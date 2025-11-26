@@ -30,6 +30,9 @@ class Context {
     /** @var array<string, Signal> */
     private array $signals = [];
     private ?string $namespace = null;
+    
+    /** @var array<callable> */
+    private array $cleanupCallbacks = [];
 
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null) {
         $this->id = $id;
@@ -44,6 +47,27 @@ class Context {
      */
     public function getId(): string {
         return $this->id;
+    }
+    
+    /**
+     * Register a callback to be executed when the context is cleaned up (SSE disconnect).
+     */
+    public function onCleanup(callable $callback): void {
+        $this->cleanupCallbacks[] = $callback;
+    }
+    
+    /**
+     * Execute cleanup callbacks and release resources.
+     */
+    public function cleanup(): void {
+        foreach ($this->cleanupCallbacks as $callback) {
+            try {
+                $callback();
+            } catch (\Throwable $e) {
+                // Silently ignore cleanup errors
+            }
+        }
+        $this->cleanupCallbacks = [];
     }
 
     public function getRoute(): string {

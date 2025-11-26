@@ -326,6 +326,10 @@ class Via {
         }
 
         $this->log('debug', "SSE connection closed for context: {$context->getId()}");
+        
+        // Execute cleanup callbacks and remove context to prevent memory leak
+        $context->cleanup();
+        unset($this->contexts[$contextId]);
     }
 
     /**
