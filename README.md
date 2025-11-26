@@ -34,12 +34,12 @@ composer require mbolli/php-via
 require 'vendor/autoload.php';
 
 use Mbolli\PhpVia\Via;
+use Mbolli\PhpVia\Config;
 
-$app = new Via();
+$config = new Config();
+$config->withTemplateDir(__DIR__ . '/templates');
 
-$app->config([
-    'template_dir' => __DIR__ . '/templates'
-]);
+$app = new Via($config);
 
 $app->page('/', function ($c) {
     $count = 0;
@@ -52,13 +52,13 @@ $app->page('/', function ($c) {
     
     $c->view(function () use (&$count, $step, $increment, $c) {
         return $c->renderString('
-            <div>
+            <div id="counter"><!-- id is used to morph -->
                 <p>Count: {{ count }}</p>
                 <label>
                     Step: 
                     <input type="number" data-bind="{{ step.id }}">
                 </label>
-                <button data-on:click="@post(\'{{ increment.url }}\')">
+                <button data-on:click="@post(\'{{ increment.url() }}\')">
                     Increment
                 </button>
             </div>
@@ -88,15 +88,16 @@ Then open your browser to `http://localhost:3000`
 The main application class that manages routing and the Swoole HTTP server.
 
 ```php
-$app = new Via();
+use Mbolli\PhpVia\Config;
 
-$app->config([
-    'host' => '0.0.0.0',
-    'port' => 3000,
-    'document_title' => 'My App',
-    'dev_mode' => true,
-    'log_level' => 'debug'
-]);
+$config = new Config();
+$config->withHost('0.0.0.0')
+    ->withPort(3000)
+    ->withDocumentTitle('My App')
+    ->withDevMode(true)
+    ->withLogLevel('debug');
+
+$app = new Via($config);
 ```
 
 ### Context
@@ -160,20 +161,20 @@ $c->view(function () use ($data, $c) {
 php-via uses Datastar attributes for reactivity:
 
 ```twig
-{# Two-way data binding with signals #}
-<input type="text" data-bind="{{ nameSignal.id }}">
+{# Two-way data binding with signals - use the bind() Twig function #}
+<input type="text" {{ bind(nameSignal) }}>
 
-{# Display signal value #}
-<span data-text="${{ nameSignal.id }}"></span>
+{# Display signal value (note the $ sign to access the signal) #}
+<span data-text="${{ nameSignal.id() }}"></span>
 
-{# Trigger actions on events #}
-<button data-on:click="@post('{{ saveAction.url }}')">Save</button>
+{# Trigger actions on events - actions use @get() #}
+<button data-on:click="@get('{{ saveAction.url() }}')">Save</button>
 
 {# Actions with specific keys #}
-<input data-on:keydown.enter="@post('{{ submitAction.url }}')">
+<input data-on:keydown.enter="@get('{{ submitAction.url() }}')">
 
 {# Change events #}
-<select data-on:change="@post('{{ updateAction.url }}')">...</select>
+<select data-on:change="@get('{{ updateAction.url() }}')">...</select>
 ```
 
 See [Datastar documentation](https://data-star.dev/) for more attributes and patterns.
@@ -195,7 +196,7 @@ $counterComponent = function ($c) {
         return $c->renderString('
             <div>
                 <p>Count: {{ count }}</p>
-                <button data-on:click="@post(\'{{ increment.url }}\')">Increment</button>
+                <button data-on:click="@post(\'{{ increment.url() }}\')">Increment</button>
             </div>
         ', [
             'count' => $count,
@@ -257,18 +258,8 @@ Check the `examples/` directory for more examples:
 - `counter.php` - Counter with step control and components
 - `greeter.php` - Form handling with multiple inputs
 - `components.php` - Reusable component patterns
-- `todo.php` - Todo list with multiplayer sync
-
-## Comparison with Go Via
-
-| Feature | Go Via | php-via |
-|---------|--------|---------|
-| Language | Go | PHP 8.1+ |
-| Async Runtime | Goroutines | Swoole Coroutines |
-| Templates | gomponents | Twig |
-| Reactivity | Datastar | Datastar |
-| SSE Support | Native | Swoole HTTP |
-| Performance | Excellent | Very Good |
+- `todo.php` - Todo list (multiplayer)
+- `game_of_life.php` - Conway's Game of Life with real-time updates (multiplayer)
 
 ## Credits
 
@@ -298,6 +289,10 @@ composer install
 
 # Run the counter example
 php examples/counter.php
+
+# Code quality tools
+composer phpstan        # Run static analysis
+composer cs-fix         # Fix code style
 ```
 
 ## Roadmap
