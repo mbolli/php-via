@@ -68,6 +68,17 @@ class Context {
             }
         }
         $this->cleanupCallbacks = [];
+        
+        // Close and cleanup the patch channel
+        if ($this->patchChannel !== null) {
+            $this->patchChannel->close();
+        }
+        
+        // Clear references to prevent memory leaks
+        $this->signals = [];
+        $this->actionRegistry = [];
+        $this->componentRegistry = [];
+        $this->viewFn = null;
     }
 
     public function getRoute(): string {
@@ -269,6 +280,11 @@ class Context {
      * Sync current view and signals to the browser.
      */
     public function sync(): void {
+        // Skip if channel is full (client too slow)
+        if ($this->getPatchChannel()->isFull()) {
+            return;
+        }
+        
         // Sync view with proper selector for components
         $viewHtml = $this->renderView();
 
