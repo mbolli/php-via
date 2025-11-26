@@ -190,8 +190,12 @@ class Via {
     private function handleRequest(Request $request, Response $response): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
+
+        // Populate superglobals for compatibility
         $_GET = $request->get ?? [];
         $_POST = $request->post ?? [];
+
+        $this->log('debug', "Request: {$method} {$path}");
 
         // Serve Datastar.js
         if ($path === '/_datastar.js') {
@@ -285,6 +289,11 @@ class Via {
         // Create SSE generator
         $sse = new ServerSentEventGenerator();
 
+        // Send initial sync (view + signals) on connection/reconnection
+        Coroutine::create(function () use ($context) {
+            $context->sync();
+        });
+
         // Send initial signals
         $initialSignals = $context->prepareSignalsForPatch();
         if (!empty($initialSignals)) {
@@ -305,7 +314,8 @@ class Via {
                     $output = $this->sendSSEPatch($sse, $patch);
                     $response->write($output);
                 } catch (\Throwable $e) {
-                    error_log("SSE: Error sending patch: " . $e->getMessage());
+                    $this->log('debug', "Patch failed, continuing: " . $e->getMessage(), $context);
+                    // Continue processing - don't break the SSE stream
                 }
             }
 
@@ -390,9 +400,7 @@ class Via {
         $selector = $patch['selector'] ?? null;
         $mode = $patch['mode'] ?? null;
 
-        error_log("sendSSEPatch: type=$type, selector=" . ($selector ?? 'null'));
-
-        $result = match ($type) {
+        return match ($type) {
             'elements' => $sse->patchElements($content, array_filter([
                 'selector' => $selector,
                 'mode' => $mode,
@@ -401,9 +409,6 @@ class Via {
             'script' => $sse->executeScript($content),
             default => ''
         };
-
-        error_log("sendSSEPatch: result_length=" . strlen($result));
-        return $result;
     }
 
     /**
