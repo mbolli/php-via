@@ -301,6 +301,124 @@ class GameOfLife {
     }
 }
 
+$app->appendToHead(<<<HTML
+<style>
+    body {
+        max-width: 700px;
+        margin: 10px auto;
+        padding: 20px;
+        font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .container {
+        width: 100%;
+    }
+
+    h1 {
+        color: #333;
+        margin-bottom: 10px;
+    }
+
+    p.subtitle {
+        color: #666;
+        font-style: italic;
+        margin-bottom: 15px;
+    }
+
+    p.generation {
+        font-weight: bold;
+        color: #0066cc;
+        font-size: 1.1em;
+        margin-bottom: 15px;
+    }
+
+    .controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+
+    button {
+        padding: 10px 20px;
+        background: #0066cc;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 16px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+
+    button:hover {
+        background: #0052a3;
+    }
+
+    button:active {
+        transform: scale(0.98);
+    }
+
+    .board {
+        background: white;
+        width: 100%;
+        max-width: 700px;
+        display: grid;
+        aspect-ratio: 1/1;
+        grid-template-rows: repeat(50, 1fr);
+        grid-template-columns: repeat(50, 1fr);
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .tile {
+        border-bottom: 1px solid #f0f0f0;
+        border-right: 1px solid #f0f0f0;
+        cursor: crosshair;
+        transition: background 0.3s ease;
+    }
+
+    .dead { background: white; }
+    .red { background: #ef4444; }
+    .blue { background: #3b82f6; }
+    .green { background: #22c55e; }
+    .orange { background: #f97316; }
+    .fuchsia { background: #d946ef; }
+    .purple { background: #a855f7; }
+
+    footer { font-size: 0.9em; color: #666; margin-top: 40px; }
+</style>
+HTML
+);
+$app->appendToFoot(<<<HTML
+<footer>
+    <div style="padding: 10px;">
+        <p>
+            <strong>Performance Notes:</strong> <br>
+            <ul>
+                <li><strong>Naive but fast:</strong> This sends the <em>entire</em> board state (2500 divs) to all clients every 200ms. No diffing, no canvas, no SVG. Just HTML over SSE.</li>
+                <li><strong>Compression magic:</strong> Brotli compression over SSE achieves 100-230:1 compression ratios. ~140KB of HTML → 2-5KB over the wire (97%+ compression).</li>
+                <li><strong>Client-side morphing:</strong> Datastar uses a fast DOM morphing algorithm (idiomorph) that only updates changed cells, keeping the browser responsive.</li>
+                <li><strong>DevTools Network tab:</strong> Watch the <code>_sse</code> request streaming updates in real-time.</li>
+                <li><strong>HTML morphing:</strong> According to flamegraphs, morphing 2500 cells takes ~11ms on AMD Ryzen 7 PRO 7840 (28W)—sub frame fast (60fps = 16.67ms/frame).</li>
+                <li><strong>Why SSE over WebSockets?</strong> SSE is HTTP, so it gets compression, multiplexing, auto-reconnect, and works through firewalls/proxies. WebSockets require custom solutions for all of this.</li>
+                <li><strong>Already multiplayer:</strong> No code changes needed—since everyone sees the same view function, it's collaborative by default!</li>
+            </ul>
+        </p>
+    </div>
+    <div style="text-align: center; padding: 10px;">
+        <p>
+            &copy; 2025 <a href="https://github.com/mbolli">Michael Bolli</a>. 
+            Adapted from <a href="https://andersmurphy.com/2025/04/07/clojure-realtime-collaborative-web-apps-without-clojurescript.html" target="_blank">Anders Murphy's Clojure version</a>. 
+            Licensed under <a href="https://opensource.org/licenses/MIT" target="_blank">MIT License</a>.
+        </p>
+        <p>Developed with ❤️ using <a href="https://github.com/mbolli/php-via" target="_blank">php-via</a>, <a href="https://www.php.net/" target="_blank">PHP</a>, <a href="https://www.swoole.com/" target="_blank">Swoole</a> and <a href="https://data-star.dev/" target="_blank">Datastar</a></p>
+    </div>
+</footer>
+HTML
+);
+
 // Register the game page
 $app->page('/', function (Context $c): void {
     // Register this context for global updates
@@ -392,112 +510,6 @@ $app->page('/', function (Context $c): void {
                 </div>
             </div>
         </div>
-
-        <style>
-            .page-layout {
-                max-width: 900px;
-                margin: 50px auto;
-                padding: 20px;
-                font-family: system-ui, -apple-system, sans-serif;
-            }
-
-            .container {
-                width: 100%;
-            }
-
-            h1 {
-                color: #333;
-                margin-bottom: 10px;
-            }
-
-            p.subtitle {
-                color: #666;
-                font-style: italic;
-                margin-bottom: 15px;
-            }
-
-            p.generation {
-                font-weight: bold;
-                color: #0066cc;
-                font-size: 1.1em;
-                margin-bottom: 15px;
-            }
-
-            .controls {
-                display: flex;
-                gap: 10px;
-                margin-bottom: 20px;
-            }
-
-            button {
-                padding: 10px 20px;
-                background: #0066cc;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 16px;
-                cursor: pointer;
-                font-weight: 500;
-                transition: background 0.2s;
-            }
-
-            button:hover {
-                background: #0052a3;
-            }
-
-            button:active {
-                transform: scale(0.98);
-            }
-
-            .board {
-                background: white;
-                width: 100%;
-                max-width: 700px;
-                display: grid;
-                aspect-ratio: 1/1;
-                grid-template-rows: repeat(50, 1fr);
-                grid-template-columns: repeat(50, 1fr);
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                overflow: hidden;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
-
-            .tile {
-                border-bottom: 1px solid #f0f0f0;
-                border-right: 1px solid #f0f0f0;
-                cursor: crosshair;
-                transition: background 0.3s ease;
-            }
-
-            .dead {
-                background: white;
-            }
-
-            .red {
-                background: #ef4444;
-            }
-
-            .blue {
-                background: #3b82f6;
-            }
-
-            .green {
-                background: #22c55e;
-            }
-
-            .orange {
-                background: #f97316;
-            }
-
-            .fuchsia {
-                background: #d946ef;
-            }
-
-            .purple {
-                background: #a855f7;
-            }
-        </style>
         HTML;
     });
 });
