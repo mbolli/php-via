@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
-use starfederation\datastar\enums\ElementPatchMode;
 use Swoole\Coroutine\Channel;
 use Swoole\Timer;
-use Swoole\Http\Request;
 
 /**
  * Context represents a living bridge between PHP and the browser.
@@ -81,17 +79,18 @@ class Context {
     /**
      * Render a Twig template with context data.
      *
-     * @param array<string, mixed> $data Data to pass to the template
-     * @param null|string $block Optional block name to render only that block
+     * @param array<string, mixed> $data  Data to pass to the template
+     * @param null|string          $block Optional block name to render only that block
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
         if ($block !== null) {
             // Render only the specified block
             $twig = $this->app->getTwig();
             $twigTemplate = $twig->load($template);
+
             return $twigTemplate->renderBlock($block, $data);
         }
-        
+
         return $this->app->getTwig()->render($template, $data);
     }
 
@@ -115,7 +114,7 @@ class Context {
         }
 
         $isUpdate = !$this->isInitialRender;
-        
+
         // Check if the view function accepts parameters
         $reflection = new \ReflectionFunction($this->viewFn);
         if ($reflection->getNumberOfParameters() > 0) {
@@ -123,10 +122,10 @@ class Context {
         } else {
             $result = ($this->viewFn)();
         }
-        
+
         // After first render, all subsequent renders are updates
         $this->isInitialRender = false;
-        
+
         return $result;
     }
 

@@ -9,8 +9,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
 // Global shared state
-class TodoState
-{
+class TodoState {
     /** @var array<int, array{id: int, text: string, completed: bool}> */
     public static array $todos = [
         ['id' => 1, 'text' => 'Buy milk', 'completed' => false],
@@ -25,7 +24,8 @@ $config = new Config();
 $config->withHost('0.0.0.0')
     ->withPort(3000)
     ->withDocumentTitle('⚡ Via Todo List')
-    ->withTemplateDir(__DIR__ . '/../templates');
+    ->withTemplateDir(__DIR__ . '/../templates')
+;
 
 // Create the application
 $app = new Via($config);
@@ -43,7 +43,7 @@ $app->page('/', function (Context $c): void {
 
     $deleteTodo = $c->action(function () use ($c): void {
         $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
-        TodoState::$todos = array_filter(TodoState::$todos, fn(array $todo) => $todo['id'] !== $id);
+        TodoState::$todos = array_filter(TodoState::$todos, fn (array $todo) => $todo['id'] !== $id);
         TodoState::$todos = array_values(TodoState::$todos); // Re-index array
         $c->getApp()->broadcast('/');
     }, 'deleteTodo');
@@ -53,6 +53,7 @@ $app->page('/', function (Context $c): void {
         foreach (TodoState::$todos as $key => $todo) {
             if ($todo['id'] === $id) {
                 TodoState::$todos[$key]['completed'] = !TodoState::$todos[$key]['completed'];
+
                 break;
             }
         }
@@ -61,6 +62,7 @@ $app->page('/', function (Context $c): void {
 
     $c->view(function (bool $isUpdate = false) use ($c, $newTodo, $addTodo, $deleteTodo, $toggleTodo): string {
         $block = $isUpdate ? 'content' : null;
+
         return $c->render('todo.html.twig', [
             'todos' => TodoState::$todos,
             'newTodo' => $newTodo,

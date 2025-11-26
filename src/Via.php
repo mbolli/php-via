@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use starfederation\datastar\enums\ElementPatchMode;
 use starfederation\datastar\ServerSentEventGenerator;
 use Swoole\Coroutine;
 use Swoole\Http\Request;
@@ -45,7 +46,7 @@ class Via {
         } else {
             $loader = new ArrayLoader([]);
         }
-        
+
         $this->twig = new Environment($loader, [
             'cache' => false,
             'autoescape' => 'html',
@@ -160,7 +161,7 @@ class Via {
 
     /**
      * Read Datastar signals from a Swoole HTTP request.
-     * 
+     *
      * This is a replacement for ServerSentEventGenerator::readSignals() which only checks
      * $_GET['datastar'] and php://input, but doesn't handle $_POST.
      * In Swoole, POST requests need special handling since we use $request->post instead of $_POST.
@@ -171,16 +172,18 @@ class Via {
         // Check GET parameters first
         if (isset($request->get['datastar'])) {
             $signals = json_decode($request->get['datastar'], true);
-            return is_array($signals) ? $signals : [];
+
+            return \is_array($signals) ? $signals : [];
         }
-        
+
         // Fall back to raw request body
         $rawContent = $request->getContent();
         if ($rawContent) {
             $signals = json_decode($rawContent, true);
-            return is_array($signals) ? $signals : [];
+
+            return \is_array($signals) ? $signals : [];
         }
-        
+
         return [];
     }
 
@@ -290,7 +293,7 @@ class Via {
         $sse = new ServerSentEventGenerator();
 
         // Send initial sync (view + signals) on connection/reconnection
-        Coroutine::create(function () use ($context) {
+        Coroutine::create(function () use ($context): void {
             $context->sync();
         });
 
@@ -314,7 +317,7 @@ class Via {
                     $output = $this->sendSSEPatch($sse, $patch);
                     $response->write($output);
                 } catch (\Throwable $e) {
-                    $this->log('debug', "Patch failed, continuing: " . $e->getMessage(), $context);
+                    $this->log('debug', 'Patch failed, continuing: ' . $e->getMessage(), $context);
                     // Continue processing - don't break the SSE stream
                 }
             }
@@ -392,7 +395,7 @@ class Via {
     /**
      * Send SSE patch to client using Datastar SDK.
      *
-     * @param array{type: string, content: mixed, selector?: string, mode?: \starfederation\datastar\enums\ElementPatchMode} $patch
+     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode} $patch
      */
     private function sendSSEPatch(ServerSentEventGenerator $sse, array $patch): string {
         $type = $patch['type'];

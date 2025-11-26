@@ -10,6 +10,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
+use Swoole\Timer;
 
 // Create configuration
 $config = new Config();
@@ -18,29 +19,30 @@ $config->withHost('0.0.0.0')
     ->withDocumentTitle('🎮 Via Game of Life')
     ->withDevMode(true)
     ->withLogLevel('info')
-    ->withTemplateDir(__DIR__ . '/../templates');
+    ->withTemplateDir(__DIR__ . '/../templates')
+;
 
 // Create the application
 $app = new Via($config);
 
 // Global shared state (shared across all clients in this worker)
-class GameState
-{
+class GameState {
     /** @var array<int, string> */
     public static array $board;
     public static bool $running = true;
     public static int $generation = 0;
     public static int $sessionCounter = 0;
+
     /** @var array<string, int> */
     public static array $sessionIds = [];
     public static bool $initialized = false;
     public static ?int $timerId = null;
+
     /** @var array<string, Context> */
     public static array $contexts = [];
     private static ?string $cachedBoardHtml = null;
 
-    public static function init(): void
-    {
+    public static function init(): void {
         if (!self::$initialized) {
             self::$board = GameOfLife::emptyBoard();
             self::$initialized = true;
@@ -48,45 +50,31 @@ class GameState
     }
 
     /**
-     * Get cached board HTML or render it if needed
+     * Get cached board HTML or render it if needed.
      */
-    public static function getBoardHtml(): string
-    {
+    public static function getBoardHtml(): string {
         if (self::$cachedBoardHtml === null) {
             self::renderBoardHtml();
         }
+
         return self::$cachedBoardHtml;
     }
 
     /**
-     * Render the board HTML and cache it
+     * Invalidate the board HTML cache (call when board changes).
      */
-    private static function renderBoardHtml(): void
-    {
-        $tiles = '';
-        foreach (self::$board as $id => $colorClass) {
-            $tiles .= "<div class=\"tile {$colorClass}\" data-id=\"{$id}\"></div>";
-        }
-        self::$cachedBoardHtml = $tiles;
-    }
-
-    /**
-     * Invalidate the board HTML cache (call when board changes)
-     */
-    public static function invalidateBoardCache(): void
-    {
+    public static function invalidateBoardCache(): void {
         self::$cachedBoardHtml = null;
     }
 
-    public static function startTimer(): void
-    {
+    public static function startTimer(): void {
         if (self::$timerId === null) {
-            self::$timerId = \Swoole\Timer::tick(200, function (): void {
+            self::$timerId = Timer::tick(200, function (): void {
                 if (self::$running) {
                     self::$board = GameOfLife::nextGeneration(self::$board);
                     ++self::$generation;
                     self::invalidateBoardCache();
-                    
+
                     // Update all connected clients
                     foreach (self::$contexts as $context) {
                         $context->sync();
@@ -94,6 +82,17 @@ class GameState
                 }
             });
         }
+    }
+
+    /**
+     * Render the board HTML and cache it.
+     */
+    private static function renderBoardHtml(): void {
+        $tiles = '';
+        foreach (self::$board as $id => $colorClass) {
+            $tiles .= "<div class=\"tile {$colorClass}\" data-id=\"{$id}\"></div>";
+        }
+        self::$cachedBoardHtml = $tiles;
     }
 }
 
@@ -306,10 +305,10 @@ class GameOfLife {
 $app->page('/', function (Context $c): void {
     // Register this context for global updates
     GameState::$contexts[$c->getId()] = $c;
-    
+
     // Start the global timer (only runs once)
     GameState::startTimer();
-    
+
     // Use global shared state instead of static variables
     $board = &GameState::$board;
     $running = &GameState::$running;
@@ -328,10 +327,10 @@ $app->page('/', function (Context $c): void {
     $runningSignal = $c->signal($running, 'running');  // Whether simulation is running
 
     // Action: Toggle the running/paused state
-    $toggleRunning = $c->action(function () use ($runningSignal, $c): void {
+    $toggleRunning = $c->action(function () use ($runningSignal): void {
         GameState::$running = !GameState::$running;
         $runningSignal->setValue(GameState::$running);
-        
+
         // Update all clients
         foreach (GameState::$contexts as $context) {
             $context->sync();
@@ -343,7 +342,7 @@ $app->page('/', function (Context $c): void {
         GameState::$board = GameOfLife::emptyBoard();
         GameState::$generation = 0;
         GameState::invalidateBoardCache();
-        
+
         // Update all clients
         foreach (GameState::$contexts as $context) {
             $context->sync();
@@ -353,12 +352,12 @@ $app->page('/', function (Context $c): void {
     // Action: Handle cell clicks to draw patterns
     $tapCell = $c->action(function () use ($sessionId): void {
         $id = $_GET['id'] ?? null;
-        error_log("Cell tapped: " . var_export($id, true));
+        error_log('Cell tapped: ' . var_export($id, true));
         if ($id !== null) {
             // Draw a cross pattern at clicked position
             GameState::$board = GameOfLife::fillCross(GameState::$board, (int) $id, $sessionId);
             GameState::invalidateBoardCache();
-            
+
             // Update all clients
             foreach (GameState::$contexts as $context) {
                 $context->sync();

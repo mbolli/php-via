@@ -14,7 +14,8 @@ use Mbolli\PhpVia\Via;
 $config = new Config();
 $config->withDocumentTitle('⚡ Via Greeter Example')
     ->withLogLevel('info')
-    ->withTemplateDir(__DIR__ . '/../templates');
+    ->withTemplateDir(__DIR__ . '/../templates')
+;
 
 // Create the application
 $app = new Via($config);

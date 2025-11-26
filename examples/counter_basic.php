@@ -11,7 +11,8 @@ use Mbolli\PhpVia\Via;
 // Create configuration
 $config = new Config();
 $config->withDocumentTitle('⚡ Via Counter - Twig Example')
-    ->withTemplateDir(__DIR__ . '/../templates');
+    ->withTemplateDir(__DIR__ . '/../templates')
+;
 
 // Create the application
 $app = new Via($config);

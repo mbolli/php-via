@@ -16,7 +16,8 @@ $config->withHost('0.0.0.0')
     ->withDocumentTitle('⚡ Via Counter Example')
     ->withDevMode(true)
     ->withLogLevel('debug')
-    ->withTemplateDir(__DIR__ . '/../templates');
+    ->withTemplateDir(__DIR__ . '/../templates')
+;
 
 // Create the application
 $app = new Via($config);
