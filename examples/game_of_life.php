@@ -328,16 +328,20 @@ $app->page('/', function (Context $c): void {
     $runningSignal = $c->signal($running, 'running');  // Whether simulation is running
 
     // Action: Toggle the running/paused state
-    $toggleRunning = $c->action(function () use (&$running, $runningSignal, $c): void {
-        $running = !$running;
-        $runningSignal->setValue($running);
-        $c->syncSignals();
+    $toggleRunning = $c->action(function () use ($runningSignal, $c): void {
+        GameState::$running = !GameState::$running;
+        $runningSignal->setValue(GameState::$running);
+        
+        // Update all clients
+        foreach (GameState::$contexts as $context) {
+            $context->sync();
+        }
     }, 'toggleRunning');
 
     // Action: Reset the board to empty state
-    $reset = $c->action(function () use (&$board, &$generation): void {
-        $board = GameOfLife::emptyBoard();
-        $generation = 0;
+    $reset = $c->action(function (): void {
+        GameState::$board = GameOfLife::emptyBoard();
+        GameState::$generation = 0;
         GameState::invalidateBoardCache();
         
         // Update all clients
@@ -347,11 +351,12 @@ $app->page('/', function (Context $c): void {
     }, 'reset');
 
     // Action: Handle cell clicks to draw patterns
-    $tapCell = $c->action(function () use (&$board, $sessionId): void {
-        $id = $_GET['id'] ?? $_POST['id'] ?? null;
+    $tapCell = $c->action(function () use ($sessionId): void {
+        $id = $_GET['id'] ?? null;
+        error_log("Cell tapped: " . var_export($id, true));
         if ($id !== null) {
             // Draw a cross pattern at clicked position
-            $board = GameOfLife::fillCross($board, (int) $id, $sessionId);
+            GameState::$board = GameOfLife::fillCross(GameState::$board, (int) $id, $sessionId);
             GameState::invalidateBoardCache();
             
             // Update all clients
@@ -362,28 +367,26 @@ $app->page('/', function (Context $c): void {
     }, 'tapCell');
 
     // Render the HTML view
-    $c->view(function () use (&$generation, &$running, $toggleRunning, $reset, $tapCell) {
-        // Generate Datastar event attributes for buttons
-        $toggleClick = $toggleRunning->onClick();
-        $resetClick = $reset->onClick();
-
-        // Get cached board HTML (rendered once, reused for all clients)
+    $c->view(function () use ($toggleRunning, $reset, $tapCell) {
+        // Read current state directly from GameState (not from local references)
         $tiles = GameState::getBoardHtml();
+        $generation = GameState::$generation;
+        $running = GameState::$running;
 
         // Dynamic button text based on state
         $runningText = $running ? 'Pause' : 'Resume';
         $runningEmoji = $running ? '⏸️' : '▶️';
 
         return <<<HTML
-        <div class="page-layout">
+        <div class="page-layout" id="gameoflife">
             <div class="container">
                 <h1>🎮 Game of Life</h1>
                 <p class="subtitle">Click cells to draw patterns. Multiple users can draw simultaneously!</p>
                 <p class="generation">Generation: {$generation}</p>
 
                 <div class="controls">
-                    <button {$toggleClick}>{$runningEmoji} {$runningText}</button>
-                    <button {$resetClick}>🔄 Reset</button>
+                    <button data-on:click="@get('{$toggleRunning->url()}')">{$runningEmoji} {$runningText}</button>
+                    <button data-on:click="@get('{$reset->url()}')">🔄 Reset</button>
                 </div>
                 <div class="board" data-on:pointerdown="@get('{$tapCell->url()}?id=' + event.target.dataset.id)">
                     {$tiles}

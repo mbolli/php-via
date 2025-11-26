@@ -43,7 +43,7 @@ $app->page('/', function (Context $c): void {
 
     $deleteTodo = $c->action(function () use ($c): void {
         $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
-        TodoState::$todos = array_filter(TodoState::$todos, fn($todo) => $todo['id'] !== $id);
+        TodoState::$todos = array_filter(TodoState::$todos, fn(array $todo) => $todo['id'] !== $id);
         TodoState::$todos = array_values(TodoState::$todos); // Re-index array
         $c->getApp()->broadcast('/');
     }, 'deleteTodo');

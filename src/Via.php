@@ -159,11 +159,39 @@ class Via {
     }
 
     /**
+     * Read Datastar signals from a Swoole HTTP request.
+     * 
+     * This is a replacement for ServerSentEventGenerator::readSignals() which only checks
+     * $_GET['datastar'] and php://input, but doesn't handle $_POST.
+     * In Swoole, POST requests need special handling since we use $request->post instead of $_POST.
+     *
+     * @return array<string, mixed> The decoded signals array
+     */
+    private static function readSignals(Request $request): array {
+        // Check GET parameters first
+        if (isset($request->get['datastar'])) {
+            $signals = json_decode($request->get['datastar'], true);
+            return is_array($signals) ? $signals : [];
+        }
+        
+        // Fall back to raw request body
+        $rawContent = $request->getContent();
+        if ($rawContent) {
+            $signals = json_decode($rawContent, true);
+            return is_array($signals) ? $signals : [];
+        }
+        
+        return [];
+    }
+
+    /**
      * Handle incoming HTTP requests.
      */
     private function handleRequest(Request $request, Response $response): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
+        $_GET = $request->get ?? [];
+        $_POST = $request->post ?? [];
 
         // Serve Datastar.js
         if ($path === '/_datastar.js') {
@@ -234,11 +262,8 @@ class Via {
      * Handle SSE connection for real-time updates.
      */
     private function handleSSE(Request $request, Response $response): void {
-        $_GET = $request->get ?? [];
-        $_POST = $request->post ?? [];
-
         // Get context ID from signals
-        $signals = ServerSentEventGenerator::readSignals();
+        $signals = self::readSignals($request);
         $contextId = $signals['via_ctx'] ?? null;
 
         if (!$contextId || !isset($this->contexts[$contextId])) {
@@ -276,12 +301,9 @@ class Via {
             // Check for patches from the context
             $patch = $context->getPatch();
             if ($patch) {
-                error_log("SSE: Got patch of type: " . ($patch['type'] ?? 'unknown'));
                 try {
                     $output = $this->sendSSEPatch($sse, $patch);
-                    error_log("SSE: About to write " . strlen($output) . " bytes");
                     $response->write($output);
-                    error_log("SSE: Write completed");
                 } catch (\Throwable $e) {
                     error_log("SSE: Error sending patch: " . $e->getMessage());
                 }
@@ -297,11 +319,8 @@ class Via {
      * Handle action triggers from the client.
      */
     private function handleAction(Request $request, Response $response, string $actionId): void {
-        $_GET = $request->get ?? [];
-        $_POST = $request->post ?? [];
-        
-        // Read signals from request using Datastar SDK
-        $signals = ServerSentEventGenerator::readSignals();
+        // Read signals from request
+        $signals = self::readSignals($request);
 
         $contextId = $signals['via_ctx'] ?? null;
 
@@ -318,8 +337,12 @@ class Via {
             // Inject signals into context
             $context->injectSignals($signals);
 
+            $this->log('debug', "Executing action {$actionId} for context {$contextId}");
+
             // Execute the action
             $context->executeAction($actionId);
+
+            $this->log('debug', "Action {$actionId} completed successfully");
 
             $response->status(200);
             $response->end();
@@ -359,18 +382,21 @@ class Via {
     /**
      * Send SSE patch to client using Datastar SDK.
      *
-     * @param array{type: string, content: mixed, selector?: string} $patch
+     * @param array{type: string, content: mixed, selector?: string, mode?: \starfederation\datastar\enums\ElementPatchMode} $patch
      */
     private function sendSSEPatch(ServerSentEventGenerator $sse, array $patch): string {
         $type = $patch['type'];
         $content = $patch['content'];
         $selector = $patch['selector'] ?? null;
+        $mode = $patch['mode'] ?? null;
 
-        $contentInfo = is_string($content) ? "length=" . strlen($content) : "array_keys=" . implode(',', array_keys($content));
-        error_log("sendSSEPatch: type=$type, selector=" . ($selector ?? 'null') . ", content_$contentInfo");
+        error_log("sendSSEPatch: type=$type, selector=" . ($selector ?? 'null'));
 
         $result = match ($type) {
-            'elements' => $sse->patchElements($content, $selector ? ['selector' => $selector] : []),
+            'elements' => $sse->patchElements($content, array_filter([
+                'selector' => $selector,
+                'mode' => $mode,
+            ])),
             'signals' => $sse->patchSignals($content),
             'script' => $sse->executeScript($content),
             default => ''

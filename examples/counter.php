@@ -23,33 +23,28 @@ $app = new Via($config);
 
 // Register the counter page
 $app->page('/', function (Context $c): void {
-    // Initialize data
-    $count = 0;
-
-    // Create a reactive signal for the step value
+    // Create reactive signals
+    $count = $c->signal(0, 'count');
     $step = $c->signal(1, 'step');
 
     // Create an increment action
-    $increment = $c->action(function () use (&$count, $step, $c): void {
-        $count += $step->int();
-        $c->sync();
+    $increment = $c->action(function () use ($count, $step, $c): void {
+        $count->setValue($count->int() + $step->int());
+        $c->syncSignals();
     }, 'increment');
 
     // Define the view using inline HTML
     $c->view(function () use (&$count, $step, $increment) {
-        $stepBind = $step->bind();
-        $incrementClick = $increment->onClick();
-
         return <<<HTML
         <div class="page-layout">
             <div class="container">
                 <h1>⚡ Via Counter</h1>
-                <p class="count">Count: {$count}</p>
+                <p class="count">Count: <span data-text="\${$count->id()}"></span></p>
                 <label>
                     Update Step:
-                    <input type="number" {$stepBind}>
+                    <input type="number" {$step->bind()}>
                 </label>
-                <button {$incrementClick}>Increment</button>
+                <button data-on:click="@post('{$increment->url()}')">Increment</button>
             </div>
             <aside class="debug-sidebar">
                 <h3>🔍 Live Signals</h3>

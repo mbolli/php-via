@@ -40,7 +40,7 @@ $app->page('/', function (Context $c): void {
                     Update Step:
                     <input type="number" {{ bind(step) }}>
                 </label>
-                <button {{ on_click(increment) }}>Increment</button>
+                <button data-on:click="@get('{{ increment.url() }}')">Increment</button>
             </div>
             <style>
                 .container { max-width: 600px; margin: 50px auto; padding: 20px; font-family: system-ui, sans-serif; }

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use starfederation\datastar\enums\ElementPatchMode;
 use Swoole\Coroutine\Channel;
 use Swoole\Timer;
+use Swoole\Http\Request;
 
 /**
  * Context represents a living bridge between PHP and the browser.
@@ -342,7 +344,9 @@ class Context {
      */
     public function prepareSignalsForPatch(): array {
         // Components should use parent's signals
-        $signalsToCheck = $this->isComponent() ? $this->parentPageContext->signals : $this->signals;
+        $signalsToCheck = $this->isComponent()
+            ? $this->parentPageContext->signals
+            : $this->signals;
 
         $flat = [];
 

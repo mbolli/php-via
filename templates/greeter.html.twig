@@ -42,7 +42,7 @@ button:hover {
 <h1>⚡ Via Greeter</h1>
 
 <p class="greeting">
-    Greeting: {{ signal_text(greeting) }}
+    Greeting: <span data-text="${{ greeting.id }}"></span>
 </p>
 
 <div class="buttons">
