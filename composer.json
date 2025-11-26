@@ -1,0 +1,44 @@
+{
+    "name": "mbolli/php-via",
+    "description": "Real-time engine for building reactive web applications in PHP",
+    "type": "library",
+    "require": {
+        "php": "^8.4",
+        "ext-swoole": "*",
+        "starfederation/datastar-php": "dev-main",
+        "twig/twig": "^3.0"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1.0",
+        "friendsofphp/php-cs-fixer": "^3.90.0",
+        "rector/type-perfect": "^2.1",
+        "tomasvotruba/type-coverage": "^2.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan-deprecation-rules": "^2.0"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Mbolli\\PhpVia\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Michael Bolli",
+            "email": "michael@bolli.us"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "optimize-autoloader": true,
+        "classmap-authoritative": true,
+        "allow-plugins": {
+            "phpstan/extension-installer": true
+        }
+    },
+    "scripts": {
+        "phpstan": "phpstan analyse --configuration=.phpstan.neon",
+        "cs-fix": "php-cs-fixer fix -v --config=.php-cs-fixer.php"
+    }
+}

@@ -46,7 +46,7 @@ button:hover {
 </p>
 
 <div class="buttons">
-    <button data-on:click="@get('/_action/{{ greet_bob.id() }}')">Greet Bob</button>
-    <button data-on:click="@get('/_action/{{ greet_alice.id() }}')">Greet Alice</button>
+    <button data-on:click="@get('{{ greet_bob.url() }}')">Greet Bob</button>
+    <button data-on:click="@get('{{ greet_alice.url() }}')">Greet Alice</button>
 </div>
 {% endblock %}

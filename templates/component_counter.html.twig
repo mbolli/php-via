@@ -2,8 +2,8 @@
     <h3>Counter: {{ namespace }}</h3>
     <p class="count">Count: {{ count.value }}</p>
     <div class="buttons">
-        <button data-on:click="@get('/_action/{{ decrement.id() }}')">➖ Decrement</button>
-        <button data-on:click="@get('/_action/{{ increment.id() }}')">➕ Increment</button>
+        <button data-on:click="@get('{{ decrement.url() }}')">➖ Decrement</button>
+        <button data-on:click="@get('{{ increment.url() }}')">➕ Increment</button>
     </div>
 </div>
 

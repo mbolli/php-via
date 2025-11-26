@@ -44,5 +44,5 @@ button:hover {
     <input type="number" {{ bind(step) }}>
 </label>
 
-<button data-on:click="@get('/_action/{{ increment.id() }}')">Increment</button>
+<button data-on:click="@get('{{ increment.url() }}')">Increment</button>
 {% endblock %}

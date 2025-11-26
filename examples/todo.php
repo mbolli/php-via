@@ -15,7 +15,7 @@ class TodoState
     public static array $todos = [
         ['id' => 1, 'text' => 'Buy milk', 'completed' => false],
         ['id' => 2, 'text' => 'Walk dog', 'completed' => false],
-        ['id' => 3, 'text' => 'Learn PHP Via', 'completed' => true],
+        ['id' => 3, 'text' => 'Learn php-via', 'completed' => true],
     ];
     public static int $nextId = 4;
 }

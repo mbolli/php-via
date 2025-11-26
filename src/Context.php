@@ -163,11 +163,11 @@ class Context {
      * @param callable    $fn   The action function to execute
      * @param null|string $name Optional human-readable name
      */
-    public function action(callable $fn, ?string $name = null): ActionTrigger {
+    public function action(callable $fn, ?string $name = null): Action {
         $actionId = $this->generateId($name ?? 'action');
         $this->actionRegistry[$actionId] = $fn;
 
-        return new ActionTrigger($actionId);
+        return new Action($actionId);
     }
 
     /**

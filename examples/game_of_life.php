@@ -385,7 +385,7 @@ $app->page('/', function (Context $c): void {
                     <button {$toggleClick}>{$runningEmoji} {$runningText}</button>
                     <button {$resetClick}>🔄 Reset</button>
                 </div>
-                <div class="board" data-on:pointerdown="@get('/_action/{$tapCell->id()}?id=' + event.target.dataset.id)">
+                <div class="board" data-on:pointerdown="@get('{$tapCell->url()}?id=' + event.target.dataset.id)">
                     {$tiles}
                 </div>
             </div>
