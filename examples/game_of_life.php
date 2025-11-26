@@ -75,6 +75,11 @@ class GameState {
                     ++self::$generation;
                     self::invalidateBoardCache();
 
+                    // Auto-pause if all cells are dead
+                    if (GameOfLife::isAllDead(self::$board)) {
+                        self::$running = false;
+                    }
+
                     // Update all connected clients
                     foreach (self::$contexts as $context) {
                         $context->sync();
@@ -260,6 +265,23 @@ class GameOfLife {
     }
 
     /**
+     * Check if all cells on the board are dead.
+     *
+     * @param array<int, string> $board Current board state
+     *
+     * @return bool True if all cells are dead
+     */
+    public static function isAllDead(array $board): bool {
+        foreach ($board as $cell) {
+            if (self::isAlive($cell)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Fill a single cell with a color (with bounds checking).
      *
      * @param array<int, string> $board Current board state
@@ -398,8 +420,8 @@ $app->appendToFoot(<<<HTML
             <strong>Performance Notes:</strong> <br>
             <ul>
                 <li><strong>Naive but fast:</strong> This sends the <em>entire</em> board state (2500 divs) to all clients every 200ms. No diffing, no canvas, no SVG. Just HTML over SSE.</li>
-                <li><strong>Compression magic:</strong> Brotli compression over SSE achieves 100-230:1 compression ratios. ~140KB of HTML → 2-5KB over the wire (97%+ compression).</li>
-                <li><strong>Client-side morphing:</strong> Datastar uses a fast DOM morphing algorithm (idiomorph) that only updates changed cells, keeping the browser responsive.</li>
+                <li><strong>Compression magic:</strong> Brotli compression over SSE achieves ~500:1 compression ratios. 24 MB of HTML (200 generations) → 45 KB over the wire (99.8% compression).</li>
+                <li><strong>Client-side morphing:</strong> Datastar uses a fast DOM morphing algorithm, that only updates changed cells, keeping the browser responsive.</li>
                 <li><strong>DevTools Network tab:</strong> Watch the <code>_sse</code> request streaming updates in real-time.</li>
                 <li><strong>HTML morphing:</strong> According to flamegraphs, morphing 2500 cells takes ~11ms on AMD Ryzen 7 PRO 7840 (28W)—sub frame fast (60fps = 16.67ms/frame).</li>
                 <li><strong>Why SSE over WebSockets?</strong> SSE is HTTP, so it gets compression, multiplexing, auto-reconnect, and works through firewalls/proxies. WebSockets require custom solutions for all of this.</li>
@@ -422,7 +444,14 @@ HTML
 // Register the game page
 $app->page('/', function (Context $c): void {
     // Register this context for global updates
-    GameState::$contexts[$c->getId()] = $c;
+    $contextId = $c->getId();
+    GameState::$contexts[$contextId] = $c;
+    
+    // Clean up when connection closes
+    $c->onCleanup(function () use ($contextId): void {
+        unset(GameState::$contexts[$contextId]);
+        unset(GameState::$sessionIds[$contextId]);
+    });
 
     // Start the global timer (only runs once)
     GameState::startTimer();
@@ -470,11 +499,16 @@ $app->page('/', function (Context $c): void {
     // Action: Handle cell clicks to draw patterns
     $tapCell = $c->action(function () use ($sessionId): void {
         $id = $_GET['id'] ?? null;
-        error_log('Cell tapped: ' . var_export($id, true));
+        error_log("Cell tapped: id={$id}, session={$sessionId}");
         if ($id !== null) {
             // Draw a cross pattern at clicked position
             GameState::$board = GameOfLife::fillCross(GameState::$board, (int) $id, $sessionId);
             GameState::invalidateBoardCache();
+            
+            // Resume game if it was paused
+            if (!GameState::$running) {
+                GameState::$running = true;
+            }
 
             // Update all clients
             foreach (GameState::$contexts as $context) {
