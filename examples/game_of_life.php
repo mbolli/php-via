@@ -453,7 +453,7 @@ $app->page('/', function (Context $c): void {
             .board {
                 background: white;
                 width: 100%;
-                max-width: 800px;
+                max-width: 700px;
                 display: grid;
                 aspect-ratio: 1/1;
                 grid-template-rows: repeat(50, 1fr);
