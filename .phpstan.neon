@@ -1,0 +1,20 @@
+parameters:
+  level: 6
+  paths:
+    - examples/
+    - src/
+  editorUrl: 'phpstorm://open?file=%%file%%&line=%%line%%'
+  editorUrlTitle: '%%file%%:%%line%%'
+  type_perfect:
+    null_over_false: true
+    no_mixed: true
+    #narrow_param: true
+    #narrow_return: true
+  type_coverage:
+    declare: 100
+    return: 100
+    param: 100
+    property: 100
+    constant: 100
+includes:
+  - vendor/phpstan/phpstan/conf/bleedingEdge.neon

@@ -1,0 +1,52 @@
+{% extends "base.html.twig" %}
+
+{% block title %}Greeter Example{% endblock %}
+
+{% block styles %}
+.container {
+    text-align: center;
+    margin-top: 50px;
+}
+
+.greeting {
+    font-size: 1.5em;
+    color: #333;
+    margin: 30px 0;
+    padding: 20px;
+    background: #f0f0f0;
+    border-radius: 8px;
+}
+
+.buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+button {
+    padding: 12px 24px;
+    background: #0066cc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #0052a3;
+}
+{% endblock %}
+
+{% block content %}
+<h1>⚡ Via Greeter</h1>
+
+<p class="greeting">
+    Greeting: {{ signal_text(greeting) }}
+</p>
+
+<div class="buttons">
+    <button data-on:click="@get('/_action/{{ greet_bob.id() }}')">Greet Bob</button>
+    <button data-on:click="@get('/_action/{{ greet_alice.id() }}')">Greet Alice</button>
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+<div class="counter-component">
+    <h3>Counter: {{ namespace }}</h3>
+    <p class="count">Count: {{ count.value }}</p>
+    <div class="buttons">
+        <button data-on:click="@get('/_action/{{ decrement.id() }}')">➖ Decrement</button>
+        <button data-on:click="@get('/_action/{{ increment.id() }}')">➕ Increment</button>
+    </div>
+</div>
+
+<style>
+    .counter-component {
+        border: 1px solid #ccc;
+        padding: 20px;
+        margin: 10px;
+        border-radius: 5px;
+        background: white;
+    }
+    
+    .counter-component h3 {
+        margin-top: 0;
+        color: #333;
+    }
+    
+    .count {
+        font-size: 24px;
+        font-weight: bold;
+        margin: 15px 0;
+    }
+    
+    .buttons {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .buttons button {
+        flex: 1;
+        padding: 10px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+    
+    .buttons button:first-child {
+        background: #dc3545;
+        color: white;
+    }
+    
+    .buttons button:first-child:hover {
+        background: #c82333;
+    }
+    
+    .buttons button:last-child {
+        background: #28a745;
+        color: white;
+    }
+    
+    .buttons button:last-child:hover {
+        background: #218838;
+    }
+</style>

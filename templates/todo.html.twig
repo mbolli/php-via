@@ -1,0 +1,181 @@
+{% extends "base.html.twig" %}
+
+{% block title %}⚡ Via Todo List{% endblock %}
+
+{% block styles %}
+    h1 {
+        color: #333;
+        margin-bottom: 30px;
+    }
+
+    .add-todo {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+
+    .add-todo input {
+        flex: 1;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 16px;
+    }
+
+    .add-todo input:focus {
+        outline: none;
+        border-color: #0066cc;
+    }
+
+    .add-todo button {
+        padding: 12px 24px;
+        background: #0066cc;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 16px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+
+    .add-todo button:hover {
+        background: #0052a3;
+    }
+
+    .todo-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .todo-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 15px;
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        transition: all 0.2s;
+    }
+
+    .todo-item:hover {
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .todo-item.completed {
+        background: #f8f9fa;
+        opacity: 0.7;
+    }
+
+    .todo-content {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 1;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .todo-content input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+    }
+
+    .todo-text {
+        flex: 1;
+        font-size: 16px;
+        color: #333;
+    }
+
+    .todo-item.completed .todo-text {
+        text-decoration: line-through;
+        color: #999;
+    }
+
+    .delete-btn {
+        padding: 8px 12px;
+        background: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background 0.2s;
+        opacity: 0.7;
+    }
+
+    .delete-btn:hover {
+        background: #c82333;
+        opacity: 1;
+    }
+
+    .empty-state {
+        padding: 40px 20px;
+        text-align: center;
+        color: #999;
+        font-style: italic;
+        background: #f8f9fa;
+        border: 1px dashed #ddd;
+        border-radius: 4px;
+    }
+
+    .stats {
+        margin-top: 20px;
+    }
+
+    .count {
+        padding: 10px;
+        background: #e7f3ff;
+        border-radius: 4px;
+        text-align: center;
+        font-weight: 500;
+        color: #0066cc;
+        margin: 0;
+    }
+{% endblock %}
+
+{% block content %}
+    <div id="todo-content">
+        <h1>⚡ Todo List</h1>
+
+        <div class="add-todo">
+            <input type="text"
+                   placeholder="Add a new todo..."
+                   {{ bind(newTodo) }}
+                   data-on:keydown.enter="@get('/_action/{{ addTodo.id() }}')">
+            <button data-on:click="@get('/_action/{{ addTodo.id() }}')">Add</button>
+        </div>
+
+        <ul class="todo-list">
+            {% for todo in todos %}
+                <li class="todo-item{% if todo.completed %} completed{% endif %}">
+                    <div class="todo-content" data-on:click="@get('/_action/{{ toggleTodo.id() }}?id={{ todo.id }}')">
+                        <input type="checkbox"
+                               {% if todo.completed %}checked{% endif %}
+                               readonly>
+                        <span class="todo-text">{{ todo.text }}</span>
+                    </div>
+                    <button class="delete-btn"
+                            data-on:click="@get('/_action/{{ deleteTodo.id() }}?id={{ todo.id }}')">
+                        🗑️
+                    </button>
+                </li>
+            {% else %}
+                <li class="empty-state">No todos yet. Add one above!</li>
+            {% endfor %}
+        </ul>
+
+        <div class="stats">
+            <p class="count">
+                Total: {{ todos|length }} items
+                {% if todos|filter(t => t.completed)|length > 0 %}
+                    · {{ todos|filter(t => t.completed)|length }} completed
+                {% endif %}
+            </p>
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Via App{% endblock %}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        
+        .page-layout {
+            display: flex;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .container, .page-container {
+            flex: 1;
+        }
+        
+        .debug-sidebar {
+            width: 300px;
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            align-self: flex-start;
+        }
+        
+        .debug-sidebar h3 {
+            margin-top: 0;
+            color: #333;
+            font-size: 16px;
+        }
+        
+        .debug-sidebar pre {
+            background: #fff;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            overflow-x: auto;
+            font-size: 12px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        {% block styles %}{% endblock %}
+    </style>
+    {% block stylesheets %}{% endblock %}
+</head>
+<body>
+    <div class="page-layout">
+        {% block body %}
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
+        
+        <aside class="debug-sidebar">
+            <h3>🔍 Live Signals</h3>
+            <pre data-json-signals></pre>
+        </aside>
+        {% endblock %}
+    </div>
+    {% block javascripts %}{% endblock %}
+    <script type="module" src="/_datastar.js"></script>
+</body>
+</html>

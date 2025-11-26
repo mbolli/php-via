@@ -1,0 +1,32 @@
+{% extends "base.html.twig" %}
+
+{% block title %}Components Example{% endblock %}
+
+{% block styles %}
+h1 {
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.container > p {
+    color: #666;
+    margin-bottom: 30px;
+}
+
+.components {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+{% endblock %}
+
+{% block content %}
+<h1>⚡ Via Components Example</h1>
+<p>Each counter is an independent component with its own state and actions.</p>
+
+<div class="components">
+    {{ counter1|raw }}
+    {{ counter2|raw }}
+    {{ counter3|raw }}
+</div>
+{% endblock %}

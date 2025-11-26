@@ -1,0 +1,48 @@
+{% extends "base.html.twig" %}
+
+{% block title %}Counter Example{% endblock %}
+
+{% block styles %}
+.count {
+    font-size: 2em;
+    font-weight: bold;
+    color: #333;
+    margin: 20px 0;
+}
+
+input[type="number"] {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+    margin: 0 10px;
+}
+
+button {
+    padding: 10px 20px;
+    background: #0066cc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    cursor: pointer;
+    margin-top: 20px;
+}
+
+button:hover {
+    background: #0052a3;
+}
+{% endblock %}
+
+{% block content %}
+<h1>⚡ Via Counter</h1>
+
+<p class="count">Count: {{ count }}</p>
+
+<label>
+    Update Step: 
+    <input type="number" {{ bind(step) }}>
+</label>
+
+<button data-on:click="@get('/_action/{{ increment.id() }}')">Increment</button>
+{% endblock %}
