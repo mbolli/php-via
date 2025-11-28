@@ -43,7 +43,7 @@ class Context {
         $this->route = $route;
         $this->app = $app;
         $this->namespace = $namespace;
-        $this->patchChannel = new Channel(100);
+        $this->patchChannel = new Channel(5);
     }
 
     /**
@@ -374,11 +374,17 @@ class Context {
      * Sync current view and signals to the browser.
      */
     public function sync(): void {
-        // Skip if channel is full (client too slow)
-        if ($this->getPatchChannel()->isFull()) {
-            $this->app->log('warning', "Skipping sync for context {$this->id} - patch channel full");
+        $channel = $this->getPatchChannel();
 
-            return;
+        // If channel is full, drop oldest patches to make room for new updates
+        // This prevents user interactions from being lost when client is slow
+        while ($channel->isFull()) {
+            $dropped = $channel->pop(0);
+            if ($dropped !== false) {
+                $this->app->log('debug', "Dropped old patch for context {$this->id} - channel full");
+            } else {
+                break;
+            }
         }
 
         // Sync view with proper selector for components
