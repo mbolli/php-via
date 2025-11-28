@@ -146,21 +146,21 @@
             <input type="text"
                    placeholder="Add a new todo..."
                    {{ bind(newTodo) }}
-                   data-on:keydown.enter="@get('{{ addTodo.url() }}')">
-            <button data-on:click="@get('{{ addTodo.url() }}')">Add</button>
+                   data-on:keydown="evt.key == 'Enter' && @post('{{ addTodo.url() }}')">
+            <button data-on:click="@post('{{ addTodo.url() }}')">Add</button>
         </div>
 
         <ul class="todo-list">
             {% for todo in todos %}
-                <li class="todo-item{% if todo.completed %} completed{% endif %}">
-                    <div class="todo-content" data-on:click="@get('{{ toggleTodo.url() }}?id={{ todo.id }}')">
+                <li class="todo-item{% if todo.completed %} completed{% endif %}" id="todo-{{ todo.id }}">
+                    <div class="todo-content" data-on:click="@post('{{ toggleTodo.url() }}?id={{ todo.id }}')">
                         <input type="checkbox"
                                {% if todo.completed %}checked{% endif %}
                                readonly>
                         <span class="todo-text">{{ todo.text }}</span>
                     </div>
                     <button class="delete-btn"
-                            data-on:click="@get('{{ deleteTodo.url() }}?id={{ todo.id }}')">
+                            data-on:click="@delete('{{ deleteTodo.url() }}?id={{ todo.id }}')">
                         🗑️
                     </button>
                 </li>

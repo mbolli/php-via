@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script type="module" src="/_datastar.js"></script>
+    <meta data-signals='{{ signals_json }}'>
+    <meta data-indicator="_connecting"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('/_sse')"
+        data-on-datastar-fetch="el === evt.detail.el &&
+                           ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
+                           (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
+    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{{ context_id }}'); });">
+    {{ head_content }}
+</head>
+<body>
+    <div data-show="$_disconnected" style="position: fixed; top: 0; right: 0; background: red; color: white; padding: 5px; z-index: 9999;">Warning: Not connected to server.</div>
+    {{ content }}
+    {{ foot_content }}
+</body>
+</html>

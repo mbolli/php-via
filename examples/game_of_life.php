@@ -18,8 +18,8 @@ $config->withHost('0.0.0.0')
     ->withPort(3000)
     ->withDocumentTitle('🎮 Via Game of Life')
     ->withDevMode(true)
-    ->withLogLevel('info')
-    ->withTemplateDir(__DIR__ . '/../templates')
+    ->withLogLevel('debug')
+    ->withViewCache(true)  // Enable view caching for better performance with 2500 cells
 ;
 
 // Create the application
@@ -40,7 +40,8 @@ class GameState {
 
     /** @var array<string, Context> */
     public static array $contexts = [];
-    private static ?string $cachedBoardHtml = null;
+
+    public static ?Via $app = null;
 
     public static function init(): void {
         if (!self::$initialized) {
@@ -50,30 +51,24 @@ class GameState {
     }
 
     /**
-     * Get cached board HTML or render it if needed.
+     * Render board HTML tiles.
      */
-    public static function getBoardHtml(): string {
-        if (self::$cachedBoardHtml === null) {
-            self::renderBoardHtml();
+    public static function renderBoard(): string {
+        $tiles = '';
+        foreach (self::$board as $id => $colorClass) {
+            $tiles .= "<div class=\"tile {$colorClass}\" data-id=\"{$id}\"></div>";
         }
 
-        return self::$cachedBoardHtml;
-    }
-
-    /**
-     * Invalidate the board HTML cache (call when board changes).
-     */
-    public static function invalidateBoardCache(): void {
-        self::$cachedBoardHtml = null;
+        return $tiles;
     }
 
     public static function startTimer(): void {
         if (self::$timerId === null) {
-            self::$timerId = Timer::tick(200, function (): void {
+            $tickCount = 0;
+            self::$timerId = Timer::tick(200, function () use (&$tickCount): void {
                 if (self::$running) {
                     self::$board = GameOfLife::nextGeneration(self::$board);
                     ++self::$generation;
-                    self::invalidateBoardCache();
 
                     // Auto-pause if all cells are dead
                     if (GameOfLife::isAllDead(self::$board)) {
@@ -81,28 +76,53 @@ class GameState {
                     }
 
                     // Update all connected clients
-                    foreach (self::$contexts as $context) {
-                        $context->sync();
+                    self::$app->broadcast('/');
+
+                    // Log memory every 50 ticks (~10 seconds)
+                    ++$tickCount;
+                    if ($tickCount % 50 === 0) {
+                        $memMB = round(memory_get_usage(true) / 1024 / 1024, 2);
+                        $memActual = round(memory_get_usage(false) / 1024 / 1024, 2);
+                        $peakMB = round(memory_get_peak_usage(true) / 1024 / 1024, 2);
+
+                        // Count objects/arrays in memory
+                        $stats = [
+                            'gen' => self::$generation,
+                            'clients' => count(self::$contexts),
+                            'sessions' => count(self::$sessionIds),
+                            'mem_alloc' => $memMB,
+                            'mem_used' => $memActual,
+                            'mem_peak' => $peakMB,
+                        ];
+                        error_log(json_encode($stats));
+                        gc_collect_cycles(); // Force garbage collection
+                    }
+
+                    // Aggressive GC every 500 generations (~100 seconds)
+                    if (self::$generation % 500 === 0) {
+                        gc_mem_caches();
+
+                        // Debug snapshot
+                        $snapshot = [
+                            'gen' => self::$generation,
+                            'contexts_count' => count(self::$contexts),
+                            'sessions_count' => count(self::$sessionIds),
+                            'board_size' => strlen(serialize(self::$board)),
+                            'memory_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+                        ];
+                        error_log('SNAPSHOT: ' . json_encode($snapshot));
                     }
                 }
             });
         }
     }
 
-    /**
-     * Render the board HTML and cache it.
-     */
-    private static function renderBoardHtml(): void {
-        $tiles = '';
-        foreach (self::$board as $id => $colorClass) {
-            $tiles .= "<div class=\"tile {$colorClass}\" data-id=\"{$id}\"></div>";
-        }
-        self::$cachedBoardHtml = $tiles;
-    }
+    // Render the board HTML and cache it.
 }
 
 // Initialize shared state
 GameState::init();
+GameState::$app = $app;
 
 /**
  * Conway's Game of Life Implementation.
@@ -323,7 +343,8 @@ class GameOfLife {
     }
 }
 
-$app->appendToHead(<<<HTML
+$app->appendToHead(
+    <<<'HTML'
 <style>
     body {
         max-width: 700px;
@@ -413,7 +434,8 @@ $app->appendToHead(<<<HTML
 </style>
 HTML
 );
-$app->appendToFoot(<<<HTML
+$app->appendToFoot(
+    <<<'HTML'
 <footer>
     <div style="padding: 10px;">
         <p>
@@ -431,8 +453,8 @@ $app->appendToFoot(<<<HTML
     </div>
     <div style="text-align: center; padding: 10px;">
         <p>
-            &copy; 2025 <a href="https://github.com/mbolli">Michael Bolli</a>. 
-            Adapted from <a href="https://andersmurphy.com/2025/04/07/clojure-realtime-collaborative-web-apps-without-clojurescript.html" target="_blank">Anders Murphy's Clojure version</a>. 
+            &copy; 2025 <a href="https://github.com/mbolli">Michael Bolli</a>.
+            Adapted from <a href="https://andersmurphy.com/2025/04/07/clojure-realtime-collaborative-web-apps-without-clojurescript.html" target="_blank">Anders Murphy's Clojure version</a>.
             Licensed under <a href="https://opensource.org/licenses/MIT" target="_blank">MIT License</a>.
         </p>
         <p>Developed with ❤️ using <a href="https://github.com/mbolli/php-via" target="_blank">php-via</a>, <a href="https://www.php.net/" target="_blank">PHP</a>, <a href="https://www.swoole.com/" target="_blank">Swoole</a> and <a href="https://data-star.dev/" target="_blank">Datastar</a></p>
@@ -442,15 +464,17 @@ HTML
 );
 
 // Register the game page
-$app->page('/', function (Context $c): void {
+$app->page('/', function (Context $c) use ($app): void {
     // Register this context for global updates
     $contextId = $c->getId();
     GameState::$contexts[$contextId] = $c;
-    
+
     // Clean up when connection closes
     $c->onCleanup(function () use ($contextId): void {
-        unset(GameState::$contexts[$contextId]);
-        unset(GameState::$sessionIds[$contextId]);
+        unset(GameState::$contexts[$contextId], GameState::$sessionIds[$contextId]);
+
+        $memMB = round(memory_get_usage(true) / 1024 / 1024, 2);
+        error_log("CLIENT_DISCONNECT: id={$contextId}, remaining=" . count(GameState::$contexts) . ", mem={$memMB}MB");
     });
 
     // Start the global timer (only runs once)
@@ -474,55 +498,69 @@ $app->page('/', function (Context $c): void {
     $runningSignal = $c->signal($running, 'running');  // Whether simulation is running
 
     // Action: Toggle the running/paused state
-    $toggleRunning = $c->action(function () use ($runningSignal): void {
+    $toggleRunning = $c->routeAction(function (Context $ctx) use ($runningSignal): void {
         GameState::$running = !GameState::$running;
         $runningSignal->setValue(GameState::$running);
 
         // Update all clients
-        foreach (GameState::$contexts as $context) {
-            $context->sync();
-        }
+        GameState::$app->broadcast('/');
     }, 'toggleRunning');
 
     // Action: Reset the board to empty state
-    $reset = $c->action(function (): void {
+    $reset = $c->routeAction(function (Context $ctx): void {
         GameState::$board = GameOfLife::emptyBoard();
         GameState::$generation = 0;
-        GameState::invalidateBoardCache();
 
         // Update all clients
-        foreach (GameState::$contexts as $context) {
-            $context->sync();
-        }
+        GameState::$app->broadcast('/');
     }, 'reset');
 
     // Action: Handle cell clicks to draw patterns
-    $tapCell = $c->action(function () use ($sessionId): void {
+    $tapCell = $c->routeAction(function (Context $ctx): void {
         $id = $_GET['id'] ?? null;
-        error_log("Cell tapped: id={$id}, session={$sessionId}");
+        // Get session ID from GameState using context ID (route actions are shared, so can't capture per-context data)
+        $sessionId = GameState::$sessionIds[$ctx->getId()] ?? 0;
+        error_log("Cell tapped: id={$id}, session={$sessionId}, contextId={$ctx->getId()}");
         if ($id !== null) {
             // Draw a cross pattern at clicked position
             GameState::$board = GameOfLife::fillCross(GameState::$board, (int) $id, $sessionId);
-            GameState::invalidateBoardCache();
-            
+
             // Resume game if it was paused
             if (!GameState::$running) {
                 GameState::$running = true;
             }
 
             // Update all clients
-            foreach (GameState::$contexts as $context) {
-                $context->sync();
-            }
+            GameState::$app->broadcast('/');
         }
     }, 'tapCell');
 
     // Render the HTML view
-    $c->view(function () use ($toggleRunning, $reset, $tapCell) {
+    $c->view(function () use ($toggleRunning, $reset, $tapCell, $app) {
         // Read current state directly from GameState (not from local references)
-        $tiles = GameState::getBoardHtml();
+        $tiles = GameState::renderBoard();
         $generation = GameState::$generation;
         $running = GameState::$running;
+
+        // Get profiling data
+        $clients = $app->getClients();
+        $stats = $app->getRenderStats();
+        $clientCount = count($clients);
+
+        // Build compact client icons
+        $clientIcons = '';
+        foreach (array_slice($clients, 0, 10) as $client) {
+            $identicon = htmlspecialchars($client['identicon']);
+            $id = htmlspecialchars($client['id']);
+            $clientIcons .= "<img src=\"{$identicon}\" title=\"{$id}\" style=\"width:24px;height:24px;border-radius:3px;margin-right:2px;\" />";
+        }
+        if ($clientCount > 10) {
+            $clientIcons .= '<span style="font-size:12px;color:#666;">+' . ($clientCount - 10) . '</span>';
+        }
+
+        // Format stats
+        $renderCount = number_format($stats['render_count']);
+        $avgTime = number_format($stats['avg_time'] * 1000, 2);
 
         // Dynamic button text based on state
         $runningText = $running ? 'Pause' : 'Resume';
@@ -533,6 +571,16 @@ $app->page('/', function (Context $c): void {
             <div class="container">
                 <h1>🎮 Game of Life</h1>
                 <p class="subtitle">Click cells to draw patterns. Multiple users can draw simultaneously!</p>
+
+                <div style="display:flex;gap:10px;margin-bottom:15px;">
+                    <div style="flex:1;padding:8px;background:#f0f0f0;border-radius:4px;font-size:12px;">
+                        <strong>👥 {$clientCount}</strong> {$clientIcons}
+                    </div>
+                    <div style="flex:1;padding:8px;background:#e8f4f8;border-radius:4px;font-size:12px;">
+                        <strong>📊</strong> {$renderCount} renders • {$avgTime}ms avg
+                    </div>
+                </div>
+
                 <p class="generation">Generation: {$generation}</p>
 
                 <div class="controls">

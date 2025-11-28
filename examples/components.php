@@ -13,6 +13,7 @@ use Mbolli\PhpVia\Via;
 $config = new Config();
 $config->withDocumentTitle('⚡ Via Components Example')
     ->withTemplateDir(__DIR__ . '/../templates')
+    ->withLogLevel('debug')
 ;
 
 // Create the application

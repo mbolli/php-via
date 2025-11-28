@@ -11,6 +11,7 @@ use Mbolli\PhpVia\Via;
 // Create configuration
 $config = new Config();
 $config->withDocumentTitle('⚡ Via Counter - Twig Example')
+    ->withLogLevel('debug')
     ->withTemplateDir(__DIR__ . '/../templates')
 ;
 
@@ -34,7 +35,7 @@ $app->page('/', function (Context $c): void {
     // Render view with inline template
     $c->view(function () use (&$count, $step, $increment, $c) {
         return $c->renderString(<<<'TWIG'
-            <div class="container">
+            <div class="container" id="counter">
                 <h1>⚡ Via Counter</h1>
                 <p class="count">Count: {{ count }}</p>
                 <label>

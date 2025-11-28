@@ -37,7 +37,7 @@ $app->page('/', function (Context $c): void {
     // Define the view using inline HTML
     $c->view(function () use (&$count, $step, $increment) {
         return <<<HTML
-        <div class="page-layout">
+        <div class="page-layout" id="counter">
             <div class="container">
                 <h1>⚡ Via Counter</h1>
                 <p class="count">Count: <span data-text="\${$count->id()}"></span></p>

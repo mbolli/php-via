@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Via App{% endblock %}</title>
+    <meta data-signals='{"via_ctx":"{{contextId}}", "_disconnected": false}'>
+    <meta data-indicator="_connecting"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('/_sse')"
+        data-on-datastar-fetch="el === evt.detail.el &&
+                           ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
+                           (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
+    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{{contextId}}'); });">
     <style>
         body {
             margin: 0;
@@ -54,7 +61,7 @@
     {% block stylesheets %}{% endblock %}
 </head>
 <body>
-    <div class="page-layout">
+    <div class="page-layout" id="content">
         {% block body %}
         <div class="container">
             {% block content %}{% endblock %}

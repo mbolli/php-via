@@ -25,30 +25,37 @@ $config->withHost('0.0.0.0')
     ->withPort(3000)
     ->withDocumentTitle('⚡ Via Todo List')
     ->withTemplateDir(__DIR__ . '/../templates')
+    ->withLogLevel('debug')
 ;
 
 // Create the application
 $app = new Via($config);
 
-$app->page('/', function (Context $c): void {
+$app->page('/', function (Context $c) use ($app): void {
     $newTodo = $c->signal('', 'newTodo');
-    $addTodo = $c->action(function () use ($newTodo, $c): void {
-        $task = mb_trim($newTodo->string());
+
+    $addTodo = $c->routeAction(function (Context $ctx) use ($app): void {
+        // Get the signal from the context (each context has its own signal with injected value)
+        $newTodoSignal = $ctx->getSignal('newTodo');
+        $task = $newTodoSignal ? mb_trim($newTodoSignal->string()) : '';
         if ($task !== '') {
+            $app->log('info', "Adding new todo item: {$task}");
             TodoState::$todos[] = ['id' => TodoState::$nextId++, 'text' => $task, 'completed' => false];
-            $newTodo->setValue('');
-            $c->getApp()->broadcast('/');
+            $newTodoSignal?->setValue(''); // Clear the signal value after processing
+            $app->broadcast('/');
+        } else {
+            $app->log('debug', 'Attempted to add empty todo item, ignoring.' . $newTodoSignal?->id());
         }
     }, 'addTodo');
 
-    $deleteTodo = $c->action(function () use ($c): void {
+    $deleteTodo = $c->routeAction(function (Context $ctx) use ($app): void {
         $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
         TodoState::$todos = array_filter(TodoState::$todos, fn (array $todo) => $todo['id'] !== $id);
         TodoState::$todos = array_values(TodoState::$todos); // Re-index array
-        $c->getApp()->broadcast('/');
+        $app->broadcast('/');
     }, 'deleteTodo');
 
-    $toggleTodo = $c->action(function () use ($c): void {
+    $toggleTodo = $c->routeAction(function (Context $ctx) use ($app): void {
         $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
         foreach (TodoState::$todos as $key => $todo) {
             if ($todo['id'] === $id) {
@@ -57,7 +64,7 @@ $app->page('/', function (Context $c): void {
                 break;
             }
         }
-        $c->getApp()->broadcast('/');
+        $app->broadcast('/');
     }, 'toggleTodo');
 
     $c->view(function (bool $isUpdate = false) use ($c, $newTodo, $addTodo, $deleteTodo, $toggleTodo): string {
