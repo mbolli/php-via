@@ -10,6 +10,7 @@ use Swoole\Coroutine;
 use Swoole\Http\Request;
 use Swoole\Http\Response;
 use Swoole\Http\Server;
+use Swoole\Timer;
 use Twig\Environment;
 use Twig\Loader\ArrayLoader;
 use Twig\Loader\FilesystemLoader;
@@ -27,8 +28,26 @@ class Via {
     /** @var array<string, callable> */
     private array $routes = [];
 
+    /** @var array<string, array<string, callable>> Route-level actions */
+    private array $routeActions = [];
+
     /** @var array<string, Context> */
     private array $contexts = [];
+
+    /** @var array<string, int> Cleanup timer IDs for contexts */
+    private array $cleanupTimers = [];
+
+    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
+    private array $clients = [];
+
+    /** @var array{render_count: int, total_time: float, min_time: float, max_time: float} */
+    private array $renderStats = ['render_count' => 0, 'total_time' => 0.0, 'min_time' => PHP_FLOAT_MAX, 'max_time' => 0.0];
+
+    /** @var array<string, string> Route-based view cache (route -> html) */
+    private array $viewCache = [];
+
+    /** @var array<string, bool> Tracks if route is currently rendering (prevents race condition) */
+    private array $rendering = [];
 
     /** @var array<int, string> */
     private array $headIncludes = [];
@@ -38,7 +57,18 @@ class Via {
     private Environment $twig;
 
     public function __construct(private Config $config) {
-        $this->server = new Server($this->config->getHost(), $this->config->getPort());
+        $this->server = new Server($this->config->getHost(), $this->config->getPort(), SWOOLE_BASE);
+
+        // Configure Swoole for SSE streaming
+        $this->server->set([
+            'open_http2_protocol' => false,
+            'http_compression' => false,
+            'buffer_output_size' => 0,   // NO OUTPUT BUFFERING
+            'socket_buffer_size' => 1024 * 1024,
+            'max_coroutine' => 100000,
+            'worker_num' => 1,   // Single worker = shared state (clients, render stats)
+            'send_yield' => true,
+        ]);
 
         // Initialize Twig with appropriate loader
         if ($this->config->getTemplateDir()) {
@@ -84,6 +114,13 @@ class Via {
     }
 
     /**
+     * Check if view caching is enabled.
+     */
+    public function isViewCacheEnabled(): bool {
+        return $this->config->getViewCache();
+    }
+
+    /**
      * Register a page route with its handler.
      *
      * @param string   $route   The route pattern (e.g., '/')
@@ -97,6 +134,9 @@ class Via {
      * Broadcast sync to all contexts on a specific route.
      */
     public function broadcast(string $route): void {
+        // Invalidate cache so next render is fresh
+        $this->invalidateViewCache($route);
+
         foreach ($this->contexts as $context) {
             if ($context->getRoute() === $route) {
                 $context->sync();
@@ -153,10 +193,105 @@ class Via {
     }
 
     /**
+     * Get all connected clients.
+     *
+     * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
+     */
+    public function getClients(): array {
+        $clients = [];
+        foreach ($this->clients as $contextId => $client) {
+            $clients[$contextId] = array_merge($client, ['context_id' => $contextId]);
+        }
+
+        return $clients;
+    }
+
+    /**
+     * Get render statistics.
+     *
+     * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
+     */
+    public function getRenderStats(): array {
+        $stats = $this->renderStats;
+        $stats['avg_time'] = $stats['render_count'] > 0 ? $stats['total_time'] / $stats['render_count'] : 0.0;
+        if ($stats['min_time'] === PHP_FLOAT_MAX) {
+            $stats['min_time'] = 0.0;
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Track view render time.
+     */
+    public function trackRender(float $duration): void {
+        $this->renderStats['render_count']++;
+        $this->renderStats['total_time'] += $duration;
+        $this->renderStats['min_time'] = min($this->renderStats['min_time'], $duration);
+        $this->renderStats['max_time'] = max($this->renderStats['max_time'], $duration);
+    }
+
+    /**
+     * Get cached view HTML for a route if available and fresh.
+     */
+    public function getCachedView(string $route): ?string {
+        return $this->viewCache[$route] ?? null;
+    }
+
+    /**
+     * Cache rendered view HTML for a route.
+     */
+    public function cacheView(string $route, string $html): void {
+        $this->viewCache[$route] = $html;
+    }
+
+    /**
+     * Check if route is currently rendering.
+     */
+    public function isRendering(string $route): bool {
+        return $this->rendering[$route] ?? false;
+    }
+
+    /**
+     * Set rendering status for route.
+     */
+    public function setRendering(string $route, bool $status): void {
+        if ($status) {
+            $this->rendering[$route] = true;
+        } else {
+            unset($this->rendering[$route]);
+        }
+    }
+
+    /**
+     * Invalidate view cache for a route (called on broadcast).
+     */
+    public function invalidateViewCache(string $route): void {
+        unset($this->viewCache[$route]);
+    }
+
+    /**
      * Get Twig environment.
      */
     public function getTwig(): Environment {
         return $this->twig;
+    }
+
+    /**
+     * Register a route-level action (shared across all contexts on this route).
+     */
+    public function registerRouteAction(string $route, string $actionId, callable $handler): void {
+        if (!isset($this->routeActions[$route])) {
+            $this->routeActions[$route] = [];
+        }
+        $this->routeActions[$route][$actionId] = $handler;
+    }
+
+    /**
+     * Get route action handler.
+     */
+    public function getRouteAction(string $route, string $actionId): ?callable {
+        return $this->routeActions[$route][$actionId] ?? null;
     }
 
     /**
@@ -228,6 +363,13 @@ class Via {
             return;
         }
 
+        // Handle stats endpoint
+        if ($path === '/_stats' && $method === 'GET') {
+            $this->handleStats($request, $response);
+
+            return;
+        }
+
         // Handle page routes
         foreach ($this->routes as $route => $handler) {
             if ($this->matchRoute($route, $path)) {
@@ -273,38 +415,60 @@ class Via {
         $signals = self::readSignals($request);
         $contextId = $signals['via_ctx'] ?? null;
 
-        if (!$contextId || !isset($this->contexts[$contextId])) {
+        if (!$contextId) {
             $response->status(400);
             $response->end('Invalid context');
 
             return;
         }
 
-        $context = $this->contexts[$contextId];
-
+        $sse = new ServerSentEventGenerator();
         // Set SSE headers using Datastar SDK
         foreach (ServerSentEventGenerator::headers() as $name => $value) {
             $response->header($name, $value);
         }
 
-        $this->log('debug', "SSE connection established for context: {$contextId}");
+        // If context doesn't exist, it was cleaned up
+        // Use Datastar SDK to send reload script
+        if (!isset($this->contexts[$contextId])) {
+            $this->log('info', "Context expired, sending reload: {$contextId}");
 
-        // Create SSE generator
-        $sse = new ServerSentEventGenerator();
-
-        // Send initial sync (view + signals) on connection/reconnection
-        Coroutine::create(function () use ($context): void {
-            $context->sync();
-        });
-
-        // Send initial signals
-        $initialSignals = $context->prepareSignalsForPatch();
-        if (!empty($initialSignals)) {
-            $output = $sse->patchSignals($initialSignals);
+            // Use Datastar's executeScript to reload
+            $output = $sse->executeScript('window.location.reload()');
             $response->write($output);
+            $response->end();
+
+            return;
         }
 
+        $context = $this->contexts[$contextId];
+
+        // Track client info when SSE connects (not at page load)
+        if (!isset($this->clients[$contextId])) {
+            $clientId = $this->generateClientId();
+            $this->clients[$contextId] = [
+                'id' => $clientId,
+                'identicon' => $this->generateIdenticon($clientId),
+                'connected_at' => time(),
+                'ip' => $request->server['remote_addr'] ?? 'unknown',
+            ];
+        }
+
+        $this->log('debug', "SSE connection established for context: {$contextId}");
+
+        // Cancel any pending cleanup timer for this context (reconnection)
+        if (isset($this->cleanupTimers[$contextId])) {
+            Timer::clear($this->cleanupTimers[$contextId]);
+            unset($this->cleanupTimers[$contextId]);
+            $this->log('debug', "Cancelled cleanup timer for reconnected context: {$contextId}");
+        }
+
+        // Send initial sync (view + signals) on connection/reconnection
+        // Do this synchronously to ensure patches are ready before the loop starts
+        $context->sync();
+
         // Keep connection alive and listen for patches
+        $lastKeepalive = time();
         while (true) {
             if (!$response->isWritable()) {
                 break;
@@ -315,10 +479,25 @@ class Via {
             if ($patch) {
                 try {
                     $output = $this->sendSSEPatch($sse, $patch);
-                    $response->write($output);
+                    if (!$response->write($output)) {
+                        break;
+                    }
                 } catch (\Throwable $e) {
-                    $this->log('debug', 'Patch failed, continuing: ' . $e->getMessage(), $context);
-                    // Continue processing - don't break the SSE stream
+                    $this->log('debug', 'Patch write exception, client disconnected: ' . $e->getMessage(), $context);
+
+                    break;
+                }
+            }
+
+            // Send keepalive comment every 30 seconds to prevent timeout
+            if (time() - $lastKeepalive >= 30) {
+                try {
+                    if (!$response->write(": keepalive\n\n")) {
+                        break;
+                    }
+                    $lastKeepalive = time();
+                } catch (\Throwable $e) {
+                    break;
                 }
             }
 
@@ -326,10 +505,18 @@ class Via {
         }
 
         $this->log('debug', "SSE connection closed for context: {$context->getId()}");
-        
-        // Execute cleanup callbacks and remove context to prevent memory leak
-        $context->cleanup();
-        unset($this->contexts[$contextId]);
+
+        // Don't immediately cleanup - give client time to reconnect (e.g., tab switching)
+        // Schedule cleanup after 60 seconds of inactivity
+        $timerId = Timer::after(60000, function () use ($contextId): void {
+            if (isset($this->contexts[$contextId])) {
+                $this->log('debug', "Cleaning up inactive context: {$contextId}");
+                $this->contexts[$contextId]->cleanup();
+                unset($this->contexts[$contextId], $this->clients[$contextId], $this->cleanupTimers[$contextId]);
+            }
+        });
+
+        $this->cleanupTimers[$contextId] = $timerId;
     }
 
     /**
@@ -349,6 +536,34 @@ class Via {
         }
 
         $context = $this->contexts[$contextId];
+        $route = $context->getRoute();
+
+        // Check for route-level action first
+        $routeHandler = $this->getRouteAction($route, $actionId);
+        if ($routeHandler !== null) {
+            try {
+                // Inject signals into context
+                $context->injectSignals($signals);
+
+                $this->log('debug', "Executing route action {$actionId} for route {$route}");
+
+                // Execute the route-level action with context
+                $routeHandler($context);
+
+                $this->log('debug', "Route action {$actionId} completed successfully");
+
+                $response->status(200);
+                $response->end();
+
+                return;
+            } catch (\Exception $e) {
+                $this->log('error', "Route action {$actionId} failed: " . $e->getMessage());
+                $response->status(500);
+                $response->end('Action failed');
+
+                return;
+            }
+        }
 
         try {
             // Inject signals into context
@@ -356,7 +571,7 @@ class Via {
 
             $this->log('debug', "Executing action {$actionId} for context {$contextId}");
 
-            // Execute the action
+            // Execute the context-level action
             $context->executeAction($actionId);
 
             $this->log('debug', "Action {$actionId} completed successfully");
@@ -377,12 +592,32 @@ class Via {
         $contextId = $request->rawContent();
 
         if (isset($this->contexts[$contextId])) {
-            unset($this->contexts[$contextId]);
+            unset($this->contexts[$contextId], $this->clients[$contextId]);
+
             $this->log('debug', "Context closed: {$contextId}");
         }
 
         $response->status(200);
         $response->end();
+    }
+
+    /**
+     * Handle stats endpoint.
+     */
+    private function handleStats(Request $request, Response $response): void {
+        $stats = [
+            'contexts' => \count($this->contexts),
+            'clients' => $this->getClients(),
+            'render_stats' => $this->getRenderStats(),
+            'memory' => [
+                'current' => memory_get_usage(true),
+                'peak' => memory_get_peak_usage(true),
+            ],
+            'uptime' => time() - ($_SERVER['REQUEST_TIME'] ?? time()),
+        ];
+
+        $response->header('Content-Type', 'application/json');
+        $response->end(json_encode($stats, JSON_PRETTY_PRINT));
     }
 
     /**
@@ -428,25 +663,42 @@ class Via {
         $headContent = implode("\n", $this->headIncludes);
         $footContent = implode("\n", $this->footIncludes);
 
-        return <<<HTML
-<!doctype html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{$title}</title>
-    <script type="module" src="/_datastar.js"></script>
-    <meta data-signals='{"via_ctx":"{$contextId}"}'>
-    <meta data-init="@get('/_sse')">
-    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{$contextId}'); });">
-    {$headContent}
-</head>
-<body>
-    {$context->renderView()}
-    {$footContent}
-</body>
-</html>
-HTML;
+        $content = $context->renderView();
+
+        // If it's a full page (already processed by processView), return it
+        if (stripos($content, '<html') !== false) {
+            return $content;
+        }
+
+        // Use the shell template for fragments
+        $signalsJson = json_encode([
+            'via_ctx' => $contextId,
+            '_disconnected' => false,
+        ]);
+
+        // Simple template replacement for the shell
+        $shellPath = $this->config->getShellTemplate() ?? __DIR__ . '/../shell.html';
+        $shell = file_get_contents($shellPath);
+        
+        return str_replace(
+            [
+                '{{ title }}',
+                '{{ signals_json }}',
+                '{{ context_id }}',
+                '{{ head_content }}',
+                '{{ content }}',
+                '{{ foot_content }}'
+            ],
+            [
+                $title,
+                $signalsJson,
+                $contextId,
+                $headContent,
+                $content,
+                $footContent
+            ],
+            $shell
+        );
     }
 
     /**
@@ -461,6 +713,60 @@ HTML;
      */
     private function generateId(): string {
         return bin2hex(random_bytes(8));
+    }
+
+    /**
+     * Generate unique client ID.
+     */
+    private function generateClientId(): string {
+        return bin2hex(random_bytes(4)); // 8 char hex
+    }
+
+    /**
+     * Generate SVG identicon based on client ID.
+     * Creates a 5x5 symmetric pattern.
+     */
+    private function generateIdenticon(string $clientId): string {
+        // Use client ID to seed colors and pattern
+        $hash = hash('sha256', $clientId);
+
+        // Extract color from hash
+        $hue = hexdec(substr($hash, 0, 2)) / 255 * 360;
+        $color = "hsl({$hue}, 70%, 50%)";
+        $bgColor = "hsl({$hue}, 70%, 90%)";
+
+        // Generate 5x5 pattern (symmetric, so only need 3 columns)
+        $size = 5;
+        $cells = [];
+        for ($y = 0; $y < $size; ++$y) {
+            for ($x = 0; $x < 3; ++$x) {
+                $index = $y * 3 + $x;
+                $cells[$y][$x] = (bool) (hexdec($hash[$index % 64]) % 2);
+            }
+        }
+
+        // Build SVG
+        $cellSize = 20;
+        $svgSize = $size * $cellSize;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' . $svgSize . '" height="' . $svgSize . '" viewBox="0 0 ' . $svgSize . ' ' . $svgSize . '">';
+        $svg .= '<rect width="' . $svgSize . '" height="' . $svgSize . '" fill="' . $bgColor . '"/>';
+
+        for ($y = 0; $y < $size; ++$y) {
+            for ($x = 0; $x < $size; ++$x) {
+                // Mirror pattern
+                $cellX = $x < 3 ? $x : 4 - $x;
+                if ($cells[$y][$cellX]) {
+                    $posX = $x * $cellSize;
+                    $posY = $y * $cellSize;
+                    $svg .= '<rect x="' . $posX . '" y="' . $posY . '" width="' . $cellSize . '" height="' . $cellSize . '" fill="' . $color . '"/>';
+                }
+            }
+        }
+
+        $svg .= '</svg>';
+
+        // Return base64 data URI
+        return 'data:image/svg+xml;base64,' . base64_encode($svg);
     }
 
     /**

@@ -14,6 +14,8 @@ class Config {
     private bool $devMode = false;
     private string $logLevel = 'info';
     private ?string $templateDir = null;
+    private bool $enableViewCache = false;
+    private ?string $shellTemplate = null;
 
     public function withHost(string $host): self {
         $this->host = $host;
@@ -51,6 +53,18 @@ class Config {
         return $this;
     }
 
+    public function withViewCache(bool $enabled = true): self {
+        $this->enableViewCache = $enabled;
+
+        return $this;
+    }
+
+    public function withShellTemplate(string $path): self {
+        $this->shellTemplate = $path;
+
+        return $this;
+    }
+
     public function getHost(): string {
         return $this->host;
     }
@@ -73,5 +87,13 @@ class Config {
 
     public function getTemplateDir(): ?string {
         return $this->templateDir;
+    }
+
+    public function getViewCache(): bool {
+        return $this->enableViewCache;
+    }
+
+    public function getShellTemplate(): ?string {
+        return $this->shellTemplate;
     }
 }

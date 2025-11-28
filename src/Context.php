@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use Swoole\Coroutine;
 use Swoole\Coroutine\Channel;
 use Swoole\Timer;
 
@@ -30,9 +31,12 @@ class Context {
     /** @var array<string, Signal> */
     private array $signals = [];
     private ?string $namespace = null;
-    
+
     /** @var array<callable> */
     private array $cleanupCallbacks = [];
+
+    /** @var array<int> Timer IDs created by this context */
+    private array $timerIds = [];
 
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null) {
         $this->id = $id;
@@ -48,18 +52,39 @@ class Context {
     public function getId(): string {
         return $this->id;
     }
-    
+
     /**
      * Register a callback to be executed when the context is cleaned up (SSE disconnect).
      */
     public function onCleanup(callable $callback): void {
         $this->cleanupCallbacks[] = $callback;
     }
-    
+
+    /**
+     * Create a timer that will be automatically cleaned up with the context.
+     *
+     * @param callable $callback The function to call on each tick
+     * @param int      $ms       Interval in milliseconds
+     *
+     * @return int Timer ID
+     */
+    public function setInterval(callable $callback, int $ms): int {
+        $timerId = Timer::tick($ms, $callback);
+        $this->timerIds[] = $timerId;
+
+        return $timerId;
+    }
+
     /**
      * Execute cleanup callbacks and release resources.
      */
     public function cleanup(): void {
+        // Clear all timers first
+        foreach ($this->timerIds as $timerId) {
+            Timer::clear($timerId);
+        }
+        $this->timerIds = [];
+
         foreach ($this->cleanupCallbacks as $callback) {
             try {
                 $callback();
@@ -67,14 +92,12 @@ class Context {
                 // Silently ignore cleanup errors
             }
         }
-        $this->cleanupCallbacks = [];
         
         // Close and cleanup the patch channel
-        if ($this->patchChannel !== null) {
-            $this->patchChannel->close();
-        }
-        
+        $this->patchChannel->close();
+
         // Clear references to prevent memory leaks
+        $this->cleanupCallbacks = [];
         $this->signals = [];
         $this->actionRegistry = [];
         $this->componentRegistry = [];
@@ -92,17 +115,14 @@ class Context {
     /**
      * Define the UI rendered by this context.
      *
-     * @param callable|string      $view Function that returns HTML content, or Twig template name
-     * @param array<string, mixed> $data Optional data for Twig templates
+     * @param callable|string      $view  Function that returns HTML content, or Twig template name
+     * @param array<string, mixed> $data  Optional data for Twig templates
+     * @param null|string          $block Optional block name to render only that block during updates
      */
-    public function view(callable|string $view, array $data = []): void {
+    public function view(callable|string $view, array $data = [], ?string $block = null): void {
         if (\is_string($view)) {
             // Twig template name
-            $this->viewFn = function () use ($view, $data) {
-                $html = $this->app->getTwig()->render($view, $data);
-
-                return '<div id="' . $this->id . '">' . $html . '</div>';
-            };
+            $this->viewFn = fn () => $this->render($view, $data, $block);
         } elseif (\is_callable($view)) {
             // Callable function - don't wrap, let the callable handle its own structure
             $this->viewFn = $view;
@@ -118,6 +138,11 @@ class Context {
      * @param null|string          $block Optional block name to render only that block
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
+        $data += [
+            'contextId' => $this->id,
+            'via_is_update' => !$this->isInitialRender,
+        ];
+
         if ($block !== null) {
             // Render only the specified block
             $twig = $this->app->getTwig();
@@ -150,16 +175,52 @@ class Context {
 
         $isUpdate = !$this->isInitialRender;
 
-        // Check if the view function accepts parameters
-        $reflection = new \ReflectionFunction($this->viewFn);
-        if ($reflection->getNumberOfParameters() > 0) {
-            $result = ($this->viewFn)($isUpdate);
-        } else {
-            $result = ($this->viewFn)();
+        // Only use cache for subsequent renders if caching is enabled
+        // Updates might render partial blocks, which shouldn't be cached or reused
+        if ($isUpdate && $this->app->isViewCacheEnabled()) {
+            $cached = $this->app->getCachedView($this->route);
+            if ($cached !== null) {
+                $this->app->log('debug', "Using cached view for route: {$this->route}");
+
+                return $cached;
+            }
         }
+
+        // Mark as rendering to prevent concurrent renders
+        if ($this->app->isRendering($this->route)) {
+            // Another context is already rendering, wait and get cached result
+            Coroutine::sleep(0.001);
+            $cached = $this->app->getCachedView($this->route);
+            if ($cached !== null) {
+                $this->app->log('debug', "Got cached view after wait for route: {$this->route}");
+
+                return $cached;
+            }
+        }
+
+        $this->app->setRendering($this->route, true);
+        $this->app->log('debug', "Rendering view for route: {$this->route} (cache mode is " . ($this->app->isViewCacheEnabled() ? 'enabled' : 'disabled') . ')');
+
+        // Track render time
+        $startTime = microtime(true);
+
+        // Add isUpdate parameter if the view function accepts it
+        $result = ($this->viewFn)($isUpdate);
 
         // After first render, all subsequent renders are updates
         $this->isInitialRender = false;
+
+        // Track render duration
+        $duration = microtime(true) - $startTime;
+        $this->app->trackRender($duration);
+
+        // Cache the result ONLY for subsequent renders if caching is enabled
+        // Updates might render partial Twig blocks, which shouldn't be cached
+        if ($isUpdate && $this->app->isViewCacheEnabled()) {
+            $this->app->cacheView($this->route, $result);
+            $this->app->log('debug', "Cached view for route: {$this->route}");
+        }
+        $this->app->setRendering($this->route, false);
 
         return $result;
     }
@@ -177,10 +238,13 @@ class Context {
      */
     public function signal(mixed $initialValue, ?string $name = null): Signal {
         $baseName = $name ?? 'signal';
+        // clean base name to be alphanumeric and underscores only
+        // Use context ID to make signal IDs predictable and queryable
+        // Format: basename_contextId for easier readability
         $signalId = $this->namespace
             ? $this->namespace . '.' . $baseName
-            : $this->generateId($baseName);
-
+            : $baseName . '_' . $this->id;
+        $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
         $signal = new Signal($signalId, $initialValue);
 
         // Components register signals on parent page
@@ -194,6 +258,23 @@ class Context {
     }
 
     /**
+     * Get a signal by name.
+     *
+     * @param string $name Signal name (without namespace prefix)
+     *
+     * @return null|Signal The signal if found, null otherwise
+     */
+    public function getSignal(string $name): ?Signal {
+        // With context ID-based signal IDs, we can construct the expected ID
+        $signalId = $this->namespace
+            ? $this->namespace . '.' . $name
+            : $name . '_' . $this->id;
+        $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
+
+        return $this->signals[$signalId] ?? null;
+    }
+
+    /**
      * Create an action trigger.
      *
      * @param callable    $fn   The action function to execute
@@ -204,6 +285,19 @@ class Context {
         $this->actionRegistry[$actionId] = $fn;
 
         return new Action($actionId);
+    }
+
+    /**
+     * Register a route-level action (shared across all contexts on this route).
+     * Use this for actions that should work the same for all users on the same page.
+     *
+     * @param callable $fn   The action handler function (receives Context as first param)
+     * @param string   $name Action name (must be consistent across contexts)
+     */
+    public function routeAction(callable $fn, string $name): Action {
+        $this->app->registerRouteAction($this->route, $name, $fn);
+
+        return new Action($name);
     }
 
     /**
@@ -282,9 +376,11 @@ class Context {
     public function sync(): void {
         // Skip if channel is full (client too slow)
         if ($this->getPatchChannel()->isFull()) {
+            $this->app->log('warning', "Skipping sync for context {$this->id} - patch channel full");
+
             return;
         }
-        
+
         // Sync view with proper selector for components
         $viewHtml = $this->renderView();
 
