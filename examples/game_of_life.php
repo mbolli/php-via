@@ -150,6 +150,16 @@ class GameOfLife {
     /** @var array<int, string> Colors assigned to different users */
     private const array COLORS = ['red', 'blue', 'green', 'orange', 'fuchsia', 'purple'];
 
+    /** @var array<string, string> Mapping of color names to hex values */
+    public const array COLOR_HEX = [
+        'red' => '#ef4444',
+        'blue' => '#3b82f6',
+        'green' => '#22c55e',
+        'orange' => '#f97316',
+        'fuchsia' => '#d946ef',
+        'purple' => '#a855f7',
+    ];
+
     /**
      * Create an empty game board with all dead cells.
      *
@@ -299,6 +309,25 @@ class GameOfLife {
         }
 
         return true;
+    }
+
+    /**
+     * Get cell statistics by color.
+     *
+     * @param array<int, string> $board Current board state
+     *
+     * @return array<string, int> Array of color counts, sorted by count descending
+     */
+    public static function getCellStats(array $board): array {
+        $stats = [];
+        foreach ($board as $cell) {
+            if (self::isAlive($cell)) {
+                $stats[$cell] = ($stats[$cell] ?? 0) + 1;
+            }
+        }
+        arsort($stats);
+
+        return $stats;
     }
 
     /**
@@ -561,6 +590,36 @@ $app->page('/', function (Context $c) use ($app): void {
         // Format stats
         $renderCount = number_format($stats['render_count']);
         $avgTime = number_format($stats['avg_time'] * 1000, 2);
+        $minTime = number_format($stats['min_time'] * 1000, 2);
+        $maxTime = number_format($stats['max_time'] * 1000, 2);
+        $memoryMB = number_format(memory_get_usage(true) / 1024 / 1024, 2);
+
+        // Get cell statistics
+        $cellStats = GameOfLife::getCellStats(GameState::$board);
+        $totalLiveCells = array_sum($cellStats);
+        $cellStatsHtml = '';
+        if (!empty($cellStats)) {
+            $maxCount = max($cellStats);
+            $index = 0;
+            foreach ($cellStats as $color => $count) {
+                // Get color hex value from constant
+                $bgColor = GameOfLife::COLOR_HEX[$color] ?? '#666';
+                
+                // Calculate opacity based on rank (first=1.0, gradually decreasing more aggressively)
+                $opacity = 1.0 - ($index * 0.25);
+                $opacity = max($opacity, 0.25); // minimum opacity
+                
+                if ($index > 0) {
+                    $cellStatsHtml .= ' ';
+                }
+                $cellStatsHtml .= "<span style=\"display:inline-block;padding:2px 6px;border-radius:3px;";
+                $cellStatsHtml .= "background:{$bgColor};opacity:{$opacity};";
+                $cellStatsHtml .= "color:white;font-size:11px;font-weight:500;\">{$count}</span>";
+                ++$index;
+            }
+        } else {
+            $cellStatsHtml = '<span style="color:#999;font-size:11px;">No live cells</span>';
+        }
 
         // Dynamic button text based on state
         $runningText = $running ? 'Pause' : 'Resume';
@@ -573,11 +632,19 @@ $app->page('/', function (Context $c) use ($app): void {
                 <p class="subtitle">Click cells to draw patterns. Multiple users can draw simultaneously!</p>
 
                 <div style="display:flex;gap:10px;margin-bottom:15px;">
-                    <div style="flex:1;padding:8px;background:#f0f0f0;border-radius:4px;font-size:12px;">
-                        <strong>👥 {$clientCount}</strong> {$clientIcons}
+                    <div style="flex:1;min-width:150px;padding:8px;background:#f0f0f0;border-radius:4px;font-size:12px;">
+                        <strong style="vertical-align: top">👥 {$clientCount}</strong> {$clientIcons}
                     </div>
-                    <div style="flex:1;padding:8px;background:#e8f4f8;border-radius:4px;font-size:12px;">
-                        <strong>📊</strong> {$renderCount} renders • {$avgTime}ms avg
+                    <div style="flex:1;min-width:150px;padding:8px;background:#e8f4f8;border-radius:4px;font-size:12px;">
+                        <strong>📊</strong> {$renderCount} renders • {$avgTime}ms avg<br>
+                        <small style="color:#666;">min: {$minTime}ms • max: {$maxTime}ms</small>
+                    </div>
+                    <div style="flex:1;min-width:150px;padding:8px;background:#f0f8f0;border-radius:4px;font-size:12px;">
+                        <strong>💾</strong> {$memoryMB} MB memory
+                    </div>
+                    <div style="flex:1;min-width:150px;padding:8px;background:#fff4e6;border-radius:4px;font-size:12px;">
+                        <strong>🎨</strong> {$totalLiveCells} cells<br>
+                        {$cellStatsHtml}
                     </div>
                 </div>
 
