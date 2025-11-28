@@ -16,7 +16,6 @@ use Swoole\Timer;
 $config = new Config();
 $config->withHost('0.0.0.0')
     ->withPort(3000)
-    ->withDocumentTitle('🎮 Via Game of Life')
     ->withDevMode(true)
     ->withLogLevel('debug')
     ->withViewCache(true)  // Enable view caching for better performance with 2500 cells
@@ -42,10 +41,12 @@ class GameState {
     public static array $contexts = [];
 
     public static ?Via $app = null;
+    public static float $startTime;
 
     public static function init(): void {
         if (!self::$initialized) {
             self::$board = GameOfLife::emptyBoard();
+            self::$startTime = microtime(true);
             self::$initialized = true;
         }
     }
@@ -592,7 +593,14 @@ $app->page('/', function (Context $c) use ($app): void {
         $avgTime = number_format($stats['avg_time'] * 1000, 2);
         $minTime = number_format($stats['min_time'] * 1000, 2);
         $maxTime = number_format($stats['max_time'] * 1000, 2);
-        $memoryMB = number_format(memory_get_usage(true) / 1024 / 1024, 2);
+        $memoryMB = number_format(memory_get_usage(false) / 1024 / 1024, 2);
+        
+        // Calculate uptime
+        $uptime = microtime(true) - GameState::$startTime;
+        $hours = floor($uptime / 3600);
+        $minutes = floor(($uptime % 3600) / 60);
+        $seconds = floor($uptime % 60);
+        $uptimeStr = sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
 
         // Get cell statistics
         $cellStats = GameOfLife::getCellStats(GameState::$board);
@@ -639,8 +647,9 @@ $app->page('/', function (Context $c) use ($app): void {
                         <strong>📊</strong> {$renderCount} renders • {$avgTime}ms avg<br>
                         <small style="color:#666;">min: {$minTime}ms • max: {$maxTime}ms</small>
                     </div>
-                    <div style="flex:1;min-width:150px;padding:8px;background:#f0f8f0;border-radius:4px;font-size:12px;">
-                        <strong>💾</strong> {$memoryMB} MB memory
+                    <div style="flex:1;min-width:200px;padding:8px;background:#f0f8f0;border-radius:4px;font-size:12px;">
+                        <strong>💾</strong> {$memoryMB} MB memory<br>
+                        <small style="color:#666;">⏱️ uptime: {$uptimeStr}</small>
                     </div>
                     <div style="flex:1;min-width:150px;padding:8px;background:#fff4e6;border-radius:4px;font-size:12px;">
                         <strong>🎨</strong> {$totalLiveCells} cells<br>
