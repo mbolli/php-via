@@ -18,7 +18,9 @@ $config->withHost('0.0.0.0')
     ->withPort(3000)
     ->withDevMode(true)
     ->withLogLevel('debug')
-    ->withViewCache(true)  // Enable view caching for better performance with 2500 cells
+    ->withShellTemplate('templates/gameoflife.html')
+    // Note: View caching is automatic! Route scope (only route actions, no signals)
+    // means the framework will cache the view automatically
 ;
 
 // Create the application
@@ -117,8 +119,6 @@ class GameState {
             });
         }
     }
-
-    // Render the board HTML and cache it.
 }
 
 // Initialize shared state
@@ -138,6 +138,16 @@ GameState::$app = $app;
  * with each user's cells displayed in a unique color.
  */
 class GameOfLife {
+    /** @var array<string, string> Mapping of color names to hex values */
+    public const array COLOR_HEX = [
+        'red' => '#ef4444',
+        'blue' => '#3b82f6',
+        'green' => '#22c55e',
+        'orange' => '#f97316',
+        'fuchsia' => '#d946ef',
+        'purple' => '#a855f7',
+    ];
+
     /** @var int Size of the square game board (50x50 = 2500 cells) */
     private const int BOARD_SIZE = 50;
 
@@ -150,16 +160,6 @@ class GameOfLife {
 
     /** @var array<int, string> Colors assigned to different users */
     private const array COLORS = ['red', 'blue', 'green', 'orange', 'fuchsia', 'purple'];
-
-    /** @var array<string, string> Mapping of color names to hex values */
-    public const array COLOR_HEX = [
-        'red' => '#ef4444',
-        'blue' => '#3b82f6',
-        'green' => '#22c55e',
-        'orange' => '#f97316',
-        'fuchsia' => '#d946ef',
-        'purple' => '#a855f7',
-    ];
 
     /**
      * Create an empty game board with all dead cells.
@@ -373,128 +373,12 @@ class GameOfLife {
     }
 }
 
-$app->appendToHead(
-    <<<'HTML'
-<style>
-    body {
-        max-width: 700px;
-        margin: 10px auto;
-        padding: 20px;
-        font-family: system-ui, -apple-system, sans-serif;
-    }
-
-    .container {
-        width: 100%;
-    }
-
-    h1 {
-        color: #333;
-        margin-bottom: 10px;
-    }
-
-    p.subtitle {
-        color: #666;
-        font-style: italic;
-        margin-bottom: 15px;
-    }
-
-    p.generation {
-        font-weight: bold;
-        color: #0066cc;
-        font-size: 1.1em;
-        margin-bottom: 15px;
-    }
-
-    .controls {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 20px;
-    }
-
-    button {
-        padding: 10px 20px;
-        background: #0066cc;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        font-size: 16px;
-        cursor: pointer;
-        font-weight: 500;
-        transition: background 0.2s;
-    }
-
-    button:hover {
-        background: #0052a3;
-    }
-
-    button:active {
-        transform: scale(0.98);
-    }
-
-    .board {
-        background: white;
-        width: 100%;
-        max-width: 700px;
-        display: grid;
-        aspect-ratio: 1/1;
-        grid-template-rows: repeat(50, 1fr);
-        grid-template-columns: repeat(50, 1fr);
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    }
-
-    .tile {
-        border-bottom: 1px solid #f0f0f0;
-        border-right: 1px solid #f0f0f0;
-        cursor: crosshair;
-        transition: background 0.3s ease;
-    }
-
-    .dead { background: white; }
-    .red { background: #ef4444; }
-    .blue { background: #3b82f6; }
-    .green { background: #22c55e; }
-    .orange { background: #f97316; }
-    .fuchsia { background: #d946ef; }
-    .purple { background: #a855f7; }
-
-    footer { font-size: 0.9em; color: #666; margin-top: 40px; }
-</style>
-HTML
-);
-$app->appendToFoot(
-    <<<'HTML'
-<footer>
-    <div style="padding: 10px;">
-        <p>
-            <strong>Performance Notes:</strong> <br>
-            <ul>
-                <li><strong>Naive but fast:</strong> This sends the <em>entire</em> board state (2500 divs) to all clients every 200ms. No diffing, no canvas, no SVG. Just HTML over SSE.</li>
-                <li><strong>Compression magic:</strong> Brotli compression over SSE achieves ~500:1 compression ratios. 24 MB of HTML (200 generations) → 45 KB over the wire (99.8% compression).</li>
-                <li><strong>Client-side morphing:</strong> Datastar uses a fast DOM morphing algorithm, that only updates changed cells, keeping the browser responsive.</li>
-                <li><strong>DevTools Network tab:</strong> Watch the <code>_sse</code> request streaming updates in real-time.</li>
-                <li><strong>HTML morphing:</strong> According to flamegraphs, morphing 2500 cells takes ~11ms on AMD Ryzen 7 PRO 7840 (28W)—sub frame fast (60fps = 16.67ms/frame).</li>
-                <li><strong>Why SSE over WebSockets?</strong> SSE is HTTP, so it gets compression, multiplexing, auto-reconnect, and works through firewalls/proxies. WebSockets require custom solutions for all of this.</li>
-                <li><strong>Already multiplayer:</strong> No code changes needed—since everyone sees the same view function, it's collaborative by default!</li>
-            </ul>
-        </p>
-    </div>
-    <div style="text-align: center; padding: 10px;">
-        <p>
-            &copy; 2025 <a href="https://github.com/mbolli">Michael Bolli</a>.
-            Adapted from <a href="https://andersmurphy.com/2025/04/07/clojure-realtime-collaborative-web-apps-without-clojurescript.html" target="_blank">Anders Murphy's Clojure version</a>.
-            Licensed under <a href="https://opensource.org/licenses/MIT" target="_blank">MIT License</a>.
-        </p>
-        <p>Developed with ❤️ using <a href="https://github.com/mbolli/php-via" target="_blank">php-via</a>, <a href="https://www.php.net/" target="_blank">PHP</a>, <a href="https://www.swoole.com/" target="_blank">Swoole</a> and <a href="https://data-star.dev/" target="_blank">Datastar</a></p>
-    </div>
-</footer>
-HTML
-);
-
 // Register the game page
 $app->page('/', function (Context $c) use ($app): void {
+    // Check if we're in embed mode (must be done per-request for Swoole)
+    // Use routeScoped=true so this signal doesn't break ROUTE scope caching
+    $embed = $c->signal(($_GET['embed'] ?? '') === '1', 'embed', routeScoped: true);
+
     // Register this context for global updates
     $contextId = $c->getId();
     GameState::$contexts[$contextId] = $c;
@@ -510,27 +394,18 @@ $app->page('/', function (Context $c) use ($app): void {
     // Start the global timer (only runs once)
     GameState::startTimer();
 
-    // Use global shared state instead of static variables
-    $board = &GameState::$board;
-    $running = &GameState::$running;
-    $generation = &GameState::$generation;
-
     // Track unique users by context ID (each browser tab gets unique context)
     $contextId = $c->getId();
     if (!isset(GameState::$sessionIds[$contextId])) {
         GameState::$sessionIds[$contextId] = GameState::$sessionCounter++;
     }
-    $sessionId = GameState::$sessionIds[$contextId];
 
-    // Create reactive signals for state synchronization with browser
-    // Note: We don't create a signal for the board itself (too large)
-    // Instead we re-render the view when board changes
-    $runningSignal = $c->signal($running, 'running');  // Whether simulation is running
+    // Note: No signals needed - we use global GameState and re-render on each broadcast
+    // This makes it ROUTE scope (one view for all users)
 
     // Action: Toggle the running/paused state
-    $toggleRunning = $c->routeAction(function (Context $ctx) use ($runningSignal): void {
+    $toggleRunning = $c->routeAction(function (Context $ctx): void {
         GameState::$running = !GameState::$running;
-        $runningSignal->setValue(GameState::$running);
 
         // Update all clients
         GameState::$app->broadcast('/');
@@ -582,10 +457,10 @@ $app->page('/', function (Context $c) use ($app): void {
         foreach (array_slice($clients, 0, 10) as $client) {
             $identicon = htmlspecialchars($client['identicon']);
             $id = htmlspecialchars($client['id']);
-            $clientIcons .= "<img src=\"{$identicon}\" title=\"{$id}\" style=\"width:24px;height:24px;border-radius:3px;margin-right:2px;\" />";
+            $clientIcons .= "<img src=\"{$identicon}\" title=\"{$id}\" class=\"client-icon\" />";
         }
         if ($clientCount > 10) {
-            $clientIcons .= '<span style="font-size:12px;color:#666;">+' . ($clientCount - 10) . '</span>';
+            $clientIcons .= '<span class="client-more">+' . ($clientCount - 10) . '</span>';
         }
 
         // Format stats
@@ -594,7 +469,7 @@ $app->page('/', function (Context $c) use ($app): void {
         $minTime = number_format($stats['min_time'] * 1000, 2);
         $maxTime = number_format($stats['max_time'] * 1000, 2);
         $memoryMB = number_format(memory_get_usage(false) / 1024 / 1024, 2);
-        
+
         // Calculate uptime
         $uptime = microtime(true) - GameState::$startTime;
         $hours = floor($uptime / 3600);
@@ -612,21 +487,19 @@ $app->page('/', function (Context $c) use ($app): void {
             foreach ($cellStats as $color => $count) {
                 // Get color hex value from constant
                 $bgColor = GameOfLife::COLOR_HEX[$color] ?? '#666';
-                
+
                 // Calculate opacity based on rank (first=1.0, gradually decreasing more aggressively)
                 $opacity = 1.0 - ($index * 0.25);
                 $opacity = max($opacity, 0.25); // minimum opacity
-                
+
                 if ($index > 0) {
                     $cellStatsHtml .= ' ';
                 }
-                $cellStatsHtml .= "<span style=\"display:inline-block;padding:2px 6px;border-radius:3px;";
-                $cellStatsHtml .= "background:{$bgColor};opacity:{$opacity};";
-                $cellStatsHtml .= "color:white;font-size:11px;font-weight:500;\">{$count}</span>";
+                $cellStatsHtml .= "<span class=\"cell-badge\" style=\"background:{$bgColor};opacity:{$opacity};\">{$count}</span>";
                 ++$index;
             }
         } else {
-            $cellStatsHtml = '<span style="color:#999;font-size:11px;">No live cells</span>';
+            $cellStatsHtml = '<span class="no-cells">No live cells</span>';
         }
 
         // Dynamic button text based on state
@@ -639,19 +512,19 @@ $app->page('/', function (Context $c) use ($app): void {
                 <h1>🎮 Game of Life</h1>
                 <p class="subtitle">Click cells to draw patterns. Multiple users can draw simultaneously!</p>
 
-                <div style="display:flex;gap:10px;margin-bottom:15px;">
-                    <div style="flex:1;min-width:150px;padding:8px;background:#f0f0f0;border-radius:4px;font-size:12px;">
-                        <strong style="vertical-align: top">👥 {$clientCount}</strong> {$clientIcons}
+                <div class="stats-grid">
+                    <div class="stat-box clients">
+                        <strong>👥 {$clientCount}</strong> {$clientIcons}
                     </div>
-                    <div style="flex:1;min-width:150px;padding:8px;background:#e8f4f8;border-radius:4px;font-size:12px;">
+                    <div class="stat-box renders">
                         <strong>📊</strong> {$renderCount} renders • {$avgTime}ms avg<br>
-                        <small style="color:#666;">min: {$minTime}ms • max: {$maxTime}ms</small>
+                        <small>min: {$minTime}ms • max: {$maxTime}ms</small>
                     </div>
-                    <div style="flex:1;min-width:200px;padding:8px;background:#f0f8f0;border-radius:4px;font-size:12px;">
+                    <div class="stat-box memory">
                         <strong>💾</strong> {$memoryMB} MB memory<br>
-                        <small style="color:#666;">⏱️ uptime: {$uptimeStr}</small>
+                        <small>⏱️ uptime: {$uptimeStr}</small>
                     </div>
-                    <div style="flex:1;min-width:150px;padding:8px;background:#fff4e6;border-radius:4px;font-size:12px;">
+                    <div class="stat-box cells">
                         <strong>🎨</strong> {$totalLiveCells} cells<br>
                         {$cellStatsHtml}
                     </div>
