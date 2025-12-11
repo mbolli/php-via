@@ -110,6 +110,42 @@ $app->page('/dashboard', function ($c) {
 });
 ```
 
+### Path Parameters
+
+Routes can include dynamic path parameters using curly braces. Parameters are automatically injected into your callable by matching parameter names:
+
+```php
+// ✨ NEW: Automatic parameter injection
+$app->page('/users/{username}', function ($c, string $username) {
+    // $username is automatically populated from the URL!
+    // No need to call $c->getPathParam('username')
+});
+
+// Multiple parameters - matched by name, not order
+$app->page('/blog/{year}/{month}/{slug}', function ($c, string $year, string $month, string $slug) {
+    // All parameters are automatically injected
+    echo "Blog post: $year/$month/$slug";
+});
+
+// Parameters with static segments
+$app->page('/products/{product_id}/reviews', function ($c, string $product_id) {
+    // $product_id is auto-injected
+});
+
+// 📚 Legacy method still works
+$app->page('/users/{username}', function ($c) {
+    $username = $c->getPathParam('username');
+    // Both methods work - choose your preference
+});
+```
+
+**How it works:**
+- Parameters are matched by **name** from your function signature
+- Order doesn't matter - `function($c, $slug, $year)` works the same
+- Missing parameters get their default value, or empty string if no default
+- The Context `$c` is always passed first
+- Both new (auto-injection) and old (`getPathParam()`) methods work
+
 ### Signals
 
 Signals are reactive values that sync between server and client automatically using Datastar's data model.
@@ -177,6 +213,57 @@ php-via uses Datastar attributes for reactivity:
 ```
 
 See [Datastar documentation](https://data-star.dev/) for more attributes and patterns.
+
+### Scopes
+
+php-via automatically detects the **scope** of each page and optimizes rendering accordingly:
+
+**Global Scope** (app-wide state):
+- Pages using **only** global actions (no route actions, no signals)
+- State is shared across **ALL routes and users**
+- View is rendered once and cached globally (maximum performance)
+- Example: Notification system visible on every page
+
+**Route Scope** (shared state):
+- Pages using **only** route actions (no global actions, no signals)
+- State is shared across all users/tabs **on the same route**
+- View is rendered once per route and cached
+- Example: Game of Life with global board state
+
+**Tab Scope** (per-user state):
+- Pages using signals (personal state) or mixing scopes
+- Each user/tab has independent state
+- View renders fresh for each context
+- Example: User profile, shopping cart
+
+```php
+// Global scope (cached app-wide):
+$app->page('/anywhere', function ($c) use ($app) {
+    $notify = $c->globalAction(function ($c) use ($app) {
+        $count = $app->globalState('notifications', 0);
+        $app->setGlobalState('notifications', $count + 1);
+        $app->broadcastGlobal(); // Updates ALL pages
+    });
+    // No signals, no route actions = Global scope
+});
+
+// Route scope (cached per route):
+$app->page('/game', function ($c) {
+    $toggle = $c->routeAction(function ($c) {
+        GameState::toggle();
+        $c->broadcast();
+    });
+    // No signals, no global actions = Route scope
+});
+
+// Tab scope (not cached):
+$app->page('/profile', function ($c) {
+    $name = $c->signal('Alice');
+    // Uses signals = Tab scope
+});
+```
+
+The scope is detected automatically - no manual configuration needed!
 
 ### Components
 
@@ -256,6 +343,7 @@ Check the `examples/` directory for more examples:
 - `counter_basic.php` - Simple counter with reactive signals
 - `counter.php` - Counter with step control and components
 - `greeter.php` - Form handling with multiple inputs
+- `path_params.php` - Dynamic path parameters demonstration
 - `components.php` - Reusable component patterns
 - `todo.php` - Todo list (multiplayer)
 - `game_of_life.php` - Conway's Game of Life with real-time updates (multiplayer)
