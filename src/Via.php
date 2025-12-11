@@ -49,6 +49,12 @@ class Via {
     /** @var array<string, bool> Tracks if route is currently rendering (prevents race condition) */
     private array $rendering = [];
 
+    /** @var array<string, mixed> Global state shared across all routes and clients */
+    private array $globalState = [];
+
+    /** @var null|string Global view cache (shared across all routes) */
+    private ?string $globalViewCache = null;
+
     /** @var array<int, string> */
     private array $headIncludes = [];
 
@@ -114,10 +120,35 @@ class Via {
     }
 
     /**
-     * Check if view caching is enabled.
+     * Get global state value.
      */
-    public function isViewCacheEnabled(): bool {
-        return $this->config->getViewCache();
+    public function globalState(string $key, mixed $default = null): mixed {
+        return $this->globalState[$key] ?? $default;
+    }
+
+    /**
+     * Set global state value.
+     */
+    public function setGlobalState(string $key, mixed $value): void {
+        $this->globalState[$key] = $value;
+    }
+
+    /**
+     * Get the global view cache.
+     *
+     * @internal Used by Context for global scope caching
+     */
+    public function getGlobalViewCache(): ?string {
+        return $this->globalViewCache;
+    }
+
+    /**
+     * Set the global view cache.
+     *
+     * @internal Used by Context for global scope caching
+     */
+    public function setGlobalViewCache(string $html): void {
+        $this->globalViewCache = $html;
     }
 
     /**
@@ -132,23 +163,31 @@ class Via {
 
     /**
      * Broadcast sync to all contexts on a specific route.
+     *
+     * Automatically detects scope:
+     * - Route scope: Invalidates cache, triggers ONE render shared by all
+     * - Tab scope: Triggers per-context renders
      */
     public function broadcast(string $route): void {
-        // Invalidate cache so next render is fresh
-        $this->invalidateViewCache($route);
-
-        foreach ($this->contexts as $context) {
-            if ($context->getRoute() === $route) {
-                $context->sync();
-            }
+        // Detect if any context or component on this route is ROUTE-scoped
+        if ($this->hasRouteScopeOnRoute($route)) {
+            $this->invalidateViewCache($route);
+            $this->log('debug', "Broadcasting to ROUTE-scoped page: {$route} (cache invalidated)");
+        } else {
+            $this->log('debug', "Broadcasting to TAB-scoped page: {$route} (no cache)");
         }
+
+        $this->syncContextsOnRoute($route);
     }
 
     /**
-     * Register a custom HTTP handler.
+     * Broadcast to ALL contexts across ALL routes (global scope).
+     * Invalidates global cache and syncs every connected client.
      */
-    public function handleFunc(string $pattern, callable $handler): void {
-        $this->routes[$pattern] = $handler;
+    public function broadcastGlobal(): void {
+        $this->invalidateGlobalViewCache();
+        $this->log('debug', 'Broadcasting globally (cache invalidated, syncing all contexts)');
+        $this->syncAllContexts();
     }
 
     /**
@@ -186,13 +225,6 @@ class Via {
     }
 
     /**
-     * Get context by ID.
-     */
-    public function getContext(string $id): ?Context {
-        return $this->contexts[$id] ?? null;
-    }
-
-    /**
      * Get all connected clients.
      *
      * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
@@ -223,9 +255,11 @@ class Via {
 
     /**
      * Track view render time.
+     *
+     * @internal Called by Context during rendering
      */
     public function trackRender(float $duration): void {
-        $this->renderStats['render_count']++;
+        ++$this->renderStats['render_count'];
         $this->renderStats['total_time'] += $duration;
         $this->renderStats['min_time'] = min($this->renderStats['min_time'], $duration);
         $this->renderStats['max_time'] = max($this->renderStats['max_time'], $duration);
@@ -233,6 +267,8 @@ class Via {
 
     /**
      * Get cached view HTML for a route if available and fresh.
+     *
+     * @internal Used by Context for scope-based caching
      */
     public function getCachedView(string $route): ?string {
         return $this->viewCache[$route] ?? null;
@@ -240,20 +276,47 @@ class Via {
 
     /**
      * Cache rendered view HTML for a route.
+     *
+     * @internal Used by Context for scope-based caching
      */
     public function cacheView(string $route, string $html): void {
         $this->viewCache[$route] = $html;
     }
 
     /**
-     * Check if route is currently rendering.
+     * Get Twig environment.
+     *
+     * @internal Used by Context for template rendering
+     */
+    public function getTwig(): Environment {
+        return $this->twig;
+    }
+
+    /**
+     * Register a route-level action (shared across all contexts on this route).
+     *
+     * @internal Called by Context when creating route/global actions
+     */
+    public function registerRouteAction(string $route, string $actionId, callable $handler): void {
+        if (!isset($this->routeActions[$route])) {
+            $this->routeActions[$route] = [];
+        }
+        $this->routeActions[$route][$actionId] = $handler;
+    }
+
+    /**
+     * Check if a route is currently rendering.
+     *
+     * @internal Used by Context for render locking
      */
     public function isRendering(string $route): bool {
         return $this->rendering[$route] ?? false;
     }
 
     /**
-     * Set rendering status for route.
+     * Set rendering status for a route.
+     *
+     * @internal Used by Context for render locking
      */
     public function setRendering(string $route, bool $status): void {
         if ($status) {
@@ -264,33 +327,64 @@ class Via {
     }
 
     /**
+     * Invalidate the global view cache.
+     */
+    private function invalidateGlobalViewCache(): void {
+        $this->globalViewCache = null;
+    }
+
+    /**
+     * Check if any context or component on the given route is ROUTE-scoped.
+     */
+    private function hasRouteScopeOnRoute(string $route): bool {
+        foreach ($this->contexts as $ctx) {
+            if ($ctx->getRoute() === $route) {
+                if ($ctx->getScope() === Scope::ROUTE) {
+                    return true;
+                }
+
+                foreach ($ctx->getComponentRegistry() as $componentCtx) {
+                    if ($componentCtx->getScope() === Scope::ROUTE) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Sync all contexts on a specific route.
+     */
+    private function syncContextsOnRoute(string $route): void {
+        foreach ($this->contexts as $context) {
+            if ($context->getRoute() === $route) {
+                $context->sync();
+            }
+        }
+    }
+
+    /**
+     * Sync all contexts across all routes.
+     */
+    private function syncAllContexts(): void {
+        foreach ($this->contexts as $context) {
+            $context->sync();
+        }
+    }
+
+    /**
      * Invalidate view cache for a route (called on broadcast).
      */
-    public function invalidateViewCache(string $route): void {
+    private function invalidateViewCache(string $route): void {
         unset($this->viewCache[$route]);
-    }
-
-    /**
-     * Get Twig environment.
-     */
-    public function getTwig(): Environment {
-        return $this->twig;
-    }
-
-    /**
-     * Register a route-level action (shared across all contexts on this route).
-     */
-    public function registerRouteAction(string $route, string $actionId, callable $handler): void {
-        if (!isset($this->routeActions[$route])) {
-            $this->routeActions[$route] = [];
-        }
-        $this->routeActions[$route][$actionId] = $handler;
     }
 
     /**
      * Get route action handler.
      */
-    public function getRouteAction(string $route, string $actionId): ?callable {
+    private function getRouteAction(string $route, string $actionId): ?callable {
         return $this->routeActions[$route][$actionId] ?? null;
     }
 
@@ -538,7 +632,34 @@ class Via {
         $context = $this->contexts[$contextId];
         $route = $context->getRoute();
 
-        // Check for route-level action first
+        // Check for global action first
+        $globalHandler = $this->getRouteAction('__global__', $actionId);
+        if ($globalHandler !== null) {
+            try {
+                // Inject signals into context
+                $context->injectSignals($signals);
+
+                $this->log('debug', "Executing global action {$actionId}");
+
+                // Execute the global action with context
+                $globalHandler($context);
+
+                $this->log('debug', "Global action {$actionId} completed successfully");
+
+                $response->status(200);
+                $response->end();
+
+                return;
+            } catch (\Exception $e) {
+                $this->log('error', "Global action {$actionId} failed: " . $e->getMessage());
+                $response->status(500);
+                $response->end('Action failed');
+
+                return;
+            }
+        }
+
+        // Check for route-level action
         $routeHandler = $this->getRouteAction($route, $actionId);
         if ($routeHandler !== null) {
             try {
@@ -658,7 +779,6 @@ class Via {
      */
     private function buildHtmlDocument(Context $context): string {
         $contextId = $context->getId();
-        $title = $this->config->getDocumentTitle();
 
         $headContent = implode("\n", $this->headIncludes);
         $footContent = implode("\n", $this->footIncludes);
@@ -679,23 +799,21 @@ class Via {
         // Simple template replacement for the shell
         $shellPath = $this->config->getShellTemplate() ?? __DIR__ . '/../shell.html';
         $shell = file_get_contents($shellPath);
-        
+
         return str_replace(
             [
-                '{{ title }}',
                 '{{ signals_json }}',
                 '{{ context_id }}',
                 '{{ head_content }}',
                 '{{ content }}',
-                '{{ foot_content }}'
+                '{{ foot_content }}',
             ],
             [
-                $title,
                 $signalsJson,
                 $contextId,
                 $headContent,
                 $content,
-                $footContent
+                $footContent,
             ],
             $shell
         );

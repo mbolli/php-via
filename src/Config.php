@@ -13,7 +13,6 @@ class Config {
     private bool $devMode = false;
     private string $logLevel = 'info';
     private ?string $templateDir = null;
-    private bool $enableViewCache = false;
     private ?string $shellTemplate = null;
 
     public function withHost(string $host): self {
@@ -42,12 +41,6 @@ class Config {
 
     public function withTemplateDir(string $dir): self {
         $this->templateDir = $dir;
-
-        return $this;
-    }
-
-    public function withViewCache(bool $enabled = true): self {
-        $this->enableViewCache = $enabled;
 
         return $this;
     }

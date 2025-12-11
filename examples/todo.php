@@ -31,6 +31,9 @@ $config->withHost('0.0.0.0')
 $app = new Via($config);
 
 $app->page('/', function (Context $c) use ($app): void {
+    // Note: This page uses Tab scope (not cached) because of the $newTodo signal
+    // needed for input field binding. Even though the todo list is global state,
+    // each user needs their own input signal value.
     $newTodo = $c->signal('', 'newTodo');
 
     $addTodo = $c->routeAction(function (Context $ctx) use ($app): void {

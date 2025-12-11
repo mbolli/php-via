@@ -17,7 +17,9 @@ class Context {
     private string $id;
     private string $route;
     private Via $app;
-    private ?\Closure $viewFn = null;
+
+    /** @var null|callable(bool): string */
+    private $viewFn;
     private bool $isInitialRender = true;
 
     /** @var array<string, self> */
@@ -37,6 +39,18 @@ class Context {
 
     /** @var array<int> Timer IDs created by this context */
     private array $timerIds = [];
+
+    /** @var bool Track if context uses any context-level signals (Tab scope indicator) */
+    private bool $usesContextSignals = false;
+
+    /** @var bool Track if context uses route-level actions (Route scope indicator) */
+    private bool $usesRouteActions = false;
+
+    /** @var bool Track if context uses global-level actions (Global scope indicator) */
+    private bool $usesGlobalActions = false;
+
+    /** @var ?Scope Cached scope detection result */
+    private ?Scope $detectedScope = null;
 
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null) {
         $this->id = $id;
@@ -77,6 +91,8 @@ class Context {
 
     /**
      * Execute cleanup callbacks and release resources.
+     *
+     * @internal Called by Via when context is destroyed
      */
     public function cleanup(): void {
         // Clear all timers first
@@ -92,7 +108,7 @@ class Context {
                 // Silently ignore cleanup errors
             }
         }
-        
+
         // Close and cleanup the patch channel
         $this->patchChannel->close();
 
@@ -108,16 +124,66 @@ class Context {
         return $this->route;
     }
 
-    public function getApp(): Via {
-        return $this->app;
+    /**
+     * Get all component contexts registered with this context.
+     *
+     * @internal Used by Via for scope detection
+     *
+     * @return array<string, Context>
+     */
+    public function getComponentRegistry(): array {
+        return $this->componentRegistry;
+    }
+
+    /**
+     * Detect the scope of this context based on usage patterns.
+     *
+     * @internal Used by Via for caching decisions
+     *
+     * Global scope: Uses ONLY global actions, no signals or route actions
+     * Route scope: Uses ONLY route actions, no context signals or global actions
+     * Tab scope: Uses context signals OR mixes scopes (default, safest)
+     *
+     * @return Scope The detected scope for this context
+     */
+    public function getScope(): Scope {
+        // Return cached result if already detected
+        if ($this->detectedScope !== null) {
+            return $this->detectedScope;
+        }
+
+        // Global scope: ONLY global actions, NO route actions, NO context signals
+        // This means all state is shared across ALL routes and users
+        if ($this->usesGlobalActions && !$this->usesRouteActions && !$this->usesContextSignals) {
+            $this->detectedScope = Scope::GLOBAL;
+            $this->app->log('debug', 'Scope detected: GLOBAL (uses global actions only)', $this);
+
+            return Scope::GLOBAL;
+        }
+
+        // Route scope: ONLY route actions, NO global actions, NO context signals
+        // This means all state is shared across users on same route
+        if ($this->usesRouteActions && !$this->usesGlobalActions && !$this->usesContextSignals) {
+            $this->detectedScope = Scope::ROUTE;
+            $this->app->log('debug', 'Scope detected: ROUTE (uses route actions, no signals)', $this);
+
+            return Scope::ROUTE;
+        }
+
+        // Default to Tab scope (safest)
+        // This means each user gets their own state, or scopes are mixed
+        $this->detectedScope = Scope::TAB;
+        $this->app->log('debug', 'Scope detected: TAB (uses signals, mixed scopes, or default)', $this);
+
+        return Scope::TAB;
     }
 
     /**
      * Define the UI rendered by this context.
      *
-     * @param callable|string      $view  Function that returns HTML content, or Twig template name
-     * @param array<string, mixed> $data  Optional data for Twig templates
-     * @param null|string          $block Optional block name to render only that block during updates
+     * @param callable(bool): string|string $view  Function that returns HTML content, or Twig template name
+     * @param array<string, mixed>          $data  Optional data for Twig templates
+     * @param null|string                   $block Optional block name to render only that block during updates
      */
     public function view(callable|string $view, array $data = [], ?string $block = null): void {
         if (\is_string($view)) {
@@ -166,7 +232,13 @@ class Context {
     }
 
     /**
-     * Render the view.
+     * Render the view with automatic scope-based caching.
+     *
+     * @internal Called by Via during SSE updates and initial page render
+     *
+     * Scope detection:
+     * - Route scope: Render once, cache, share with all clients
+     * - Tab scope: Render per context, no caching
      */
     public function renderView(): string {
         if ($this->viewFn === null) {
@@ -174,53 +246,45 @@ class Context {
         }
 
         $isUpdate = !$this->isInitialRender;
+        $scope = $this->getScope();
 
-        // Only use cache for subsequent renders if caching is enabled
-        // Updates might render partial blocks, which shouldn't be cached or reused
-        if ($isUpdate && $this->app->isViewCacheEnabled()) {
-            $cached = $this->app->getCachedView($this->route);
-            if ($cached !== null) {
-                $this->app->log('debug', "Using cached view for route: {$this->route}");
-
-                return $cached;
-            }
+        // GLOBAL SCOPE: Cache view and share across ALL routes and clients
+        if ($scope === Scope::GLOBAL) {
+            return $this->renderCachedView(
+                cacheKey: '__global__',
+                getCache: fn (): ?string => $this->app->getGlobalViewCache(),
+                setCache: function (string $html): void {
+                    $this->app->setGlobalViewCache($html);
+                },
+                logPrefix: 'GLOBAL-scoped view',
+                isUpdate: $isUpdate
+            );
         }
 
-        // Mark as rendering to prevent concurrent renders
-        if ($this->app->isRendering($this->route)) {
-            // Another context is already rendering, wait and get cached result
-            Coroutine::sleep(0.001);
-            $cached = $this->app->getCachedView($this->route);
-            if ($cached !== null) {
-                $this->app->log('debug', "Got cached view after wait for route: {$this->route}");
-
-                return $cached;
-            }
+        // ROUTE SCOPE: Cache view and share across all clients on same route
+        if ($scope === Scope::ROUTE) {
+            return $this->renderCachedView(
+                cacheKey: $this->route,
+                getCache: fn (): ?string => $this->app->getCachedView($this->route),
+                setCache: function (string $html): void {
+                    $this->app->cacheView($this->route, $html);
+                },
+                logPrefix: "ROUTE-scoped view for {$this->route}",
+                isUpdate: $isUpdate,
+                withLock: true
+            );
         }
 
-        $this->app->setRendering($this->route, true);
-        $this->app->log('debug', "Rendering view for route: {$this->route} (cache mode is " . ($this->app->isViewCacheEnabled() ? 'enabled' : 'disabled') . ')');
+        // TAB SCOPE: Render per context, no caching
+        // Each user gets their own unique view
+        $this->app->log('debug', "Rendering TAB-scoped view for {$this->route} (no cache)", $this);
 
-        // Track render time
         $startTime = microtime(true);
-
-        // Add isUpdate parameter if the view function accepts it
         $result = ($this->viewFn)($isUpdate);
-
-        // After first render, all subsequent renders are updates
-        $this->isInitialRender = false;
-
-        // Track render duration
         $duration = microtime(true) - $startTime;
         $this->app->trackRender($duration);
 
-        // Cache the result ONLY for subsequent renders if caching is enabled
-        // Updates might render partial Twig blocks, which shouldn't be cached
-        if ($isUpdate && $this->app->isViewCacheEnabled()) {
-            $this->app->cacheView($this->route, $result);
-            $this->app->log('debug', "Cached view for route: {$this->route}");
-        }
-        $this->app->setRendering($this->route, false);
+        $this->isInitialRender = false;
 
         return $result;
     }
@@ -237,6 +301,9 @@ class Context {
      * @param null|string $name         Optional human-readable name
      */
     public function signal(mixed $initialValue, ?string $name = null): Signal {
+        // Mark that this context uses context-level signals (Tab scope indicator)
+        $this->usesContextSignals = true;
+
         $baseName = $name ?? 'signal';
         // clean base name to be alphanumeric and underscores only
         // Use context ID to make signal IDs predictable and queryable
@@ -295,7 +362,27 @@ class Context {
      * @param string   $name Action name (must be consistent across contexts)
      */
     public function routeAction(callable $fn, string $name): Action {
+        // Mark that this context uses route-level actions (Route scope indicator)
+        $this->usesRouteActions = true;
+
         $this->app->registerRouteAction($this->route, $name, $fn);
+
+        return new Action($name);
+    }
+
+    /**
+     * Register a global-scoped action that can be called from any route.
+     * Use this for actions that affect state shared across ALL routes.
+     *
+     * @param callable $fn   The action handler function (receives Context as first param)
+     * @param string   $name Action name (must be globally unique)
+     */
+    public function globalAction(callable $fn, string $name): Action {
+        // Mark that this context uses global-level actions (Global scope indicator)
+        $this->usesGlobalActions = true;
+
+        // Register as route action but with a special global prefix
+        $this->app->registerRouteAction('__global__', $name, $fn);
 
         return new Action($name);
     }
@@ -316,6 +403,8 @@ class Context {
 
     /**
      * Execute a registered action.
+     *
+     * @internal Called by Via when handling action requests
      */
     public function executeAction(string $actionId): void {
         // First check this context
@@ -412,30 +501,6 @@ class Context {
     }
 
     /**
-     * Sync only signals to the browser.
-     */
-    public function syncSignals(): void {
-        $updatedSignals = $this->prepareSignalsForPatch();
-
-        if (!empty($updatedSignals)) {
-            $this->getPatchChannel()->push([
-                'type' => 'signals',
-                'content' => $updatedSignals,
-            ]);
-        }
-    }
-
-    /**
-     * Sync specific HTML elements to the browser.
-     */
-    public function syncElements(string $html): void {
-        $this->getPatchChannel()->push([
-            'type' => 'elements',
-            'content' => $html,
-        ]);
-    }
-
-    /**
      * Execute JavaScript on the client.
      */
     public function execScript(string $script): void {
@@ -451,6 +516,8 @@ class Context {
 
     /**
      * Inject signals from the client.
+     *
+     * @internal Called by Via when processing requests
      *
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
      */
@@ -468,6 +535,8 @@ class Context {
     /**
      * Get next patch from the queue.
      *
+     * @internal Called by Via during SSE event streaming
+     *
      * @return null|array<string, mixed> Next patch data or null if none available
      */
     public function getPatch(): ?array {
@@ -478,12 +547,92 @@ class Context {
         return $this->patchChannel->pop(0.01);
     }
 
+    public function getNamespace(): ?string {
+        return $this->namespace;
+    }
+
+    /**
+     * Sync only signals to the browser.
+     * Useful when you only need to update signal values without re-rendering.
+     */
+    public function syncSignals(): void {
+        $updatedSignals = $this->prepareSignalsForPatch();
+
+        if (!empty($updatedSignals)) {
+            $this->getPatchChannel()->push([
+                'type' => 'signals',
+                'content' => $updatedSignals,
+            ]);
+        }
+    }
+
+    /**
+     * Render view with caching support.
+     *
+     * @param string   $cacheKey  Cache identifier
+     * @param callable $getCache  Function to retrieve cached view
+     * @param callable $setCache  Function to store cached view
+     * @param string   $logPrefix Prefix for log messages
+     * @param bool     $isUpdate  Whether this is an update render
+     * @param bool     $withLock  Whether to use render lock (for ROUTE scope)
+     */
+    private function renderCachedView(
+        string $cacheKey,
+        callable $getCache,
+        callable $setCache,
+        string $logPrefix,
+        bool $isUpdate,
+        bool $withLock = false
+    ): string {
+        // Check cache first
+        $cached = $getCache();
+        if ($cached !== null) {
+            $this->app->log('debug', "Using cached {$logPrefix}", $this);
+            $this->isInitialRender = false;
+
+            return $cached;
+        }
+
+        // Handle concurrent render locking (for ROUTE scope)
+        if ($withLock) {
+            if ($this->app->isRendering($cacheKey)) {
+                Coroutine::sleep(0.001);
+                $cached = $getCache();
+                if ($cached !== null) {
+                    $this->app->log('debug', "Got cached view after wait: {$logPrefix}", $this);
+                    $this->isInitialRender = false;
+
+                    return $cached;
+                }
+            }
+            $this->app->setRendering($cacheKey, true);
+        }
+
+        $this->app->log('debug', "Rendering {$logPrefix} (will cache)", $this);
+
+        // Render and track time
+        $startTime = microtime(true);
+        $result = ($this->viewFn)($isUpdate);
+        $duration = microtime(true) - $startTime;
+        $this->app->trackRender($duration);
+
+        $this->isInitialRender = false;
+        $setCache($result);
+        $this->app->log('debug', "Cached {$logPrefix}", $this);
+
+        if ($withLock) {
+            $this->app->setRendering($cacheKey, false);
+        }
+
+        return $result;
+    }
+
     /**
      * Prepare signals for patching.
      *
      * @return array<string, mixed> Nested structure of changed signals
      */
-    public function prepareSignalsForPatch(): array {
+    private function prepareSignalsForPatch(): array {
         // Components should use parent's signals
         $signalsToCheck = $this->isComponent()
             ? $this->parentPageContext->signals
@@ -500,10 +649,6 @@ class Context {
 
         // Convert flat structure to nested object for namespaced signals
         return $this->flatToNested($flat);
-    }
-
-    public function getNamespace(): ?string {
-        return $this->namespace;
     }
 
     /**
