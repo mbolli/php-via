@@ -494,8 +494,8 @@ class Via {
         // Inject route parameters
         $context->injectRouteParams($params);
 
-        // Execute the page handler
-        $handler($context);
+        // Execute the page handler with automatic parameter injection
+        $this->invokeHandlerWithParams($handler, $context, $params);
 
         // Store context
         $this->contexts[$contextId] = $context;
@@ -869,6 +869,95 @@ class Via {
         }
 
         return false;
+    }
+
+    /**
+     * Invoke a handler with automatic path parameter injection.
+     *
+     * Inspects the callable's parameters and automatically injects path parameters
+     * matching the parameter names, along with the Context as the first parameter.
+     * Automatically casts route parameters to the expected type (int, float, bool, string).
+     *
+     * @param array<string, string> $routeParams Available route parameters
+     */
+    private function invokeHandlerWithParams(callable $handler, Context $context, array $routeParams): void {
+        try {
+            $reflection = new \ReflectionFunction(\Closure::fromCallable($handler));
+        } catch (\ReflectionException $e) {
+            // Fallback: just call with context
+            $handler($context);
+
+            return;
+        }
+
+        $parameters = $reflection->getParameters();
+        $args = [];
+
+        foreach ($parameters as $param) {
+            $paramName = $param->getName();
+            $paramType = $param->getType();
+
+            // First parameter should be Context (or if it's type-hinted as Context)
+            if ($paramType instanceof \ReflectionNamedType && $paramType->getName() === Context::class) {
+                $args[] = $context;
+
+                continue;
+            }
+
+            // Check if this parameter name matches a route parameter
+            if (isset($routeParams[$paramName])) {
+                $value = $routeParams[$paramName];
+
+                // Cast to the expected type if type hint is present
+                if ($paramType instanceof \ReflectionNamedType && !$paramType->isBuiltin()) {
+                    // Non-builtin type, pass as string
+                    $args[] = $value;
+                } elseif ($paramType instanceof \ReflectionNamedType) {
+                    $args[] = $this->castToType($value, $paramType->getName());
+                } else {
+                    // No type hint, pass as string
+                    $args[] = $value;
+                }
+
+                continue;
+            }
+
+            // If parameter has default value, use it
+            if ($param->isDefaultValueAvailable()) {
+                $args[] = $param->getDefaultValue();
+
+                continue;
+            }
+
+            // If parameter is optional (nullable), pass null
+            if ($param->allowsNull()) {
+                $args[] = null;
+
+                continue;
+            }
+
+            // Otherwise, pass empty string for missing parameters
+            $args[] = '';
+        }
+
+        $handler(...$args);
+    }
+
+    /**
+     * Cast a string value to the specified type.
+     *
+     * @param string $value The string value to cast
+     * @param string $type  The target type (int, float, bool, string)
+     *
+     * @return mixed The casted value
+     */
+    private function castToType(string $value, string $type): mixed {
+        return match ($type) {
+            'int' => (int) $value,
+            'float' => (float) $value,
+            'bool' => filter_var($value, FILTER_VALIDATE_BOOLEAN),
+            default => $value,
+        };
     }
 
     /**
