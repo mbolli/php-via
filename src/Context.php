@@ -326,17 +326,16 @@ class Context {
     /**
      * Create a reactive signal.
      *
-     * @param mixed $initialValue Initial value for the signal
-     */
-    /**
-     * Create a reactive signal.
-     *
      * @param mixed       $initialValue Initial value of the signal
      * @param null|string $name         Optional human-readable name
+     * @param bool        $routeScoped  If true, signal won't break ROUTE scope (use for query params, path params, etc.)
      */
-    public function signal(mixed $initialValue, ?string $name = null): Signal {
+    public function signal(mixed $initialValue, ?string $name = null, bool $routeScoped = false): Signal {
         // Mark that this context uses context-level signals (Tab scope indicator)
-        $this->usesContextSignals = true;
+        // UNLESS it's a route-scoped signal (derived from URL params)
+        if (!$routeScoped) {
+            $this->usesContextSignals = true;
+        }
 
         $baseName = $name ?? 'signal';
         // clean base name to be alphanumeric and underscores only
@@ -373,6 +372,15 @@ class Context {
         $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
 
         return $this->signals[$signalId] ?? null;
+    }
+
+    /**
+     * Get all signals.
+     *
+     * @return array<string, Signal>
+     */
+    public function getSignals(): array {
+        return $this->signals;
     }
 
     /**
