@@ -466,8 +466,9 @@ class Via {
 
         // Handle page routes
         foreach ($this->routes as $route => $handler) {
-            if ($this->matchRoute($route, $path)) {
-                $this->handlePage($request, $response, $route, $handler);
+            $params = [];
+            if ($this->matchRoute($route, $path, $params)) {
+                $this->handlePage($request, $response, $route, $handler, $params);
 
                 return;
             }
@@ -480,13 +481,18 @@ class Via {
 
     /**
      * Handle page rendering.
+     *
+     * @param array<string, string> $params Route parameters
      */
-    private function handlePage(Request $request, Response $response, string $route, callable $handler): void {
+    private function handlePage(Request $request, Response $response, string $route, callable $handler, array $params = []): void {
         // Generate unique context ID
         $contextId = $route . '_/' . $this->generateId();
 
         // Create context
         $context = new Context($contextId, $route, $this);
+
+        // Inject route parameters
+        $context->injectRouteParams($params);
 
         // Execute the page handler
         $handler($context);
@@ -497,7 +503,7 @@ class Via {
         // Build HTML document
         $html = $this->buildHtmlDocument($context);
 
-        $response->header('Content-Type', 'text/html');
+        $response->header('Content-Type', 'text/html; charset=utf-8');
         $response->end($html);
     }
 
@@ -822,8 +828,47 @@ class Via {
     /**
      * Match route pattern.
      */
-    private function matchRoute(string $route, string $path): bool {
-        return $route === $path;
+    /**
+     * Match route pattern against path and extract parameters.
+     *
+     * @param string                $route  Route pattern (e.g., '/users/{id}')
+     * @param string                $path   Request path (e.g., '/users/123')
+     * @param array<string, string> $params Output array for extracted parameters
+     *
+     * @return bool True if route matches
+     */
+    private function matchRoute(string $route, string $path, array &$params = []): bool {
+        // Exact match (no parameters)
+        if ($route === $path) {
+            return true;
+        }
+
+        // Check if route has parameters
+        if (!str_contains($route, '{')) {
+            return false;
+        }
+
+        // Convert route pattern to regex
+        $pattern = preg_replace_callback(
+            '/\{([a-zA-Z_]\w*)\}/',
+            static fn (array $matches) => '(?P<' . $matches[1] . '>[^/]+)',
+            $route
+        );
+        $pattern = '#^' . $pattern . '$#';
+
+        // Match and extract parameters
+        if (preg_match($pattern, $path, $matches)) {
+            // Extract named parameters
+            foreach ($matches as $key => $value) {
+                if (\is_string($key)) {
+                    $params[$key] = $value;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /**

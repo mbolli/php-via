@@ -52,6 +52,9 @@ class Context {
     /** @var ?Scope Cached scope detection result */
     private ?Scope $detectedScope = null;
 
+    /** @var array<string, string> Path parameters extracted from route */
+    private array $routeParams = [];
+
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null) {
         $this->id = $id;
         $this->route = $route;
@@ -65,6 +68,37 @@ class Context {
      */
     public function getId(): string {
         return $this->id;
+    }
+
+    /**
+     * Get a path parameter value by name.
+     *
+     * Returns the value from the page request URL for the given parameter name,
+     * or an empty string if not found.
+     *
+     * Example:
+     *   $v->page('/users/{user_id}', function(Context $c) {
+     *       $userId = $c->getPathParam('user_id');
+     *       // ...
+     *   });
+     *
+     * @param string $name Parameter name
+     *
+     * @return string Parameter value or empty string
+     */
+    public function getPathParam(string $name): string {
+        return $this->routeParams[$name] ?? '';
+    }
+
+    /**
+     * Inject route parameters into the context.
+     *
+     * @internal Called by Via during route matching
+     *
+     * @param array<string, string> $params
+     */
+    public function injectRouteParams(array $params): void {
+        $this->routeParams = $params;
     }
 
     /**
