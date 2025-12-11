@@ -23,7 +23,6 @@ class TodoState {
 $config = new Config();
 $config->withHost('0.0.0.0')
     ->withPort(3000)
-    ->withDocumentTitle('⚡ Via Todo List')
     ->withTemplateDir(__DIR__ . '/../templates')
     ->withLogLevel('debug')
 ;

@@ -11,8 +11,7 @@ use Mbolli\PhpVia\Via;
 
 // Create configuration
 $config = new Config();
-$config->withDocumentTitle('⚡ Via Components Example')
-    ->withTemplateDir(__DIR__ . '/../templates')
+$config->withTemplateDir(__DIR__ . '/../templates')
     ->withLogLevel('debug')
 ;
 

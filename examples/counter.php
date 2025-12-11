@@ -13,7 +13,6 @@ use Mbolli\PhpVia\Via;
 $config = new Config();
 $config->withHost('0.0.0.0')
     ->withPort(3000)
-    ->withDocumentTitle('⚡ Via Counter Example')
     ->withDevMode(true)
     ->withLogLevel('debug')
     ->withTemplateDir(__DIR__ . '/../templates')

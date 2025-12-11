@@ -10,7 +10,6 @@ namespace Mbolli\PhpVia;
 class Config {
     private string $host = '0.0.0.0';
     private int $port = 3000;
-    private string $documentTitle = '⚡ Via';
     private bool $devMode = false;
     private string $logLevel = 'info';
     private ?string $templateDir = null;
@@ -25,12 +24,6 @@ class Config {
 
     public function withPort(int $port): self {
         $this->port = $port;
-
-        return $this;
-    }
-
-    public function withDocumentTitle(string $title): self {
-        $this->documentTitle = $title;
 
         return $this;
     }
@@ -73,10 +66,6 @@ class Config {
         return $this->port;
     }
 
-    public function getDocumentTitle(): string {
-        return $this->documentTitle;
-    }
-
     public function getDevMode(): bool {
         return $this->devMode;
     }
@@ -87,10 +76,6 @@ class Config {
 
     public function getTemplateDir(): ?string {
         return $this->templateDir;
-    }
-
-    public function getViewCache(): bool {
-        return $this->enableViewCache;
     }
 
     public function getShellTemplate(): ?string {

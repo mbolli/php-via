@@ -93,7 +93,6 @@ use Mbolli\PhpVia\Config;
 $config = new Config();
 $config->withHost('0.0.0.0')
     ->withPort(3000)
-    ->withDocumentTitle('My App')
     ->withDevMode(true)
     ->withLogLevel('debug');
 

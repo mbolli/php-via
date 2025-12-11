@@ -12,7 +12,6 @@ use Swoole\Timer;
 $config = new Config();
 $config->withHost('0.0.0.0')
     ->withPort(3000)
-    ->withDocumentTitle('Profiling Demo')
     ->withDevMode(true)
     ->withLogLevel('info')
 ;

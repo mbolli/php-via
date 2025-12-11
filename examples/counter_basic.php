@@ -10,8 +10,7 @@ use Mbolli\PhpVia\Via;
 
 // Create configuration
 $config = new Config();
-$config->withDocumentTitle('⚡ Via Counter - Twig Example')
-    ->withLogLevel('debug')
+$config->withLogLevel('debug')
     ->withTemplateDir(__DIR__ . '/../templates')
 ;
 

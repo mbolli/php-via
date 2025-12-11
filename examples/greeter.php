@@ -12,8 +12,7 @@ use Mbolli\PhpVia\Via;
 
 // Create configuration
 $config = new Config();
-$config->withDocumentTitle('⚡ Via Greeter Example')
-    ->withLogLevel('info')
+$config->withLogLevel('info')
     ->withTemplateDir(__DIR__ . '/../templates')
 ;
 
