@@ -41,16 +41,16 @@ $config->withTemplateDir(__DIR__ . '/templates');
 
 $app = new Via($config);
 
-$app->page('/', function ($c) {
+$app->page('/', function (Context $c) {
     $count = 0;
     $step = $c->signal(1);
     
-    $increment = $c->action(function () use (&$count, $step, $c) {
+    $increment = $c->action(function () use (&$count, $step, $c): void {
         $count += $step->int();
         $c->sync();
     });
     
-    $c->view(function () use (&$count, $step, $increment, $c) {
+    $c->view(function () use (&$count, $step, $increment, $c): string {
         return $c->renderString('
             <div id="counter"><!-- id is used to morph -->
                 <p>Count: {{ count }}</p>
@@ -104,7 +104,7 @@ $app = new Via($config);
 A Context represents a living connection between the server and browser. Each page gets its own context.
 
 ```php
-$app->page('/dashboard', function ($c) {
+$app->page('/dashboard', function (Context $c) {
     // $c is the Context instance
     // Define signals, actions, and views here
 });
@@ -115,7 +115,7 @@ $app->page('/dashboard', function ($c) {
 Routes can include dynamic path parameters using curly braces. Parameters are automatically injected into your callable by matching parameter names:
 
 ```php
-// ✨ NEW: Automatic parameter injection
+// Automatic parameter injection
 $app->page('/users/{username}', function ($c, string $username) {
     // $username is automatically populated from the URL!
     // No need to call $c->getPathParam('username')
@@ -132,7 +132,7 @@ $app->page('/products/{product_id}/reviews', function ($c, string $product_id) {
     // $product_id is auto-injected
 });
 
-// 📚 Legacy method still works
+// Alternative: Manual parameter retrieval
 $app->page('/users/{username}', function ($c) {
     $username = $c->getPathParam('username');
     // Both methods work - choose your preference
@@ -169,7 +169,7 @@ $name->float()   // Get as float
 Actions are server-side functions triggered by client events via Datastar.
 
 ```php
-$saveAction = $c->action(function () use ($c) {
+$saveAction = $c->action(function () use ($c): void {
     // Do something
     $c->sync();  // Push updates to browser
 });
@@ -184,7 +184,7 @@ Views can use Twig templates (inline or from files) or plain PHP functions.
 
 **Inline Twig:**
 ```php
-$c->view(function () use ($data, $c) {
+$c->view(function () use ($data, $c): string {
     return $c->renderString('<h1>Hello, {{ name }}!</h1>', [
         'name' => $data->name
     ]);
@@ -238,8 +238,8 @@ php-via automatically detects the **scope** of each page and optimizes rendering
 
 ```php
 // Global scope (cached app-wide):
-$app->page('/anywhere', function ($c) use ($app) {
-    $notify = $c->globalAction(function ($c) use ($app) {
+$app->page('/anywhere', function (Context $c) use ($app) {
+    $notify = $c->globalAction(function (Context $c) use ($app): void {
         $count = $app->globalState('notifications', 0);
         $app->setGlobalState('notifications', $count + 1);
         $app->broadcastGlobal(); // Updates ALL pages
@@ -248,8 +248,8 @@ $app->page('/anywhere', function ($c) use ($app) {
 });
 
 // Route scope (cached per route):
-$app->page('/game', function ($c) {
-    $toggle = $c->routeAction(function ($c) {
+$app->page('/game', function (Context $c) {
+    $toggle = $c->routeAction(function (Context $c): void {
         GameState::toggle();
         $c->broadcast();
     });
@@ -257,7 +257,7 @@ $app->page('/game', function ($c) {
 });
 
 // Tab scope (not cached):
-$app->page('/profile', function ($c) {
+$app->page('/profile', function (Context $c) {
     $name = $c->signal('Alice');
     // Uses signals = Tab scope
 });
@@ -270,15 +270,15 @@ The scope is detected automatically - no manual configuration needed!
 Components are reusable sub-contexts with their own state and actions:
 
 ```php
-$counterComponent = function ($c) {
+$counterComponent = function (Context $c) {
     $count = 0;
     
-    $increment = $c->action(function () use (&$count, $c) {
+    $increment = $c->action(function () use (&$count, $c): void {
         $count++;
         $c->sync();
     });
     
-    $c->view(function () use (&$count, $increment, $c) {
+    $c->view(function () use (&$count, $increment, $c): string {
         return $c->renderString('
             <div>
                 <p>Count: {{ count }}</p>
@@ -291,11 +291,11 @@ $counterComponent = function ($c) {
     });
 };
 
-$app->page('/', function ($c) use ($counterComponent) {
+$app->page('/', function (Context $c) use ($counterComponent) {
     $counter1 = $c->component($counterComponent);
     $counter2 = $c->component($counterComponent);
     
-    $c->view(function () use ($counter1, $counter2) {
+    $c->view(function () use ($counter1, $counter2): string {
         return <<<HTML
         <div>
             <h1>Counter 1</h1>
