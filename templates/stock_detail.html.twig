@@ -1,0 +1,315 @@
+{% extends "@via/templates/base.html.twig" %}
+{% block title %}{{ symbol }} - {{ name }}{% endblock %}
+{% block head %}
+    <script type="module">
+    class StockChart extends HTMLElement {
+        constructor() {
+            super();
+            this.chart = null;
+            this.echarts = null;
+            this.times = [];
+            this.prices = [];
+        }
+        
+        async connectedCallback() {
+            // Parse initial data from attributes
+            try {
+                console.log(this.getAttribute('times'));
+                this.times = JSON.parse(this.getAttribute('times') || '[]');
+                this.prices = JSON.parse(this.getAttribute('prices') || '[]');
+            } catch (e) {
+                console.error('Failed to parse chart data:', e);
+                this.times = [];
+                this.prices = [];
+            }
+            
+            // Load ECharts dynamically
+            this.echarts = await import('https://cdn.jsdelivr.net/npm/echarts@6/dist/echarts.esm.min.js');
+            console.log('ECharts loaded');
+            
+            // Create chart
+            this.chart = this.echarts.init(this);
+            this.updateChart();
+            console.log('StockChart initialized for', this.getAttribute('symbol'), 'with', this.times.length, 'data points');
+            
+            // Handle window resize
+            this.resizeHandler = () => {
+                if (this.chart) this.chart.resize();
+            };
+            window.addEventListener('resize', this.resizeHandler);
+            
+            // Watch for price updates in the DOM
+            this.startPriceWatcher();
+        }
+        
+        disconnectedCallback() {
+            if (this.resizeHandler) {
+                window.removeEventListener('resize', this.resizeHandler);
+            }
+            if (this.observer) {
+                this.observer.disconnect();
+            }
+            if (this.chart) {
+                this.chart.dispose();
+                this.chart = null;
+            }
+        }
+        
+        startPriceWatcher() {
+            // Watch for changes to our own times/prices attributes
+            this.observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.type !== 'attributes') {
+                        continue;
+                    }
+
+                    const attrName = mutation.attributeName;
+                    if (!attrName in ['times', 'prices']) {
+                        continue;
+                    }
+                    
+                    try {
+                        console.log(this.getAttribute('times'));
+                        this.times = JSON.parse(this.getAttribute('times') || '[]');
+                        this.prices = JSON.parse(this.getAttribute('prices') || '[]');
+                        this.updateChart();
+                        console.log('Chart data updated:', this.times.length, 'data points');
+                    } catch (e) {
+                        console.error('Failed to parse chart data:', e);
+                    }
+                    break; // Only need to update once even if both changed
+                }
+            });
+            
+            this.observer.observe(this, {
+                attributes: true,
+                attributeFilter: ['times', 'prices']
+            });
+        }
+        
+        updateChart() {
+            if (!this.chart) return;
+            
+            const symbol = this.getAttribute('symbol') || '';
+            const color = this.getAttribute('color') || '#667eea';
+            
+            const option = {
+                title: {
+                    text: 'Price History (Last 2 Minutes)',
+                    left: 'center',
+                    textStyle: {
+                        fontSize: 18,
+                        fontWeight: 'normal',
+                        color: '#666'
+                    }
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        return params[0].name + '<br/>' +
+                               params[0].marker + ' $' + params[0].value.toFixed(2);
+                    }
+                },
+                xAxis: {
+                    type: 'category',
+                    data: this.times,
+                    boundaryGap: false,
+                    axisLabel: {
+                        rotate: 45
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    scale: true,
+                    axisLabel: {
+                        formatter: '${value}'
+                    }
+                },
+                series: [{
+                    name: symbol,
+                    type: 'line',
+                    data: this.prices,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    lineStyle: {
+                        color: color,
+                        width: 3
+                    },
+                    itemStyle: {
+                        color: color
+                    },
+                    areaStyle: {
+                        color: {
+                            type: 'linear',
+                            x: 0,
+                            y: 0,
+                            x2: 0,
+                            y2: 1,
+                            colorStops: [{
+                                offset: 0,
+                                color: color + '80'
+                            }, {
+                                offset: 1,
+                                color: color + '10'
+                            }]
+                        }
+                    }
+                }],
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '15%',
+                    containLabel: true
+                }
+            };
+
+            console.log(option);
+            
+            this.chart.setOption(option);
+        }
+    }
+    
+    customElements.define('stock-chart', StockChart);
+    </script>
+{% endblock %}
+{% block styles %}
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 40px 20px;
+    }
+    .container { 
+        max-width: 1200px; 
+        margin: 0 auto;
+    }
+    .back-link {
+        display: inline-block;
+        color: white;
+        text-decoration: none;
+        margin-bottom: 20px;
+        font-size: 1.1em;
+        transition: opacity 0.2s;
+    }
+    .back-link:hover {
+        opacity: 0.8;
+    }
+    .stock-header {
+        background: white;
+        border-radius: 12px;
+        padding: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .stock-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .stock-symbol {
+        font-size: 2.5em;
+        font-weight: bold;
+        color: #333;
+    }
+    .stock-price {
+        font-size: 2.5em;
+        font-weight: bold;
+        color: #10b981;
+    }
+    .stock-name {
+        color: #666;
+        font-size: 1.2em;
+    }
+    .chart-container {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    stock-chart {
+        display: block;
+        width: 100%;
+        height: 400px;
+    }
+    .other-stocks {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .other-stocks h3 {
+        margin-bottom: 15px;
+        color: #333;
+    }
+    .stock-link {
+        display: inline-block;
+        padding: 8px 16px;
+        background: #f3f4f6;
+        color: #667eea;
+        text-decoration: none;
+        border-radius: 6px;
+        margin: 4px;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    .stock-link:hover {
+        background: #667eea;
+        color: white;
+    }
+    .live-indicator {
+        display: inline-flex;
+        align-items: center;
+        color: #10b981;
+        font-weight: 500;
+        margin-top: 10px;
+    }
+    .live-dot {
+        width: 8px;
+        height: 8px;
+        background: #10b981;
+        border-radius: 50%;
+        margin-right: 8px;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+{% endblock %}
+{% block content %}
+<div id="stockDetail">
+    <a href="/" class="back-link">← Back to Dashboard</a>
+    
+    <div class="stock-header">
+        <div class="stock-title">
+            <div>
+                <div class="stock-symbol">{{ symbol }}</div>
+                <div class="stock-name">{{ name }}</div>
+            </div>
+            <div class="stock-price">$<span data-text="${{ priceSignal.id()}}"></span></div>
+        </div>
+        <div class="live-indicator">
+            <span class="live-dot"></span>
+            Live Updates
+        </div>
+    </div>
+    
+    <div class="chart-container">
+        <stock-chart 
+            symbol="{{ symbol }}" 
+            color="{{ color }}"
+            data-attr:times="${{ timesSignal.id()}}"
+            data-attr:prices="${{ pricesSignal.id()}}"
+        </stock-chart>
+    </div>
+    
+    <div class="other-stocks">
+        <h3>Other Stocks</h3>
+        {{ otherStocks|raw }}
+    </div>
+</div>
+{% endblock %}
