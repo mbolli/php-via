@@ -7,16 +7,29 @@ namespace Mbolli\PhpVia;
 /**
  * Signal represents a reactive value synchronized between server and browser.
  *
- * Signals are bound to HTML inputs and automatically synced when actions are triggered.
+ * Signals can be TAB-scoped (per-context) or shared across a scope.
  */
 class Signal {
     private string $id;
-    private mixed $value;
+    private mixed $value = null;
     private bool $changed = true;
+    private ?string $scope = null;
+    private bool $autoBroadcast = true;
+    private ?Via $app = null;
 
-    public function __construct(string $id, mixed $initialValue) {
+    public function __construct(
+        string $id,
+        mixed $initialValue,
+        ?string $scope = null,
+        bool $autoBroadcast = true,
+        ?Via $app = null
+    ) {
         $this->id = $id;
-        $this->setValue($initialValue, true);
+        $this->scope = $scope;
+        $this->autoBroadcast = $autoBroadcast;
+        $this->app = $app;
+        $this->setValue($initialValue, false); // Don't trigger broadcast on init
+        $this->changed = true; // But mark as changed for initial sync
     }
 
     /**
@@ -37,6 +50,9 @@ class Signal {
      * Set the signal value.
      */
     public function setValue(mixed $value, bool $markChanged = true): void {
+        // Check if value actually changed
+        $oldValue = $this->value;
+
         // Convert arrays/objects to JSON for complex types
         if (\is_array($value) || \is_object($value)) {
             $this->value = json_encode($value);
@@ -46,7 +62,29 @@ class Signal {
 
         if ($markChanged) {
             $this->changed = true;
+
+            // Auto-broadcast for scoped signals (if enabled and value changed)
+            if ($this->isScoped()
+                && $this->autoBroadcast
+                && $this->app !== null
+                && $oldValue !== $this->value) {
+                $this->app->broadcast($this->scope);
+            }
         }
+    }
+
+    /**
+     * Check if this signal is scoped (non-TAB scope).
+     */
+    public function isScoped(): bool {
+        return $this->scope !== null && $this->scope !== Scope::TAB;
+    }
+
+    /**
+     * Get the signal's scope.
+     */
+    public function getScope(): ?string {
+        return $this->scope;
     }
 
     /**

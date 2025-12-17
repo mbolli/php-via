@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
-use Swoole\Coroutine;
 use Swoole\Coroutine\Channel;
 use Swoole\Timer;
 
@@ -40,27 +39,32 @@ class Context {
     /** @var array<int> Timer IDs created by this context */
     private array $timerIds = [];
 
-    /** @var bool Track if context uses any context-level signals (Tab scope indicator) */
-    private bool $usesContextSignals = false;
-
-    /** @var bool Track if context uses route-level actions (Route scope indicator) */
-    private bool $usesRouteActions = false;
-
-    /** @var bool Track if context uses global-level actions (Global scope indicator) */
-    private bool $usesGlobalActions = false;
-
-    /** @var ?Scope Cached scope detection result */
-    private ?Scope $detectedScope = null;
+    /** @var array<string> Explicit scopes for this context (can have multiple) */
+    private array $scopes = [];
 
     /** @var array<string, string> Path parameters extracted from route */
     private array $routeParams = [];
 
-    public function __construct(string $id, string $route, Via $app, ?string $namespace = null) {
+    /** @var null|string Session ID for this context */
+    private ?string $sessionId = null;
+
+    public function __construct(string $id, string $route, Via $app, ?string $namespace = null, ?string $sessionId = null) {
         $this->id = $id;
         $this->route = $route;
         $this->app = $app;
         $this->namespace = $namespace;
+        $this->sessionId = $sessionId;
         $this->patchChannel = new Channel(5);
+
+        // Default scope is TAB (per-context isolation)
+        $this->scopes = [Scope::TAB];
+    }
+
+    /**
+     * Get session ID for this context.
+     */
+    public function getSessionId(): ?string {
+        return $this->sessionId;
     }
 
     /**
@@ -109,6 +113,20 @@ class Context {
     }
 
     /**
+     * Register a callback to be executed when the user disconnects.
+     *
+     * This is an alias for onCleanup() with clearer semantics.
+     * The callback is executed when:
+     * - SSE connection closes and remains closed for 60 seconds
+     * - Browser sends explicit session close beacon
+     *
+     * @param callable(Context): void $callback Function to call on disconnect
+     */
+    public function onDisconnect(callable $callback): void {
+        $this->cleanupCallbacks[] = $callback;
+    }
+
+    /**
      * Create a timer that will be automatically cleaned up with the context.
      *
      * @param callable $callback The function to call on each tick
@@ -137,9 +155,9 @@ class Context {
 
         foreach ($this->cleanupCallbacks as $callback) {
             try {
-                $callback();
+                $callback($this);
             } catch (\Throwable $e) {
-                // Silently ignore cleanup errors
+                error_log('Cleanup callback error: ' . $e->getMessage());
             }
         }
 
@@ -170,46 +188,67 @@ class Context {
     }
 
     /**
-     * Detect the scope of this context based on usage patterns.
+     * Set the scope(s) for this context.
      *
-     * @internal Used by Via for caching decisions
+     * Replaces any previously set scopes. To add additional scopes, use addScope().
      *
-     * Global scope: Uses ONLY global actions, no signals or route actions
-     * Route scope: Uses ONLY route actions, no context signals or global actions
-     * Tab scope: Uses context signals OR mixes scopes (default, safest)
-     *
-     * @return Scope The detected scope for this context
+     * @param string $scope Built-in scope (Scope::TAB, etc.) or custom (e.g., "room:lobby")
      */
-    public function getScope(): Scope {
-        // Return cached result if already detected
-        if ($this->detectedScope !== null) {
-            return $this->detectedScope;
+    public function scope(string $scope): void {
+        // Auto-expand ROUTE to include the actual route path
+        if ($scope === Scope::ROUTE) {
+            $scope = Scope::routeScope($this->route);
         }
 
-        // Global scope: ONLY global actions, NO route actions, NO context signals
-        // This means all state is shared across ALL routes and users
-        if ($this->usesGlobalActions && !$this->usesRouteActions && !$this->usesContextSignals) {
-            $this->detectedScope = Scope::GLOBAL;
-            $this->app->log('debug', 'Scope detected: GLOBAL (uses global actions only)', $this);
+        $this->scopes = [$scope];
+        $this->app->registerContextInScope($this, $scope);
+        $this->app->log('debug', "Scope set to: {$scope}", $this);
+    }
 
-            return Scope::GLOBAL;
+    /**
+     * Add an additional scope to this context (multi-scope support).
+     *
+     * Allows a context to belong to multiple scopes simultaneously.
+     * Example: A user in a chat room can have both "user:123" and "room:lobby" scopes.
+     *
+     * @param string $scope Additional scope to add
+     */
+    public function addScope(string $scope): void {
+        if (!\in_array($scope, $this->scopes, true)) {
+            $this->scopes[] = $scope;
+            $this->app->registerContextInScope($this, $scope);
+            $this->app->log('debug', "Added scope: {$scope}", $this);
         }
+    }
 
-        // Route scope: ONLY route actions, NO global actions, NO context signals
-        // This means all state is shared across users on same route
-        if ($this->usesRouteActions && !$this->usesGlobalActions && !$this->usesContextSignals) {
-            $this->detectedScope = Scope::ROUTE;
-            $this->app->log('debug', 'Scope detected: ROUTE (uses route actions, no signals)', $this);
+    /**
+     * Get all scopes for this context.
+     *
+     * @return array<string>
+     */
+    public function getScopes(): array {
+        return $this->scopes;
+    }
 
-            return Scope::ROUTE;
-        }
+    /**
+     * Get the primary scope (first scope) for this context.
+     */
+    public function getPrimaryScope(): string {
+        return $this->scopes[0] ?? Scope::TAB;
+    }
 
-        // Default to Tab scope (safest)
-        // This means each user gets their own state, or scopes are mixed
-        $this->detectedScope = Scope::TAB;
-        $this->app->log('debug', 'Scope detected: TAB (uses signals, mixed scopes, or default)', $this);
+    /**
+     * Check if this context has a specific scope.
+     */
+    public function hasScope(string $scope): bool {
+        return \in_array($scope, $this->scopes, true);
+    }
 
-        return Scope::TAB;
+    /**
+     * Broadcast updates to all contexts with the same primary scope.
+     */
+    public function broadcast(): void {
+        $this->app->broadcast($this->getPrimaryScope());
     }
 
     /**
@@ -280,37 +319,34 @@ class Context {
         }
 
         $isUpdate = !$this->isInitialRender;
-        $scope = $this->getScope();
+        $scope = $this->getPrimaryScope();
 
-        // GLOBAL SCOPE: Cache view and share across ALL routes and clients
-        if ($scope === Scope::GLOBAL) {
-            return $this->renderCachedView(
-                cacheKey: '__global__',
-                getCache: fn (): ?string => $this->app->getGlobalViewCache(),
-                setCache: function (string $html): void {
-                    $this->app->setGlobalViewCache($html);
-                },
-                logPrefix: 'GLOBAL-scoped view',
-                isUpdate: $isUpdate
-            );
-        }
+        // Check if this scope supports caching (non-TAB scopes)
+        $shouldCache = $scope !== Scope::TAB;
 
-        // ROUTE SCOPE: Cache view and share across all clients on same route
-        if ($scope === Scope::ROUTE) {
-            return $this->renderCachedView(
-                cacheKey: $this->route,
-                getCache: fn (): ?string => $this->app->getCachedView($this->route),
-                setCache: function (string $html): void {
-                    $this->app->cacheView($this->route, $html);
-                },
-                logPrefix: "ROUTE-scoped view for {$this->route}",
-                isUpdate: $isUpdate,
-                withLock: true
-            );
+        if ($shouldCache) {
+            // Try to get cached view
+            $cached = $this->app->getViewCache($scope);
+            if ($cached !== null && !$isUpdate) {
+                $this->app->log('debug', "Using cached view for scope: {$scope}");
+
+                return $cached;
+            }
+
+            $this->app->log('debug', "Rendering view for scope: {$scope} (cache miss or update)", $this);
+
+            $startTime = microtime(true);
+            $result = ($this->viewFn)($isUpdate);
+            $duration = microtime(true) - $startTime;
+            $this->app->trackRender($duration);
+
+            $this->app->setViewCache($scope, $result);
+            $this->isInitialRender = false;
+
+            return $result;
         }
 
         // TAB SCOPE: Render per context, no caching
-        // Each user gets their own unique view
         $this->app->log('debug', "Rendering TAB-scoped view for {$this->route} (no cache)", $this);
 
         $startTime = microtime(true);
@@ -328,19 +364,57 @@ class Context {
      *
      * @param mixed       $initialValue Initial value of the signal
      * @param null|string $name         Optional human-readable name
-     * @param bool        $routeScoped  If true, signal won't break ROUTE scope (use for query params, path params, etc.)
      */
-    public function signal(mixed $initialValue, ?string $name = null, bool $routeScoped = false): Signal {
-        // Mark that this context uses context-level signals (Tab scope indicator)
-        // UNLESS it's a route-scoped signal (derived from URL params)
-        if (!$routeScoped) {
-            $this->usesContextSignals = true;
+    /**
+     * Create a signal.
+     *
+     * @param mixed       $initialValue  The initial value of the signal
+     * @param null|string $name          Optional signal name (defaults to 'signal')
+     * @param null|string $scope         Optional scope for shared signal (null = TAB scope, no sharing)
+     * @param bool        $autoBroadcast Auto-broadcast changes for scoped signals (default: true)
+     *
+     * TAB scope (scope=null): Signal is private to this context, not shared
+     * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
+     * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
+     */
+    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true): Signal {
+        $baseName = $name ?? 'signal';
+
+        // Resolve SESSION scope to actual session ID
+        if ($scope === Scope::SESSION) {
+            if ($this->sessionId === null) {
+                throw new \RuntimeException('Cannot use SESSION scope without session ID');
+            }
+            $scope = 'session:' . $this->sessionId;
         }
 
-        $baseName = $name ?? 'signal';
-        // clean base name to be alphanumeric and underscores only
-        // Use context ID to make signal IDs predictable and queryable
-        // Format: basename_contextId for easier readability
+        // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
+        // For TAB signals, use context ID to make them unique per context
+        if ($scope !== null) {
+            // Scoped signal: shared across contexts in this scope
+            $signalId = $scope . ':' . $baseName;
+            $signalId = preg_replace('/[^a-zA-Z0-9_:]/', '_', $signalId);
+
+            // Check if signal already exists in this scope
+            $existingSignal = $this->app->getScopedSignal($scope, $signalId);
+            if ($existingSignal !== null) {
+                // Return existing signal (last-write-wins if value differs)
+                error_log("SIGNAL: Found existing signal {$signalId} in scope {$scope}, value: " . $existingSignal->getValue());
+
+                return $existingSignal;
+            }
+
+            // Create new scoped signal with Via reference for auto-broadcast
+            $signal = new Signal($signalId, $initialValue, $scope, $autoBroadcast, $this->app);
+            error_log("SIGNAL: Created new signal {$signalId} in scope {$scope}, initial value: {$initialValue}");
+
+            // Register in Via's scoped signals
+            $this->app->registerScopedSignal($scope, $signal);
+
+            return $signal;
+        }
+
+        // TAB scope: context-specific signal, not shared
         $signalId = $this->namespace
             ? $this->namespace . '.' . $baseName
             : $baseName . '_' . $this->id;
@@ -375,58 +449,75 @@ class Context {
     }
 
     /**
-     * Get all signals.
+     * Get all signals available to this context.
+     *
+     * Returns both TAB-scoped signals (context-specific) and scoped signals
+     * (shared with other contexts in the same scopes).
      *
      * @return array<string, Signal>
      */
     public function getSignals(): array {
-        return $this->signals;
+        $signals = $this->signals; // TAB-scoped signals
+
+        // Add scoped signals from all scopes this context belongs to
+        foreach ($this->getScopes() as $scope) {
+            $scopedSignals = $this->app->getScopedSignals($scope);
+            foreach ($scopedSignals as $signalId => $signal) {
+                $signals[$signalId] = $signal;
+            }
+        }
+
+        return $signals;
     }
 
     /**
      * Create an action trigger.
      *
-     * @param callable    $fn   The action function to execute
-     * @param null|string $name Optional human-readable name
+     * Actions can be TAB-scoped (per-context) or shared across a scope.
+     * If the context has a non-TAB scope, the action is registered as a scoped action
+     * and shared with all contexts in the same scope.
+     *
+     * @param callable    $fn    The action function to execute
+     * @param null|string $name  Optional human-readable name
+     * @param null|string $scope Optional explicit scope (defaults to context's primary scope)
      */
-    public function action(callable $fn, ?string $name = null): Action {
-        $actionId = $this->generateId($name ?? 'action');
-        $this->actionRegistry[$actionId] = $fn;
+    public function action(callable $fn, ?string $name = null, ?string $scope = null): Action {
+        // Use explicit scope if provided, otherwise use context's primary scope
+        $actionScope = $scope ?? $this->getPrimaryScope();
+
+        // Auto-expand ROUTE to include the actual route path
+        if ($actionScope === Scope::ROUTE) {
+            $actionScope = Scope::routeScope($this->route);
+        }
+
+        // For scoped actions, use deterministic ID (name only) so cached views work
+        // For TAB scope, use random ID to ensure uniqueness per context
+        if ($actionScope !== Scope::TAB) {
+            if ($name === null) {
+                throw new \InvalidArgumentException('Action name is required for scoped actions (non-TAB scope)');
+            }
+            $actionId = $name; // Use name directly for deterministic ID
+
+            // Check if action already exists in this scope
+            $existingAction = $this->app->getScopedAction($actionScope, $actionId);
+            if ($existingAction !== null) {
+                // Action already registered in this scope, reuse it
+                $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
+
+                return new Action($actionId);
+            }
+
+            // Register as scoped action
+            $this->app->log('debug', "[{$this->getId()}] Registering new action {$actionId} in scope {$actionScope}", $this);
+
+            $this->app->registerScopedAction($actionScope, $actionId, $fn);
+        } else {
+            // TAB scope: generate unique random ID
+            $actionId = $this->generateId($name ?? 'action');
+            $this->actionRegistry[$actionId] = $fn;
+        }
 
         return new Action($actionId);
-    }
-
-    /**
-     * Register a route-level action (shared across all contexts on this route).
-     * Use this for actions that should work the same for all users on the same page.
-     *
-     * @param callable $fn   The action handler function (receives Context as first param)
-     * @param string   $name Action name (must be consistent across contexts)
-     */
-    public function routeAction(callable $fn, string $name): Action {
-        // Mark that this context uses route-level actions (Route scope indicator)
-        $this->usesRouteActions = true;
-
-        $this->app->registerRouteAction($this->route, $name, $fn);
-
-        return new Action($name);
-    }
-
-    /**
-     * Register a global-scoped action that can be called from any route.
-     * Use this for actions that affect state shared across ALL routes.
-     *
-     * @param callable $fn   The action handler function (receives Context as first param)
-     * @param string   $name Action name (must be globally unique)
-     */
-    public function globalAction(callable $fn, string $name): Action {
-        // Mark that this context uses global-level actions (Global scope indicator)
-        $this->usesGlobalActions = true;
-
-        // Register as route action but with a special global prefix
-        $this->app->registerRouteAction('__global__', $name, $fn);
-
-        return new Action($name);
     }
 
     /**
@@ -449,12 +540,50 @@ class Context {
      * @internal Called by Via when handling action requests
      */
     public function executeAction(string $actionId): void {
-        // First check this context
+        // First check TAB-scoped actions (context-specific)
         if (isset($this->actionRegistry[$actionId])) {
             $action = $this->actionRegistry[$actionId];
-            $action();
+            $action($this);
 
             return;
+        }
+
+        // Then check scoped actions in this context's scopes
+        $scopes = $this->getScopes();
+        $this->app->log('debug', "Checking scoped actions for {$actionId} in scopes: " . implode(', ', $scopes), $this);
+        foreach ($scopes as $scope) {
+            $scopedAction = $this->app->getScopedAction($scope, $actionId);
+            if ($scopedAction !== null) {
+                $this->app->log('debug', "Found scoped action {$actionId} in scope {$scope}", $this);
+                $scopedAction($this);
+
+                return;
+            }
+            $allScopedActions = $this->app->getScopedActions($scope);
+            $this->app->log('debug', "Scoped actions in {$scope}: " . implode(', ', array_keys($allScopedActions)), $this);
+        }
+
+        // Check broader scopes (ROUTE and GLOBAL) if not found in context's scopes
+        $routeScope = Scope::routeScope($this->route);
+        if (!\in_array($routeScope, $scopes, true)) {
+            $scopedAction = $this->app->getScopedAction($routeScope, $actionId);
+            if ($scopedAction !== null) {
+                $this->app->log('debug', "Found scoped action {$actionId} in ROUTE scope {$routeScope}", $this);
+                $scopedAction($this);
+
+                return;
+            }
+        }
+
+        // Check GLOBAL scope if not already in context's scopes
+        if (!\in_array(Scope::GLOBAL, $scopes, true)) {
+            $scopedAction = $this->app->getScopedAction(Scope::GLOBAL, $actionId);
+            if ($scopedAction !== null) {
+                $this->app->log('debug', "Found scoped action {$actionId} in GLOBAL scope", $this);
+                $scopedAction($this);
+
+                return;
+            }
         }
 
         // Check component contexts
@@ -568,8 +697,21 @@ class Context {
         $flat = $this->nestedToFlat($signalsData);
 
         foreach ($flat as $signalId => $value) {
+            // First check TAB-scoped signals (context-specific)
             if (isset($this->signals[$signalId])) {
                 $this->signals[$signalId]->setValue($value, false);
+
+                continue;
+            }
+
+            // Then check scoped signals (shared across contexts in each scope)
+            foreach ($this->getScopes() as $scope) {
+                $scopedSignals = $this->app->getScopedSignals($scope);
+                if (isset($scopedSignals[$signalId])) {
+                    $scopedSignals[$signalId]->setValue($value, false);
+
+                    break; // Found and updated, stop searching
+                }
             }
         }
     }
@@ -606,67 +748,37 @@ class Context {
                 'content' => $updatedSignals,
             ]);
         }
+
+        // Also sync scoped signals for all scopes this context belongs to
+        $this->syncScopedSignals();
     }
 
     /**
-     * Render view with caching support.
-     *
-     * @param string   $cacheKey  Cache identifier
-     * @param callable $getCache  Function to retrieve cached view
-     * @param callable $setCache  Function to store cached view
-     * @param string   $logPrefix Prefix for log messages
-     * @param bool     $isUpdate  Whether this is an update render
-     * @param bool     $withLock  Whether to use render lock (for ROUTE scope)
+     * Sync scoped signals for all scopes this context belongs to.
      */
-    private function renderCachedView(
-        string $cacheKey,
-        callable $getCache,
-        callable $setCache,
-        string $logPrefix,
-        bool $isUpdate,
-        bool $withLock = false
-    ): string {
-        // Check cache first
-        $cached = $getCache();
-        if ($cached !== null) {
-            $this->app->log('debug', "Using cached {$logPrefix}", $this);
-            $this->isInitialRender = false;
+    private function syncScopedSignals(): void {
+        $flat = [];
 
-            return $cached;
-        }
-
-        // Handle concurrent render locking (for ROUTE scope)
-        if ($withLock) {
-            if ($this->app->isRendering($cacheKey)) {
-                Coroutine::sleep(0.001);
-                $cached = $getCache();
-                if ($cached !== null) {
-                    $this->app->log('debug', "Got cached view after wait: {$logPrefix}", $this);
-                    $this->isInitialRender = false;
-
-                    return $cached;
-                }
+        foreach ($this->getScopes() as $scope) {
+            // Skip TAB scope - already handled by prepareSignalsForPatch
+            if ($scope === Scope::TAB) {
+                continue;
             }
-            $this->app->setRendering($cacheKey, true);
+
+            $scopedSignals = $this->app->getScopedSignals($scope);
+            foreach ($scopedSignals as $id => $signal) {
+                // Always sync scoped signals during broadcast (don't check hasChanged)
+                // because multiple contexts need to receive the same value
+                $flat[$id] = $signal->getValue();
+            }
         }
 
-        $this->app->log('debug', "Rendering {$logPrefix} (will cache)", $this);
-
-        // Render and track time
-        $startTime = microtime(true);
-        $result = ($this->viewFn)($isUpdate);
-        $duration = microtime(true) - $startTime;
-        $this->app->trackRender($duration);
-
-        $this->isInitialRender = false;
-        $setCache($result);
-        $this->app->log('debug', "Cached {$logPrefix}", $this);
-
-        if ($withLock) {
-            $this->app->setRendering($cacheKey, false);
+        if (!empty($flat)) {
+            $this->getPatchChannel()->push([
+                'type' => 'signals',
+                'content' => $this->flatToNested($flat),
+            ]);
         }
-
-        return $result;
     }
 
     /**

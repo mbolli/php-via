@@ -23,13 +23,11 @@ use Twig\TwigFunction;
  * Main application class that manages routing, contexts, and SSE connections.
  */
 class Via {
+    private const SESSION_COOKIE_NAME = 'via_session_id';
     private Server $server;
 
     /** @var array<string, callable> */
     private array $routes = [];
-
-    /** @var array<string, array<string, callable>> Route-level actions */
-    private array $routeActions = [];
 
     /** @var array<string, Context> */
     private array $contexts = [];
@@ -43,17 +41,26 @@ class Via {
     /** @var array{render_count: int, total_time: float, min_time: float, max_time: float} */
     private array $renderStats = ['render_count' => 0, 'total_time' => 0.0, 'min_time' => PHP_FLOAT_MAX, 'max_time' => 0.0];
 
-    /** @var array<string, string> Route-based view cache (route -> html) */
+    /** @var array<string, string> Scope-based view cache (scope -> html) */
     private array $viewCache = [];
 
-    /** @var array<string, bool> Tracks if route is currently rendering (prevents race condition) */
+    /** @var array<string, bool> Tracks if scope is currently rendering (prevents race condition) */
     private array $rendering = [];
+
+    /** @var array<string, array<string, Context>> Scope registry: scope => [contextId => Context] */
+    private array $scopeRegistry = [];
+
+    /** @var array<string, array<string, Signal>> Scoped signals: scope => [signalId => Signal] */
+    private array $scopedSignals = [];
+
+    /** @var array<string, array<string, callable>> Scoped actions: scope => [actionId => callable] */
+    private array $scopedActions = [];
 
     /** @var array<string, mixed> Global state shared across all routes and clients */
     private array $globalState = [];
 
-    /** @var null|string Global view cache (shared across all routes) */
-    private ?string $globalViewCache = null;
+    /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
+    private array $contextSessions = [];
 
     /** @var array<int, string> */
     private array $headIncludes = [];
@@ -103,6 +110,13 @@ class Via {
     }
 
     /**
+     * Get session ID for a context.
+     */
+    public function getContextSessionId(string $contextId): ?string {
+        return $this->contextSessions[$contextId] ?? null;
+    }
+
+    /**
      * Get the configuration instance for fluent configuration.
      */
     public function config(): Config {
@@ -139,17 +153,22 @@ class Via {
      *
      * @internal Used by Context for global scope caching
      */
-    public function getGlobalViewCache(): ?string {
-        return $this->globalViewCache;
+    /**
+     * Get cached view for a scope.
+     *
+     * @internal Used by Context to get cached view
+     */
+    public function getViewCache(string $scope): ?string {
+        return $this->viewCache[$scope] ?? null;
     }
 
     /**
-     * Set the global view cache.
+     * Set cached view for a scope.
      *
-     * @internal Used by Context for global scope caching
+     * @internal Used by Context to cache view
      */
-    public function setGlobalViewCache(string $html): void {
-        $this->globalViewCache = $html;
+    public function setViewCache(string $scope, string $html): void {
+        $this->viewCache[$scope] = $html;
     }
 
     /**
@@ -163,32 +182,155 @@ class Via {
     }
 
     /**
-     * Broadcast sync to all contexts on a specific route.
+     * Unified broadcast method supporting built-in and custom scopes.
      *
-     * Automatically detects scope:
-     * - Route scope: Invalidates cache, triggers ONE render shared by all
-     * - Tab scope: Triggers per-context renders
+     * Examples:
+     * - $app->broadcast(Scope::GLOBAL) - All contexts everywhere
+     * - $app->broadcast(Scope::routeScope('/game')) - All on /game route
+     * - $app->broadcast("room:lobby") - All in lobby chat room
+     * - $app->broadcast("user:123") - All tabs for user 123
+     * - $app->broadcast("room:*") - All rooms (wildcard)
+     *
+     * @param string $scope Scope to broadcast to
      */
-    public function broadcast(string $route): void {
-        // Detect if any context or component on this route is ROUTE-scoped
-        if ($this->hasRouteScopeOnRoute($route)) {
-            $this->invalidateViewCache($route);
-            $this->log('debug', "Broadcasting to ROUTE-scoped page: {$route} (cache invalidated)");
-        } else {
-            $this->log('debug', "Broadcasting to TAB-scoped page: {$route} (no cache)");
+    public function broadcast(string $scope): void {
+        // Handle GLOBAL scope - sync all contexts
+        if ($scope === Scope::GLOBAL) {
+            $this->invalidateViewCache($scope);
+            $this->log('debug', 'Broadcasting to GLOBAL scope (all contexts)');
+            $this->syncAllContexts();
+
+            return;
         }
 
-        $this->syncContextsOnRoute($route);
+        // Handle ROUTE scope - sync all contexts on this route
+        if (Scope::isRouteBased($scope)) {
+            $parts = Scope::parse($scope);
+            $route = $parts[1] ?? null;
+
+            // If no specific route provided, broadcast to all routes
+            if ($route === null) {
+                $this->log('debug', 'Broadcasting to all ROUTE scopes (all routes)');
+                // Find all route scopes and invalidate their caches
+                foreach (array_keys($this->viewCache) as $cachedScope) {
+                    if (Scope::isRouteBased($cachedScope)) {
+                        $this->invalidateViewCache($cachedScope);
+                    }
+                }
+                // Sync all contexts
+                $this->syncAllContexts();
+            } else {
+                $this->invalidateViewCache($scope);
+                $this->log('debug', "Broadcasting to ROUTE scope: {$route}");
+                $this->syncContextsOnRoute($route);
+            }
+
+            return;
+        }
+
+        // Handle custom scopes (with wildcard support)
+        $matchedContexts = [];
+
+        if (str_contains($scope, '*')) {
+            // Wildcard pattern - match all scopes
+            foreach ($this->scopeRegistry as $registeredScope => $contexts) {
+                if (Scope::matches($registeredScope, $scope)) {
+                    $matchedContexts = array_merge($matchedContexts, array_values($contexts));
+                }
+            }
+            $this->log('debug', "Broadcasting to wildcard scope: {$scope} (" . \count($matchedContexts) . ' contexts)');
+        } else {
+            // Direct scope match
+            if (isset($this->scopeRegistry[$scope])) {
+                $matchedContexts = array_values($this->scopeRegistry[$scope]);
+                $this->log('debug', "Broadcasting to scope: {$scope} (" . \count($matchedContexts) . ' contexts)');
+            }
+        }
+
+        // Invalidate cache for this scope
+        $this->invalidateViewCache($scope);
+
+        // Sync all matched contexts
+        foreach ($matchedContexts as $context) {
+            $context->sync();
+        }
     }
 
     /**
-     * Broadcast to ALL contexts across ALL routes (global scope).
-     * Invalidates global cache and syncs every connected client.
+     * Register a context under a specific scope.
+     *
+     * @internal Called by Context::scope() and Context::addScope()
      */
-    public function broadcastGlobal(): void {
-        $this->invalidateGlobalViewCache();
-        $this->log('debug', 'Broadcasting globally (cache invalidated, syncing all contexts)');
-        $this->syncAllContexts();
+    public function registerContextInScope(Context $context, string $scope): void {
+        if (!isset($this->scopeRegistry[$scope])) {
+            $this->scopeRegistry[$scope] = [];
+        }
+        $this->scopeRegistry[$scope][$context->getId()] = $context;
+    }
+
+    /**
+     * Get all contexts registered under a specific scope.
+     *
+     * @return array<Context>
+     */
+    public function getContextsByScope(string $scope): array {
+        return array_values($this->scopeRegistry[$scope] ?? []);
+    }
+
+    /**
+     * Register a scoped signal.
+     *
+     * @internal Called by Context when creating scoped signals
+     */
+    public function registerScopedSignal(string $scope, Signal $signal): void {
+        if (!isset($this->scopedSignals[$scope])) {
+            $this->scopedSignals[$scope] = [];
+        }
+        $this->scopedSignals[$scope][$signal->id()] = $signal;
+    }
+
+    /**
+     * Get a scoped signal by scope and ID.
+     *
+     * @internal Used by Context to retrieve scoped signals
+     */
+    public function getScopedSignal(string $scope, string $signalId): ?Signal {
+        return $this->scopedSignals[$scope][$signalId] ?? null;
+    }
+
+    /**
+     * Get all scoped signals for a scope.
+     *
+     * @return array<string, Signal>
+     */
+    public function getScopedSignals(string $scope): array {
+        return $this->scopedSignals[$scope] ?? [];
+    }
+
+    /**
+     * Register a scoped action (shared across contexts in the same scope).
+     */
+    public function registerScopedAction(string $scope, string $actionId, callable $action): void {
+        if (!isset($this->scopedActions[$scope])) {
+            $this->scopedActions[$scope] = [];
+        }
+        $this->scopedActions[$scope][$actionId] = $action;
+    }
+
+    /**
+     * Get a scoped action by ID.
+     */
+    public function getScopedAction(string $scope, string $actionId): ?callable {
+        return $this->scopedActions[$scope][$actionId] ?? null;
+    }
+
+    /**
+     * Get all scoped actions for a scope.
+     *
+     * @return array<string, callable>
+     */
+    public function getScopedActions(string $scope): array {
+        return $this->scopedActions[$scope] ?? [];
     }
 
     /**
@@ -294,18 +436,6 @@ class Via {
     }
 
     /**
-     * Register a route-level action (shared across all contexts on this route).
-     *
-     * @internal Called by Context when creating route/global actions
-     */
-    public function registerRouteAction(string $route, string $actionId, callable $handler): void {
-        if (!isset($this->routeActions[$route])) {
-            $this->routeActions[$route] = [];
-        }
-        $this->routeActions[$route][$actionId] = $handler;
-    }
-
-    /**
      * Check if a route is currently rendering.
      *
      * @internal Used by Context for render locking
@@ -328,31 +458,74 @@ class Via {
     }
 
     /**
-     * Invalidate the global view cache.
+     * Get or create session ID from request cookies.
      */
-    private function invalidateGlobalViewCache(): void {
-        $this->globalViewCache = null;
+    private function getSessionId(Request $request): string {
+        $cookies = $request->cookie ?? [];
+        $sessionId = $cookies[self::SESSION_COOKIE_NAME] ?? null;
+
+        if (!$sessionId) {
+            // Generate new session ID
+            $sessionId = bin2hex(random_bytes(16));
+        }
+
+        return $sessionId;
     }
 
     /**
-     * Check if any context or component on the given route is ROUTE-scoped.
+     * Set session cookie in response.
      */
-    private function hasRouteScopeOnRoute(string $route): bool {
-        foreach ($this->contexts as $ctx) {
-            if ($ctx->getRoute() === $route) {
-                if ($ctx->getScope() === Scope::ROUTE) {
-                    return true;
-                }
+    private function setSessionCookie(Response $response, string $sessionId): void {
+        // Set cookie with 30 day expiration
+        $expires = time() + (30 * 24 * 60 * 60);
+        $result = $response->cookie(
+            self::SESSION_COOKIE_NAME,
+            $sessionId,
+            $expires,
+            '/',
+            '',
+            false, // secure (set to true for HTTPS)
+            true   // httponly
+        );
+        $this->log('debug', "Set session cookie: {$sessionId}, result: " . ($result ? 'success' : 'failed'));
+    }
 
-                foreach ($ctx->getComponentRegistry() as $componentCtx) {
-                    if ($componentCtx->getScope() === Scope::ROUTE) {
-                        return true;
+    /**
+     * Invalidate the global view cache.
+     */
+    /**
+     * Remove context from all scope registries (called on disconnect).
+     *
+     * Automatically cleans up empty scopes and their signals.
+     */
+    private function unregisterContextFromScopes(Context $context): void {
+        foreach ($context->getScopes() as $scope) {
+            if (isset($this->scopeRegistry[$scope])) {
+                unset($this->scopeRegistry[$scope][$context->getId()]);
+
+                // Clean up empty scopes (and their signals)
+                if (empty($this->scopeRegistry[$scope])) {
+                    unset($this->scopeRegistry[$scope]);
+
+                    // Also clean up scoped signals and actions for this scope
+                    $hadSignals = isset($this->scopedSignals[$scope]);
+                    $hadActions = isset($this->scopedActions[$scope]);
+
+                    if ($hadSignals) {
+                        unset($this->scopedSignals[$scope]);
+                    }
+                    if ($hadActions) {
+                        unset($this->scopedActions[$scope]);
+                    }
+
+                    if ($hadSignals || $hadActions) {
+                        $this->log('debug', "Cleaned up empty scope with signals/actions: {$scope}");
+                    } else {
+                        $this->log('debug', "Cleaned up empty scope: {$scope}");
                     }
                 }
             }
         }
-
-        return false;
     }
 
     /**
@@ -376,17 +549,10 @@ class Via {
     }
 
     /**
-     * Invalidate view cache for a route (called on broadcast).
+     * Invalidate view cache for a scope (called on broadcast).
      */
-    private function invalidateViewCache(string $route): void {
-        unset($this->viewCache[$route]);
-    }
-
-    /**
-     * Get route action handler.
-     */
-    private function getRouteAction(string $route, string $actionId): ?callable {
-        return $this->routeActions[$route][$actionId] ?? null;
+    private function invalidateViewCache(string $scope): void {
+        unset($this->viewCache[$scope]);
     }
 
     /**
@@ -486,11 +652,17 @@ class Via {
      * @param array<string, string> $params Route parameters
      */
     private function handlePage(Request $request, Response $response, string $route, callable $handler, array $params = []): void {
+        // Get or create session ID
+        $sessionId = $this->getSessionId($request);
+
         // Generate unique context ID
         $contextId = $route . '_/' . $this->generateId();
 
-        // Create context
-        $context = new Context($contextId, $route, $this);
+        // Create context with session ID
+        $context = new Context($contextId, $route, $this, null, $sessionId);
+
+        // Track session for this context
+        $this->contextSessions[$contextId] = $sessionId;
 
         // Inject route parameters
         $context->injectRouteParams($params);
@@ -501,8 +673,14 @@ class Via {
         // Store context
         $this->contexts[$contextId] = $context;
 
+        // Register context in its default TAB scope
+        $this->registerContextInScope($context, Scope::TAB);
+
         // Build HTML document
         $html = $this->buildHtmlDocument($context);
+
+        // Set session cookie
+        $this->setSessionCookie($response, $sessionId);
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
         $response->end($html);
@@ -607,12 +785,31 @@ class Via {
 
         $this->log('debug', "SSE connection closed for context: {$context->getId()}");
 
-        // Don't immediately cleanup - give client time to reconnect (e.g., tab switching)
-        // Schedule cleanup after 60 seconds of inactivity
-        $timerId = Timer::after(60000, function () use ($contextId): void {
+        // Schedule delayed cleanup
+        $this->scheduleContextCleanup($contextId);
+    }
+
+    /**
+     * Schedule context cleanup after a delay.
+     * Allows time for reconnection or navigation between pages.
+     */
+    private function scheduleContextCleanup(string $contextId, int $delayMs = 5000): void {
+        // Cancel any existing cleanup timer
+        if (isset($this->cleanupTimers[$contextId])) {
+            Timer::clear($this->cleanupTimers[$contextId]);
+            unset($this->cleanupTimers[$contextId]);
+        }
+
+        // Schedule cleanup after delay
+        $timerId = Timer::after($delayMs, function () use ($contextId): void {
             if (isset($this->contexts[$contextId])) {
                 $this->log('debug', "Cleaning up inactive context: {$contextId}");
-                $this->contexts[$contextId]->cleanup();
+                $context = $this->contexts[$contextId];
+                $context->cleanup();
+
+                // Remove from scope registry
+                $this->unregisterContextFromScopes($context);
+
                 unset($this->contexts[$contextId], $this->clients[$contextId], $this->cleanupTimers[$contextId]);
             }
         });
@@ -637,61 +834,6 @@ class Via {
         }
 
         $context = $this->contexts[$contextId];
-        $route = $context->getRoute();
-
-        // Check for global action first
-        $globalHandler = $this->getRouteAction('__global__', $actionId);
-        if ($globalHandler !== null) {
-            try {
-                // Inject signals into context
-                $context->injectSignals($signals);
-
-                $this->log('debug', "Executing global action {$actionId}");
-
-                // Execute the global action with context
-                $globalHandler($context);
-
-                $this->log('debug', "Global action {$actionId} completed successfully");
-
-                $response->status(200);
-                $response->end();
-
-                return;
-            } catch (\Exception $e) {
-                $this->log('error', "Global action {$actionId} failed: " . $e->getMessage());
-                $response->status(500);
-                $response->end('Action failed');
-
-                return;
-            }
-        }
-
-        // Check for route-level action
-        $routeHandler = $this->getRouteAction($route, $actionId);
-        if ($routeHandler !== null) {
-            try {
-                // Inject signals into context
-                $context->injectSignals($signals);
-
-                $this->log('debug', "Executing route action {$actionId} for route {$route}");
-
-                // Execute the route-level action with context
-                $routeHandler($context);
-
-                $this->log('debug', "Route action {$actionId} completed successfully");
-
-                $response->status(200);
-                $response->end();
-
-                return;
-            } catch (\Exception $e) {
-                $this->log('error', "Route action {$actionId} failed: " . $e->getMessage());
-                $response->status(500);
-                $response->end('Action failed');
-
-                return;
-            }
-        }
 
         try {
             // Inject signals into context
@@ -720,9 +862,12 @@ class Via {
         $contextId = $request->rawContent();
 
         if (isset($this->contexts[$contextId])) {
-            unset($this->contexts[$contextId], $this->clients[$contextId]);
+            // Don't immediately delete context - delay to allow page navigation
+            // If SSE reconnects within timeout, context survives; otherwise it's cleaned up
+            // This prevents reload loops during navigation
+            $this->scheduleContextCleanup($contextId);
 
-            $this->log('debug', "Context closed: {$contextId}");
+            $this->log('debug', "Context cleanup scheduled: {$contextId}");
         }
 
         $response->status(200);
@@ -816,10 +961,10 @@ class Via {
         // e.g., "embed" from route-scoped or "greeting_TAB123" from tab-scoped
         foreach ($context->getSignals() as $fullId => $signal) {
             // Get the base name (before underscore for tab-scoped signals)
-            $baseName = strpos($fullId, '_') !== false 
+            $baseName = strpos($fullId, '_') !== false
                 ? substr($fullId, 0, strpos($fullId, '_'))
                 : $fullId;
-            
+
             // Support both {{ signalName }} for value and {{ signalName.id }} for ID
             $replacements['{{ ' . $baseName . ' }}'] = json_encode($signal->getValue());
             $replacements['{{ ' . $baseName . '.id }}'] = $signal->id();
