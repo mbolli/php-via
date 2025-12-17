@@ -2,23 +2,21 @@
 
 declare(strict_types=1);
 
-// Disable Xdebug for long-running SSE connections
-ini_set('xdebug.mode', 'off');
-
 require __DIR__ . '/../vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use Swoole\Timer;
 
 // Create configuration
 $config = new Config();
 $config->withHost('0.0.0.0')
-    ->withPort(3000)
+    ->withPort(3007)
     ->withDevMode(true)
     ->withLogLevel('debug')
-    ->withShellTemplate('templates/gameoflife.html')
+    ->withShellTemplate(dirname(__DIR__) . '/templates/gameoflife.html')
     // Note: View caching is automatic! Route scope (only route actions, no signals)
     // means the framework will cache the view automatically
 ;
@@ -69,9 +67,8 @@ class GameState {
         if (self::$timerId === null) {
             $tickCount = 0;
             self::$timerId = Timer::tick(200, function () use (&$tickCount): void {
-                if (self::$running) {
+                if (self::$running && count(self::$contexts) > 0) {
                     self::$board = GameOfLife::nextGeneration(self::$board);
-                    ++self::$generation;
 
                     // Auto-pause if all cells are dead
                     if (GameOfLife::isAllDead(self::$board)) {
@@ -79,7 +76,10 @@ class GameState {
                     }
 
                     // Update all connected clients
-                    self::$app->broadcast('/');
+                    self::$app->broadcast(Scope::ROUTE);
+
+                    // Only increment after successful broadcast
+                    ++self::$generation;
 
                     // Log memory every 50 ticks (~10 seconds)
                     ++$tickCount;
@@ -376,8 +376,8 @@ class GameOfLife {
 // Register the game page
 $app->page('/', function (Context $c) use ($app): void {
     // Check if we're in embed mode (must be done per-request for Swoole)
-    // Use routeScoped=true so this signal doesn't break ROUTE scope caching
-    $embed = $c->signal(($_GET['embed'] ?? '') === '1', 'embed', routeScoped: true);
+    // TAB-scoped signal (default) so each context gets its own embed state
+    $embed = $c->signal(($_GET['embed'] ?? '') === '1', 'embed');
 
     // Register this context for global updates
     $contextId = $c->getId();
@@ -400,28 +400,31 @@ $app->page('/', function (Context $c) use ($app): void {
         GameState::$sessionIds[$contextId] = GameState::$sessionCounter++;
     }
 
+    // Set ROUTE scope - shared state across all users on this route
+    $c->scope(Scope::ROUTE);
+
     // Note: No signals needed - we use global GameState and re-render on each broadcast
-    // This makes it ROUTE scope (one view for all users)
+    // ROUTE scope means one cached view for all users
 
     // Action: Toggle the running/paused state
-    $toggleRunning = $c->routeAction(function (Context $ctx): void {
+    $toggleRunning = $c->action(function (Context $ctx): void {
         GameState::$running = !GameState::$running;
 
         // Update all clients
-        GameState::$app->broadcast('/');
+        GameState::$app->broadcast(Scope::ROUTE);
     }, 'toggleRunning');
 
     // Action: Reset the board to empty state
-    $reset = $c->routeAction(function (Context $ctx): void {
+    $reset = $c->action(function (Context $ctx): void {
         GameState::$board = GameOfLife::emptyBoard();
         GameState::$generation = 0;
 
         // Update all clients
-        GameState::$app->broadcast('/');
+        GameState::$app->broadcast(Scope::ROUTE);
     }, 'reset');
 
     // Action: Handle cell clicks to draw patterns
-    $tapCell = $c->routeAction(function (Context $ctx): void {
+    $tapCell = $c->action(function (Context $ctx): void {
         $id = $_GET['id'] ?? null;
         // Get session ID from GameState using context ID (route actions are shared, so can't capture per-context data)
         $sessionId = GameState::$sessionIds[$ctx->getId()] ?? 0;
@@ -436,12 +439,12 @@ $app->page('/', function (Context $c) use ($app): void {
             }
 
             // Update all clients
-            GameState::$app->broadcast('/');
+            GameState::$app->broadcast(Scope::ROUTE);
         }
     }, 'tapCell');
 
     // Render the HTML view
-    $c->view(function () use ($toggleRunning, $reset, $tapCell, $app) {
+    $c->view(function (bool $isUpdate) use ($toggleRunning, $reset, $tapCell, $app) {
         // Read current state directly from GameState (not from local references)
         $tiles = GameState::renderBoard();
         $generation = GameState::$generation;
@@ -546,6 +549,6 @@ $app->page('/', function (Context $c) use ($app): void {
 });
 
 // Start the server
-echo "Starting Via server on http://0.0.0.0:3000\n";
+echo "Starting Via server on http://0.0.0.0:3007\n";
 echo "Press Ctrl+C to stop\n";
 $app->start();

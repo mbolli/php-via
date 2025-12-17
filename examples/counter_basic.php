@@ -10,7 +10,9 @@ use Mbolli\PhpVia\Via;
 
 // Create configuration
 $config = new Config();
-$config->withLogLevel('debug')
+$config->withHost('0.0.0.0')
+    ->withPort(3002)
+    ->withLogLevel('debug')
     ->withTemplateDir(__DIR__ . '/../templates')
 ;
 
@@ -58,6 +60,6 @@ $app->page('/', function (Context $c): void {
     });
 });
 
-echo "Starting Via server with Twig on http://0.0.0.0:3000\n";
+echo "Starting Via server with Twig on http://0.0.0.0:3002\n";
 echo "Press Ctrl+C to stop\n";
 $app->start();

@@ -9,8 +9,8 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
 $config = new Config();
-$config = $config->withHost('127.0.0.1');
-$config = $config->withPort(8080);
+$config = $config->withHost('0.0.0.0');
+$config = $config->withPort(3011);
 $config = $config->withLogLevel('info');
 
 $via = new Via($config);
@@ -432,9 +432,9 @@ $via->page('/items/{item_id}/specs', function (Context $c, string $item_id): voi
         ");
 });
 
-echo "🚀 Path Parameters demo running on http://127.0.0.1:8080\n";
-echo "   Manual access: http://127.0.0.1:8080/users/alice\n";
-echo "   Auto-injection: http://127.0.0.1:8080/profile/bob\n";
+echo "🚀 Path Parameters demo running on http://127.0.0.1:3011\n";
+echo "   Manual access: http://127.0.0.1:3011/users/alice\n";
+echo "   Auto-injection: http://127.0.0.1:3011/profile/bob\n";
 echo "\n";
 echo "💡 This demo shows BOTH ways to access path parameters:\n";
 echo "   1. Manual: \$c->getPathParam('name')\n";

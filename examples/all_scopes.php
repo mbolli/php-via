@@ -9,6 +9,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
 /**
@@ -25,7 +26,7 @@ use Mbolli\PhpVia\Via;
 // Create configuration
 $config = new Config();
 $config->withHost('0.0.0.0')
-    ->withPort(3000)
+    ->withPort(3012)
     ->withLogLevel('debug')
 ;
 
@@ -35,6 +36,7 @@ $app = new Via($config);
 // Add global styles
 $app->appendToHead(
     <<<'HTML'
+<title>All Scopes Demo</title>
 <style>
     body {
         font-family: system-ui, -apple-system, sans-serif;
@@ -86,7 +88,10 @@ class PageState {
 // GLOBAL SCOPE COMPONENT - System Status Banner
 // =============================================================================
 $globalStatusBanner = function (Context $c) use ($app): void {
-    $updateStatus = $c->globalAction(function (Context $ctx) use ($app): void {
+    // Set GLOBAL scope - shared across ALL pages and users
+    $c->scope(Scope::GLOBAL);
+
+    $updateStatus = $c->action(function (Context $ctx) use ($app): void {
         $statuses = ['All systems operational', 'Maintenance mode', 'High load detected', 'Everything is awesome!'];
         $newStatus = $statuses[array_rand($statuses)];
         $app->setGlobalState('systemStatus', $newStatus);
@@ -95,7 +100,7 @@ $globalStatusBanner = function (Context $c) use ($app): void {
         $app->setGlobalState('totalVisitors', $visitors + 1);
 
         $app->log('info', "Global status updated: {$newStatus}");
-        $app->broadcastGlobal(); // Updates EVERY page, EVERY user
+        $app->broadcast(Scope::GLOBAL); // Updates EVERY page, EVERY user
     }, 'updateStatus');
 
     // GLOBAL scope: No signals, no route actions, ONLY global actions
@@ -134,16 +139,19 @@ $routeScopeCounter = function (Context $c) use ($app): void {
     // Component inherits parent page's route, so $c->getRoute() returns the correct route
     $route = $c->getRoute();
 
-    $increment = $c->routeAction(function (Context $ctx) use ($app, $route): void {
+    // Set ROUTE scope - shared across all users on THIS route only
+    $c->scope(Scope::ROUTE);
+
+    $increment = $c->action(function (Context $ctx) use ($app, $route): void {
         ++PageState::$counters[$route];
         $app->log('info', "Counter for {$route} incremented to: " . PageState::$counters[$route]);
-        $app->broadcast($route); // Updates all users on THIS route only
+        $app->broadcast(Scope::ROUTE); // Updates all users on THIS route only
     }, 'increment_' . str_replace('/', '_', $route));
 
-    $reset = $c->routeAction(function (Context $ctx) use ($app, $route): void {
+    $reset = $c->action(function (Context $ctx) use ($app, $route): void {
         PageState::$counters[$route] = 0;
         $app->log('info', "Counter for {$route} reset to 0");
-        $app->broadcast($route);
+        $app->broadcast(Scope::ROUTE);
     }, 'reset_' . str_replace('/', '_', $route));
 
     // ROUTE scope: No signals, ONLY route actions
@@ -351,12 +359,12 @@ $createPage('📄 Page B', '/page-b', <<<'HTML'
     <p>Try updating the global status from here - it will update on ALL pages!</p>
 HTML);
 
-echo "Starting All Scopes Demo on http://0.0.0.0:3000\n";
+echo "Starting All Scopes Demo on http://0.0.0.0:3012\n";
 echo "Open multiple tabs and pages to see how each scope behaves!\n";
 echo "\n";
 echo "Pages available:\n";
-echo "  - http://0.0.0.0:3000/       (Home)\n";
-echo "  - http://0.0.0.0:3000/page-a (Page A)\n";
-echo "  - http://0.0.0.0:3000/page-b (Page B)\n";
+echo "  - http://0.0.0.0:3012/       (Home)\n";
+echo "  - http://0.0.0.0:3012/page-a (Page A)\n";
+echo "  - http://0.0.0.0:3012/page-b (Page B)\n";
 echo "\n";
 $app->start();

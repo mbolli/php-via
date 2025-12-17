@@ -6,28 +6,30 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use Swoole\Timer;
 
 $config = new Config();
 $config->withHost('0.0.0.0')
-    ->withPort(3000)
+    ->withPort(3010)
     ->withDevMode(true)
     ->withLogLevel('info')
 ;
 
 $app = new Via($config);
 
-// Global timer - render once and broadcast to all clients
+// Global interval - broadcast once every 2 seconds to all clients
 static $timerStarted = false;
 if (!$timerStarted) {
     Timer::tick(2000, function () use ($app): void {
-        $app->broadcast('/');
+        $app->broadcast(Scope::ROUTE);
     });
     $timerStarted = true;
 }
 
 $app->page('/', function (Context $ctx) use ($app): void {
+    $ctx->scope(Scope::ROUTE);
     $ctx->view(function () use ($app) {
         $clients = $app->getClients();
         $stats = $app->getRenderStats();
@@ -86,7 +88,7 @@ $app->page('/', function (Context $ctx) use ($app): void {
     });
 });
 
-echo "Starting profiling demo on http://localhost:3002\n";
-echo "Stats JSON endpoint: http://localhost:3002/_stats\n";
+echo "Starting profiling demo on http://localhost:3010\n";
+echo "Stats JSON endpoint: http://localhost:3010/_stats\n";
 
 $app->start();

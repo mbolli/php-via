@@ -140,6 +140,9 @@
 
 {% block content %}
     <div id="todo-content">
+        {% if backLink is defined %}
+            <a href="{{ backLink }}" style="display: inline-block; margin-bottom: 1rem; color: #0066cc; text-decoration: none;">← Back to Examples</a>
+        {% endif %}
         <h1>⚡ Todo List</h1>
 
         <div class="add-todo">

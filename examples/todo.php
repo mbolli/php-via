@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
 // Global shared state
@@ -22,7 +23,7 @@ class TodoState {
 // Create configuration
 $config = new Config();
 $config->withHost('0.0.0.0')
-    ->withPort(3000)
+    ->withPort(3004)
     ->withTemplateDir(__DIR__ . '/../templates')
     ->withLogLevel('debug')
 ;
@@ -31,12 +32,13 @@ $config->withHost('0.0.0.0')
 $app = new Via($config);
 
 $app->page('/', function (Context $c) use ($app): void {
-    // Note: This page uses Tab scope (not cached) because of the $newTodo signal
-    // needed for input field binding. Even though the todo list is global state,
-    // each user needs their own input signal value.
+    // Set ROUTE scope for shared todo list actions
+    $c->scope(Scope::ROUTE);
+
+    // Note: $newTodo is a TAB-scoped signal (default) because each user needs their own input value
     $newTodo = $c->signal('', 'newTodo');
 
-    $addTodo = $c->routeAction(function (Context $ctx) use ($app): void {
+    $addTodo = $c->action(function (Context $ctx) use ($app): void {
         // Get the signal from the context (each context has its own signal with injected value)
         $newTodoSignal = $ctx->getSignal('newTodo');
         $task = $newTodoSignal ? mb_trim($newTodoSignal->string()) : '';
@@ -44,20 +46,20 @@ $app->page('/', function (Context $c) use ($app): void {
             $app->log('info', "Adding new todo item: {$task}");
             TodoState::$todos[] = ['id' => TodoState::$nextId++, 'text' => $task, 'completed' => false];
             $newTodoSignal?->setValue(''); // Clear the signal value after processing
-            $app->broadcast('/');
+            $app->broadcast(Scope::ROUTE);
         } else {
             $app->log('debug', 'Attempted to add empty todo item, ignoring.' . $newTodoSignal?->id());
         }
     }, 'addTodo');
 
-    $deleteTodo = $c->routeAction(function (Context $ctx) use ($app): void {
+    $deleteTodo = $c->action(function (Context $ctx) use ($app): void {
         $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
         TodoState::$todos = array_filter(TodoState::$todos, fn (array $todo) => $todo['id'] !== $id);
         TodoState::$todos = array_values(TodoState::$todos); // Re-index array
-        $app->broadcast('/');
+        $app->broadcast(Scope::ROUTE);
     }, 'deleteTodo');
 
-    $toggleTodo = $c->routeAction(function (Context $ctx) use ($app): void {
+    $toggleTodo = $c->action(function (Context $ctx) use ($app): void {
         $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
         foreach (TodoState::$todos as $key => $todo) {
             if ($todo['id'] === $id) {
@@ -66,7 +68,7 @@ $app->page('/', function (Context $c) use ($app): void {
                 break;
             }
         }
-        $app->broadcast('/');
+        $app->broadcast(Scope::ROUTE);
     }, 'toggleTodo');
 
     $c->view(function (bool $isUpdate = false) use ($c, $newTodo, $addTodo, $deleteTodo, $toggleTodo): string {
@@ -82,5 +84,5 @@ $app->page('/', function (Context $c) use ($app): void {
     });
 });
 
-echo "Starting Via Todo List on http://0.0.0.0:3000\n";
+echo "Starting Via Todo List on http://0.0.0.0:3004\n";
 $app->start();

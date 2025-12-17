@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
 /**
@@ -24,7 +25,7 @@ use Mbolli\PhpVia\Via;
 // Create configuration
 $config = new Config();
 $config->withHost('0.0.0.0')
-    ->withPort(3000)
+    ->withPort(3008)
     ->withLogLevel('debug')
 ;
 
@@ -33,20 +34,23 @@ $app = new Via($config);
 
 // Shared notification component (uses GLOBAL scope)
 $notificationBanner = function (Context $c) use ($app): void {
+    // Set GLOBAL scope - shared across ALL routes and users
+    $c->scope(Scope::GLOBAL);
+
     // This action is GLOBAL - callable from any route, affects all routes
-    $addNotification = $c->globalAction(function (Context $ctx) use ($app): void {
+    $addNotification = $c->action(function (Context $ctx) use ($app): void {
         $count = $app->globalState('notificationCount', 0);
         $app->setGlobalState('notificationCount', $count + 1);
         $app->log('info', 'Notification added! Total: ' . ($count + 1));
 
         // Broadcast to ALL routes
-        $app->broadcastGlobal();
+        $app->broadcast(Scope::GLOBAL);
     }, 'addNotification');
 
-    $clearNotifications = $c->globalAction(function (Context $ctx) use ($app): void {
+    $clearNotifications = $c->action(function (Context $ctx) use ($app): void {
         $app->setGlobalState('notificationCount', 0);
         $app->log('info', 'Notifications cleared');
-        $app->broadcastGlobal();
+        $app->broadcast(Scope::GLOBAL);
     }, 'clearNotifications');
 
     // Note: No signals, ONLY global actions = GLOBAL scope
@@ -218,6 +222,6 @@ $app->page('/settings', function (Context $c) use ($app, $notificationBanner): v
     HTML);
 });
 
-echo "Starting Global Scope Demo on http://0.0.0.0:3000\n";
+echo "Starting Global Scope Demo on http://0.0.0.0:3008\n";
 echo "Try opening multiple pages in different tabs and clicking 'Add Notification'!\n";
 $app->start();

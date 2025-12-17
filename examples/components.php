@@ -11,7 +11,9 @@ use Mbolli\PhpVia\Via;
 
 // Create configuration
 $config = new Config();
-$config->withTemplateDir(__DIR__ . '/../templates')
+$config->withHost('0.0.0.0')
+    ->withPort(3005)
+    ->withTemplateDir(__DIR__ . '/../templates')
     ->withLogLevel('debug')
 ;
 
@@ -58,6 +60,6 @@ $app->page('/', function (Context $c) use ($counterComponent): void {
 });
 
 // Start the server
-echo "Starting Via server on http://0.0.0.0:3000\n";
+echo "Starting Via server on http://0.0.0.0:3005\n";
 echo "Press Ctrl+C to stop\n";
 $app->start();
