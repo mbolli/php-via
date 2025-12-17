@@ -593,6 +593,27 @@ class Via {
         // Populate superglobals for compatibility
         $_GET = $request->get ?? [];
         $_POST = $request->post ?? [];
+        $_FILES = $request->files ?? [];
+
+        // Handle HEAD requests without logging or rendering
+        if ($method === 'HEAD') {
+            // Check if route exists
+            foreach ($this->routes as $route => $handler) {
+                $params = [];
+                if ($this->matchRoute($route, $path, $params)) {
+                    $response->status(200);
+                    $response->header('Content-Type', 'text/html; charset=utf-8');
+                    $response->end();
+
+                    return;
+                }
+            }
+            // Route not found
+            $response->status(404);
+            $response->end();
+
+            return;
+        }
 
         $this->log('debug', "Request: {$method} {$path}");
 
