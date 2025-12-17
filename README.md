@@ -1,6 +1,6 @@
 # 🚀 php-via
 
-![php-via logo](https://raw.githubusercontent.com/mbolli/php-via/main/logo.png)
+![php-via logo](https://raw.githubusercontent.com/mbolli/php-via/master/logo.png)
 
 Real-time engine for building reactive web applications in PHP with Swoole.
 
