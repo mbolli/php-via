@@ -66,7 +66,7 @@ class Via {
         $this->server = new Server($this->config->getHost(), $this->config->getPort(), SWOOLE_BASE);
 
         // Configure Swoole for SSE streaming
-        $this->server->set([
+        $defaultSettings = [
             'open_http2_protocol' => false,
             'http_compression' => false,
             'buffer_output_size' => 0,   // NO OUTPUT BUFFERING
@@ -74,7 +74,8 @@ class Via {
             'max_coroutine' => 100000,
             'worker_num' => 1,   // Single worker = shared state (clients, render stats)
             'send_yield' => true,
-        ]);
+        ];
+        $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings()));
 
         // Initialize Twig with appropriate loader
         if ($this->config->getTemplateDir()) {
