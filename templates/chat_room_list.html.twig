@@ -1,0 +1,74 @@
+{% extends "base.html.twig" %}
+
+{% block title %}Chat Rooms{% endblock %}
+
+{% block styles %}
+        .rooms {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 600px;
+        }
+        
+        h1 {
+            margin: 0 0 20px 0;
+            color: #333;
+        }
+        
+        .room-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .room-list li {
+            margin: 0;
+            padding: 0;
+        }
+        
+        .room-list a {
+            display: block;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            color: #0066cc;
+            text-decoration: none;
+            border-radius: 6px;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .room-list a:hover {
+            background: #e9ecef;
+            border-color: #0066cc;
+            transform: translateX(5px);
+        }
+        
+        .description {
+            color: #666;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e5e5;
+            font-size: 14px;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="rooms">
+        <h1>Chat Rooms</h1>
+        <ul class="room-list">
+            {% for room in rooms %}
+            <li>
+                <a href="/room/{{ room.id }}">{{ room.name }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+        
+        <div class="description">
+            <strong>Multi-User Chat Demo</strong><br>
+            Open multiple browser tabs or windows to test real-time chat with different users.
+            Each room maintains separate message history and user lists.
+        </div>
+    </div>
+{% endblock %}

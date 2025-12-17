@@ -1,0 +1,328 @@
+{% extends "base.html.twig" %}
+
+{% block title %}Chat: {{ roomName }}{% endblock %}
+
+{% block styles %}
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 24px 28px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
+            color: white;
+        }
+        
+        h1 {
+            margin: 0 0 12px 0;
+            color: white;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        .user-info {
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .user-info strong {
+            color: #ffd700;
+            font-weight: 600;
+        }
+        
+        .user-info a {
+            color: white;
+            text-decoration: none;
+            padding: 4px 12px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .user-info a:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .users {
+            margin-top: 16px;
+        }
+        
+        .users h3 {
+            margin: 0 0 12px 0;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .users > div {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .user-item {
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            font-size: 13px;
+            color: white;
+            transition: background 0.2s;
+        }
+        
+        .user-item.you {
+            background: rgba(255, 215, 0, 0.3);
+            font-weight: 600;
+            color: #ffd700;
+        }
+        
+        .chat {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            max-width: 900px;
+        }
+        
+        .messages {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px;
+            height: 500px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+            background: #f9fafb;
+        }
+        
+        .message {
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            max-width: 75%;
+        }
+        
+        .message.mine {
+            margin-left: auto;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-left: none;
+            border-right: 3px solid #ffd700;
+        }
+        
+        .message.mine .username {
+            color: #ffd700;
+        }
+        
+        .message.mine .timestamp {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .message.mine .message-text {
+            color: white;
+        }
+        
+        .message:last-child {
+            margin-bottom: 0;
+        }
+        
+        .message-header {
+            display: flex;
+            gap: 10px;
+            align-items: baseline;
+            margin-bottom: 6px;
+        }
+        
+        .username {
+            font-weight: 600;
+            color: #667eea;
+            font-size: 14px;
+        }
+        
+        .timestamp {
+            font-size: 0.75em;
+            color: #9ca3af;
+        }
+        
+        .message-text {
+            color: #374151;
+            line-height: 1.5;
+            font-size: 15px;
+        }
+        
+        .typing {
+            font-style: italic;
+            color: #667eea;
+            min-height: 22px;
+            margin-bottom: 12px;
+            font-size: 0.9em;
+            padding-left: 4px;
+        }
+        
+        .input-area {
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 15px;
+            transition: transform 0.1s, box-shadow 0.2s;
+            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+        }
+        
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .empty-messages {
+            color: #9ca3af;
+            text-align: center;
+            padding: 60px 20px;
+            font-style: italic;
+            font-size: 15px;
+        }
+        
+        /* Custom scrollbar */
+        .messages::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        .messages::-webkit-scrollbar-track {
+            background: #f3f4f6;
+            border-radius: 8px;
+        }
+        
+        .messages::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 8px;
+        }
+        
+        .messages::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .user-info {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            
+            .chat {
+                padding: 16px;
+            }
+            
+            .messages {
+                height: 350px;
+                padding: 16px;
+            }
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="header">
+        <h1>💬 Chat Room: {{ roomName }}</h1>
+        <div class="user-info">
+            You are: <strong>{{ username }}</strong> | <a href="/">← Back to room list</a>
+        </div>
+        <div class="users">
+            <h3>👥 Active Users</h3>
+            <div>
+                {% for user in users %}
+                    <div class="user-item {% if user == username %}you{% endif %}">
+                        {{ user }}{% if user == username %} (you){% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="chat">
+        <div class="main">
+            <div class="messages" id="messages">
+                {% if messages is empty %}
+                    <div class="empty-messages">
+                        No messages yet. Be the first to say something!
+                    </div>
+                {% else %}
+                    {% for msg in messages %}
+                        <div class="message {% if msg.username == username %}mine{% endif %}">
+                            <div class="message-header">
+                                <span class="username">{{ msg.username }}</span>
+                                <span class="timestamp">{{ msg.timestamp }}</span>
+                            </div>
+                            <div class="message-text">{{ msg.message }}</div>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+            
+            <div class="typing" data-on-interval__duration.5s__viewtransition="$['{{ typingIndicatorId }}'] = ''" data-text="$['{{ typingIndicatorId }}']"></div>
+            
+            <div class="input-area">
+                <input 
+                    type="text" 
+                    placeholder="Type a message..."
+                    data-bind="{{ messageInputId }}"
+                    data-on:keyup__throttle.500ms="evt.key != 'Enter' && @get('{{ updateTypingUrl }}')"
+                    data-on:keydown="evt.key === 'Enter' && @get('{{ sendMessageUrl }}')"
+                    autofocus
+                >
+                <button data-on:click="@get('{{ sendMessageUrl }}')">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Auto-scroll messages to bottom on new messages
+        const messagesDiv = document.getElementById('messages');
+        const observer = new MutationObserver(() => {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+        observer.observe(messagesDiv, { childList: true, subtree: true });
+        
+        // Initial scroll to bottom
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    </script>
+{% endblock %}
