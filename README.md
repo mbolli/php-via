@@ -1,8 +1,10 @@
 # 🚀 php-via
 
+![php-via logo](https://raw.githubusercontent.com/mbolli/php-via/main/logo.png)
+
 Real-time engine for building reactive web applications in PHP with Swoole.
 
-Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using Swoole's async capabilities. [Datastar](https://data-star.dev) acts as the glue between server and client, handling DOM morphing and SSE communication.
+Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using Swoole's async capabilities. [Datastar](https://data-star.dev) (RC.7) acts as the glue between server and client, handling DOM morphing and SSE communication.
 
 ## Why php-via?
 
@@ -105,7 +107,6 @@ A Context represents a living connection between the server and browser. Each pa
 
 ```php
 $app->page('/dashboard', function (Context $c) {
-    // $c is the Context instance
     // Define signals, actions, and views here
 });
 ```
@@ -115,25 +116,14 @@ $app->page('/dashboard', function (Context $c) {
 Routes can include dynamic path parameters using curly braces. Parameters are automatically injected into your callable by matching parameter names:
 
 ```php
-// Automatic parameter injection
-$app->page('/users/{username}', function ($c, string $username) {
-    // $username is automatically populated from the URL!
-    // No need to call $c->getPathParam('username')
-});
-
-// Multiple parameters - matched by name, not order
-$app->page('/blog/{year}/{month}/{slug}', function ($c, string $year, string $month, string $slug) {
+// Automatic parameter injection - matched by name, not order
+$app->page('/blog/{year}/{month}/{slug}', function (Context $c, string $year, string $month, string $slug) {
     // All parameters are automatically injected
     echo "Blog post: $year/$month/$slug";
 });
 
-// Parameters with static segments
-$app->page('/products/{product_id}/reviews', function ($c, string $product_id) {
-    // $product_id is auto-injected
-});
-
 // Alternative: Manual parameter retrieval
-$app->page('/users/{username}', function ($c) {
+$app->page('/users/{username}', function (Context $c) {
     $username = $c->getPathParam('username');
     // Both methods work - choose your preference
 });
@@ -180,7 +170,7 @@ $saveAction = $c->action(function () use ($c): void {
 
 ### Views
 
-Views can use Twig templates (inline or from files) or plain PHP functions.
+Views can use Twig templates (inline or from files) or plain PHP functions. php-via automatically registers a `@via` Twig namespace for accessing templates.
 
 **Inline Twig:**
 ```php
@@ -197,7 +187,7 @@ php-via uses Datastar attributes for reactivity:
 
 ```twig
 {# Two-way data binding with signals - use the bind() Twig function #}
-<input type="text" {{ bind(nameSignal) }}>
+<input type="text" data-bind="{{ nameSignal.id() }}">
 
 {# Display signal value (note the $ sign to access the signal) #}
 <span data-text="${{ nameSignal.id() }}"></span>
@@ -206,7 +196,7 @@ php-via uses Datastar attributes for reactivity:
 <button data-on:click="@get('{{ saveAction.url() }}')">Save</button>
 
 {# Actions with specific keys #}
-<input data-on:keydown.enter="@get('{{ submitAction.url() }}')">
+<input data-on:keydown="evt.key == 'Enter' && @get('{{ submitAction.url() }}')">
 
 {# Change events #}
 <select data-on:change="@get('{{ updateAction.url() }}')">...</select>
@@ -229,6 +219,11 @@ php-via automatically detects the **scope** of each page and optimizes rendering
 - State is shared across all users/tabs **on the same route**
 - View is rendered once per route and cached
 - Example: Game of Life with global board state
+
+**Custom Scope** (domain-specific state):
+- Define custom scopes for specific resources (e.g., `stock:NFLX`, `chat:room123`)
+- State is shared across all users/tabs accessing the same resource
+- Example: Stock ticker showing real-time data for a specific stock symbol
 
 **Tab Scope** (per-user state):
 - Pages using signals (personal state) or mixing scopes
@@ -347,6 +342,11 @@ Check the `examples/` directory for more examples:
 - `components.php` - Reusable component patterns
 - `todo.php` - Todo list (multiplayer)
 - `game_of_life.php` - Conway's Game of Life with real-time updates (multiplayer)
+- `global_notifications.php` - Global scope notification system
+- `stock_ticker.php` - Real-time stock ticker with custom scopes and Apache ECharts
+- `chat_room.php` - Multi-room chat application
+- `all_scopes.php` - Demonstrates all scope types in one example
+- `profile_demo.php` - User profile with tab-scoped state
 
 ## Credits
 
@@ -389,10 +389,14 @@ composer cs-fix         # Fix code style
 - [x] Reactive signals
 - [x] Action triggers
 - [x] SSE support
-- [ ] Component system improvements
+- [x] Path parameters with auto-injection
+- [x] Automatic scope detection and caching
+- [x] Custom scopes (resource-specific state)
+- [x] Component system
+- [x] Testing suite (46+ comprehensive tests)
+- [x] HEAD method support
 - [ ] Session management
-- [ ] More examples
-- [ ] Testing suite
+- [ ] More examples and documentation
 - [ ] Documentation site
 
 ## Stay Reactive! ⚡
