@@ -87,6 +87,7 @@ class Via {
         // Initialize Twig with appropriate loader
         if ($this->config->getTemplateDir()) {
             $loader = new FilesystemLoader($this->config->getTemplateDir());
+            $loader->addPath(\dirname(__DIR__), 'via');
         } else {
             $loader = new ArrayLoader([]);
         }
@@ -130,6 +131,7 @@ class Via {
         // Update Twig loader if template directory is set
         if ($this->config->getTemplateDir()) {
             $loader = new FilesystemLoader($this->config->getTemplateDir());
+            $loader->addPath(\dirname(__DIR__), 'via');
             $this->twig->setLoader($loader);
         }
     }
