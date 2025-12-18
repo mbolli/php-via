@@ -31,7 +31,7 @@ use Mbolli\PhpVia\Via;
 
 // Global shared state for chat rooms
 class ChatState {
-    /** @var array<string, array{name: string, messages: array}> */
+    /** @var array<string, array{name: string, messages: array<array{user: string, text: string, time: int, color: string}>}> */
     public static array $rooms = [
         'lobby' => [
             'name' => 'Lobby',
@@ -80,7 +80,7 @@ $app->page('/', function (Context $c): void {
         error_log('ROOT: Generated username: ' . $usernameSignal->getValue());
     }
 
-    $rooms = array_map(fn ($roomId) => [
+    $rooms = array_map(fn (string $roomId) => [
         'id' => $roomId,
         'name' => ChatState::$rooms[$roomId]['name'],
     ], array_keys(ChatState::$rooms));

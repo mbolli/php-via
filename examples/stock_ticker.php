@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * Real-time Stock Ticker Demo.
  *
@@ -29,6 +31,7 @@ $app = new Via($config);
 
 // Stock data management
 class StockData {
+    /** @var array<string, array{name: string, price: float, history: array<array{time: int, price: float}>, color: string}> */
     private static array $stocks = [
         'AAPL' => ['name' => 'Apple Inc.', 'price' => 185.92, 'history' => [], 'color' => '#555555'],
         'GOOGL' => ['name' => 'Alphabet Inc.', 'price' => 142.58, 'history' => [], 'color' => '#4285F4'],
@@ -61,10 +64,16 @@ class StockData {
         self::$initialized = true;
     }
 
+    /**
+     * @return array<string, array{name: string, price: float, history: array<array{time: int, price: float}>, color: string}>
+     */
     public static function getAll(): array {
         return self::$stocks;
     }
 
+    /**
+     * @return null|array{name: string, price: float, history: array<array{time: int, price: float}>, color: string}
+     */
     public static function get(string $symbol): ?array {
         return self::$stocks[$symbol] ?? null;
     }
@@ -84,6 +93,9 @@ class StockData {
         }
     }
 
+    /**
+     * @return array<array{time: int, price: float}>
+     */
     public static function getPriceHistory(string $symbol): array {
         return self::$stocks[$symbol]['history'] ?? [];
     }
@@ -148,8 +160,8 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol) use ($app): 
 
         // Prepare chart data
         $history = StockData::getPriceHistory($symbol);
-        $times = array_map(fn ($h) => date('H:i:s', $h['time']), $history);
-        $prices = array_map(fn ($h) => $h['price'], $history);
+        $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
+        $prices = array_map(fn (array $h) => $h['price'], $history);
 
         $priceSignal = $c->signal(number_format($price, 2), 'price');
         $timesSignal = $c->signal($times, 'times');

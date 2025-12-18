@@ -21,26 +21,26 @@ class Scope {
      * Built-in scope: Tab-scoped (default).
      * Each browser tab/context has isolated state.
      */
-    public const TAB = 'tab';
+    public const string TAB = 'tab';
 
     /**
      * Built-in scope: Route-scoped.
      * State is shared across all users on the same route.
      * View is cached and reused.
      */
-    public const ROUTE = 'route';
+    public const string ROUTE = 'route';
 
     /**
      * Built-in scope: Session-scoped.
      * State is shared across all tabs in the same browser session.
      */
-    public const SESSION = 'session';
+    public const string SESSION = 'session';
 
     /**
      * Built-in scope: Global-scoped.
      * State is shared across ALL routes and users.
      */
-    public const GLOBAL = 'global';
+    public const string GLOBAL = 'global';
 
     /**
      * Parse a scope string into its components.

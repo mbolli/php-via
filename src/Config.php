@@ -14,6 +14,8 @@ class Config {
     private string $logLevel = 'info';
     private ?string $templateDir = null;
     private ?string $shellTemplate = null;
+
+    /** @var array<string, mixed> */
     private array $swooleSettings = [];
 
     public function withHost(string $host): self {
@@ -52,6 +54,9 @@ class Config {
         return $this;
     }
 
+    /**
+     * @param array<string, mixed> $settings
+     */
     public function withSwooleSettings(array $settings): self {
         $this->swooleSettings = array_merge($this->swooleSettings, $settings);
 
@@ -82,6 +87,9 @@ class Config {
         return $this->shellTemplate;
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function getSwooleSettings(): array {
         return $this->swooleSettings;
     }
