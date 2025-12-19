@@ -19,14 +19,13 @@ $config->withHost('0.0.0.0')
 
 $app = new Via($config);
 
-// Global interval - broadcast once every 2 seconds to all clients
-static $timerStarted = false;
-if (!$timerStarted) {
+// Start broadcast timer when server starts (not when clients connect)
+$app->onStart(function () use ($app): void {
+    echo "Starting broadcast timer...\n";
     Timer::tick(2000, function () use ($app): void {
         $app->broadcast(Scope::ROUTE);
     });
-    $timerStarted = true;
-}
+});
 
 $app->page('/', function (Context $ctx) use ($app): void {
     $ctx->scope(Scope::ROUTE);
