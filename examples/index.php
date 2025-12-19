@@ -7,19 +7,24 @@ use Swoole\Http\Server;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+// Configuration: Set USE_SUBPATHS=true when running behind a reverse proxy (production)
+// Set USE_SUBPATHS=false for local development with separate ports
+$useSubpaths = getenv('USE_SUBPATHS') === '1';
+$baseUrl = $useSubpaths ? '' : 'http://localhost';
+
 $examples = [
-    ['title' => '⚡ Counter', 'port' => 3001, 'difficulty' => 'Beginner', 'file' => 'counter.php', 'rendering' => 'html', 'description' => 'Basic counter with increment button. Uses signals with data binding and actions. Shows SSE with debug sidebar.'],
-    ['title' => '🔢 Counter Basic', 'port' => 3002, 'difficulty' => 'Beginner', 'file' => 'counter_basic.php', 'rendering' => 'twig', 'description' => 'Simplest counter example. Demonstrates minimal Via setup with inline Twig rendering and reactive signals.'],
-    ['title' => '👋 Greeter', 'port' => 3003, 'difficulty' => 'Beginner', 'file' => 'greeter.php', 'rendering' => 'twig', 'description' => 'Interactive greeting buttons. Shows Twig templates, multiple actions, and signal updates with SSE.'],
-    ['title' => '✓ Todo List', 'port' => 3004, 'difficulty' => 'Intermediate', 'file' => 'todo.php', 'rendering' => 'twig', 'description' => 'Multiplayer todo app—one shared list for all clients! Uses route scope, CRUD operations, and mixed tab/route scoped signals.'],
-    ['title' => '🧩 Components', 'port' => 3005, 'difficulty' => 'Intermediate', 'file' => 'components.php', 'rendering' => 'twig', 'description' => 'Three independent counter components. Demonstrates component abstraction with namespaced signals and Twig partials.'],
-    ['title' => '💬 Chat Room', 'port' => 3006, 'difficulty' => 'Advanced', 'file' => 'chat_room.php', 'rendering' => 'twig', 'description' => 'Multi-room chat system. Features custom room scopes, session-based usernames, typing indicators, and real-time broadcasting.'],
-    ['title' => '🎮 Game of Life', 'port' => 3007, 'difficulty' => 'Advanced', 'file' => 'game_of_life.php', 'rendering' => 'html', 'description' => 'Multiplayer Conway\'s Game of Life—everyone sees and controls the same board! Uses route scope, timer-based updates, and view caching.'],
-    ['title' => '🔔 Global Notifications', 'port' => 3008, 'difficulty' => 'Advanced', 'file' => 'global_notifications.php', 'rendering' => 'html', 'description' => 'System-wide notification banner. Demonstrates global scope with globalState() and broadcasting across all routes.'],
-    ['title' => '📈 Stock Ticker', 'port' => 3009, 'difficulty' => 'Advanced', 'file' => 'stock_ticker.php', 'rendering' => 'twig', 'description' => 'Multiplayer stock tracker—all clients see the same live prices! Uses route-scoped path parameters, ECharts visualization, and timer-based updates.'],
-    ['title' => '� Client Monitor', 'port' => 3010, 'difficulty' => 'Intermediate', 'file' => 'client_monitor.php', 'rendering' => 'html', 'description' => 'Live connected clients viewer with identicons and server stats. Shows route scope broadcasting, render statistics, and real-time client monitoring.'],
-    ['title' => '🛣️  Path Parameters', 'port' => 3011, 'difficulty' => 'Intermediate', 'file' => 'path_params.php', 'rendering' => 'html', 'description' => 'Dynamic routing showcase. Demonstrates path parameter extraction with multiple route patterns and inline styling.'],
-    ['title' => '📊 All Scopes Demo', 'port' => 3012, 'difficulty' => 'Intermediate', 'file' => 'all_scopes.php', 'rendering' => 'html', 'description' => 'Complete scope comparison. Shows global, route, and tab scopes working together in a single multi-page application.'],
+    ['title' => '⚡ Counter', 'port' => 3001, 'subpath' => '/counter', 'difficulty' => 'Beginner', 'file' => 'counter.php', 'rendering' => 'html', 'description' => 'Basic counter with increment button. Uses signals with data binding and actions. Shows SSE with debug sidebar.'],
+    ['title' => '🔢 Counter Basic', 'port' => 3002, 'subpath' => '/counter-basic', 'difficulty' => 'Beginner', 'file' => 'counter_basic.php', 'rendering' => 'twig', 'description' => 'Simplest counter example. Demonstrates minimal Via setup with inline Twig rendering and reactive signals.'],
+    ['title' => '👋 Greeter', 'port' => 3003, 'subpath' => '/greeter', 'difficulty' => 'Beginner', 'file' => 'greeter.php', 'rendering' => 'twig', 'description' => 'Interactive greeting buttons. Shows Twig templates, multiple actions, and signal updates with SSE.'],
+    ['title' => '✓ Todo List', 'port' => 3004, 'subpath' => '/todo', 'difficulty' => 'Intermediate', 'file' => 'todo.php', 'rendering' => 'twig', 'description' => 'Multiplayer todo app—one shared list for all clients! Uses route scope, CRUD operations, and mixed tab/route scoped signals.'],
+    ['title' => '🧩 Components', 'port' => 3005, 'subpath' => '/components', 'difficulty' => 'Intermediate', 'file' => 'components.php', 'rendering' => 'twig', 'description' => 'Three independent counter components. Demonstrates component abstraction with namespaced signals and Twig partials.'],
+    ['title' => '💬 Chat Room', 'port' => 3006, 'subpath' => '/chat', 'difficulty' => 'Advanced', 'file' => 'chat_room.php', 'rendering' => 'twig', 'description' => 'Multi-room chat system. Features custom room scopes, session-based usernames, typing indicators, and real-time broadcasting.'],
+    ['title' => '🎮 Game of Life', 'port' => 3007, 'subpath' => '/gameoflife', 'difficulty' => 'Advanced', 'file' => 'game_of_life.php', 'rendering' => 'html', 'description' => 'Multiplayer Conway\'s Game of Life—everyone sees and controls the same board! Uses route scope, timer-based updates, and view caching.'],
+    ['title' => '🔔 Global Notifications', 'port' => 3008, 'subpath' => '/notifications', 'difficulty' => 'Advanced', 'file' => 'global_notifications.php', 'rendering' => 'html', 'description' => 'System-wide notification banner. Demonstrates global scope with globalState() and broadcasting across all routes.'],
+    ['title' => '📈 Stock Ticker', 'port' => 3009, 'subpath' => '/stocks', 'difficulty' => 'Advanced', 'file' => 'stock_ticker.php', 'rendering' => 'twig', 'description' => 'Multiplayer stock tracker—all clients see the same live prices! Uses route-scoped path parameters, ECharts visualization, and timer-based updates.'],
+    ['title' => '� Client Monitor', 'port' => 3010, 'subpath' => '/monitor', 'difficulty' => 'Intermediate', 'file' => 'client_monitor.php', 'rendering' => 'html', 'description' => 'Live connected clients viewer with identicons and server stats. Shows route scope broadcasting, render statistics, and real-time client monitoring.'],
+    ['title' => '🛣️  Path Parameters', 'port' => 3011, 'subpath' => '/path-params', 'difficulty' => 'Intermediate', 'file' => 'path_params.php', 'rendering' => 'html', 'description' => 'Dynamic routing showcase. Demonstrates path parameter extraction with multiple route patterns and inline styling.'],
+    ['title' => '📊 All Scopes Demo', 'port' => 3012, 'subpath' => '/all-scopes', 'difficulty' => 'Intermediate', 'file' => 'all_scopes.php', 'rendering' => 'html', 'description' => 'Complete scope comparison. Shows global, route, and tab scopes working together in a single multi-page application.'],
 ];
 
 /**
@@ -27,7 +32,7 @@ $examples = [
  *
  * @param array<int, array<string, mixed>> $examples
  */
-function renderHtml(array $examples): string {
+function renderHtml(array $examples, bool $useSubpaths, string $baseUrl): string {
     ob_start();
     ?>
 <!DOCTYPE html>
@@ -96,7 +101,7 @@ function renderHtml(array $examples): string {
     <div class="container">
         <header>
             <h1>⚡ php-via Examples</h1>
-            <p>Live Interactive Examples - Each Running on Its Own Port</p>
+            <p><?php echo $useSubpaths ? 'Live Interactive Examples' : 'Live Interactive Examples - Each Running on Its Own Port'; ?></p>
         </header>
 
         <div class="info-box">
@@ -109,15 +114,18 @@ function renderHtml(array $examples): string {
         </div>
 
         <div class="examples-grid" id="examples-grid">
-            <?php foreach ($examples as $example) { ?>
+            <?php foreach ($examples as $example) {
+                $url = $useSubpaths ? $example['subpath'] : "{$baseUrl}:{$example['port']}";
+                $checkUrl = $useSubpaths ? $example['subpath'] : "http://localhost:{$example['port']}";
+                ?>
                 <div class="card example-card"
-                   onclick="window.open('http://localhost:<?php echo $example['port']; ?>', '_blank')"
+                   onclick="window.open('<?php echo $url; ?>', '_blank')"
                    data-signals="{'p<?php echo $example['port']; ?>': { 'online': false} }"
-                   data-on-interval__duration.10s.leading="fetch('http://localhost:<?php echo $example['port']; ?>', { method: 'HEAD', mode: 'no-cors' }).then(() => $p<?php echo $example['port']; ?>.online = true).catch(() => $p<?php echo $example['port']; ?>.online = false)">
+                   data-on-interval__duration.10s.leading="fetch('<?php echo $checkUrl; ?>', { method: 'HEAD', mode: 'no-cors' }).then(() => $p<?php echo $example['port']; ?>.online = true).catch(() => $p<?php echo $example['port']; ?>.online = false)">
                     <h3><?php echo htmlspecialchars($example['title']); ?></h3>
                     <div class="port">
                         <span class="status-indicator" data-class="{'online': $p<?php echo $example['port']; ?>.online, 'offline': !$p<?php echo $example['port']; ?>.online}"></span>
-                        Port <?php echo $example['port']; ?>
+                        <?php echo $useSubpaths ? htmlspecialchars($example['subpath']) : "Port {$example['port']}"; ?>
                     </div>
                     <div class="description"><?php echo htmlspecialchars($example['description']); ?></div>
                     <div class="meta">
@@ -147,7 +155,7 @@ function renderHtml(array $examples): string {
 
 $server = new Server('0.0.0.0', 3000);
 
-$server->on('request', function (Request $request, Response $response) use ($examples): void {
+$server->on('request', function (Request $request, Response $response) use ($examples, $useSubpaths, $baseUrl): void {
     // Serve via.css as a static file
     if ($request->server['request_uri'] === '/via.css') {
         $cssPath = __DIR__ . '/../templates/via.css';
@@ -180,7 +188,7 @@ $server->on('request', function (Request $request, Response $response) use ($exa
 
     // Serve the main HTML page
     $response->header('Content-Type', 'text/html; charset=utf-8');
-    $response->end(renderHtml($examples));
+    $response->end(renderHtml($examples, $useSubpaths, $baseUrl));
 });
 
 echo "🌟 Examples Landing Page Server started on http://0.0.0.0:3000\n";
