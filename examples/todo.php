@@ -35,20 +35,21 @@ $app->page('/', function (Context $c) use ($app): void {
     // Set ROUTE scope for shared todo list actions
     $c->scope(Scope::ROUTE);
 
-    // Note: $newTodo is a TAB-scoped signal (default) because each user needs their own input value
-    $newTodo = $c->signal('', 'newTodo');
+    // Note: $newTodo is a TAB-scoped signal because each user needs their own input value
+    // Must explicitly set to Scope::TAB since context defaults to ROUTE
+    $newTodo = $c->signal('', 'newTodo', Scope::TAB);
 
     $addTodo = $c->action(function (Context $ctx) use ($app): void {
-        // Get the signal from the context (each context has its own signal with injected value)
-        $newTodoSignal = $ctx->getSignal('newTodo');
-        $task = $newTodoSignal ? mb_trim($newTodoSignal->string()) : '';
+        // Get TAB-scoped signal from the executing context (not from definition context)
+        $newTodo = $ctx->getSignal('newTodo');
+        $task = $newTodo ? mb_trim($newTodo->string()) : '';
         if ($task !== '') {
             $app->log('info', "Adding new todo item: {$task}");
             TodoState::$todos[] = ['id' => TodoState::$nextId++, 'text' => $task, 'completed' => false];
-            $newTodoSignal?->setValue(''); // Clear the signal value after processing
+            $newTodo->setValue(''); // Clear the signal value after processing
             $app->broadcast(Scope::ROUTE);
         } else {
-            $app->log('debug', 'Attempted to add empty todo item, ignoring.' . $newTodoSignal?->id());
+            $app->log('debug', 'Attempted to add empty todo item, ignoring.' . $newTodo?->id());
         }
     }, 'addTodo');
 
@@ -71,17 +72,13 @@ $app->page('/', function (Context $c) use ($app): void {
         $app->broadcast(Scope::ROUTE);
     }, 'toggleTodo');
 
-    $c->view(function (bool $isUpdate = false) use ($c, $newTodo, $addTodo, $deleteTodo, $toggleTodo): string {
-        $block = $isUpdate ? 'content' : null;
-
-        return $c->render('todo.html.twig', [
-            'todos' => TodoState::$todos,
-            'newTodo' => $newTodo,
-            'addTodo' => $addTodo,
-            'deleteTodo' => $deleteTodo,
-            'toggleTodo' => $toggleTodo,
-        ], $block);
-    });
+    $c->view(fn (bool $isUpdate = false): string => $c->render('todo.html.twig', [
+        'todos' => TodoState::$todos,
+        'newTodo' => $newTodo,
+        'addTodo' => $addTodo,
+        'deleteTodo' => $deleteTodo,
+        'toggleTodo' => $toggleTodo,
+    ], $isUpdate ? 'content' : null), cacheUpdates: false); // Disable caching for updates to ensure fresh data
 });
 
 echo "Starting Via Todo List on http://0.0.0.0:3004\n";
