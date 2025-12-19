@@ -22,12 +22,14 @@ class Context {
 
     /** @var null|callable(bool): string */
     private $viewFn;
-    private bool $isInitialRender = true;
 
     /** @var array<string, callable> */
     private array $actionRegistry = [];
 
     private ?string $namespace = null;
+
+    /** Whether to cache update renders (default true for performance) */
+    private bool $cacheUpdates = true;
 
     /** @var array<string> Explicit scopes for this context (can have multiple) */
     private array $scopes = [];
@@ -271,11 +273,12 @@ class Context {
     /**
      * Define the UI rendered by this context.
      *
-     * @param callable(bool): string|string $view  Function that returns HTML content, or Twig template name
-     * @param array<string, mixed>          $data  Optional data for Twig templates
-     * @param null|string                   $block Optional block name to render only that block during updates
+     * @param callable(bool): string|string $view         Function that returns HTML content, or Twig template name
+     * @param array<string, mixed>          $data         Optional data for Twig templates
+     * @param null|string                   $block        Optional block name to render only that block during updates
+     * @param bool                          $cacheUpdates Whether to cache update renders (default true). Set to false if view returns different content on updates (e.g., empty string).
      */
-    public function view(callable|string $view, array $data = [], ?string $block = null): void {
+    public function view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void {
         if (\is_string($view)) {
             // Twig template name
             $this->viewFn = fn () => $this->render($view, $data, $block);
@@ -285,6 +288,24 @@ class Context {
         } else {
             throw new \RuntimeException('View must be a template name or callable');
         }
+
+        $this->cacheUpdates = $cacheUpdates;
+    }
+
+    /**
+     * Check if a view has been defined for this context.
+     */
+    public function hasView(): bool {
+        return $this->viewFn !== null;
+    }
+
+    /**
+     * Check if update renders should be cached.
+     *
+     * @internal
+     */
+    public function shouldCacheUpdates(): bool {
+        return $this->cacheUpdates;
     }
 
     /**
@@ -294,10 +315,7 @@ class Context {
      * @param null|string          $block Optional block name to render only that block
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
-        $data += [
-            'contextId' => $this->id,
-            'via_is_update' => !$this->isInitialRender,
-        ];
+        $data += ['contextId' => $this->id];
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
     }
@@ -310,10 +328,7 @@ class Context {
      */
     public function renderString(string $template, array $data = []): string {
         // Add context data automatically
-        $data += [
-            'contextId' => $this->id,
-            'via_is_update' => !$this->isInitialRender,
-        ];
+        $data += ['contextId' => $this->id];
 
         return $this->app->getViewRenderer()->renderString($template, $data);
     }
@@ -323,26 +338,24 @@ class Context {
      *
      * @internal Called by Via during SSE updates and initial page render
      *
+     * @param bool $isUpdate If true, this is an SSE update render (not initial page load)
+     *
      * Scope detection:
      * - Route scope: Render once, cache, share with all clients
      * - Tab scope: Render per context, no caching
      */
-    public function renderView(): string {
+    public function renderView(bool $isUpdate = false): string {
         if ($this->viewFn === null) {
             throw new \RuntimeException('View not defined');
         }
 
-        $result = $this->app->getViewRenderer()->renderView(
+        return $this->app->getViewRenderer()->renderView(
             $this->viewFn,
-            !$this->isInitialRender,
+            $isUpdate,
             $this->getPrimaryScope(),
             $this,
             $this->route
         );
-
-        $this->isInitialRender = false;
-
-        return $result;
     }
 
     /**

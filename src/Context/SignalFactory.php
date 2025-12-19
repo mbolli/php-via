@@ -42,6 +42,15 @@ class SignalFactory {
     public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true): Signal {
         $baseName = $name ?? 'signal';
 
+        // If no explicit scope provided, inherit from context's primary scope
+        if ($scope === null) {
+            $contextScope = $this->context->getPrimaryScope();
+            // Only inherit if context has a non-TAB scope
+            if ($contextScope !== Scope::TAB) {
+                $scope = $contextScope;
+            }
+        }
+
         // Resolve SESSION scope to actual session ID
         if ($scope === Scope::SESSION) {
             $sessionId = $this->context->getSessionId();
@@ -53,23 +62,24 @@ class SignalFactory {
 
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
         // For TAB signals, use context ID to make them unique per context
-        if ($scope !== null) {
+        if ($scope !== null && $scope !== Scope::TAB) {
             // Scoped signal: shared across contexts in this scope
             $signalId = $scope . ':' . $baseName;
-            $signalId = preg_replace('/[^a-zA-Z0-9_:]/', '_', $signalId);
+            // Sanitize signal ID - only alphanumeric and underscore allowed
+            $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
 
             // Check if signal already exists in this scope
             $existingSignal = $this->app->getScopedSignal($scope, $signalId);
             if ($existingSignal !== null) {
-                // Return existing signal (last-write-wins if value differs)
-                error_log("SIGNAL: Found existing signal {$signalId} in scope {$scope}, value: " . $existingSignal->getValue());
-
+                // Signal already exists in this scope - return it without modification
+                // This ensures all contexts viewing the same scope see the same signal state
+                // and prevents race conditions where each context overwrites the shared signal
+                // with potentially stale or inconsistent data during re-renders.
                 return $existingSignal;
             }
 
             // Create new scoped signal with Via reference for auto-broadcast
             $signal = new Signal($signalId, $initialValue, $scope, $autoBroadcast, $this->app);
-            error_log("SIGNAL: Created new signal {$signalId} in scope {$scope}, initial value: {$initialValue}");
 
             // Register in Via's scoped signals
             $this->app->registerScopedSignal($scope, $signal);
@@ -83,8 +93,15 @@ class SignalFactory {
             ? $namespace . '.' . $baseName
             : $baseName . '_' . $this->context->getId();
         $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
-        $signal = new Signal($signalId, $initialValue);
 
+        // Check if signal already exists
+        if (isset($this->signals[$signalId])) {
+            $this->signals[$signalId]->setValue($initialValue);
+
+            return $this->signals[$signalId];
+        }
+
+        $signal = new Signal($signalId, $initialValue);
         $this->signals[$signalId] = $signal;
 
         return $signal;

@@ -67,54 +67,56 @@ class GameState {
         if (self::$timerId === null) {
             $tickCount = 0;
             self::$timerId = Timer::tick(200, function () use (&$tickCount): void {
-                if (self::$running && count(self::$contexts) > 0) {
-                    self::$board = GameOfLife::nextGeneration(self::$board);
+                if (!self::$running || count(self::$contexts) <= 0) {
+                    return;
+                }
 
-                    // Auto-pause if all cells are dead
-                    if (GameOfLife::isAllDead(self::$board)) {
-                        self::$running = false;
-                    }
+                self::$board = GameOfLife::nextGeneration(self::$board);
 
-                    // Update all connected clients
-                    self::$app->broadcast(Scope::ROUTE);
+                // Auto-pause if all cells are dead
+                if (GameOfLife::isAllDead(self::$board)) {
+                    self::$running = false;
+                }
 
-                    // Only increment after successful broadcast
-                    ++self::$generation;
+                // Update all connected clients
+                self::$app->broadcast(Scope::ROUTE);
 
-                    // Log memory every 50 ticks (~10 seconds)
-                    ++$tickCount;
-                    if ($tickCount % 50 === 0) {
-                        $memMB = round(memory_get_usage(true) / 1024 / 1024, 2);
-                        $memActual = round(memory_get_usage(false) / 1024 / 1024, 2);
-                        $peakMB = round(memory_get_peak_usage(true) / 1024 / 1024, 2);
+                // Only increment after successful broadcast
+                ++self::$generation;
 
-                        // Count objects/arrays in memory
-                        $stats = [
-                            'gen' => self::$generation,
-                            'clients' => count(self::$contexts),
-                            'sessions' => count(self::$sessionIds),
-                            'mem_alloc' => $memMB,
-                            'mem_used' => $memActual,
-                            'mem_peak' => $peakMB,
-                        ];
-                        error_log(json_encode($stats));
-                        gc_collect_cycles(); // Force garbage collection
-                    }
+                // Log memory every 50 ticks (~10 seconds)
+                ++$tickCount;
+                if ($tickCount % 50 === 0) {
+                    $memMB = round(memory_get_usage(true) / 1024 / 1024, 2);
+                    $memActual = round(memory_get_usage(false) / 1024 / 1024, 2);
+                    $peakMB = round(memory_get_peak_usage(true) / 1024 / 1024, 2);
 
-                    // Aggressive GC every 500 generations (~100 seconds)
-                    if (self::$generation % 500 === 0) {
-                        gc_mem_caches();
+                    // Count objects/arrays in memory
+                    $stats = [
+                        'gen' => self::$generation,
+                        'clients' => count(self::$contexts),
+                        'sessions' => count(self::$sessionIds),
+                        'mem_alloc' => $memMB,
+                        'mem_used' => $memActual,
+                        'mem_peak' => $peakMB,
+                    ];
+                    error_log(json_encode($stats));
+                    gc_collect_cycles(); // Force garbage collection
+                }
 
-                        // Debug snapshot
-                        $snapshot = [
-                            'gen' => self::$generation,
-                            'contexts_count' => count(self::$contexts),
-                            'sessions_count' => count(self::$sessionIds),
-                            'board_size' => strlen(serialize(self::$board)),
-                            'memory_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
-                        ];
-                        error_log('SNAPSHOT: ' . json_encode($snapshot));
-                    }
+                // Aggressive GC every 500 generations (~100 seconds)
+                if (self::$generation % 500 === 0) {
+                    gc_mem_caches();
+
+                    // Debug snapshot
+                    $snapshot = [
+                        'gen' => self::$generation,
+                        'contexts_count' => count(self::$contexts),
+                        'sessions_count' => count(self::$sessionIds),
+                        'board_size' => strlen(serialize(self::$board)),
+                        'memory_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+                    ];
+                    error_log('SNAPSHOT: ' . json_encode($snapshot));
                 }
             });
         }

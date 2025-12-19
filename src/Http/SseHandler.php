@@ -78,11 +78,23 @@ class SseHandler {
             $this->via->log('debug', "Cancelled cleanup timer for reconnected context: {$contextId}");
         }
 
+        // Re-register context in all its scopes (in case cleanup partially ran)
+        // This ensures the context receives broadcasts after reconnection
+        foreach ($context->getScopes() as $scope) {
+            $this->via->registerContextInScope($context, $scope);
+        }
+
+        // Recreate the patch channel for the new coroutine (SSE reconnection)
+        // Swoole Channels are coroutine-specific and can't be shared across request coroutines
+        $context->getPatchManager()->recreatePatchChannel();
+
         // Send initial sync (view + signals) on connection/reconnection
+        // Do this AFTER starting the loop to ensure patches are consumed
         $context->sync();
 
         // Keep connection alive and listen for patches
         $lastKeepalive = time();
+
         while (true) {
             if (!$response->isWritable()) {
                 break;
@@ -93,6 +105,7 @@ class SseHandler {
             if ($patch) {
                 try {
                     $output = $this->sendSSEPatch($sse, $patch);
+
                     if (!$response->write($output)) {
                         break;
                     }
@@ -119,6 +132,12 @@ class SseHandler {
         }
 
         $this->via->log('debug', "SSE connection closed for context: {$context->getId()}");
+
+        // Unregister from all scopes immediately to stop receiving broadcasts
+        // This prevents wasting resources syncing a context with no active SSE connection
+        foreach ($context->getScopes() as $scope) {
+            $this->via->getScopeRegistry()->unregisterContext($context, $scope);
+        }
 
         // Schedule delayed cleanup
         $this->via->scheduleContextCleanup($contextId);

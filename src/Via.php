@@ -280,7 +280,7 @@ class Via {
     /**
      * Get a scoped signal by scope and ID.
      *
-     * @internal Used by Context to retrieve scoped signals
+     * Used by Context to retrieve scoped signals
      */
     public function getScopedSignal(string $scope, string $signalId): ?Signal {
         return $this->signalManager->getSignal($scope, $signalId);
@@ -324,6 +324,15 @@ class Via {
      */
     public function getScopedActions(string $scope): array {
         return $this->actionRegistry->getActions($scope);
+    }
+
+    /**
+     * Get the scope registry.
+     *
+     * @internal Used by SSE handler to manage context registration
+     */
+    public function getScopeRegistry(): ScopeRegistry {
+        return $this->scopeRegistry;
     }
 
     /**

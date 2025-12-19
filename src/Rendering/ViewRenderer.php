@@ -30,7 +30,7 @@ class ViewRenderer {
      * @param callable    $viewFn   View function to execute
      * @param bool        $isUpdate Whether this is an update render
      * @param string      $scope    Primary scope for caching
-     * @param Context     $context  Context for logging
+     * @param Context     $context  Context for logging and settings
      * @param null|string $route    Route for logging
      *
      * @return string Rendered HTML
@@ -46,21 +46,51 @@ class ViewRenderer {
         $shouldCache = $scope !== Scope::TAB;
 
         if ($shouldCache) {
-            // Try to get cached view
+            // On update renders (SSE sync), check if context allows update caching
+            if ($isUpdate) {
+                // If context allows update caching (default true), use cache for performance
+                // This prevents rendering once per client (e.g., game of life)
+                if ($context->shouldCacheUpdates()) {
+                    $cached = $this->cache->get($scope);
+                    if ($cached !== null) {
+                        $this->logger->debug("Using cached update view for scope: {$scope}", $context);
+
+                        return $cached;
+                    }
+                }
+
+                // Render fresh (either no cache, or cacheUpdates=false)
+                $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
+
+                $startTime = microtime(true);
+                $result = $viewFn($isUpdate);
+                $duration = microtime(true) - $startTime;
+                $this->stats->trackRender($duration);
+
+                // Cache the result if updates are cacheable
+                if ($context->shouldCacheUpdates()) {
+                    $this->cache->set($scope, $result);
+                }
+
+                return $result;
+            }
+
+            // On initial page loads, use cache if available
             $cached = $this->cache->get($scope);
-            if ($cached !== null && !$isUpdate) {
+            if ($cached !== null) {
                 $this->logger->debug("Using cached view for scope: {$scope}", $context);
 
                 return $cached;
             }
 
-            $this->logger->debug("Rendering view for scope: {$scope} (cache miss or update)", $context);
+            $this->logger->debug("Rendering view for scope: {$scope} (cache miss)", $context);
 
             $startTime = microtime(true);
             $result = $viewFn($isUpdate);
             $duration = microtime(true) - $startTime;
             $this->stats->trackRender($duration);
 
+            // Only cache initial renders (not updates)
             $this->cache->set($scope, $result);
 
             return $result;

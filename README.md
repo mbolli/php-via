@@ -234,20 +234,22 @@ php-via automatically detects the **scope** of each page and optimizes rendering
 ```php
 // Global scope (cached app-wide):
 $app->page('/anywhere', function (Context $c) use ($app) {
-    $notify = $c->globalAction(function (Context $c) use ($app): void {
+    $c->scope(Scope::GLOBAL);
+    $notify = $c->action(function (Context $c) use ($app): void {
         $count = $app->globalState('notifications', 0);
         $app->setGlobalState('notifications', $count + 1);
-        $app->broadcastGlobal(); // Updates ALL pages
-    });
+        $app->broadcast(Scope::GLOBAL); // Updates ALL pages
+    }, 'notify');
     // No signals, no route actions = Global scope
 });
 
 // Route scope (cached per route):
 $app->page('/game', function (Context $c) {
-    $toggle = $c->routeAction(function (Context $c): void {
+    $c->scope(Scope::ROUTE);
+    $toggle = $c->action(function (Context $c): void {
         GameState::toggle();
         $c->broadcast();
-    });
+    }, 'toggle');
     // No signals, no global actions = Route scope
 });
 

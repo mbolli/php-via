@@ -48,8 +48,12 @@ class Signal {
 
     /**
      * Set the signal value.
+     *
+     * @param mixed $value       The new value to set
+     * @param bool  $markChanged Whether to mark signal as changed for sync
+     * @param bool  $broadcast   Whether to auto-broadcast (only applies if markChanged=true)
      */
-    public function setValue(mixed $value, bool $markChanged = true): void {
+    public function setValue(mixed $value, bool $markChanged = true, bool $broadcast = true): void {
         // Check if value actually changed
         $oldValue = $this->value;
 
@@ -63,8 +67,9 @@ class Signal {
         if ($markChanged) {
             $this->changed = true;
 
-            // Auto-broadcast for scoped signals (if enabled and value changed)
-            if ($this->isScoped()
+            // Auto-broadcast for scoped signals (if enabled, broadcast=true, and value changed)
+            if ($broadcast
+                && $this->isScoped()
                 && $this->autoBroadcast
                 && $this->app !== null
                 && $oldValue !== $this->value) {

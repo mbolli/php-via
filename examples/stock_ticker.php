@@ -12,7 +12,7 @@ declare(strict_types=1);
  * - Automatic price simulation
  */
 
-require 'vendor/autoload.php';
+require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
@@ -136,16 +136,9 @@ $app->page('/', function (Context $c): void {
 // Individual Stock Page with Real-time Chart
 // =============================================================================
 
-$app->page('/stock/{symbol}', function (Context $c, string $symbol) use ($app): void {
+$app->page('/stock/{symbol}', function (Context $c, string $symbol): void {
     // Topic-based scope - all watchers of this stock share updates
     $c->scope(Scope::build('stock', $symbol));
-
-    // Start the background updater on first access
-    static $updaterStarted = false;
-    if (!$updaterStarted) {
-        startStockUpdater($app);
-        $updaterStarted = true;
-    }
 
     $c->view(function (bool $isUpdate = false) use ($symbol, $c): string {
         $stock = StockData::get($symbol);
@@ -190,7 +183,7 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol) use ($app): 
             'pricesSignal' => $pricesSignal,
             'otherStocks' => $otherStocks,
         ]);
-    });
+    }, cacheUpdates: false); // Disable caching for updates to ensure fresh data
 });
 
 // =============================================================================
@@ -198,12 +191,6 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol) use ($app): 
 // =============================================================================
 
 function startStockUpdater(Via $app): void {
-    static $started = false;
-    if ($started) {
-        return;
-    }
-    $started = true;
-
     echo "Starting stock price updater...\n";
 
     Timer::tick(2000, function () use ($app): void {
@@ -231,11 +218,38 @@ function startStockUpdater(Via $app): void {
 
             StockData::updatePrice($symbol, $newPrice);
 
-            // Broadcast to all contexts watching this stock
+            // Update scoped signals directly so all contexts see the same data
+            $scope = Scope::build('stock', $symbol);
+            $history = StockData::getPriceHistory($symbol);
+            $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
+            $prices = array_map(fn (array $h) => $h['price'], $history);
+
+            // Get and update the scoped signals
+            // Use broadcast=false to batch all changes, then broadcast once at the end
+            $priceSignal = $app->getScopedSignal($scope, 'stock_' . $symbol . '_price');
+            if ($priceSignal) {
+                $priceSignal->setValue(number_format($newPrice, 2), markChanged: true, broadcast: false);
+            }
+
+            $timesSignal = $app->getScopedSignal($scope, 'stock_' . $symbol . '_times');
+            if ($timesSignal) {
+                $timesSignal->setValue($times, markChanged: true, broadcast: false);
+            }
+
+            $pricesSignal = $app->getScopedSignal($scope, 'stock_' . $symbol . '_prices');
+            if ($pricesSignal) {
+                $pricesSignal->setValue($prices, markChanged: true, broadcast: false);
+            }
+
+            // Single broadcast sends all changed signals together (more efficient than 3 separate broadcasts)
             $app->broadcast(Scope::build('stock', $symbol));
         }
     });
 }
+
+$app->onStart(function () use ($app): void {
+    startStockUpdater($app);
+});
 
 echo "Starting Stock Ticker Demo on http://0.0.0.0:3009\n";
 echo "Dashboard: http://0.0.0.0:3009/\n";

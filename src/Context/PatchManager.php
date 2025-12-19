@@ -69,24 +69,35 @@ class PatchManager {
      * Sync current view and signals to the browser.
      */
     public function sync(): void {
-        // Sync view with proper selector for components
-        $viewHtml = $this->context->renderView();
+        // Skip sync if view is not defined (e.g., during broadcast before client connects)
+        if (!$this->context->hasView()) {
+            // Still sync signals even without a view
+            $this->app->log('debug', "Context {$this->context->getId()} has no view, syncing signals only");
+            $this->syncSignals();
 
-        if ($this->componentManager->isComponent()) {
-            // Create valid CSS ID by replacing slashes and prefixing with 'c-'
-            $cssId = 'c-' . str_replace(['/', '_'], '-', $this->context->getId());
-            $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
-            $this->queuePatch([
-                'type' => 'elements',
-                'content' => $wrappedHtml,
-                'selector' => '#' . $cssId,
-            ]);
-        } else {
-            // For pages, update entire content
-            $this->queuePatch([
-                'type' => 'elements',
-                'content' => $viewHtml,
-            ]);
+            return;
+        }
+
+        // Sync view with proper selector for components
+        $viewHtml = $this->context->renderView(isUpdate: true);
+
+        if (!empty(trim($viewHtml))) {
+            if ($this->componentManager->isComponent()) {
+                // Create valid CSS ID by replacing slashes and prefixing with 'c-'
+                $cssId = 'c-' . str_replace(['/', '_'], '-', $this->context->getId());
+                $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
+                $this->queuePatch([
+                    'type' => 'elements',
+                    'content' => $wrappedHtml,
+                    'selector' => '#' . $cssId,
+                ]);
+            } else {
+                // For pages, update entire content
+                $this->queuePatch([
+                    'type' => 'elements',
+                    'content' => $viewHtml,
+                ]);
+            }
         }
 
         // Sync signals
@@ -129,6 +140,21 @@ class PatchManager {
      */
     public function closePatchChannel(): void {
         $this->patchChannel->close();
+    }
+
+    /**
+     * Recreate the patch channel (needed for SSE reconnections in new coroutines).
+     */
+    public function recreatePatchChannel(): void {
+        try {
+            $this->patchChannel->close();
+        } catch (\Throwable $e) {
+            // Channel might already be closed, ignore
+        }
+
+        // Create new channel for the current coroutine
+        $this->patchChannel = new Channel(5);
+        $this->app->log('debug', "Recreated patch channel for context {$this->context->getId()}");
     }
 
     /**
