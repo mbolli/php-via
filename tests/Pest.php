@@ -29,6 +29,9 @@ expect()->extend('toBeOneOf', fn (array $values) => $this->toBeIn($values));
 |--------------------------------------------------------------------------
 */
 
+// Set environment variable to indicate we're in test mode (no Swoole)
+putenv('VIA_TEST_MODE=1');
+
 /**
  * Create a Via instance for testing (doesn't start HTTP server).
  */
@@ -50,13 +53,11 @@ function testContextId(): string {
  * Create a counter function for tracking render calls.
  */
 function renderCounter(): Closure {
-    return new class {
-        public int $count = 0;
+    $count = 0;
 
-        public function __invoke(): string {
-            ++$this->count;
+    return function () use (&$count): string {
+        ++$count;
 
-            return '<div>Render ' . $this->count . '</div>';
-        }
+        return '<div>Render ' . $count . '</div>';
     };
 }

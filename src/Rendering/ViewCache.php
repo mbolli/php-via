@@ -20,31 +20,39 @@ class ViewCache {
     /**
      * Get cached view for a scope.
      *
-     * @param string $scope Scope identifier
+     * @param string $scope    Scope identifier
+     * @param bool   $isUpdate Whether this is an update render
      *
      * @return null|string Cached HTML or null if not found
      */
-    public function get(string $scope): ?string {
-        return $this->cache[$scope] ?? null;
+    public function get(string $scope, bool $isUpdate = false): ?string {
+        $key = $this->getCacheKey($scope, $isUpdate);
+
+        return $this->cache[$key] ?? null;
     }
 
     /**
      * Cache rendered view HTML for a scope.
      *
-     * @param string $scope Scope identifier
-     * @param string $html  Rendered HTML
+     * @param string $scope    Scope identifier
+     * @param string $html     Rendered HTML
+     * @param bool   $isUpdate Whether this is an update render
      */
-    public function set(string $scope, string $html): void {
-        $this->cache[$scope] = $html;
+    public function set(string $scope, string $html, bool $isUpdate = false): void {
+        $key = $this->getCacheKey($scope, $isUpdate);
+        $this->cache[$key] = $html;
     }
 
     /**
      * Invalidate cache for a scope.
      *
-     * @param string $scope Scope identifier
+     * IMPORTANT: Pass the BASE scope string (e.g., "route:/path"), NOT the cache key
+     * (e.g., "route:/path:update"). This method will invalidate both :initial and :update caches.
+     *
+     * @param string $scope Scope identifier (without :initial or :update suffix)
      */
     public function invalidate(string $scope): void {
-        unset($this->cache[$scope]);
+        unset($this->cache[$this->getCacheKey($scope, false)], $this->cache[$this->getCacheKey($scope, true)]);
     }
 
     /**
@@ -105,5 +113,17 @@ class ViewCache {
             'count' => \count($this->cache),
             'scopes' => array_keys($this->cache),
         ];
+    }
+
+    /**
+     * Generate cache key from scope and update flag.
+     *
+     * @param string $scope    Scope identifier
+     * @param bool   $isUpdate Whether this is an update render
+     *
+     * @return string Cache key
+     */
+    private function getCacheKey(string $scope, bool $isUpdate): string {
+        return $isUpdate ? "{$scope}:update" : "{$scope}:initial";
     }
 }

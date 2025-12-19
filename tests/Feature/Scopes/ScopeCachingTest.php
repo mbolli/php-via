@@ -29,15 +29,22 @@ describe('Route Scope Caching', function (): void {
             return '<div>Render ' . $renderCount . '</div>';
         });
 
-        // First render
-        $html1 = $context->renderView();
+        // Initial render (not cached)
+        $html1 = $context->renderView(isUpdate: false);
         expect($renderCount)->toBe(1);
         expect($html1)->toContain('Render 1');
 
-        // Second render should use cache
-        $html2 = $context->renderView();
-        expect($renderCount)->toBe(1, 'Cache used - no re-render');
-        expect($html2)->toBe($html1);
+        // Second initial render also not cached (contains unique context IDs)
+        $html2 = $context->renderView(isUpdate: false);
+        expect($renderCount)->toBe(2, 'Initial renders not cached');
+
+        // Update renders ARE cached
+        $html3 = $context->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3);
+
+        $html4 = $context->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3, 'Update renders use cache');
+        expect($html4)->toBe($html3);
     });
 
     test('route scope shares cache across multiple contexts on same route', function (): void {
@@ -64,14 +71,20 @@ describe('Route Scope Caching', function (): void {
             return '<div>Game ' . $renderCount . '</div>';
         });
 
-        // First context renders
-        $html1 = $ctx1->renderView();
+        // Initial renders are NOT cached (each context gets unique HTML with context IDs)
+        $html1 = $ctx1->renderView(isUpdate: false);
         expect($renderCount)->toBe(1);
 
-        // Second context uses cached HTML
-        $html2 = $ctx2->renderView();
-        expect($renderCount)->toBe(1, 'Both contexts share route cache');
-        expect($html2)->toBe($html1);
+        $html2 = $ctx2->renderView(isUpdate: false);
+        expect($renderCount)->toBe(2, 'Initial renders not cached');
+
+        // UPDATE renders ARE cached and shared
+        $html3 = $ctx1->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3);
+
+        $html4 = $ctx2->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3, 'Update renders share route cache');
+        expect($html4)->toBe($html3);
     });
 
     test('broadcast invalidates route cache', function (): void {
@@ -88,19 +101,19 @@ describe('Route Scope Caching', function (): void {
             return '<div>Game ' . $renderCount . '</div>';
         });
 
-        // First render
-        $context->renderView();
+        // First update render
+        $context->renderView(isUpdate: true);
         expect($renderCount)->toBe(1);
 
-        // Second render uses cache
-        $context->renderView();
+        // Second update render uses cache
+        $context->renderView(isUpdate: true);
         expect($renderCount)->toBe(1);
 
         // Broadcast invalidates cache
         $app->broadcast(Scope::routeScope('/game'));
 
-        // Third render re-renders
-        $context->renderView();
+        // Third render re-renders (cache was invalidated)
+        $context->renderView(isUpdate: true);
         expect($renderCount)->toBe(2, 'Cache invalidated after broadcast');
     });
 });
@@ -179,14 +192,21 @@ describe('Global Scope Caching', function (): void {
             return '<div>Global ' . $renderCount . '</div>';
         });
 
-        // First render
-        $html1 = $context->renderView();
+        // Initial render (not cached)
+        $html1 = $context->renderView(isUpdate: false);
         expect($renderCount)->toBe(1);
 
-        // Second render uses cache
-        $html2 = $context->renderView();
-        expect($renderCount)->toBe(1, 'Global cache used');
-        expect($html2)->toBe($html1);
+        // Second initial render also not cached
+        $html2 = $context->renderView(isUpdate: false);
+        expect($renderCount)->toBe(2, 'Initial renders not cached');
+
+        // Update renders ARE cached
+        $html3 = $context->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3);
+
+        $html4 = $context->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3, 'Update renders use global cache');
+        expect($html4)->toBe($html3);
     });
 
     test('global scope shares cache across ALL routes', function (): void {
@@ -213,14 +233,20 @@ describe('Global Scope Caching', function (): void {
             return '<div>Global ' . $renderCount . '</div>';
         });
 
-        // First context renders
-        $html1 = $ctx1->renderView();
+        // Initial renders not cached
+        $html1 = $ctx1->renderView(isUpdate: false);
         expect($renderCount)->toBe(1);
 
-        // Second context (different route!) uses same global cache
-        $html2 = $ctx2->renderView();
-        expect($renderCount)->toBe(1, 'Global cache shared across routes');
-        expect($html2)->toBe($html1);
+        $html2 = $ctx2->renderView(isUpdate: false);
+        expect($renderCount)->toBe(2);
+
+        // UPDATE renders ARE cached globally
+        $html3 = $ctx1->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3);
+
+        $html4 = $ctx2->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3, 'Global cache shared across routes for updates');
+        expect($html4)->toBe($html3);
     });
 
     test('broadcastGlobal invalidates global cache', function (): void {
@@ -237,19 +263,19 @@ describe('Global Scope Caching', function (): void {
             return '<div>Global ' . $renderCount . '</div>';
         });
 
-        // First render
-        $context->renderView();
+        // First update render
+        $context->renderView(isUpdate: true);
         expect($renderCount)->toBe(1);
 
-        // Second render uses cache
-        $context->renderView();
+        // Second update render uses cache
+        $context->renderView(isUpdate: true);
         expect($renderCount)->toBe(1);
 
         // Broadcast globally
         $app->broadcast(Scope::GLOBAL);
 
-        // Third render re-renders
-        $context->renderView();
+        // Third render re-renders (cache invalidated)
+        $context->renderView(isUpdate: true);
         expect($renderCount)->toBe(2, 'Global cache invalidated');
     });
 });

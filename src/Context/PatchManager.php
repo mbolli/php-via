@@ -20,7 +20,9 @@ use Swoole\Coroutine\Channel;
  * - Signal nesting/flattening
  */
 class PatchManager {
-    private Channel $patchChannel;
+    /** @var array<string, mixed>|Channel|null */
+    private array|Channel|null $patchChannel = null;
+    private bool $useArray = false;
 
     public function __construct(
         private Context $context,
@@ -28,7 +30,16 @@ class PatchManager {
         private SignalFactory $signalFactory,
         private ComponentManager $componentManager,
     ) {
-        $this->patchChannel = new Channel(5);
+        // In test mode (no Swoole server running), use array instead of Channel
+        $inTestMode = getenv('VIA_TEST_MODE') === '1';
+
+        if ($inTestMode) {
+            $this->patchChannel = [];
+            $this->useArray = true;
+        } else {
+            $this->patchChannel = new Channel(5);
+            $this->useArray = false;
+        }
     }
 
     /**
@@ -37,19 +48,28 @@ class PatchManager {
      * @param array<string, mixed> $patch
      */
     public function queuePatch(array $patch): void {
-        $channel = $this->getPatchChannel();
-
-        // If channel is full, drop oldest patches to make room for new updates
-        while ($channel->isFull()) {
-            $dropped = $channel->pop(0);
-            if ($dropped !== false) {
-                $this->app->log('debug', "Dropped old patch for context {$this->context->getId()} - channel full");
-            } else {
-                break;
+        if ($this->useArray) {
+            // Array-based queue for tests
+            if (\count($this->patchChannel) >= 5) {
+                array_shift($this->patchChannel); // Drop oldest
+                $this->app->log('debug', "Dropped old patch for context {$this->context->getId()} - queue full");
             }
-        }
+            $this->patchChannel[] = $patch;
+        } else {
+            // Swoole Channel for production
+            $channel = $this->getPatchChannel();
 
-        $channel->push($patch);
+            while ($channel->isFull()) {
+                $dropped = $channel->pop(0);
+                if ($dropped !== false) {
+                    $this->app->log('debug', "Dropped old patch for context {$this->context->getId()} - channel full");
+                } else {
+                    break;
+                }
+            }
+
+            $channel->push($patch);
+        }
     }
 
     /**
@@ -58,6 +78,16 @@ class PatchManager {
      * @return null|array<string, mixed> Next patch data or null if none available
      */
     public function getPatch(): ?array {
+        if ($this->useArray) {
+            // Array-based queue for tests
+            if (empty($this->patchChannel)) {
+                return null;
+            }
+
+            return array_shift($this->patchChannel);
+        }
+
+        // Swoole Channel for production
         if ($this->patchChannel->isEmpty()) {
             return null;
         }
@@ -139,22 +169,31 @@ class PatchManager {
      * Close the patch channel.
      */
     public function closePatchChannel(): void {
-        $this->patchChannel->close();
+        if (!$this->useArray) {
+            $this->patchChannel->close();
+        } else {
+            $this->patchChannel = [];
+        }
     }
 
     /**
      * Recreate the patch channel (needed for SSE reconnections in new coroutines).
      */
     public function recreatePatchChannel(): void {
-        try {
-            $this->patchChannel->close();
-        } catch (\Throwable $e) {
-            // Channel might already be closed, ignore
-        }
+        if (!$this->useArray) {
+            try {
+                $this->patchChannel->close();
+            } catch (\Throwable $e) {
+                // Channel might already be closed, ignore
+            }
 
-        // Create new channel for the current coroutine
-        $this->patchChannel = new Channel(5);
-        $this->app->log('debug', "Recreated patch channel for context {$this->context->getId()}");
+            // Create new channel for the current coroutine
+            $this->patchChannel = new Channel(5);
+            $this->app->log('debug', "Recreated patch channel for context {$this->context->getId()}");
+        } else {
+            // In test mode, just clear the array
+            $this->patchChannel = [];
+        }
     }
 
     /**
@@ -249,8 +288,10 @@ class PatchManager {
 
     /**
      * Get the patch channel (for components, use parent's channel).
+     * 
+     * @return array<string, mixed>|Channel
      */
-    private function getPatchChannel(): Channel {
+    private function getPatchChannel(): array|Channel {
         if ($this->componentManager->isComponent()) {
             return $this->componentManager->getParentPageContext()->getPatchManager()->patchChannel;
         }

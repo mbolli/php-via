@@ -214,14 +214,24 @@ class Via {
             if ($route === null) {
                 $this->log('debug', 'Broadcasting to all ROUTE scopes (all routes)');
                 // Find all route scopes and invalidate their caches
-                foreach ($this->viewCache->getKeys() as $cachedScope) {
-                    if (Scope::isRouteBased($cachedScope)) {
-                        $this->invalidateViewCache($cachedScope);
+                // Note: getKeys() returns cache keys with :initial or :update suffix
+                // We need to extract the base scope before invalidating
+                $seenScopes = [];
+                foreach ($this->viewCache->getKeys() as $cacheKey) {
+                    // Extract base scope by removing :initial or :update suffix
+                    $baseScope = preg_replace('/:(?:initial|update)$/', '', $cacheKey);
+
+                    // Only invalidate each base scope once
+                    if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
+                        $this->invalidateViewCache($baseScope);
+                        $seenScopes[$baseScope] = true;
                     }
                 }
                 // Sync all contexts
                 $this->syncAllContexts();
             } else {
+                // Important: Invalidate cache using the full scope string (route:/path)
+                // The context's primary scope is "route:/path", not just "route"
                 $this->invalidateViewCache($scope);
                 $this->log('debug', "Broadcasting to ROUTE scope: {$route}");
                 $this->syncContextsOnRoute($route);

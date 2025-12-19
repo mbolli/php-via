@@ -88,14 +88,20 @@ describe('View Caching and Patches', function (): void {
             return '<div>Game ' . $renderCount . '</div>';
         });
 
-        // First render
-        $html1 = $ctx1->renderView();
+        // Initial renders NOT cached
+        $html1 = $ctx1->renderView(isUpdate: false);
         expect($renderCount)->toBe(1);
 
-        // Second context uses cached view
-        $html2 = $ctx2->renderView();
-        expect($renderCount)->toBe(1); // Still 1 - view was cached
-        expect($html2)->toBe($html1);
+        $html2 = $ctx2->renderView(isUpdate: false);
+        expect($renderCount)->toBe(2); // Both render independently
+
+        // UPDATE renders ARE cached
+        $html3 = $ctx1->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3);
+
+        $html4 = $ctx2->renderView(isUpdate: true);
+        expect($renderCount)->toBe(3); // Still 3 - update view was cached
+        expect($html4)->toBe($html3);
     });
 
     test('DOCUMENTED BUG: sync sends element patch even when view is cached', function (): void {

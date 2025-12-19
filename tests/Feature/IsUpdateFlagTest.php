@@ -185,7 +185,7 @@ test('TAB scope always renders fresh, never cached', function (): void {
     expect($renderCount)->toBe(2);
 });
 
-test('ROUTE scope uses cache for initial renders only', function (): void {
+test('ROUTE scope uses cache for update renders only', function (): void {
     $renderCount = 0;
 
     $handler = function (Context $c) use (&$renderCount): void {
@@ -194,23 +194,32 @@ test('ROUTE scope uses cache for initial renders only', function (): void {
         $c->view(function (bool $isUpdate = false) use (&$renderCount): string {
             ++$renderCount;
 
-            return $isUpdate ? '' : "<div>Dashboard render #{$renderCount}</div>";
+            return $isUpdate ? "<div>Update #{$renderCount}</div>" : "<div>Initial #{$renderCount}</div>";
         });
     };
 
     $this->app->page('/dashboard', $handler);
 
-    // First context
+    // First context - initial render (NOT cached)
     $ctx1 = new Context('ctx1', '/dashboard', $this->app);
     $handler($ctx1);
-    $html1 = $ctx1->renderView();
-    expect($html1)->toBe('<div>Dashboard render #1</div>');
+    $html1 = $ctx1->renderView(isUpdate: false);
+    expect($html1)->toBe('<div>Initial #1</div>');
 
-    // Second context - should use cache
+    // Second context - initial render also NOT cached (unique context IDs)
     $ctx2 = new Context('ctx2', '/dashboard', $this->app);
     $handler($ctx2);
-    $html2 = $ctx2->renderView();
-    expect($html2)->toBe('<div>Dashboard render #1</div>')->and('Should use cached HTML');
+    $html2 = $ctx2->renderView(isUpdate: false);
+    expect($html2)->toBe('<div>Initial #2</div>')->and('Initial renders not cached');
 
-    expect($renderCount)->toBe(1)->and('View function should only be called once due to caching');
+    expect($renderCount)->toBe(2);
+
+    // UPDATE renders ARE cached
+    $html3 = $ctx1->renderView(isUpdate: true);
+    expect($html3)->toBe('<div>Update #3</div>');
+
+    $html4 = $ctx2->renderView(isUpdate: true);
+    expect($html4)->toBe('<div>Update #3</div>')->and('Update renders use cache');
+
+    expect($renderCount)->toBe(3)->and('Update render only called once');
 });

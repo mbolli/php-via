@@ -43,61 +43,41 @@ class ViewRenderer {
         ?string $route = null
     ): string {
         // Check if this scope supports caching (non-TAB scopes)
-        $shouldCache = $scope !== Scope::TAB;
+        // Only cache UPDATE renders, not initial page loads (which contain unique context IDs)
+        $shouldCache = $scope !== Scope::TAB && $isUpdate;
 
         if ($shouldCache) {
-            // On update renders (SSE sync), check if context allows update caching
-            if ($isUpdate) {
-                // If context allows update caching (default true), use cache for performance
-                // This prevents rendering once per client (e.g., game of life)
-                if ($context->shouldCacheUpdates()) {
-                    $cached = $this->cache->get($scope);
-                    if ($cached !== null) {
-                        $this->logger->debug("Using cached update view for scope: {$scope}", $context);
+            // If context allows update caching (default true), use cache for performance
+            // This prevents rendering once per client (e.g., game of life)
+            if ($context->shouldCacheUpdates()) {
+                $cached = $this->cache->get($scope, true);
+                if ($cached !== null) {
+                    $this->logger->debug("Using cached update view for scope: {$scope}", $context);
 
-                        return $cached;
-                    }
+                    return $cached;
                 }
-
-                // Render fresh (either no cache, or cacheUpdates=false)
-                $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
-
-                $startTime = microtime(true);
-                $result = $viewFn($isUpdate);
-                $duration = microtime(true) - $startTime;
-                $this->stats->trackRender($duration);
-
-                // Cache the result if updates are cacheable
-                if ($context->shouldCacheUpdates()) {
-                    $this->cache->set($scope, $result);
-                }
-
-                return $result;
             }
 
-            // On initial page loads, use cache if available
-            $cached = $this->cache->get($scope);
-            if ($cached !== null) {
-                $this->logger->debug("Using cached view for scope: {$scope}", $context);
-
-                return $cached;
-            }
-
-            $this->logger->debug("Rendering view for scope: {$scope} (cache miss)", $context);
+            // Render fresh (either no cache, or cacheUpdates=false)
+            $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
 
             $startTime = microtime(true);
             $result = $viewFn($isUpdate);
             $duration = microtime(true) - $startTime;
             $this->stats->trackRender($duration);
 
-            // Only cache initial renders (not updates)
-            $this->cache->set($scope, $result);
+            // Cache the result if updates are cacheable
+            if ($context->shouldCacheUpdates()) {
+                $this->cache->set($scope, $result, true);
+            }
 
             return $result;
         }
 
-        // TAB SCOPE: Render per context, no caching
-        $this->logger->debug("Rendering TAB-scoped view for {$route} (no cache)", $context);
+        // No caching for: TAB scope or initial page loads
+        // Initial page loads contain unique context IDs that must not be cached
+        $logContext = $scope === Scope::TAB ? 'TAB-scoped' : 'initial page load';
+        $this->logger->debug("Rendering {$logContext} view for {$route} (no cache)", $context);
 
         $startTime = microtime(true);
         $result = $viewFn($isUpdate);
