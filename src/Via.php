@@ -43,6 +43,10 @@ class Via {
     /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
     public array $contextSessions = [];
     private ?Server $server = null;
+
+    /** @var array<callable> Callbacks to run when server starts */
+    private array $startCallbacks = [];
+
     private Application $app;
     private Router $router;
     private SessionManager $sessionManager;
@@ -360,6 +364,11 @@ class Via {
 
             $this->server->on('start', function (Server $server): void {
                 $this->log('info', "Via server started on {$this->config->getHost()}:{$this->config->getPort()}");
+
+                // Execute all registered start callbacks
+                foreach ($this->startCallbacks as $callback) {
+                    $callback();
+                }
             });
 
             $this->server->on('request', function (Request $request, Response $response): void {
@@ -368,6 +377,14 @@ class Via {
         }
 
         $this->server->start();
+    }
+
+    /**
+     * Register a callback to run when the server starts.
+     * Use this to initialize timers or background tasks.
+     */
+    public function onStart(callable $callback): void {
+        $this->startCallbacks[] = $callback;
     }
 
     /**
