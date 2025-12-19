@@ -281,6 +281,9 @@ class Application {
             'strict_variables' => true,
         ]);
 
+        // Add global variables
+        $this->twig->addGlobal('basePath', $this->config->getBasePath());
+
         $this->addTwigFunctions();
     }
 
@@ -292,5 +295,13 @@ class Application {
             'bind',
             fn (Signal $signal) => new Markup($signal->bind(), 'html')
         ));
+
+        $this->twig->addFunction(
+            new TwigFunction(
+                'dump',
+                fn (mixed $vars) => dump($vars) && null,
+                ['is_safe' => ['html']]
+            ),
+        );
     }
 }

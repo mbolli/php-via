@@ -65,7 +65,7 @@ class Via {
         $this->logger = new Logger($this->config->getLogLevel());
         $this->stats = new Stats();
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate());
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->config->getBasePath());
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();

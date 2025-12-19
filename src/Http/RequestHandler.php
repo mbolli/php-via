@@ -41,6 +41,10 @@ class RequestHandler {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
 
+        // Detect basePath from X-Base-Path header (set by reverse proxy like Caddy)
+        $basePathHeader = $request->header['x-base-path'] ?? null;
+        $this->via->getApp()->getConfig()->detectBasePathFromRequest($basePathHeader);
+
         // Populate superglobals for compatibility
         $_GET = $request->get ?? [];
         $_POST = $request->post ?? [];

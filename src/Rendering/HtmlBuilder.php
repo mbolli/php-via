@@ -20,7 +20,7 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
-    public function __construct(private ?string $shellTemplate = null) {}
+    public function __construct(private ?string $shellTemplate = null, private ?string $basePath = null) {}
 
     /**
      * Add content to the <head> section.
@@ -72,6 +72,7 @@ class HtmlBuilder {
         $replacements = [
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
+            '{{ base_path }}' => $this->basePath ?? '',
             '{{ head_content }}' => $headContent,
             '{{ content }}' => $content,
             '{{ foot_content }}' => $footContent,

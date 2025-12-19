@@ -14,9 +14,27 @@ class Config {
     private string $logLevel = 'info';
     private ?string $templateDir = null;
     private ?string $shellTemplate = null;
+    private string $basePath = '/';
+    private bool $basePathDetected = false;
 
     /** @var array<string, mixed> */
     private array $swooleSettings = [];
+
+    /**
+     * Set basePath from reverse proxy header.
+     * Called on first request with X-Base-Path header from Caddy.
+     */
+    public function detectBasePathFromRequest(?string $basePathHeader): void {
+        if ($this->basePathDetected) {
+            return;
+        }
+
+        $this->basePath = $basePathHeader !== null && $basePathHeader !== ''
+            ? rtrim($basePathHeader, '/') . '/'
+            : '/';
+
+        $this->basePathDetected = true;
+    }
 
     public function withHost(string $host): self {
         $this->host = $host;
@@ -54,6 +72,12 @@ class Config {
         return $this;
     }
 
+    public function withBasePath(string $basePath): self {
+        $this->basePath = rtrim($basePath, '/') . '/';
+
+        return $this;
+    }
+
     /**
      * @param array<string, mixed> $settings
      */
@@ -85,6 +109,10 @@ class Config {
 
     public function getShellTemplate(): ?string {
         return $this->shellTemplate;
+    }
+
+    public function getBasePath(): string {
+        return $this->basePath;
     }
 
     /**
