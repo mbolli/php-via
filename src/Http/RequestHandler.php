@@ -44,6 +44,7 @@ class RequestHandler {
         // Detect basePath from X-Base-Path header (set by reverse proxy like Caddy)
         $basePathHeader = $request->header['x-base-path'] ?? null;
         $this->via->getApp()->getConfig()->detectBasePathFromRequest($basePathHeader);
+        $this->via->getApp()->getTwig()->addGlobal('basePath', $this->via->getApp()->getConfig()->getBasePath());
 
         // Populate superglobals for compatibility
         $_GET = $request->get ?? [];

@@ -20,7 +20,7 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
-    public function __construct(private ?string $shellTemplate = null, private ?string $basePath = null) {}
+    public function __construct(private ?string $shellTemplate = null) {}
 
     /**
      * Add content to the <head> section.
@@ -50,10 +50,11 @@ class HtmlBuilder {
      * @param string  $content   Rendered HTML content
      * @param Context $context   Context for signal injection
      * @param string  $contextId Context ID for initial signals
+     * @param string  $basePath  Base path for URLs
      *
      * @return string Complete HTML document
      */
-    public function buildDocument(string $content, Context $context, string $contextId): string {
+    public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
         $headContent = implode("\n", $this->headIncludes);
         $footContent = implode("\n", $this->footIncludes);
 
@@ -72,7 +73,7 @@ class HtmlBuilder {
         $replacements = [
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
-            '{{ base_path }}' => $this->basePath ?? '',
+            '{{ base_path }}' => $basePath,
             '{{ head_content }}' => $headContent,
             '{{ content }}' => $content,
             '{{ foot_content }}' => $footContent,

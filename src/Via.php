@@ -65,7 +65,7 @@ class Via {
         $this->logger = new Logger($this->config->getLogLevel());
         $this->stats = new Stats();
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->config->getBasePath());
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate());
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -560,7 +560,7 @@ class Via {
     public function buildHtmlDocument(Context $context): string {
         $content = $context->renderView();
 
-        return $this->htmlBuilder->buildDocument($content, $context, $context->getId());
+        return $this->htmlBuilder->buildDocument($content, $context, $context->getId(), $this->config->getBasePath());
     }
 
     /**
