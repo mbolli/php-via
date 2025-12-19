@@ -86,6 +86,13 @@ class Context {
     }
 
     /**
+     * Get Config from the application.
+     */
+    public function getConfig(): Config {
+        return $this->app->getConfig();
+    }
+
+    /**
      * Get component manager.
      *
      * @internal Used by Context managers
@@ -439,7 +446,7 @@ class Context {
                 // Action already registered in this scope, reuse it
                 $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
 
-                return new Action($actionId);
+                return new Action($actionId, $this->getConfig()->getBasePath());
             }
 
             // Register as scoped action
@@ -452,7 +459,7 @@ class Context {
             $this->actionRegistry[$actionId] = $fn;
         }
 
-        return new Action($actionId);
+        return new Action($actionId, $this->getConfig()->getBasePath());
     }
 
     /**

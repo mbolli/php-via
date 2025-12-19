@@ -1,17 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <base href="{{ base_path }}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta data-signals='{{ signals_json }}'>
     <meta data-indicator="_connecting"
-        data-on-interval__duration.15s.leading="!$_connecting && @get('/_sse')"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ base_path }}_sse')"
         data-on-datastar-fetch="el === evt.detail.el &&
                            ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
                            (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
-    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{{ context_id }}'); });">
-    <link rel="stylesheet" href="/_via.css">
+    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('{{ base_path }}_session/close', '{{ context_id }}'); });">
+    <link rel="stylesheet" href="{{ base_path }}via.css">
     <style>
         {{ styles }}
     </style>
@@ -30,6 +29,6 @@
         </aside>
     </div>
     {{ foot_content }}
-    <script type="module" src="/_datastar.js"></script>
+    <script type="module" src="{{ base_path }}datastar.js"></script>
 </body>
 </html>

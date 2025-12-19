@@ -1,18 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <base href="{{ basePath }}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Via App{% endblock %}</title>
     <meta data-signals='{"via_ctx":"{{contextId}}", "_disconnected": false}'>
     <meta data-indicator="_connecting"
-        data-on-interval__duration.15s.leading="!$_connecting && @get('/_sse')"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')"
         data-on-datastar-fetch="el === evt.detail.el &&
                            ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
                            (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
-    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{{contextId}}'); });">
-    <link rel="stylesheet" href="/_via.css">
+    <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('{{ basePath }}_session/close', '{{contextId}}'); });">
+    <link rel="stylesheet" href="{{ basePath }}via.css">
     <style>
         {% block styles %}{% endblock %}
     </style>
@@ -32,6 +31,6 @@
         {% endblock %}
     </div>
     {% block javascripts %}{% endblock %}
-    <script type="module" src="/_datastar.js"></script>
+    <script type="module" src="{{ basePath }}datastar.js"></script>
 </body>
 </html>

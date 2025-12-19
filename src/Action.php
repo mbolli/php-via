@@ -8,9 +8,7 @@ namespace Mbolli\PhpVia;
  * Action represents a server-side action that can be triggered from the browser.
  */
 class Action {
-    public function __construct(private string $id) {
-        $this->id = $id;
-    }
+    public function __construct(private string $id, private string $basePath) {}
 
     /**
      * Get the action ID.
@@ -23,6 +21,6 @@ class Action {
      * Get the action URL.
      */
     public function url(): string {
-        return '/_action/' . $this->id;
+        return $this->basePath . 'action/' . $this->id;
     }
 }

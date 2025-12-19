@@ -119,7 +119,13 @@ class Via {
     }
 
     /**
-     * Get the Router instance.
+     * Get configuration.
+     */
+    public function getConfig(): Config {
+        return $this->config;
+    }
+
+    /**     * Get the Router instance.
      *
      * @internal Used by HTTP handlers
      */
