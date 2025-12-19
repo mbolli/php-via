@@ -17,7 +17,7 @@ $examples = [
     ['title' => '🎮 Game of Life', 'port' => 3007, 'difficulty' => 'Advanced', 'file' => 'game_of_life.php', 'rendering' => 'html', 'description' => 'Multiplayer Conway\'s Game of Life—everyone sees and controls the same board! Uses route scope, timer-based updates, and view caching.'],
     ['title' => '🔔 Global Notifications', 'port' => 3008, 'difficulty' => 'Advanced', 'file' => 'global_notifications.php', 'rendering' => 'html', 'description' => 'System-wide notification banner. Demonstrates global scope with globalState() and broadcasting across all routes.'],
     ['title' => '📈 Stock Ticker', 'port' => 3009, 'difficulty' => 'Advanced', 'file' => 'stock_ticker.php', 'rendering' => 'twig', 'description' => 'Multiplayer stock tracker—all clients see the same live prices! Uses route-scoped path parameters, ECharts visualization, and timer-based updates.'],
-    ['title' => '👤 Profile Demo', 'port' => 3010, 'difficulty' => 'Intermediate', 'file' => 'profile_demo.php', 'rendering' => 'html', 'description' => 'Connected clients viewer with identicons. Shows route scope broadcasting, render statistics, and inline HTML rendering.'],
+    ['title' => '� Client Monitor', 'port' => 3010, 'difficulty' => 'Intermediate', 'file' => 'client_monitor.php', 'rendering' => 'html', 'description' => 'Live connected clients viewer with identicons and server stats. Shows route scope broadcasting, render statistics, and real-time client monitoring.'],
     ['title' => '🛣️  Path Parameters', 'port' => 3011, 'difficulty' => 'Intermediate', 'file' => 'path_params.php', 'rendering' => 'html', 'description' => 'Dynamic routing showcase. Demonstrates path parameter extraction with multiple route patterns and inline styling.'],
     ['title' => '📊 All Scopes Demo', 'port' => 3012, 'difficulty' => 'Intermediate', 'file' => 'all_scopes.php', 'rendering' => 'html', 'description' => 'Complete scope comparison. Shows global, route, and tab scopes working together in a single multi-page application.'],
 ];
@@ -36,23 +36,11 @@ function renderHtml(array $examples): string {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>php-via - Live Examples</title>
+    <link rel="stylesheet" href="/via.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 2rem;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
         }
 
         header {
@@ -64,7 +52,6 @@ function renderHtml(array $examples): string {
         header h1 {
             font-size: 3rem;
             margin-bottom: 0.5rem;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
         }
 
         header p {
@@ -74,192 +61,32 @@ function renderHtml(array $examples): string {
 
         .examples-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
 
-        .example-card {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            text-decoration: none;
-            color: inherit;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-            cursor: pointer;
-        }
-
-        .rendering-flag {
-            position: absolute;
-            top: 0.75rem;
-            right: 0.75rem;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .rendering-flag.twig {
-            background: #e3f2fd;
-            color: #1565c0;
-        }
-
-        .rendering-flag.html {
-            background: #fff3e0;
-            color: #e65100;
-        }
-
-        .example-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 12px rgba(0,0,0,0.15);
-        }
-
-        .example-card h3 {
-            font-size: 1.4rem;
-            margin-bottom: 0.5rem;
-            color: #667eea;
-        }
-
-        .example-card .port {
-            font-size: 0.9rem;
-            color: #999;
-            margin-bottom: 1rem;
-        }
-
-        .example-card .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 0.5rem;
-        }
-
-        .example-card .status-indicator.online {
-            background: #4caf50;
-            box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
-        }
-
-        .example-card .status-indicator.offline {
-            background: #f44336;
-        }
-
-        .example-card .description {
-            font-size: 0.9rem;
-            color: #666;
-            line-height: 1.5;
-            margin-bottom: 1rem;
-            flex-grow: 1;
-        }
-
-        .example-card .meta {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-top: auto;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-beginner {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .badge-intermediate {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .badge-advanced {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .rendering-badge {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .rendering-badge.twig {
-            background: #e3f2fd;
-            color: #1565c0;
-        }
-
-        .rendering-badge.html {
-            background: #fff3e0;
-            color: #e65100;
-        }
-
-        .github-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            background: #24292e;
-            color: white;
-            text-decoration: none;
-            transition: background 0.2s;
-        }
-
-        .github-link:hover {
-            background: #40464e;
-        }
-
-        .github-link svg {
-            width: 14px;
-            height: 14px;
-            fill: currentColor;
-        }
-
-        .info-box {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        .info-box h2 {
-            color: #667eea;
-            margin-bottom: 1rem;
-        }
-
-        .info-box p {
-            color: #666;
-            line-height: 1.6;
-            margin-bottom: 0.5rem;
+        /* Card-specific overrides (base card styles in via.css) */
+        .info-box strong {
+            color: var(--color-primary);
         }
 
         footer {
             text-align: center;
             color: white;
             margin-top: 3rem;
-            opacity: 0.8;
+            opacity: 0.9;
         }
 
         footer a {
-            color: white;
+            color: var(--color-warning);
+            text-decoration: none;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+
+        footer a:hover {
+            opacity: 0.8;
             text-decoration: underline;
         }
     </style>
@@ -283,7 +110,7 @@ function renderHtml(array $examples): string {
 
         <div class="examples-grid" id="examples-grid">
             <?php foreach ($examples as $example) { ?>
-                <div class="example-card"
+                <div class="card example-card"
                    onclick="window.open('http://localhost:<?php echo $example['port']; ?>', '_blank')"
                    data-signals="{'p<?php echo $example['port']; ?>': { 'online': false} }"
                    data-on-interval__duration.10s.leading="fetch('http://localhost:<?php echo $example['port']; ?>', { method: 'HEAD', mode: 'no-cors' }).then(() => $p<?php echo $example['port']; ?>.online = true).catch(() => $p<?php echo $example['port']; ?>.online = false)">
@@ -321,6 +148,21 @@ function renderHtml(array $examples): string {
 $server = new Server('0.0.0.0', 3000);
 
 $server->on('request', function (Request $request, Response $response) use ($examples): void {
+    // Serve via.css as a static file
+    if ($request->server['request_uri'] === '/via.css') {
+        $cssPath = __DIR__ . '/../templates/via.css';
+        if (file_exists($cssPath)) {
+            $response->header('Content-Type', 'text/css; charset=utf-8');
+            $response->end(file_get_contents($cssPath));
+
+            return;
+        }
+        $response->status(404);
+        $response->end('Not Found');
+
+        return;
+    }
+
     // Serve datastar.js as a static file
     if ($request->server['request_uri'] === '/datastar.js') {
         $datastarPath = __DIR__ . '/../datastar.js';

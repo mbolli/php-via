@@ -109,25 +109,12 @@ StockData::init();
 // =============================================================================
 
 $app->page('/', function (Context $c): void {
+    $c->scope(Scope::ROUTE);
     $c->view(function () use ($c): string {
         $stocks = StockData::getAll();
 
-        $stockCards = '';
-        foreach ($stocks as $symbol => $stock) {
-            $stockCards .= <<<HTML
-                <div class="stock-card">
-                    <div class="stock-header">
-                        <span class="stock-symbol">{$symbol}</span>
-                        <span class="stock-name">{$stock['name']}</span>
-                    </div>
-                    <div class="stock-price">\${$stock['price']}</div>
-                    <a href="/stock/{$symbol}" class="view-link">View Chart →</a>
-                </div>
-            HTML;
-        }
-
         return $c->render('stock_dashboard.html.twig', [
-            'stockCards' => $stockCards,
+            'stocks' => $stocks,
         ]);
     });
 });
@@ -244,6 +231,9 @@ function startStockUpdater(Via $app): void {
             // Single broadcast sends all changed signals together (more efficient than 3 separate broadcasts)
             $app->broadcast(Scope::build('stock', $symbol));
         }
+
+        // Update the dashboard with all current stock data
+        $app->broadcast(Scope::routeScope('/'));
     });
 }
 

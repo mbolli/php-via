@@ -41,7 +41,7 @@ Each example runs on its own port to avoid conflicts:
 | Game of Life | 3007 | http://localhost:3007 |
 | Global Notifications | 3008 | http://localhost:3008 |
 | Stock Ticker | 3009 | http://localhost:3009 |
-| Profile Demo | 3010 | http://localhost:3010 |
+| Client Monitor | 3010 | http://localhost:3010 |
 | Path Parameters | 3011 | http://localhost:3011 |
 | All Scopes Demo | 3012 | http://localhost:3012 |
 

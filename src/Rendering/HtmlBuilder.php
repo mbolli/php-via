@@ -91,7 +91,7 @@ class HtmlBuilder {
         }
 
         // Simple template replacement for the shell
-        $shellPath = $this->shellTemplate ?? __DIR__ . '/../../shell.html';
+        $shellPath = $this->shellTemplate ?? __DIR__ . '/../../templates/shell.html';
         $shell = file_get_contents($shellPath);
 
         return str_replace(

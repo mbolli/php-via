@@ -348,7 +348,7 @@ Check the `examples/` directory for more examples:
 - `stock_ticker.php` - Real-time stock ticker with custom scopes and Apache ECharts
 - `chat_room.php` - Multi-room chat application
 - `all_scopes.php` - Demonstrates all scope types in one example
-- `profile_demo.php` - User profile with tab-scoped state
+- `client_monitor.php` - Live client monitoring with server stats
 
 ## Credits
 

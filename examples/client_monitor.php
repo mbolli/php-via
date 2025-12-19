@@ -27,8 +27,6 @@ $app->onStart(function () use ($app): void {
     });
 });
 
-$app->appendToHead('<title>Client Monitor</title>');
-
 $app->page('/', function (Context $ctx) use ($app): void {
     $ctx->scope(Scope::ROUTE);
     $ctx->view(function () use ($app) {
@@ -63,7 +61,7 @@ $app->page('/', function (Context $ctx) use ($app): void {
 
         return <<<HTML
         <div class="container" id="content">
-            <h1>Client Monitor</h1>
+            <h1>👥 Client Monitor</h1>
 
             <div class="card">
                 <h2>Connected Clients ({$clientCount})</h2>

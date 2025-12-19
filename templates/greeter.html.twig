@@ -5,36 +5,29 @@
 {% block styles %}
 .container {
     text-align: center;
-    margin-top: 50px;
 }
 
 .greeting {
-    font-size: 1.5em;
-    color: #333;
-    margin: 30px 0;
-    padding: 20px;
-    background: #f0f0f0;
-    border-radius: 8px;
+    font-size: 24px;
+    color: var(--color-dark);
+    font-weight: 600;
+    margin: 32px 0;
+    padding: 24px;
+    background: #eff6ff;
+    border: var(--border-width) solid var(--color-primary);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-sm);
+}
+
+.greeting span {
+    color: var(--color-primary);
+    font-weight: 700;
 }
 
 .buttons {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     justify-content: center;
-}
-
-button {
-    padding: 12px 24px;
-    background: #0066cc;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 16px;
-    cursor: pointer;
-}
-
-button:hover {
-    background: #0052a3;
 }
 {% endblock %}
 

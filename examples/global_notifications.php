@@ -59,28 +59,27 @@ $notificationBanner = function (Context $c) use ($app): void {
         $count = $app->globalState('notificationCount', 0);
 
         return <<<HTML
-        <div style="background: #f0f0f0; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="card" style="background: var(--color-light); margin-bottom: 1rem;">
+            <div class="flex" style="justify-content: space-between; align-items: center;">
                 <div>
                     <strong>🔔 Notifications:</strong>
-                    <span style="background: #ff6b6b; color: white; padding: 0.25rem 0.5rem; border-radius: 1rem; font-size: 0.9rem;">
+                    <span class="badge" style="background: var(--color-danger); color: white; font-size: 0.9rem;">
                         {$count}
                     </span>
                 </div>
                 <div>
                     <button
                         data-on:click="@get('{$addNotification->url()}')"
-                        style="padding: 0.5rem 1rem; margin-right: 0.5rem; cursor: pointer;">
+                        style="margin-right: 0.5rem;">
                         ➕ Add Notification
                     </button>
                     <button
-                        data-on:click="@get('{$clearNotifications->url()}')"
-                        style="padding: 0.5rem 1rem; cursor: pointer;">
+                        data-on:click="@get('{$clearNotifications->url()}')">
                         🗑️ Clear
                     </button>
                 </div>
             </div>
-            <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #666;">
+            <p class="mt-2" style="font-size: 0.9rem; color: #666;">
                 <em>This banner uses GLOBAL scope - it's rendered once and shared across ALL pages!
                 Click "Add Notification" on any page to update everywhere.</em>
             </p>
@@ -95,40 +94,45 @@ $app->page('/', function (Context $c) use ($app, $notificationBanner): void {
 
     $app->appendToHead(<<<'HTML'
         <title>🌍 Global Scope Demo - Home</title>
+        <link rel="stylesheet" href="/_via.css">
         <style>
-            body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-            nav { margin-bottom: 2rem; }
-            nav a { margin-right: 1rem; padding: 0.5rem 1rem; background: #4CAF50; color: white; text-decoration: none; border-radius: 0.25rem; }
-            nav a:hover { background: #45a049; }
+            nav { margin-bottom: 2rem; display: flex; gap: 1rem; }
+            nav a { padding: 0.5rem 1rem; background: var(--color-success); color: white; text-decoration: none; border-radius: var(--border-radius); font-weight: 600; transition: all 0.2s; }
+            nav a:hover { background: var(--color-dark); }
         </style>
     HTML);
 
     $c->view(fn (): string => <<<HTML
-        <nav>
-            <a href="/">🏠 Home</a>
-            <a href="/dashboard">📊 Dashboard</a>
-            <a href="/settings">⚙️ Settings</a>
-        </nav>
+        <div class="container" id="content">
+            <h1>🔔 Global Notifications</h1>
+            <nav>
+                <a href="/">🏠 Home</a>
+                <a href="/dashboard">📊 Dashboard</a>
+                <a href="/settings">⚙️ Settings</a>
+            </nav>
 
-        {$banner()}
+            {$banner()}
 
-        <h1>🏠 Home Page</h1>
-        <p>This is the home page. Notice how the notification banner appears on every page.</p>
-        <p>Try this:</p>
-        <ol>
-            <li>Open this page in multiple tabs</li>
-            <li>Navigate to different pages (Dashboard, Settings)</li>
-            <li>Click "Add Notification" on any tab/page</li>
-            <li>Watch ALL tabs on ALL pages update instantly!</li>
-        </ol>
-        <p><strong>How it works:</strong></p>
-        <ul>
-            <li>The notification banner uses <code>globalAction()</code> (not routeAction)</li>
-            <li>Global state stored via <code>setGlobalState()</code></li>
-            <li>Updates broadcast via <code>broadcastGlobal()</code></li>
-            <li>The view is rendered ONCE and cached globally</li>
-            <li>All routes share the same cached HTML (max performance!)</li>
-        </ul>
+            <div class="card">
+                <h1>🏠 Home Page</h1>
+                <p>This is the home page. Notice how the notification banner appears on every page.</p>
+                <p>Try this:</p>
+                <ol>
+                    <li>Open this page in multiple tabs</li>
+                    <li>Navigate to different pages (Dashboard, Settings)</li>
+                    <li>Click "Add Notification" on any tab/page</li>
+                    <li>Watch ALL tabs on ALL pages update instantly!</li>
+                </ol>
+                <p><strong>How it works:</strong></p>
+                <ul>
+                    <li>The notification banner uses <code>globalAction()</code> (not routeAction)</li>
+                    <li>Global state stored via <code>setGlobalState()</code></li>
+                    <li>Updates broadcast via <code>broadcastGlobal()</code></li>
+                    <li>The view is rendered ONCE and cached globally</li>
+                    <li>All routes share the same cached HTML (max performance!)</li>
+                </ul>
+            </div>
+        </div>
     HTML);
 });
 
@@ -139,31 +143,35 @@ $app->page('/dashboard', function (Context $c) use ($app, $notificationBanner): 
     $app->appendToHead(<<<'HTML'
         <title>🌍 Global Scope Demo - Dashboard</title>
         <style>
-            body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-            nav { margin-bottom: 2rem; }
-            nav a { margin-right: 1rem; padding: 0.5rem 1rem; background: #4CAF50; color: white; text-decoration: none; border-radius: 0.25rem; }
-            nav a:hover { background: #45a049; }
+            nav { margin-bottom: 2rem; display: flex; gap: 1rem; }
+            nav a { padding: 0.5rem 1rem; background: var(--color-success); color: white; text-decoration: none; border-radius: var(--border-radius); font-weight: 600; transition: all 0.2s; }
+            nav a:hover { background: var(--color-dark); }
         </style>
     HTML);
 
     $c->view(fn (): string => <<<HTML
-        <nav>
-            <a href="/">🏠 Home</a>
-            <a href="/dashboard">📊 Dashboard</a>
-            <a href="/settings">⚙️ Settings</a>
-        </nav>
+        <div class="container" id="content">
+            <h1>🔔 Global Notifications</h1>
+            <nav>
+                <a href="/">🏠 Home</a>
+                <a href="/dashboard">📊 Dashboard</a>
+                <a href="/settings">⚙️ Settings</a>
+            </nav>
 
-        {$banner()}
+            {$banner()}
 
-        <h1>📊 Dashboard Page</h1>
-        <p>This is the dashboard. The same global notification banner is shared here!</p>
-        <p><strong>Key point:</strong> When you click "Add Notification" here, it updates the banner on:</p>
-        <ul>
-            <li>✅ This dashboard page</li>
-            <li>✅ The home page</li>
-            <li>✅ The settings page</li>
-            <li>✅ ALL open tabs, regardless of which page they're on</li>
-        </ul>
+            <div class="card">
+                <h1>📊 Dashboard Page</h1>
+                <p>This is the dashboard. The same global notification banner is shared here!</p>
+                <p><strong>Key point:</strong> When you click "Add Notification" here, it updates the banner on:</p>
+                <ul>
+                    <li>✅ This dashboard page</li>
+                    <li>✅ The home page</li>
+                    <li>✅ The settings page</li>
+                    <li>✅ ALL open tabs, regardless of which page they're on</li>
+                </ul>
+            </div>
+        </div>
     HTML);
 });
 
@@ -174,51 +182,59 @@ $app->page('/settings', function (Context $c) use ($app, $notificationBanner): v
     $app->appendToHead(<<<'HTML'
         <title>🌍 Global Scope Demo - Settings</title>
         <style>
-            body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-            nav { margin-bottom: 2rem; }
-            nav a { margin-right: 1rem; padding: 0.5rem 1rem; background: #4CAF50; color: white; text-decoration: none; border-radius: 0.25rem; }
-            nav a:hover { background: #45a049; }
+            nav { margin-bottom: 2rem; display: flex; gap: 1rem; }
+            nav a { padding: 0.5rem 1rem; background: var(--color-success); color: white; text-decoration: none; border-radius: var(--border-radius); font-weight: 600; transition: all 0.2s; }
+            nav a:hover { background: var(--color-dark); }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { padding: 12px; text-align: left; border: 1px solid var(--color-light); }
+            th { background: var(--color-dark); color: white; font-weight: 600; }
+            tr:nth-child(even) { background: var(--color-light); }
         </style>
     HTML);
 
     $c->view(fn (): string => <<<HTML
-        <nav>
-            <a href="/">🏠 Home</a>
-            <a href="/dashboard">📊 Dashboard</a>
-            <a href="/settings">⚙️ Settings</a>
-        </nav>
+        <div class="container" id="content">
+            <h1>🔔 Global Notifications</h1>
+            <nav>
+                <a href="/">🏠 Home</a>
+                <a href="/dashboard">📊 Dashboard</a>
+                <a href="/settings">⚙️ Settings</a>
+            </nav>
 
-        {$banner()}
+            {$banner()}
 
-        <h1>⚙️ Settings Page</h1>
-        <p>This is the settings page. The global notification system works here too!</p>
-        <p><strong>Scope comparison:</strong></p>
-        <table border="1" cellpadding="10" style="border-collapse: collapse;">
-            <tr>
-                <th>Scope</th>
-                <th>Cache Key</th>
-                <th>Shared Across</th>
-                <th>Example</th>
-            </tr>
-            <tr>
-                <td>GLOBAL</td>
-                <td>App-wide (one cache for entire app)</td>
-                <td>ALL routes, ALL users</td>
-                <td>This notification banner</td>
-            </tr>
-            <tr>
-                <td>ROUTE</td>
-                <td>Per route (e.g., <code>/game</code>)</td>
-                <td>Same route, ALL users</td>
-                <td>Game of Life board</td>
-            </tr>
-            <tr>
-                <td>TAB</td>
-                <td>No cache</td>
-                <td>Single user/tab only</td>
-                <td>Personal profile page</td>
-            </tr>
-        </table>
+            <div class="card">
+                <h1>⚙️ Settings Page</h1>
+                <p>This is the settings page. The global notification system works here too!</p>
+                <p><strong>Scope comparison:</strong></p>
+                <table>
+                    <tr>
+                        <th>Scope</th>
+                        <th>Cache Key</th>
+                        <th>Shared Across</th>
+                        <th>Example</th>
+                    </tr>
+                    <tr>
+                        <td><strong>GLOBAL</strong></td>
+                        <td>App-wide (one cache for entire app)</td>
+                        <td>ALL routes, ALL users</td>
+                        <td>This notification banner</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ROUTE</strong></td>
+                        <td>Per route (e.g., <code>/game</code>)</td>
+                        <td>Same route, ALL users</td>
+                        <td>Game of Life board</td>
+                    </tr>
+                    <tr>
+                        <td><strong>TAB</strong></td>
+                        <td>No cache</td>
+                        <td>Single user/tab only</td>
+                        <td>Personal settings page</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
     HTML);
 });
 

@@ -36,32 +36,14 @@ $app->page('/', function (Context $c): void {
     // Define the view using inline HTML
     $c->view(function () use (&$count, $step, $increment) {
         return <<<HTML
-        <div class="page-layout" id="counter">
-            <div class="container">
+            <div class="container" id="content">
                 <h1>⚡ Via Counter</h1>
-                <p class="count">Count: <span data-text="\${$count->id()}"></span></p>
-                <label>
-                    Update Step:
-                    <input type="number" {$step->bind()}>
-                </label>
-                <button data-on:click="@post('{$increment->url()}')">Increment</button>
+                <div class="card">
+                    <p class="count">Count: <span data-text="\${$count->id()}"></span></p>
+                    <label>Update Step: <input type="number" {$step->bind()}></label>
+                    <button data-on:click="@post('{$increment->url()}')">Increment</button>
+                </div>
             </div>
-            <aside class="debug-sidebar">
-                <h3>🔍 Live Signals</h3>
-                <pre data-json-signals></pre>
-            </aside>
-        </div>
-        <style>
-            .page-layout { display: flex; gap: 20px; max-width: 1200px; margin: 50px auto; padding: 20px; font-family: system-ui, sans-serif; }
-            .container { flex: 1; }
-            .count { font-size: 2em; font-weight: bold; color: #333; margin: 20px 0; }
-            input[type="number"] { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; margin: 0 10px; }
-            button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-top: 20px; }
-            button:hover { background: #0052a3; }
-            .debug-sidebar { width: 300px; background: #f5f5f5; padding: 20px; border-radius: 8px; border: 1px solid #ddd; }
-            .debug-sidebar h3 { margin-top: 0; color: #333; font-size: 16px; }
-            .debug-sidebar pre { background: #fff; padding: 15px; border-radius: 4px; border: 1px solid #ddd; overflow-x: auto; font-size: 12px; max-height: 500px; overflow-y: auto; }
-        </style>
         HTML;
     });
 });

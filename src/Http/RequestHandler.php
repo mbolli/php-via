@@ -62,6 +62,13 @@ class RequestHandler {
             return;
         }
 
+        // Serve Via CSS
+        if ($path === '/_via.css') {
+            $this->serveViaCss($response);
+
+            return;
+        }
+
         // Handle SSE connection
         if ($path === '/_sse') {
             $this->sseHandler->handleSSE($request, $response);
@@ -215,5 +222,15 @@ class RequestHandler {
 
         $response->header('Content-Type', 'application/javascript');
         $response->end($datastarJs);
+    }
+
+    /**
+     * Serve Via CSS file.
+     */
+    private function serveViaCss(Response $response): void {
+        $viaCss = file_get_contents(__DIR__ . '/../../templates/via.css');
+
+        $response->header('Content-Type', 'text/css; charset=utf-8');
+        $response->end($viaCss);
     }
 }

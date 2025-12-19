@@ -11,51 +11,8 @@
                            ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
                            (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
     <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{{contextId}}'); });">
+    <link rel="stylesheet" href="/_via.css">
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: system-ui, -apple-system, sans-serif;
-        }
-        
-        .page-layout {
-            display: flex;
-            gap: 20px;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .container, .page-container {
-            flex: 1;
-        }
-        
-        .debug-sidebar {
-            width: 300px;
-            background: #f5f5f5;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #ddd;
-            align-self: flex-start;
-        }
-        
-        .debug-sidebar h3 {
-            margin-top: 0;
-            color: #333;
-            font-size: 16px;
-        }
-        
-        .debug-sidebar pre {
-            background: #fff;
-            padding: 15px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-            overflow-x: auto;
-            font-size: 12px;
-            max-height: 500px;
-            overflow-y: auto;
-        }
-        
         {% block styles %}{% endblock %}
     </style>
     {% block head %}{% endblock %}

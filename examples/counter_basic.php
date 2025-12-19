@@ -38,15 +38,16 @@ $app->page('/', function (Context $c): void {
         return $c->renderString(<<<'TWIG'
             <div class="container" id="counter">
                 <h1>⚡ Via Counter</h1>
-                <p class="count">Count: {{ count }}</p>
-                <label>
-                    Update Step:
-                    <input type="number" {{ bind(step) }}>
-                </label>
-                <button data-on:click="@get('{{ increment.url() }}')">Increment</button>
+                <div class="card">
+                    <p class="count">Count: {{ count }}</p>
+                    <label>
+                        Update Step:
+                        <input type="number" {{ bind(step) }}>
+                    </label>
+                    <button data-on:click="@get('{{ increment.url() }}')">Increment</button>
+                </div>
             </div>
             <style>
-                .container { max-width: 600px; margin: 50px auto; padding: 20px; font-family: system-ui, sans-serif; }
                 .count { font-size: 2em; font-weight: bold; color: #333; margin: 20px 0; }
                 input[type="number"] { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; margin: 0 10px; }
                 button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-top: 20px; }

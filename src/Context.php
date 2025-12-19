@@ -481,6 +481,7 @@ class Context {
     public function executeAction(string $actionId): void {
         // First check TAB-scoped actions (context-specific)
         if (isset($this->actionRegistry[$actionId])) {
+            $this->app->log('debug', "Found TAB-scoped action {$actionId}", $this);
             $action = $this->actionRegistry[$actionId];
             $action($this);
 

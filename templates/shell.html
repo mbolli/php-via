@@ -1,9 +1,8 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script type="module" src="/_datastar.js"></script>
     <meta data-signals='{{ signals_json }}'>
     <meta data-indicator="_connecting"
         data-on-interval__duration.15s.leading="!$_connecting && @get('/_sse')"
@@ -11,11 +10,25 @@
                            ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
                            (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
     <meta data-init="window.addEventListener('beforeunload', (evt) => { navigator.sendBeacon('/_session/close', '{{ context_id }}'); });">
+    <link rel="stylesheet" href="/_via.css">
+    <style>
+        {{ styles }}
+    </style>
     {{ head_content }}
 </head>
 <body>
-    <div data-show="$_disconnected" style="position: fixed; top: 0; right: 0; background: red; color: white; padding: 5px; z-index: 9999;">Warning: Not connected to server.</div>
-    {{ content }}
+    <div data-show="$_disconnected" class="connection-warning">⚠️ Warning: Not connected to server.</div>
+    <div class="page-layout">
+        <div class="container" id="content">
+            {{ content }}
+        </div>
+        
+        <aside class="debug-sidebar">
+            <h3>🔍 Live Signals</h3>
+            <pre data-json-signals></pre>
+        </aside>
+    </div>
     {{ foot_content }}
+    <script type="module" src="/_datastar.js"></script>
 </body>
 </html>

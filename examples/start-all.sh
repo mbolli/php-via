@@ -32,7 +32,7 @@ declare -A EXAMPLES=(
     ["game_of_life.php"]="3007:🎮 Game of Life"
     ["global_notifications.php"]="3008:🔔 Global Notifications"
     ["stock_ticker.php"]="3009:📈 Stock Ticker"
-    ["profile_demo.php"]="3010:👤 Profile Demo"
+    ["client_monitor.php"]="3010:👥 Client Monitor"
     ["path_params.php"]="3011:🛣️  Path Parameters"
     ["all_scopes.php"]="3012:📊 All Scopes Demo"
 )

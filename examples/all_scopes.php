@@ -38,19 +38,132 @@ $app->appendToHead(
     <<<'HTML'
 <title>All Scopes Demo</title>
 <style>
-    body {
-        font-family: system-ui, -apple-system, sans-serif;
-        max-width: 1000px;
-        margin: 2rem auto;
-        padding: 0 1rem;
-        background: #f5f5f5;
+    .page-header {
+        margin-bottom: 2rem;
     }
-    nav { margin-bottom: 2rem; }
-    .content {
+    .page-header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .page-header p {
+        color: var(--color-light);
+        font-size: 1.1rem;
+    }
+    .scope-banner {
+        color: white;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow-md);
+        border: var(--border-width) solid;
+        transition: all 0.3s ease;
+    }
+    .scope-banner:hover {
+        box-shadow: var(--shadow-lg);
+        transform: translateY(-2px);
+    }
+    .scope-banner-global {
+        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+        border-color: var(--color-secondary);
+    }
+    .scope-banner-route {
+        background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-danger) 100%);
+        border-color: var(--color-danger);
+    }
+    .scope-banner-tab {
+        background: linear-gradient(135deg, var(--color-success) 0%, var(--color-primary) 100%);
+        border-color: var(--color-primary);
+    }
+    .scope-banner-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+    .scope-banner-content {
+        flex: 1;
+        min-width: 200px;
+    }
+    .scope-banner-title {
+        font-weight: bold;
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    .scope-banner-value {
+        margin-top: 0.5rem;
+        font-size: 1.1rem;
+    }
+    .scope-banner-counter {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .scope-banner-note {
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+        opacity: 0.9;
+    }
+    .scope-banner button {
         background: white;
-        padding: 2rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border: none;
+        font-weight: bold;
+        white-space: nowrap;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .scope-banner button:hover {
+        transform: translateY(-2px) scale(1.05);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    }
+    .scope-banner button:active {
+        transform: translateY(0) scale(0.98);
+    }
+    .scope-banner-global button {
+        color: var(--color-secondary);
+    }
+    .scope-banner-global button:hover {
+        box-shadow: 0 8px 20px rgba(139, 92, 246, 0.4);
+    }
+    .scope-banner-route button {
+        color: var(--color-danger);
+    }
+    .scope-banner-route button:hover {
+        box-shadow: 0 8px 20px rgba(255, 71, 87, 0.4);
+    }
+    .scope-banner-tab button {
+        color: var(--color-success);
+    }
+    .scope-banner-tab button:hover {
+        box-shadow: 0 8px 20px rgba(80, 200, 120, 0.4);
+    }
+    .scope-banner input[type="text"] {
+        width: 100%;
+        margin-top: 0.5rem;
+        border: 2px solid white;
+    }
+    nav {
+        margin-bottom: 2rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    nav a {
+        padding: 0.5rem 1rem;
+        background: var(--color-success);
+        color: white;
+        text-decoration: none;
+        border-radius: var(--border-radius);
+        font-weight: bold;
+        transition: all 0.2s ease;
+    }
+    nav a:hover {
+        background: var(--color-primary);
+        text-decoration: none;
+    }
+    nav a.active {
+        background: var(--color-primary);
     }
     table {
         width: 100%;
@@ -63,8 +176,9 @@ $app->appendToHead(
         border-bottom: 1px solid #ddd;
     }
     th {
-        background: #f0f0f0;
+        background: var(--color-light);
         font-weight: bold;
+        color: var(--color-dark);
     }
 </style>
 HTML
@@ -110,21 +224,19 @@ $globalStatusBanner = function (Context $c) use ($app): void {
         $visitors = $app->globalState('totalVisitors', 0);
 
         return <<<HTML
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong>🌍 GLOBAL SCOPE</strong> - System Status
-                    <div style="margin-top: 0.5rem; font-size: 1.1rem;">
+        <div class="scope-banner scope-banner-global">
+            <div class="scope-banner-header">
+                <div class="scope-banner-content">
+                    <div class="scope-banner-title">🌍 GLOBAL SCOPE - System Status</div>
+                    <div class="scope-banner-value">
                         Status: <strong>{$status}</strong> | Total Visitors: <strong>{$visitors}</strong>
                     </div>
                 </div>
-                <button
-                    data-on:click="@get('{$updateStatus->url()}')"
-                    style="padding: 0.5rem 1rem; cursor: pointer; background: white; color: #667eea; border: none; border-radius: 0.25rem; font-weight: bold;">
+                <button data-on:click="@get('{$updateStatus->url()}')">
                     🔄 Update Global Status
                 </button>
             </div>
-            <div style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.9;">
+            <div class="scope-banner-note">
                 💡 This banner uses <strong>GLOBAL scope</strong> - rendered ONCE for entire app, shared across ALL pages and users!
             </div>
         </div>
@@ -160,28 +272,22 @@ $routeScopeCounter = function (Context $c) use ($app): void {
         $count = PageState::$counters[$route] ?? 0;
 
         return <<<HTML
-        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong>🎯 ROUTE SCOPE</strong> - Shared Page Counter
-                    <div style="margin-top: 0.5rem; font-size: 2rem; font-weight: bold;">
-                        {$count}
-                    </div>
+        <div class="scope-banner scope-banner-route">
+            <div class="scope-banner-header">
+                <div class="scope-banner-content">
+                    <div class="scope-banner-title">🎯 ROUTE SCOPE - Shared Page Counter</div>
+                    <div class="scope-banner-counter">{$count}</div>
                 </div>
-                <div>
-                    <button
-                        data-on:click="@get('{$increment->url()}')"
-                        style="padding: 0.5rem 1rem; margin-right: 0.5rem; cursor: pointer; background: white; color: #f5576c; border: none; border-radius: 0.25rem; font-weight: bold;">
+                <div style="display: flex; gap: 0.5rem;">
+                    <button data-on:click="@get('{$increment->url()}')">
                         ➕ Increment
                     </button>
-                    <button
-                        data-on:click="@get('{$reset->url()}')"
-                        style="padding: 0.5rem 1rem; cursor: pointer; background: white; color: #f5576c; border: none; border-radius: 0.25rem; font-weight: bold;">
+                    <button data-on:click="@get('{$reset->url()}')">
                         🔄 Reset
                     </button>
                 </div>
             </div>
-            <div style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.9;">
+            <div class="scope-banner-note">
                 💡 This counter uses <strong>ROUTE scope</strong> - shared by all users on THIS page only. Try opening multiple tabs of the same page!
             </div>
         </div>
@@ -206,33 +312,26 @@ $tabScopeMessage = function (Context $c): void {
             'Tab scope is cool! 🚀',
         ];
         $message->setValue($messages[array_rand($messages)]);
-        $c->sync();
+        $c->syncSignals();
     }, 'updateMessage');
 
     // TAB scope: Uses signals
     // This renders fresh for EACH user - no caching
     $c->view(fn (): string => <<<HTML
-        <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="flex: 1;">
-                    <strong>👤 TAB SCOPE</strong> - Your Personal Message
-                    <div style="margin-top: 0.5rem;">
-                        <input
-                            type="text"
-                            {$message->bind()}
-                            style="width: 100%; padding: 0.5rem; border: 2px solid white; border-radius: 0.25rem; font-size: 1rem;">
-                        <div style="margin-top: 0.5rem; font-size: 1.1rem; font-weight: bold;">
-                            Your message: <span data-text="\${$message->id()}"></span>
-                        </div>
+        <div class="scope-banner scope-banner-tab">
+            <div class="scope-banner-header">
+                <div class="scope-banner-content">
+                    <div class="scope-banner-title">👤 TAB SCOPE - Your Personal Message</div>
+                    <input type="text" {$message->bind()}>
+                    <div class="scope-banner-value">
+                        Your message: <span data-text="\${$message->id()}"></span>
                     </div>
                 </div>
-                <button
-                    data-on:click="@post('{$updateMessage->url()}')"
-                    style="padding: 0.5rem 1rem; margin-left: 1rem; cursor: pointer; background: white; color: #4facfe; border: none; border-radius: 0.25rem; font-weight: bold;">
+                <button data-on:click="@post('{$updateMessage->url()}')">
                     🎲 Random Message
                 </button>
             </div>
-            <div style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.9;">
+            <div class="scope-banner-note">
                 💡 This uses <strong>TAB scope</strong> - each tab/user has their own message. Try opening multiple tabs!
             </div>
         </div>
@@ -246,7 +345,7 @@ $createPage = function (string $title, string $route, string $content) use ($app
     $app->page($route, function (Context $c) use ($title, $route, $content, $globalStatusBanner, $routeScopeCounter, $tabScopeMessage): void {
         $globalBanner = $c->component($globalStatusBanner, 'global');
         $routeCounter = $c->component($routeScopeCounter, 'route');
-        $tabMessage = $c->component($tabScopeMessage, 'tab');
+        $tabMessage = $c->component($tabScopeMessage, 'private');
 
         $c->view(function (bool $isUpdate = false) use ($title, $route, $content, $globalBanner, $routeCounter, $tabMessage): string {
             // Only return the component blocks on updates (SSE)
@@ -263,20 +362,26 @@ $createPage = function (string $title, string $route, string $content) use ($app
 
             $nav = '';
             foreach ($otherPages as $path => $label) {
-                $active = $path === $route ? 'background: #2196F3;' : '';
-                $nav .= "<a href=\"{$path}\" style=\"margin-right: 0.5rem; padding: 0.5rem 1rem; background: #4CAF50; color: white; text-decoration: none; border-radius: 0.25rem; {$active}\">{$label}</a>";
+                $activeClass = $path === $route ? ' class="active"' : '';
+                $nav .= "<a href=\"{$path}\"{$activeClass}>{$label}</a>";
             }
 
             return <<<HTML
-            <nav>{$nav}</nav>
+            <div class="container">
+                <div class="page-header">
+                    <h1>🌐 All Scopes Demo</h1>
+                    <p>Explore Global, Route, and Tab scopes in action</p>
+                </div>
 
-            {$globalBanner()}
-            {$routeCounter()}
-            {$tabMessage()}
+                <nav>{$nav}</nav>
 
-            <div class="content">
-                <h1>{$title}</h1>
-                {$content}
+                {$globalBanner()}
+                {$routeCounter()}
+                {$tabMessage()}
+
+                <div class="info-box">
+                    <h1>{$title}</h1>
+                    {$content}
 
                 <h2>🔍 Scope Comparison</h2>
                 <table>
@@ -317,6 +422,7 @@ $createPage = function (string $title, string $route, string $content) use ($app
                     <li><strong>Tab Scope Test:</strong> Type different messages in different tabs - each tab keeps its own message</li>
                     <li><strong>Cross-page test:</strong> Notice the Route counter is different on each page, but Global status is always the same</li>
                 </ol>
+                </div>
             </div>
             HTML;
         });

@@ -94,7 +94,7 @@ $app->page('/', function (Context $c): void {
 // Chat room page
 $app->page('/room/{room}', function (Context $c, string $room): void {
     if (!isset(ChatState::$rooms[$room])) {
-        $c->view(fn () => '<h1>Room not found</h1>');
+        $c->view(fn () => '<h1>❌ Room not found</h1>');
 
         return;
     }

@@ -20,7 +20,7 @@ use Swoole\Coroutine\Channel;
  * - Signal nesting/flattening
  */
 class PatchManager {
-    /** @var array<string, mixed>|Channel|null */
+    /** @var null|array<string, mixed>|Channel */
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
 
@@ -230,10 +230,8 @@ class PatchManager {
      * @return array<string, mixed> Nested structure of changed signals
      */
     private function prepareSignalsForPatch(): array {
-        // Components should use parent's signals
-        $signalsToCheck = $this->componentManager->isComponent()
-            ? $this->componentManager->getParentPageContext()->getSignalFactory()->getTabSignals()
-            : $this->signalFactory->getTabSignals();
+        // Components use their own signals
+        $signalsToCheck = $this->signalFactory->getTabSignals();
 
         $flat = [];
 
@@ -288,7 +286,7 @@ class PatchManager {
 
     /**
      * Get the patch channel (for components, use parent's channel).
-     * 
+     *
      * @return array<string, mixed>|Channel
      */
     private function getPatchChannel(): array|Channel {

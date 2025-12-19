@@ -1,4 +1,4 @@
-<div class="counter-component">
+<div class="card">
     <h3>Counter: {{ namespace }}</h3>
     <p class="count">Count: {{ count.value }}</p>
     <div class="buttons">
@@ -8,54 +8,45 @@
 </div>
 
 <style>
-    .counter-component {
-        border: 1px solid #ccc;
-        padding: 20px;
-        margin: 10px;
-        border-radius: 5px;
-        background: white;
-    }
-    
-    .counter-component h3 {
-        margin-top: 0;
-        color: #333;
-    }
-    
-    .count {
-        font-size: 24px;
-        font-weight: bold;
-        margin: 15px 0;
-    }
-    
-    .buttons {
-        display: flex;
-        gap: 10px;
-    }
-    
-    .buttons button {
-        flex: 1;
-        padding: 10px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 16px;
-    }
-    
-    .buttons button:first-child {
-        background: #dc3545;
-        color: white;
-    }
-    
-    .buttons button:first-child:hover {
-        background: #c82333;
-    }
-    
-    .buttons button:last-child {
-        background: #28a745;
-        color: white;
-    }
-    
-    .buttons button:last-child:hover {
-        background: #218838;
-    }
+.card h3 {
+    margin-top: 0;
+}
+
+.count {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 15px 0;
+    color: var(--color-primary);
+}
+
+.buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.buttons button {
+    flex: 1;
+    padding: 10px 16px;
+    font-size: 14px;
+}
+
+.buttons button:first-child {
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+}
+
+.buttons button:first-child:hover {
+    background: var(--color-dark);
+    border-color: var(--color-dark);
+}
+
+.buttons button:last-child {
+    background: var(--color-success);
+    border-color: var(--color-success);
+}
+
+.buttons button:last-child:hover {
+    background: var(--color-dark);
+    border-color: var(--color-dark);
+}
 </style>
