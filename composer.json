@@ -14,7 +14,8 @@
         "rector/type-perfect": "^2.1",
         "tomasvotruba/type-coverage": "^2.0",
         "phpstan/extension-installer": "^1.4",
-        "phpstan/phpstan-deprecation-rules": "^2.0"
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "pestphp/pest": "^4.0"
     },
     "license": "MIT",
     "autoload": {
@@ -34,7 +35,8 @@
         "optimize-autoloader": true,
         "classmap-authoritative": true,
         "allow-plugins": {
-            "phpstan/extension-installer": true
+            "phpstan/extension-installer": true,
+            "pestphp/pest-plugin": true
         }
     },
     "scripts": {
