@@ -140,8 +140,8 @@ $via->page(\'/users/{username}\',<br>
             <div class="card">
                 <h2>📋 Try It Out:</h2>
                 <div class="nav-links">
-                    <a href="{$basePath}blog/2024/12/hello-world">Manual Access Example →</a>
-                    <a href="{$basePath}articles/2025/01/testing">Auto-Injection Example →</a>
+                    <a href="' . $basePath . 'blog/2024/12/hello-world">Manual Access Example →</a>
+                    <a href="' . $basePath . 'articles/2025/01/testing">Auto-Injection Example →</a>
                 </div>
             </div>
         </div>
