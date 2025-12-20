@@ -68,7 +68,7 @@
     <div class="subtitle">Real-time market data with live updates</div>
     <div class="stocks-grid">
         {% for symbol, stock in stocks %}
-            <a href="/stock/{{ symbol }}" class="card stock-card">
+            <a href="{{ basePath }}stock/{{ symbol }}" class="card stock-card">
                 <div class="stock-header">
                     <span class="stock-symbol">{{ symbol }}</span>
                     <span class="stock-name">{{ stock.name }}</span>

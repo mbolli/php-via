@@ -20,7 +20,7 @@ class Context {
     private string $route;
     private Via $app;
 
-    /** @var null|callable(bool): string */
+    /** @var null|callable(bool, string): string */
     private $viewFn;
 
     /** @var array<string, callable> */
@@ -280,10 +280,10 @@ class Context {
     /**
      * Define the UI rendered by this context.
      *
-     * @param callable(bool): string|string $view         Function that returns HTML content, or Twig template name
-     * @param array<string, mixed>          $data         Optional data for Twig templates
-     * @param null|string                   $block        Optional block name to render only that block during updates
-     * @param bool                          $cacheUpdates Whether to cache update renders (default true). Set to false if view returns different content on updates (e.g., empty string).
+     * @param callable(bool, string): string|string $view         Function that returns HTML content (receives $isUpdate, $basePath), or Twig template name
+     * @param array<string, mixed>                  $data         Optional data for Twig templates
+     * @param null|string                           $block        Optional block name to render only that block during updates
+     * @param bool                                  $cacheUpdates Whether to cache update renders (default true). Set to false if view returns different content on updates (e.g., empty string).
      */
     public function view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void {
         if (\is_string($view)) {

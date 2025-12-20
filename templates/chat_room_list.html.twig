@@ -49,7 +49,7 @@
         <ul class="room-list">
             {% for room in rooms %}
             <li>
-                <a href="/room/{{ room.id }}">{{ room.name }}</a>
+                <a href="{{ basePath }}room/{{ room.id }}">{{ room.name }}</a>
             </li>
             {% endfor %}
         </ul>

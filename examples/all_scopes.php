@@ -347,7 +347,7 @@ $createPage = function (string $title, string $route, string $content) use ($app
         $routeCounter = $c->component($routeScopeCounter, 'route');
         $tabMessage = $c->component($tabScopeMessage, 'private');
 
-        $c->view(function (bool $isUpdate = false) use ($title, $route, $content, $globalBanner, $routeCounter, $tabMessage): string {
+        $c->view(function (bool $isUpdate, string $basePath) use ($title, $route, $content, $globalBanner, $routeCounter, $tabMessage): string {
             // Only return the component blocks on updates (SSE)
             if ($isUpdate) {
                 return "{$globalBanner()}{$routeCounter()}{$tabMessage()}";
@@ -355,9 +355,9 @@ $createPage = function (string $title, string $route, string $content) use ($app
 
             // Initial render - full page
             $otherPages = [
-                '/' => '🏠 Home',
-                '/page-a' => '📄 Page A',
-                '/page-b' => '📄 Page B',
+                "{$basePath}" => '🏠 Home',
+                "{$basePath}page-a" => '📄 Page A',
+                "{$basePath}page-b" => '📄 Page B',
             ];
 
             $nav = '';

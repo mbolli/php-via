@@ -102,13 +102,13 @@ $app->page('/', function (Context $c) use ($app, $notificationBanner): void {
         </style>
     HTML);
 
-    $c->view(fn (): string => <<<HTML
+    $c->view(fn (bool $isUpdate, string $basePath): string => <<<HTML
         <div class="container" id="content">
             <h1>🔔 Global Notifications</h1>
             <nav>
-                <a href="/">🏠 Home</a>
-                <a href="/dashboard">📊 Dashboard</a>
-                <a href="/settings">⚙️ Settings</a>
+                <a href="{$basePath}/">🏠 Home</a>
+                <a href="{$basePath}/dashboard">📊 Dashboard</a>
+                <a href="{$basePath}/settings">⚙️ Settings</a>
             </nav>
 
             {$banner()}
@@ -149,13 +149,13 @@ $app->page('/dashboard', function (Context $c) use ($app, $notificationBanner): 
         </style>
     HTML);
 
-    $c->view(fn (): string => <<<HTML
+    $c->view(fn (bool $isUpdate, string $basePath): string => <<<HTML
         <div class="container" id="content">
             <h1>🔔 Global Notifications</h1>
             <nav>
-                <a href="/">🏠 Home</a>
-                <a href="/dashboard">📊 Dashboard</a>
-                <a href="/settings">⚙️ Settings</a>
+                <a href="{$basePath}">🏠 Home</a>
+                <a href="{$basePath}dashboard">📊 Dashboard</a>
+                <a href="{$basePath}settings">⚙️ Settings</a>
             </nav>
 
             {$banner()}
@@ -192,13 +192,13 @@ $app->page('/settings', function (Context $c) use ($app, $notificationBanner): v
         </style>
     HTML);
 
-    $c->view(fn (): string => <<<HTML
+    $c->view(fn (bool $isUpdate, string $basePath): string => <<<HTML
         <div class="container" id="content">
             <h1>🔔 Global Notifications</h1>
             <nav>
-                <a href="/">🏠 Home</a>
-                <a href="/dashboard">📊 Dashboard</a>
-                <a href="/settings">⚙️ Settings</a>
+                <a href="{$basePath}">🏠 Home</a>
+                <a href="{$basePath}dashboard">📊 Dashboard</a>
+                <a href="{$basePath}settings">⚙️ Settings</a>
             </nav>
 
             {$banner()}

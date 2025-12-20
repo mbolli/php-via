@@ -21,6 +21,6 @@ class Action {
      * Get the action URL.
      */
     public function url(): string {
-        return $this->basePath . 'action/' . $this->id;
+        return $this->basePath . '_action/' . $this->id;
     }
 }

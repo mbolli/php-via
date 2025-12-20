@@ -61,14 +61,14 @@ class RequestHandler {
         $this->via->log('debug', "Request: {$method} {$path}");
 
         // Serve Datastar.js
-        if ($path === '/_datastar.js') {
+        if ($path === '/datastar.js') {
             $this->serveDatastarJs($response);
 
             return;
         }
 
         // Serve Via CSS
-        if ($path === '/_via.css') {
+        if ($path === '/via.css') {
             $this->serveViaCss($response);
 
             return;

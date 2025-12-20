@@ -62,7 +62,7 @@ class ViewRenderer {
             $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
 
             $startTime = microtime(true);
-            $result = $viewFn($isUpdate);
+            $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
             $duration = microtime(true) - $startTime;
             $this->stats->trackRender($duration);
 
@@ -80,7 +80,7 @@ class ViewRenderer {
         $this->logger->debug("Rendering {$logContext} view for {$route} (no cache)", $context);
 
         $startTime = microtime(true);
-        $result = $viewFn($isUpdate);
+        $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
         $duration = microtime(true) - $startTime;
         $this->stats->trackRender($duration);
 

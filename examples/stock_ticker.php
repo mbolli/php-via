@@ -127,7 +127,7 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol): void {
     // Topic-based scope - all watchers of this stock share updates
     $c->scope(Scope::build('stock', $symbol));
 
-    $c->view(function (bool $isUpdate = false) use ($symbol, $c): string {
+    $c->view(function (bool $isUpdate, string $basePath) use ($symbol, $c): string {
         $stock = StockData::get($symbol);
 
         if (!$stock) {
@@ -158,7 +158,7 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol): void {
             if ($sym === $symbol) {
                 continue;
             }
-            $otherStocks .= "<a href='/stock/{$sym}' class='stock-link'>{$sym}</a> ";
+            $otherStocks .= "<a href='{$basePath}stock/{$sym}' class='stock-link'>{$sym}</a> ";
         }
 
         return $c->render('stock_detail.html.twig', [

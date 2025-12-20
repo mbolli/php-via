@@ -96,7 +96,7 @@ $via->appendToHead(
 
 // Home page
 $via->page('/', function (Context $c): void {
-    $c->view(fn (): string => '
+    $c->view(fn (bool $isUpdate, string $basePath): string => '
         <div class="container">
             <h1>🔗 Path Parameters Demo</h1>
 
@@ -140,8 +140,8 @@ $via->page(\'/users/{username}\',<br>
             <div class="card">
                 <h2>📋 Try It Out:</h2>
                 <div class="nav-links">
-                    <a href="/blog/2024/12/hello-world">Manual Access Example →</a>
-                    <a href="/articles/2025/01/testing">Auto-Injection Example →</a>
+                    <a href="{$basePath}blog/2024/12/hello-world">Manual Access Example →</a>
+                    <a href="{$basePath}articles/2025/01/testing">Auto-Injection Example →</a>
                 </div>
             </div>
         </div>
@@ -154,7 +154,7 @@ $via->page('/blog/{year}/{month}/{slug}', function (Context $c): void {
     $month = $c->getPathParam('month');
     $slug = $c->getPathParam('slug');
 
-    $c->view(fn (): string => "
+    $c->view(fn (bool $isUpdate, string $basePath): string => "
         <div class=\"container\">
             <div class=\"card\">
                 <h1>📰 Blog Post</h1>
@@ -179,9 +179,9 @@ $via->page('/blog/{year}/{month}/{slug}', function (Context $c): void {
             </div>
 
             <div class=\"nav-links\">
-                <a href=\"/\">← Back to Home</a>
-                <a href=\"/blog/2025/01/new-year-post\">Try another blog post</a>
-                <a href=\"/articles/2025/01/testing\">Compare with auto-injection →</a>
+                <a href=\"{$basePath}\">← Back to Home</a>
+                <a href=\"{$basePath}blog/2025/01/new-year-post\">Try another blog post</a>
+                <a href=\"{$basePath}articles/2025/01/testing\">Compare with auto-injection →</a>
             </div>
             </div>
         </div>
@@ -194,7 +194,7 @@ $via->page('/blog/{year}/{month}/{slug}', function (Context $c): void {
 
 // Multiple parameters auto-injection
 $via->page('/articles/{year}/{month}/{slug}', function (Context $c, string $year, string $month, string $slug): void {
-    $c->view(fn (): string => "
+    $c->view(fn (bool $isUpdate, string $basePath): string => "
         <div class=\"container\">
             <div class=\"card\">
                 <h1>📰 Article <span class=\"badge\">3 params auto-injected</span></h1>
@@ -248,9 +248,9 @@ function(Context \$c,<br>
             </p>
 
             <div class=\"nav-links\">
-                <a href=\"/\">← Back to Home</a>
-                <a href=\"/articles/2025/12/new-features\">Try another article</a>
-                <a href=\"/blog/2024/12/hello-world\">← Compare with manual method</a>
+                <a href=\"{$basePath}\">← Back to Home</a>
+                <a href=\"{$basePath}articles/2025/12/new-features\">Try another article</a>
+                <a href=\"{$basePath}blog/2024/12/hello-world\">← Compare with manual method</a>
             </div>
             </div>
         </div>
