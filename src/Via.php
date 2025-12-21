@@ -30,6 +30,8 @@ use Twig\Environment;
  * Main application class that manages routing, contexts, and SSE connections.
  */
 class Via {
+    public const string VERSION = '0.1.0';
+
     // Legacy public properties for HTTP handlers (will be phased out)
     /** @var array<string, Context> */
     public array $contexts = [];

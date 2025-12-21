@@ -17,14 +17,14 @@ $examples = [
     ['title' => '🔢 Counter Basic', 'port' => 3002, 'subpath' => '/counter-basic', 'difficulty' => 'Beginner', 'file' => 'counter_basic.php', 'rendering' => 'twig', 'description' => 'Simplest counter example. Demonstrates minimal Via setup with inline Twig rendering and reactive signals.'],
     ['title' => '⚡ Counter', 'port' => 3001, 'subpath' => '/counter', 'difficulty' => 'Beginner', 'file' => 'counter.php', 'rendering' => 'html', 'description' => 'Basic counter with increment button. Uses signals with data binding and actions. Shows SSE with debug sidebar.'],
     ['title' => '👋 Greeter', 'port' => 3003, 'subpath' => '/greeter', 'difficulty' => 'Beginner', 'file' => 'greeter.php', 'rendering' => 'twig', 'description' => 'Interactive greeting buttons. Shows Twig templates, multiple actions, and signal updates with SSE.'],
-    
+
     // Intermediate
     ['title' => '📊 All Scopes Demo', 'port' => 3012, 'subpath' => '/all-scopes', 'difficulty' => 'Intermediate', 'file' => 'all_scopes.php', 'rendering' => 'html', 'description' => 'Complete scope comparison. Shows global, route, and tab scopes working together in a single multi-page application.'],
     ['title' => '👁️ Client Monitor', 'port' => 3010, 'subpath' => '/monitor', 'difficulty' => 'Intermediate', 'file' => 'client_monitor.php', 'rendering' => 'html', 'description' => 'Live connected clients viewer with identicons and server stats. Shows route scope broadcasting, render statistics, and real-time client monitoring.'],
     ['title' => '🧩 Components', 'port' => 3005, 'subpath' => '/components', 'difficulty' => 'Intermediate', 'file' => 'components.php', 'rendering' => 'twig', 'description' => 'Three independent counter components. Demonstrates component abstraction with namespaced signals and Twig partials.'],
     ['title' => '🛣️  Path Parameters', 'port' => 3011, 'subpath' => '/path-params', 'difficulty' => 'Intermediate', 'file' => 'path_params.php', 'rendering' => 'html', 'description' => 'Dynamic routing showcase. Demonstrates path parameter extraction with multiple route patterns and inline styling.'],
     ['title' => '✓ Todo List', 'port' => 3004, 'subpath' => '/todo', 'difficulty' => 'Intermediate', 'file' => 'todo.php', 'rendering' => 'twig', 'description' => 'Multiplayer todo app—one shared list for all clients! Uses route scope, CRUD operations, and mixed tab/route scoped signals.'],
-    
+
     // Advanced
     ['title' => '💬 Chat Room', 'port' => 3006, 'subpath' => '/chat', 'difficulty' => 'Advanced', 'file' => 'chat_room.php', 'rendering' => 'twig', 'description' => 'Multi-room chat system. Features custom room scopes, session-based usernames, typing indicators, and real-time broadcasting.'],
     ['title' => '🎮 Game of Life', 'port' => 3007, 'subpath' => '/gameoflife', 'difficulty' => 'Advanced', 'file' => 'game_of_life.php', 'rendering' => 'html', 'description' => 'Multiplayer Conway\'s Game of Life—everyone sees and controls the same board! Uses route scope, timer-based updates, and view caching.'],
@@ -82,29 +82,29 @@ function renderHtml(array $examples, bool $useSubpaths, string $baseUrl): string
                 grid-template-columns: 1fr;
                 gap: 1rem;
             }
-            
+
             header h1 {
                 font-size: 2rem;
             }
-            
+
             header p {
                 font-size: 1rem;
             }
         }
-        
+
         @media (max-width: 480px) {
             body {
                 padding: 1rem;
             }
-            
+
             header {
                 margin-bottom: 2rem;
             }
-            
+
             header h1 {
                 font-size: 1.75rem;
             }
-            
+
             .examples-grid {
                 gap: 0.75rem;
             }
