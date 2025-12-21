@@ -299,7 +299,7 @@ class Application {
         $this->twig->addFunction(
             new TwigFunction(
                 'dump',
-                fn (mixed $vars) => dump($vars) && null,
+                fn (mixed ...$vars): string => '<pre>' . print_r($vars, true) . '</pre>',
                 ['is_safe' => ['html']]
             ),
         );
