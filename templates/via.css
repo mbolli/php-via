@@ -510,9 +510,35 @@ a:hover {
     }
 }
 
+@media (max-width: 768px) {
+    h1 {
+        font-size: 28px;
+    }
+    
+    h2 {
+        font-size: 22px;
+    }
+    
+    .page-layout {
+        padding: 16px;
+    }
+    
+    .card,
+    .info-box {
+        padding: 20px;
+    }
+    
+    /* Make example cards more compact on tablets */
+    .example-card h3,
+    .stock-card h3 {
+        font-size: 1.2rem;
+    }
+}
+
 @media (max-width: 640px) {
     body {
         font-size: 14px;
+        padding: 0;
     }
     
     h1 {
@@ -523,9 +549,18 @@ a:hover {
         font-size: 20px;
     }
     
+    h3 {
+        font-size: 16px;
+    }
+    
     button {
         padding: 10px 16px;
         font-size: 14px;
+        width: 100%;
+    }
+    
+    button + button {
+        margin-top: 8px;
     }
     
     .page-layout {
@@ -535,6 +570,92 @@ a:hover {
     
     .container,
     .page-container {
+        padding: 12px;
+    }
+    
+    .card,
+    .info-box {
         padding: 16px;
+        margin-bottom: 12px;
+    }
+    
+    /* Compact example/stock cards on mobile */
+    .example-card,
+    .stock-card {
+        padding: 16px;
+    }
+    
+    .example-card h3,
+    .stock-card h3 {
+        font-size: 1.1rem;
+        margin-bottom: 0.4rem;
+    }
+    
+    .example-card .description,
+    .stock-card .description {
+        font-size: 0.85rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .example-card .port {
+        font-size: 0.85rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .example-card .meta,
+    .stock-card .meta {
+        gap: 0.4rem;
+    }
+    
+    .badge,
+    .rendering-badge,
+    .github-link {
+        font-size: 0.7rem;
+        padding: 0.3rem 0.7rem;
+    }
+    
+    .rendering-flag {
+        font-size: 0.65rem;
+        padding: 0.3rem 0.6rem;
+        top: 0.5rem;
+        right: 0.5rem;
+    }
+    
+    /* Stack form elements vertically on mobile */
+    input[type="text"],
+    input[type="number"],
+    input[type="email"],
+    input[type="password"],
+    textarea,
+    select {
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+    
+    /* Connection warning smaller on mobile */
+    .connection-warning {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        padding: 10px 16px;
+        font-size: 13px;
+        text-align: center;
+    }
+    
+    /* Debug sidebar more compact */
+    .debug-sidebar {
+        padding: 16px;
+    }
+    
+    .debug-sidebar h3 {
+        font-size: 14px;
+        margin-bottom: 12px;
+    }
+    
+    .debug-sidebar pre {
+        font-size: 10px;
+        padding: 12px;
+        max-height: 300px;
     }
 }
