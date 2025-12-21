@@ -6,6 +6,8 @@ Real-time engine for building reactive web applications in PHP with Swoole.
 
 Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using Swoole's async capabilities. [Datastar](https://data-star.dev) (RC.7) acts as the glue between server and client, handling DOM morphing and SSE communication.
 
+**[🎮 Try Live Examples](https://via.zweiundeins.gmbh)** - See php-via in action with interactive demos
+
 ## Why php-via?
 
 - **Datastar-powered** - Reactive hypermedia framework handles client-side reactivity
@@ -13,12 +15,12 @@ Inspired by [go-via/via](https://github.com/go-via/via), this library brings the
 - **No JavaScript** - Write server-side code only, Datastar handles the rest
 - **No build step** - No transpilation or bundling
 - **Full reactivity** - Real-time updates via SSE
-- **Single SSE stream** - Efficient communication (pair with Caddy for Brotli: 2500 elements = ~0.2 KB)
+- **Single SSE stream** - Efficient communication (very efficient with Brotli)
 - **Pure PHP** - Leveraging Swoole's coroutines
 
 ## Requirements
 
-- PHP 8.1+
+- PHP 8.4+
 - Swoole extension
 - Composer
 
@@ -335,6 +337,8 @@ php-via fundamentally relies on:
 
 ## Examples
 
+**[🎮 Try Live Examples](https://via.zweiundeins.gmbh)** - Interactive demos running in production
+
 Check the `examples/` directory for more examples:
 
 - `counter_basic.php` - Simple counter with reactive signals
@@ -349,6 +353,17 @@ Check the `examples/` directory for more examples:
 - `chat_room.php` - Multi-room chat application
 - `all_scopes.php` - Demonstrates all scope types in one example
 - `client_monitor.php` - Live client monitoring with server stats
+
+## Versioning
+
+php-via follows [Semantic Versioning 2.0.0](https://semver.org/). This means:
+
+- **Major version** (e.g., 2.0.0) - Breaking changes to the public API
+- **Minor version** (e.g., 1.1.0) - New features, backward compatible
+- **Patch version** (e.g., 1.0.1) - Bug fixes, backward compatible
+
+You can safely upgrade within the same major version without breaking your code.
+
 
 ## Credits
 
