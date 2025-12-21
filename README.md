@@ -1,5 +1,12 @@
 # 🚀 php-via
 
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
+[![Total Downloads](https://img.shields.io/packagist/dt/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
+[![License](https://img.shields.io/packagist/l/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
+[![PHP Version](https://img.shields.io/packagist/php-v/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
+[![CI](https://img.shields.io/github/actions/workflow/status/mbolli/php-via/ci.yml?branch=master&style=flat-square&label=CI)](https://github.com/mbolli/php-via/actions)
+[![PHPStan](https://img.shields.io/badge/PHPStan-level%206-brightgreen.svg?style=flat-square)](https://phpstan.org/)
+
 ![php-via logo](https://raw.githubusercontent.com/mbolli/php-via/master/logo.png)
 
 Real-time engine for building reactive web applications in PHP with Swoole.
