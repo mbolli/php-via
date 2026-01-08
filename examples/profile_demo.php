@@ -19,12 +19,22 @@ $config->withHost('0.0.0.0')
 
 $app = new Via($config);
 
+// Track timer ID for cleanup
+$broadcastTimerId = null;
+
 // Start broadcast timer when server starts (not when clients connect)
-$app->onStart(function () use ($app): void {
+$app->onStart(function () use ($app, &$broadcastTimerId): void {
     echo "Starting broadcast timer...\n";
-    Timer::tick(2000, function () use ($app): void {
+    $broadcastTimerId = Timer::tick(2000, function () use ($app): void {
         $app->broadcast(Scope::ROUTE);
     });
+});
+
+$app->onShutdown(function () use (&$broadcastTimerId): void {
+    if ($broadcastTimerId !== null) {
+        Timer::clear($broadcastTimerId);
+        $broadcastTimerId = null;
+    }
 });
 
 $app->appendToHead('<title>Client Monitor</title>');

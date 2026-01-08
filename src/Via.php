@@ -19,9 +19,12 @@ use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
+use Swoole\Event;
 use Swoole\Http\Request;
 use Swoole\Http\Response;
 use Swoole\Http\Server;
+use Swoole\Process;
+use Swoole\Timer;
 use Twig\Environment;
 
 /**
@@ -48,6 +51,12 @@ class Via {
 
     /** @var array<callable> Callbacks to run when server starts */
     private array $startCallbacks = [];
+
+    /** @var array<callable> Callbacks to run on graceful shutdown */
+    private array $shutdownCallbacks = [];
+
+    private bool $shuttingDown = false;
+    private bool $signalsRegistered = false;
 
     private Application $app;
     private Router $router;
@@ -384,6 +393,9 @@ class Via {
                 'max_coroutine' => 100000,
                 'worker_num' => 1,   // Single worker = shared state (clients, render stats)
                 'send_yield' => true,
+                'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
+                'reload_async' => true,  // Enable async reload
+                'enable_reuse_port' => true,  // Allow immediate rebind on restart
             ];
             $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings()));
 
@@ -391,11 +403,22 @@ class Via {
 
             $this->server->on('start', function (Server $server): void {
                 $this->log('info', "Via server started on {$this->config->getHost()}:{$this->config->getPort()}");
+            });
+
+            $this->server->on('workerStart', function (Server $server, int $workerId): void {
+                // Register signal handlers in worker process (where timers run)
+                $this->registerSignalHandlers();
 
                 // Execute all registered start callbacks
                 foreach ($this->startCallbacks as $callback) {
                     $callback();
                 }
+            });
+
+            $this->server->on('workerExit', function (Server $server, int $workerId): void {
+                // Prevent worker exit timeout by clearing all timers and exiting event loop
+                Timer::clearAll();
+                Event::exit();
             });
 
             $this->server->on('request', function (Request $request, Response $response): void {
@@ -412,6 +435,23 @@ class Via {
      */
     public function onStart(callable $callback): void {
         $this->startCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a callback to run on graceful shutdown.
+     * Use this to clean up timers, close connections, or save state.
+     */
+    public function onShutdown(callable $callback): void {
+        $this->shutdownCallbacks[] = $callback;
+    }
+
+    /**
+     * Check if server is shutting down.
+     *
+     * @internal Used by SSE handler to exit gracefully
+     */
+    public function isShuttingDown(): bool {
+        return $this->shuttingDown;
     }
 
     /**
@@ -614,6 +654,63 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Register signal handlers for graceful shutdown.
+     */
+    private function registerSignalHandlers(): void {
+        // Prevent duplicate registration
+        if ($this->signalsRegistered) {
+            return;
+        }
+        $this->signalsRegistered = true;
+
+        // SIGTERM - systemd stop/restart
+        Process::signal(SIGTERM, function (): void {
+            $this->log('info', 'Received SIGTERM, shutting down gracefully...');
+            $this->shuttingDown = true;
+            $this->executeShutdownCallbacks();
+
+            // Force kill the server to stop all coroutines immediately
+            if ($this->server !== null) {
+                $this->server->shutdown();
+            } else {
+                exit(0);
+            }
+        });
+
+        // SIGINT - Ctrl+C
+        Process::signal(SIGINT, function (): void {
+            $this->log('info', 'Received SIGINT (Ctrl+C), shutting down gracefully...');
+            $this->shuttingDown = true;
+            $this->executeShutdownCallbacks();
+
+            if ($this->server !== null) {
+                $this->server->shutdown();
+            } else {
+                exit(0);
+            }
+        });
+
+        // SIGHUP - systemd reload (just log, don't exit)
+        Process::signal(SIGHUP, function (): void {
+            $this->log('info', 'Received SIGHUP signal, ignoring');
+        });
+    }
+
+    /**
+     * Execute all registered shutdown callbacks.
+     */
+    private function executeShutdownCallbacks(): void {
+        $this->shuttingDown = true;
+        foreach ($this->shutdownCallbacks as $callback) {
+            try {
+                $callback();
+            } catch (\Throwable $e) {
+                $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
+            }
+        }
     }
 
     /**

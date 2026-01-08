@@ -96,6 +96,13 @@ class SseHandler {
         $lastKeepalive = time();
 
         while (true) {
+            // Exit immediately if server is shutting down
+            if ($this->via->isShuttingDown()) {
+                $this->via->log('debug', 'Server shutting down, closing SSE connection', $context);
+
+                break;
+            }
+
             if (!$response->isWritable()) {
                 break;
             }

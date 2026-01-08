@@ -177,10 +177,13 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol): void {
 // Background Stock Price Updater
 // =============================================================================
 
-function startStockUpdater(Via $app): void {
+// Track timer ID for cleanup
+$stockTimerId = null;
+
+function startStockUpdater(Via $app): int {
     echo "Starting stock price updater...\n";
 
-    Timer::tick(2000, function () use ($app): void {
+    return Timer::tick(2000, function () use ($app): void {
         // Update all stock prices
         $stocks = StockData::getAll();
 
@@ -237,8 +240,15 @@ function startStockUpdater(Via $app): void {
     });
 }
 
-$app->onStart(function () use ($app): void {
-    startStockUpdater($app);
+$app->onStart(function () use ($app, &$stockTimerId): void {
+    $stockTimerId = startStockUpdater($app);
+});
+
+$app->onShutdown(function () use (&$stockTimerId): void {
+    if ($stockTimerId !== null) {
+        Timer::clear($stockTimerId);
+        $stockTimerId = null;
+    }
 });
 
 echo "Starting Stock Ticker Demo on http://0.0.0.0:3009\n";

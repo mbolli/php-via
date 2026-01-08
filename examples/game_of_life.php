@@ -121,6 +121,15 @@ class GameState {
             });
         }
     }
+
+    public static function cleanup(): void {
+        if (self::$timerId !== null) {
+            Timer::clear(self::$timerId);
+            self::$timerId = null;
+        }
+        self::$contexts = [];
+        self::$sessionIds = [];
+    }
 }
 
 // Initialize shared state
@@ -548,6 +557,11 @@ $app->page('/', function (Context $c) use ($app): void {
         </div>
         HTML;
     });
+});
+
+// Register cleanup callback for graceful shutdown
+$app->onShutdown(function (): void {
+    GameState::cleanup();
 });
 
 // Start the server
