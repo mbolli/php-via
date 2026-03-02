@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
-use Swoole\Timer;
+use OpenSwoole\Timer;
 
 /**
  * ContextLifecycle - Manages context cleanup, timers, and callbacks.

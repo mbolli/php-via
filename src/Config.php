@@ -18,7 +18,7 @@ class Config {
     private bool $basePathDetected = false;
 
     /** @var array<string, mixed> */
-    private array $swooleSettings = [];
+    private array $openSwooleSettings = [];
 
     /**
      * Set basePath from reverse proxy header.
@@ -82,7 +82,7 @@ class Config {
      * @param array<string, mixed> $settings
      */
     public function withSwooleSettings(array $settings): self {
-        $this->swooleSettings = array_merge($this->swooleSettings, $settings);
+        $this->openSwooleSettings = array_merge($this->openSwooleSettings, $settings);
 
         return $this;
     }
@@ -119,6 +119,6 @@ class Config {
      * @return array<string, mixed>
      */
     public function getSwooleSettings(): array {
-        return $this->swooleSettings;
+        return $this->openSwooleSettings;
     }
 }

@@ -7,7 +7,7 @@ namespace Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use Swoole\Coroutine\Channel;
+use OpenSwoole\Coroutine\Channel;
 
 /**
  * PatchManager - Manages patch queue and signal syncing.
@@ -30,7 +30,7 @@ class PatchManager {
         private SignalFactory $signalFactory,
         private ComponentManager $componentManager,
     ) {
-        // In test mode (no Swoole server running), use array instead of Channel
+        // In test mode (no OpenSwoole server running), use array instead of Channel
         $inTestMode = getenv('VIA_TEST_MODE') === '1';
 
         if ($inTestMode) {
@@ -56,7 +56,7 @@ class PatchManager {
             }
             $this->patchChannel[] = $patch;
         } else {
-            // Swoole Channel for production
+            // OpenSwoole Channel for production
             $channel = $this->getPatchChannel();
 
             while ($channel->isFull()) {
@@ -87,7 +87,7 @@ class PatchManager {
             return array_shift($this->patchChannel);
         }
 
-        // Swoole Channel for production
+        // OpenSwoole Channel for production
         if ($this->patchChannel->isEmpty()) {
             return null;
         }

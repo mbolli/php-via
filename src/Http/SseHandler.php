@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
+use OpenSwoole\Http\Request;
+use OpenSwoole\Http\Response;
+use OpenSwoole\Timer;
 use starfederation\datastar\enums\ElementPatchMode;
 use starfederation\datastar\ServerSentEventGenerator;
-use Swoole\Coroutine;
-use Swoole\Http\Request;
-use Swoole\Http\Response;
-use Swoole\Timer;
 
 /**
  * Handles Server-Sent Events (SSE) connections for real-time updates.
@@ -85,7 +85,7 @@ class SseHandler {
         }
 
         // Recreate the patch channel for the new coroutine (SSE reconnection)
-        // Swoole Channels are coroutine-specific and can't be shared across request coroutines
+        // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
         $context->getPatchManager()->recreatePatchChannel();
 
         // Send initial sync (view + signals) on connection/reconnection
@@ -135,7 +135,7 @@ class SseHandler {
                 }
             }
 
-            Coroutine::sleep(0.1);
+            Coroutine::sleep(1);
         }
 
         $this->via->log('debug', "SSE connection closed for context: {$context->getId()}");

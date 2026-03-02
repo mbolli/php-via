@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Support\Logger;
-use Swoole\Http\Request;
-use Swoole\Http\Response;
+use OpenSwoole\Http\Request;
+use OpenSwoole\Http\Response;
 
 /**
  * SessionManager - Session and cookie handling.

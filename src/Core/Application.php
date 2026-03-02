@@ -12,7 +12,7 @@ use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
-use Swoole\Timer;
+use OpenSwoole\Timer;
 use Twig\Environment;
 use Twig\Loader\ArrayLoader;
 use Twig\Loader\FilesystemLoader;

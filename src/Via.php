@@ -19,12 +19,12 @@ use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
-use Swoole\Event;
-use Swoole\Http\Request;
-use Swoole\Http\Response;
-use Swoole\Http\Server;
-use Swoole\Process;
-use Swoole\Timer;
+use OpenSwoole\Event;
+use OpenSwoole\Http\Request;
+use OpenSwoole\Http\Response;
+use OpenSwoole\Http\Server;
+use OpenSwoole\Process;
+use OpenSwoole\Timer;
 use Twig\Environment;
 
 /**
@@ -101,7 +101,7 @@ class Via {
         // Initialize ViewRenderer with Twig from Application
         $this->viewRenderer = new ViewRenderer($this->app->getTwig(), $this->viewCache, $this->stats, $this->logger);
 
-        // Note: Swoole server is created lazily in start() to allow testing without binding to a port
+        // Note: OpenSwoole server is created lazily in start() to allow testing without binding to a port
     }
 
     /**
@@ -382,9 +382,9 @@ class Via {
     public function start(): void {
         // Lazy initialization: create server only when starting
         if ($this->server === null) {
-            $this->server = new Server($this->config->getHost(), $this->config->getPort(), SWOOLE_BASE);
+            $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::SIMPLE_MODE);
 
-            // Configure Swoole for SSE streaming
+            // Configure OpenSwoole for SSE streaming
             $defaultSettings = [
                 'open_http2_protocol' => false,
                 'http_compression' => false,
@@ -561,11 +561,11 @@ class Via {
     }
 
     /**
-     * Read Datastar signals from a Swoole HTTP request.
+     * Read Datastar signals from an OpenSwoole HTTP request.
      *
      * This is a replacement for ServerSentEventGenerator::readSignals() which only checks
      * $_GET['datastar'] and php://input, but doesn't handle $_POST.
-     * In Swoole, POST requests need special handling since we use $request->post instead of $_POST.
+     * In OpenSwoole, POST requests need special handling since we use $request->post instead of $_POST.
      *
      * @internal Used by HTTP handlers
      *

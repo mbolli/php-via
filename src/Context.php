@@ -8,7 +8,7 @@ use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
-use Swoole\Timer;
+use OpenSwoole\Timer;
 
 /**
  * Context represents a living bridge between PHP and the browser.

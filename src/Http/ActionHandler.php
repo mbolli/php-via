@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Via;
-use Swoole\Http\Request;
-use Swoole\Http\Response;
+use OpenSwoole\Http\Request;
+use OpenSwoole\Http\Response;
 
 /**
  * Handles action triggers from the client.

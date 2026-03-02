@@ -7,8 +7,8 @@ namespace Mbolli\PhpVia\Http;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use Swoole\Http\Request;
-use Swoole\Http\Response;
+use OpenSwoole\Http\Request;
+use OpenSwoole\Http\Response;
 
 /**
  * Handles incoming HTTP requests and routes them appropriately.
