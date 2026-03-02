@@ -97,8 +97,8 @@ class HtmlBuilder {
         $shell = file_get_contents($shellPath);
 
         return str_replace(
-            array_keys($replacements),
-            array_values($replacements),
+            array_keys($replacements) ?: [],
+            array_values($replacements) ?: [],
             $shell
         );
     }
