@@ -20,6 +20,9 @@ class Config {
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
 
+    /** Poll interval for the SSE loop in milliseconds (default 100 ms). */
+    private int $ssePollIntervalMs = 100;
+
     /**
      * Set basePath from reverse proxy header.
      * Called on first request with X-Base-Path header from Caddy.
@@ -76,6 +79,21 @@ class Config {
         $this->basePath = rtrim($basePath, '/') . '/';
 
         return $this;
+    }
+
+    /**
+     * How long the SSE loop blocks waiting for a patch before looping again.
+     * Lower values increase responsiveness; higher values reduce CPU overhead.
+     * Default: 100 ms.
+     */
+    public function withSsePollIntervalMs(int $ms): self {
+        $this->ssePollIntervalMs = max(1, $ms);
+
+        return $this;
+    }
+
+    public function getSsePollIntervalMs(): int {
+        return $this->ssePollIntervalMs;
     }
 
     /**

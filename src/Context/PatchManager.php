@@ -23,6 +23,7 @@ class PatchManager {
     /** @var null|array<string, mixed>|Channel */
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
+    private float $pollTimeout;
 
     public function __construct(
         private Context $context,
@@ -40,6 +41,8 @@ class PatchManager {
             $this->patchChannel = new Channel(5);
             $this->useArray = false;
         }
+
+        $this->pollTimeout = $this->app->getConfig()->getSsePollIntervalMs() / 1000.0;
     }
 
     /**
@@ -77,6 +80,13 @@ class PatchManager {
      *
      * @return null|array<string, mixed> Next patch data or null if none available
      */
+    /**
+     * Get next patch from the queue.
+     *
+     * In production, blocks until a patch arrives or the configured SSE poll
+     * interval elapses — so the SSE loop wakes up immediately on a new patch
+     * and paces itself otherwise without a separate Coroutine::sleep().
+     */
     public function getPatch(): ?array {
         if ($this->useArray) {
             // Array-based queue for tests
@@ -87,12 +97,10 @@ class PatchManager {
             return array_shift($this->patchChannel);
         }
 
-        // OpenSwoole Channel for production
-        if ($this->patchChannel->isEmpty()) {
-            return null;
-        }
+        // OpenSwoole Channel for production — block until a patch arrives or timeout elapses
+        $result = $this->patchChannel->pop($this->pollTimeout);
 
-        return $this->patchChannel->pop(0.01);
+        return $result !== false ? $result : null;
     }
 
     /**

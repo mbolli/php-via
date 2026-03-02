@@ -5,10 +5,8 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Via;
-use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
-use OpenSwoole\Timer;
 use starfederation\datastar\enums\ElementPatchMode;
 use starfederation\datastar\ServerSentEventGenerator;
 
@@ -134,8 +132,8 @@ class SseHandler {
                     break;
                 }
             }
-
-            Coroutine::sleep(1);
+            // No explicit sleep needed: getPatch() blocks on the channel for up to 100 ms,
+            // waking immediately when a patch is available.
         }
 
         $this->via->log('debug', "SSE connection closed for context: {$context->getId()}");
