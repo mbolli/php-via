@@ -20,6 +20,8 @@ use OpenSwoole\Coroutine\Channel;
  * - Signal nesting/flattening
  */
 class PatchManager {
+    private const int CHANNEL_CAPACITY = 50;
+
     /** @var null|array<string, mixed>|Channel */
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
@@ -38,7 +40,7 @@ class PatchManager {
             $this->patchChannel = [];
             $this->useArray = true;
         } else {
-            $this->patchChannel = new Channel(5);
+            $this->patchChannel = new Channel(self::CHANNEL_CAPACITY);
             $this->useArray = false;
         }
 
@@ -53,7 +55,7 @@ class PatchManager {
     public function queuePatch(array $patch): void {
         if ($this->useArray) {
             // Array-based queue for tests
-            if (\count($this->patchChannel) >= 5) {
+            if (\count($this->patchChannel) >= self::CHANNEL_CAPACITY) {
                 array_shift($this->patchChannel); // Drop oldest
                 $this->app->log('debug', "Dropped old patch for context {$this->context->getId()} - queue full");
             }
@@ -75,11 +77,6 @@ class PatchManager {
         }
     }
 
-    /**
-     * Get next patch from the queue.
-     *
-     * @return null|array<string, mixed> Next patch data or null if none available
-     */
     /**
      * Get next patch from the queue.
      *
@@ -196,7 +193,7 @@ class PatchManager {
             }
 
             // Create new channel for the current coroutine
-            $this->patchChannel = new Channel(5);
+            $this->patchChannel = new Channel(self::CHANNEL_CAPACITY);
             $this->app->log('debug', "Recreated patch channel for context {$this->context->getId()}");
         } else {
             // In test mode, just clear the array

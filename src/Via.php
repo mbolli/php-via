@@ -597,6 +597,15 @@ class Via {
      * @internal Used by HTTP handlers
      */
     public function scheduleContextCleanup(string $contextId, int $delayMs = 5000): void {
+        // Register a cleanup callback so Via::$contexts is also cleared when Application fires the cleanup.
+        // Application::unregisterContext only removes from its own map; Via::$contexts is separate and must
+        // be cleared here, otherwise zombie contexts (no viewFn) survive and break SSE reconnection.
+        if (isset($this->contexts[$contextId])) {
+            $this->contexts[$contextId]->onCleanup(function () use ($contextId): void {
+                unset($this->contexts[$contextId]);
+            });
+        }
+
         $this->app->scheduleContextCleanup($contextId, $delayMs);
     }
 

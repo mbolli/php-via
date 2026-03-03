@@ -54,6 +54,18 @@ class SseHandler {
 
         $context = $this->via->contexts[$contextId];
 
+        // If the context exists but its view was cleared (cleanup ran and removed it from Via::$contexts
+        // but the callback hadn't fired yet), force a reload so the page re-initialises cleanly.
+        if (!$context->hasView()) {
+            $this->via->log('info', "Context has no view (post-cleanup race), sending reload: {$contextId}");
+            unset($this->via->contexts[$contextId]);
+            $output = $sse->executeScript('window.location.reload()');
+            $response->write($output);
+            $response->end();
+
+            return;
+        }
+
         // Track client info when SSE connects (not at page load)
         if (!isset($this->via->clients[$contextId])) {
             $clientId = $this->via->generateClientId();
