@@ -25,7 +25,6 @@ class PatchManager {
     /** @var null|array<string, mixed>|Channel */
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
-    private float $pollTimeout;
 
     public function __construct(
         private Context $context,
@@ -43,8 +42,6 @@ class PatchManager {
             $this->patchChannel = new Channel(self::CHANNEL_CAPACITY);
             $this->useArray = false;
         }
-
-        $this->pollTimeout = $this->app->getConfig()->getSsePollIntervalMs() / 1000.0;
     }
 
     /**
