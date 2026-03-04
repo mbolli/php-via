@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
 use starfederation\datastar\enums\ElementPatchMode;
@@ -131,6 +132,12 @@ class SseHandler {
 
                     break;
                 }
+            } else {
+                // No patch available — yield the coroutine for the poll interval.
+                // Coroutine::sleep() is the only reliable yield mechanism in OpenSwoole;
+                // Channel::pop(timeout) can return immediately (e.g. closed channel) and
+                // would cause a 100% CPU spinloop without this explicit sleep.
+                Coroutine::sleep($this->via->getConfig()->getSsePollIntervalMs() / 1000.0);
             }
 
             // Send keepalive comment every 30 seconds to prevent timeout
@@ -144,8 +151,6 @@ class SseHandler {
                     break;
                 }
             }
-            // No explicit sleep needed: getPatch() blocks on the channel for up to 100 ms,
-            // waking immediately when a patch is available.
         }
 
         $this->via->log('debug', "SSE connection closed for context: {$context->getId()}");

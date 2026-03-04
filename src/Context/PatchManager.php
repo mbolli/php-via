@@ -80,9 +80,9 @@ class PatchManager {
     /**
      * Get next patch from the queue.
      *
-     * In production, blocks until a patch arrives or the configured SSE poll
-     * interval elapses — so the SSE loop wakes up immediately on a new patch
-     * and paces itself otherwise without a separate Coroutine::sleep().
+     * Uses a non-blocking pop so the SSE loop can sleep explicitly via
+     * Coroutine::sleep(), which is the only reliable way to yield a coroutine
+     * in OpenSwoole regardless of channel state (closed, empty, etc.).
      */
     public function getPatch(): ?array {
         if ($this->useArray) {
@@ -94,8 +94,9 @@ class PatchManager {
             return array_shift($this->patchChannel);
         }
 
-        // OpenSwoole Channel for production — block until a patch arrives or timeout elapses
-        $result = $this->patchChannel->pop($this->pollTimeout);
+        // Non-blocking pop: return immediately if data is available, null otherwise.
+        // The caller (SseHandler) is responsible for sleeping when null is returned.
+        $result = $this->patchChannel->pop(0);
 
         return $result !== false ? $result : null;
     }
