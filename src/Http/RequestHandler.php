@@ -282,7 +282,7 @@ class RequestHandler {
      * Serve Datastar JavaScript file.
      */
     private function serveDatastarJs(Response $response): void {
-        $datastarJs = file_get_contents(__DIR__ . '/../../datastar.js');
+        $datastarJs = file_get_contents(__DIR__ . '/../../public/datastar.js');
 
         $response->header('Content-Type', 'application/javascript');
         $response->end($datastarJs);
@@ -292,7 +292,7 @@ class RequestHandler {
      * Serve Via CSS file.
      */
     private function serveViaCss(Response $response): void {
-        $viaCss = file_get_contents(__DIR__ . '/../../templates/via.css');
+        $viaCss = file_get_contents(__DIR__ . '/../../public/via.css');
 
         $response->header('Content-Type', 'text/css; charset=utf-8');
         $response->end($viaCss);

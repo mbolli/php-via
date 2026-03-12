@@ -134,7 +134,7 @@ function renderHtml(array $examples, bool $useSubpaths, string $baseUrl): string
             text-decoration: underline;
         }
     </style>
-    <script type="module" src="../datastar.js"></script>
+    <script type="module" src="/datastar.js"></script>
 </head>
 <body>
     <div class="container">
@@ -197,7 +197,7 @@ $server = new Server('0.0.0.0', 3000);
 $server->on('request', function (Request $request, Response $response) use ($examples, $useSubpaths, $baseUrl): void {
     // Serve via.css as a static file
     if ($request->server['request_uri'] === '/via.css') {
-        $cssPath = __DIR__ . '/../templates/via.css';
+        $cssPath = __DIR__ . '/../public/via.css';
         if (file_exists($cssPath)) {
             $response->header('Content-Type', 'text/css; charset=utf-8');
             $response->end(file_get_contents($cssPath));
@@ -212,7 +212,7 @@ $server->on('request', function (Request $request, Response $response) use ($exa
 
     // Serve datastar.js as a static file
     if ($request->server['request_uri'] === '/datastar.js') {
-        $datastarPath = __DIR__ . '/../datastar.js';
+        $datastarPath = __DIR__ . '/../public/datastar.js';
         if (file_exists($datastarPath)) {
             $response->header('Content-Type', 'application/javascript');
             $response->end(file_get_contents($datastarPath));
