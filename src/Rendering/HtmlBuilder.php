@@ -96,9 +96,13 @@ class HtmlBuilder {
         $shellPath = $this->shellTemplate ?? __DIR__ . '/../../templates/shell.html';
         $shell = file_get_contents($shellPath);
 
+        if ($shell === false) {
+            throw new \RuntimeException("Failed to load shell template from: $shellPath");
+        }
+
         return str_replace(
-            array_keys($replacements) ?: [],
-            array_values($replacements) ?: [],
+            array_keys($replacements),
+            array_values($replacements),
             $shell
         );
     }

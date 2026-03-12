@@ -32,11 +32,14 @@ class Config {
             return;
         }
 
-        $this->basePath = $basePathHeader !== null && $basePathHeader !== ''
-            ? rtrim($basePathHeader, '/') . '/'
-            : '/';
-
-        $this->basePathDetected = true;
+        // Only lock once we've seen the actual header.
+        // If there's no header (direct hit, health check, local dev without proxy),
+        // leave basePath at its configured default and don't lock — the next
+        // real proxied request will still be able to set it correctly.
+        if ($basePathHeader !== null && $basePathHeader !== '') {
+            $this->basePath = rtrim($basePathHeader, '/') . '/';
+            $this->basePathDetected = true;
+        }
     }
 
     public function withHost(string $host): self {
