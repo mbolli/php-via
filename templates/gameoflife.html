@@ -170,6 +170,19 @@
         .embed-mode footer { display: none; }
     </style>
     {{ head_content }}
+    <script>
+        // Send content height to parent for iframe auto-resize
+        function notifyParentHeight() {
+            if (window.parent === window) return;
+            const h = document.documentElement.scrollHeight;
+            window.parent.postMessage({ type: 'game-of-life-resize', height: h }, '*');
+        }
+        window.addEventListener('load', function () {
+            notifyParentHeight();
+            // Watch for size changes (board updates via Datastar/SSE)
+            new ResizeObserver(notifyParentHeight).observe(document.body);
+        });
+    </script>
 </head>
 <body data-class="{'embed-mode': {{ embed }}}">
     <div data-show="$_disconnected" style="position: fixed; top: 0; right: 0; background: red; color: white; padding: 5px; z-index: 9999;">Warning: Not connected to server.</div>
