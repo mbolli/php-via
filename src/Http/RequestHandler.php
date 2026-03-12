@@ -187,7 +187,8 @@ class RequestHandler {
         try {
             $this->via->invokeHandlerWithParams($handler, $context, $params);
         } catch (\Throwable $e) {
-            $this->via->log('error',
+            $this->via->log(
+                'error',
                 'Page handler exception on ' . $route . ': ' . \get_class($e) . ': ' . $e->getMessage()
                 . "\n" . $e->getTraceAsString()
             );
