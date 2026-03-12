@@ -361,6 +361,114 @@ Check the `examples/` directory for more examples:
 - `all_scopes.php` - Demonstrates all scope types in one example
 - `client_monitor.php` - Live client monitoring with server stats
 
+## Production Deployment
+
+This section covers running php-via examples behind a reverse proxy with systemd. The setup here matches the live demo at [via.zweiundeins.gmbh](https://via.zweiundeins.gmbh).
+
+### Overview
+
+Each example is a long-running Swoole HTTP server on its own port. In production:
+
+- **systemd** manages each process independently with automatic restarts
+- **Caddy** terminates TLS, strips subpath prefixes, and proxies to the correct port
+- **Static assets** (`datastar.js`, `via.css`) are served directly by Caddy from disk
+
+```
+Browser → Caddy (TLS, /counter/*) → strip prefix → Swoole :3001
+                 (TLS, /chat/*)   → strip prefix → Swoole :3006
+                 (/datastar.js)   → file_server (public/)
+                 (/via.css)       → file_server (public/)
+```
+
+### systemd Setup
+
+Two unit files are provided in `deploy/`:
+
+| File | Purpose |
+|---|---|
+| `via@.service` | Template unit — one instance per example |
+| `via.target` | Groups all instances; start/stop everything at once |
+
+```bash
+# Copy unit files
+sudo cp deploy/via@.service deploy/via.target /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Enable the target and all examples (adjust list to match your examples/)
+sudo systemctl enable via.target \
+  via@index \
+  via@counter \
+  via@counter_basic \
+  via@greeter \
+  via@todo \
+  via@components \
+  via@chat_room \
+  via@game_of_life \
+  via@global_notifications \
+  via@stock_ticker \
+  via@client_monitor \
+  via@path_params \
+  via@all_scopes
+
+# Start everything
+sudo systemctl start via.target
+```
+
+Each service unit runs `/usr/bin/php /opt/php-via/examples/%i.php` with `USE_SUBPATHS=1` and a 128 MB memory ceiling. See `deploy/via@.service` for full crash logging and security settings.
+
+**Useful commands:**
+
+```bash
+systemctl status 'via@*'                        # status of all instances
+journalctl -u via@counter -f                    # tail one example's log
+journalctl -t via-crash --since today           # all crash events across all instances
+systemctl restart via@stock_ticker              # restart one example
+systemctl reset-failed via@counter && systemctl start via@counter  # recover after crash limit
+```
+
+### Reverse Proxy (Caddy)
+
+A ready-made Caddyfile is at `deploy/examples.caddy`. The key pattern for each example:
+
+```caddy
+handle /counter/* {
+    uri strip_prefix /counter
+    reverse_proxy 127.0.0.1:3001 {
+        header_up X-Base-Path /counter/
+        transport http {
+            read_timeout 0s   # required for SSE
+            write_timeout 0s
+        }
+    }
+}
+redir /counter /counter/
+```
+
+The `X-Base-Path` header tells php-via what prefix to use for internal URLs (`_sse`, `_session/close`, asset paths). It is picked up automatically from the first proxied request — no manual configuration needed in the example code.
+
+Static assets are served by Caddy directly from disk, bypassing PHP entirely:
+
+```caddy
+handle /datastar.js {
+    root * /opt/php-via/public
+    file_server
+}
+handle /via.css {
+    root * /opt/php-via/public
+    file_server
+}
+```
+
+### Base Path in Development
+
+When running locally through a sub-path proxy (e.g. nginx at `/php-via`), set the base path explicitly in your example:
+
+```php
+$config->withBasePath('/php-via/');
+```
+
+When running directly on a port (the common case), no configuration is needed — the base path defaults to `/`.
+
 ## Versioning
 
 php-via follows [Semantic Versioning 2.0.0](https://semver.org/). This means:

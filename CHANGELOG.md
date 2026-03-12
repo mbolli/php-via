@@ -2,6 +2,46 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.2.0] - 2026-03-12
+
+### Dependencies
+- Migrated from `Swoole` to `OpenSwoole` extension
+- Updated bundled `datastar.js` from RC.7 to RC.8
+
+### SSE Improvements
+- **Reduced poll overhead** — idle SSE connections yield the worker coroutine via `usleep()` (hooked by `SWOOLE_HOOK_ALL`) rather than blocking the process
+  - Automatic cleanup of zombie contexts on disconnect
+  - Removed unused `$pollTimeout` from `PatchManager`
+
+### Features
+- feat: graceful shutdown — timers and open contexts cleaned up on SIGTERM/SIGINT; `Via::onShutdown()` callback hook added
+- **Crash logging** — diagnostics captured when a worker dies
+  - `register_shutdown_function` catches PHP fatals (OOM, stack overflow, compile errors) in each worker
+  - `set_exception_handler` catches uncaught exceptions that escape all coroutines
+  - `workerError` event logs abnormal worker exits including OS signal number
+  - `Logger::fatal()` — always emits regardless of log level; includes timestamp and current/peak memory
+- feat: page handler exceptions caught and logged with full stack trace, return 500 instead of crashing the worker
+- feat: move `datastar.js` and `via.css` to `public/` for direct serving by reverse proxies
+
+### Bug Fixes
+- fix: `Coroutine::sleep()` TypeError on OpenSwoole — replaced with `usleep()` and enabled `SWOOLE_HOOK_ALL` so OpenSwoole yields the coroutine non-blocking; fixes worker crashes on idle SSE connections
+- fix: `detectBasePathFromRequest()` no longer locks basePath to `/` when a direct hit (health check, systemd probe) arrives before Caddy's first proxied request — lock only triggers when `X-Base-Path` header is present
+- fix: `HtmlBuilder` throws `RuntimeException` instead of silently calling `str_replace` on `false` when shell template cannot be read
+- fix: incorrect `?: []` fallbacks on `array_keys`/`array_values` in shell template processing
+
+### Production Deployment
+- **systemd template unit** (`deploy/via@.service`) — one service instance per example
+  - Each instance independently managed and restarted by systemd
+  - Memory capped at 128 MB per process; crash marker written to journal on abnormal exit
+  - `StartLimitBurst=5` / `StartLimitIntervalSec=120` in `[Unit]` prevents restart storms
+- feat: `deploy/via.target` groups all instances for unified start/stop/status
+- **Caddy config** (`deploy/examples.caddy`)
+  - Static assets served from disk via `file_server` with path `rewrite` (fixes 404 for `/gameoflife/datastar.js` etc.)
+  - `X-Base-Path` header injected per subpath for correct internal URL generation
+
+### Examples
+- gameoflife: post iframe height to parent via `postMessage` + `ResizeObserver` for auto-resize when embedded
+
 ## [0.1.0] - 2025-12-21
 
 Initial pre-release. API is not yet stable and may change in future versions.
