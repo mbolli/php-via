@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Support\PrometheusExporter;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
@@ -20,11 +21,26 @@ class RequestHandler {
     private Via $via;
     private SseHandler $sseHandler;
     private ActionHandler $actionHandler;
+    private ?PrometheusExporter $prometheusExporter = null;
 
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
         $this->actionHandler = $actionHandler;
+    }
+
+    /**
+     * Enable Prometheus metrics endpoint at /_metrics.
+     */
+    public function enablePrometheus(?PrometheusExporter $exporter = null): void {
+        $this->prometheusExporter = $exporter ?? new PrometheusExporter();
+    }
+
+    /**
+     * Get the Prometheus exporter instance.
+     */
+    public function getPrometheusExporter(): ?PrometheusExporter {
+        return $this->prometheusExporter;
     }
 
     /**
@@ -102,6 +118,13 @@ class RequestHandler {
             return;
         }
 
+        // Handle Prometheus metrics endpoint
+        if ($path === '/_metrics' && $method === 'GET') {
+            $this->handleMetrics($request, $response);
+
+            return;
+        }
+
         // Handle page routes
         $params = [];
         $handler = $this->via->getRouter()->matchRoute($path, $params);
@@ -161,7 +184,18 @@ class RequestHandler {
         $context->injectRouteParams($params);
 
         // Execute the page handler with automatic parameter injection
-        $this->via->invokeHandlerWithParams($handler, $context, $params);
+        try {
+            $this->via->invokeHandlerWithParams($handler, $context, $params);
+        } catch (\Throwable $e) {
+            $this->via->log('error',
+                'Page handler exception on ' . $route . ': ' . \get_class($e) . ': ' . $e->getMessage()
+                . "\n" . $e->getTraceAsString()
+            );
+            $response->status(500);
+            $response->end('Internal Server Error');
+
+            return;
+        }
 
         // Store context (in both legacy array and Application)
         $this->via->contexts[$contextId] = $context;
@@ -217,6 +251,31 @@ class RequestHandler {
 
         $response->header('Content-Type', 'application/json');
         $response->end(json_encode($stats, JSON_PRETTY_PRINT));
+    }
+
+    /**
+     * Handle Prometheus metrics endpoint.
+     */
+    private function handleMetrics(Request $request, Response $response): void {
+        if ($this->prometheusExporter === null) {
+            $response->status(404);
+            $response->end('Prometheus metrics not enabled. Call enablePrometheus() first.');
+
+            return;
+        }
+
+        // Update metrics from current state
+        $this->prometheusExporter->updateFromStats($this->via->getStats());
+
+        // Add memory metrics
+        $this->prometheusExporter->gauge('memory_usage_bytes', (float) memory_get_usage(true), 'Current memory usage in bytes');
+        $this->prometheusExporter->gauge('memory_peak_bytes', (float) memory_get_peak_usage(true), 'Peak memory usage in bytes');
+
+        // Add context count
+        $this->prometheusExporter->gauge('contexts_active', (float) \count($this->via->contexts), 'Currently active contexts');
+
+        // Serve metrics
+        $this->prometheusExporter->handleRequest($request, $response);
     }
 
     /**

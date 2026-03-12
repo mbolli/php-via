@@ -18,6 +18,7 @@ use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\PrometheusExporter;
 use Mbolli\PhpVia\Support\Stats;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
@@ -409,10 +410,37 @@ class Via {
                 // Register signal handlers in worker process (where timers run)
                 $this->registerSignalHandlers();
 
+                // Catch PHP fatal errors (OOM, stack overflow, parse errors in eval, etc.).
+                // error_get_last() returns the last E_ERROR/E_PARSE that killed the worker.
+                register_shutdown_function(function () use ($workerId): void {
+                    $e = error_get_last();
+                    if ($e !== null && \in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                        $this->logger->fatal(
+                            "Worker {$workerId} PHP fatal: [{$e['type']}] {$e['message']} in {$e['file']}:{$e['line']}"
+                        );
+                    }
+                });
+
+                // Catch any exception that escapes all coroutines/handlers.
+                set_exception_handler(function (\Throwable $e) use ($workerId): void {
+                    $this->logger->fatal(
+                        "Worker {$workerId} uncaught " . \get_class($e) . ": {$e->getMessage()}\n"
+                        . "  in {$e->getFile()}:{$e->getLine()}\n"
+                        . $e->getTraceAsString()
+                    );
+                });
+
                 // Execute all registered start callbacks
                 foreach ($this->startCallbacks as $callback) {
                     $callback();
                 }
+            });
+
+            // Fires when a worker process exits abnormally (crash, OOM kill, fatal).
+            // exitCode is the PHP exit code; signal is the OS signal that killed it (e.g. 9 = SIGKILL).
+            $this->server->on('workerError', function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal): void {
+                $reason = $signal > 0 ? "signal={$signal}" : "exit_code={$exitCode}";
+                $this->logger->fatal("Worker {$workerId} (pid {$workerPid}) crashed: {$reason}");
             });
 
             $this->server->on('workerExit', function (Server $server, int $workerId): void {
@@ -477,6 +505,29 @@ class Via {
      */
     public function getRenderStats(): array {
         return $this->app->getRenderStats();
+    }
+
+    /**
+     * Get the Stats instance for metrics tracking.
+     *
+     * @internal Used by HTTP handlers for Prometheus metrics
+     */
+    public function getStats(): Stats {
+        return $this->stats;
+    }
+
+    /**
+     * Enable Prometheus metrics endpoint at /_metrics.
+     *
+     * @param null|PrometheusExporter $exporter Optional custom exporter instance
+     *
+     * @return PrometheusExporter The exporter instance (for adding custom metrics)
+     */
+    public function enablePrometheus(?PrometheusExporter $exporter = null): PrometheusExporter {
+        $exporter ??= new PrometheusExporter();
+        $this->requestHandler->enablePrometheus($exporter);
+
+        return $exporter;
     }
 
     /**

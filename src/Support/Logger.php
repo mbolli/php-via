@@ -68,4 +68,15 @@ class Logger {
     public function error(string $message, ?Context $context = null): void {
         $this->log('error', $message, $context);
     }
+
+    /**
+     * Log a fatal crash with timestamp and memory snapshot.
+     * Always printed regardless of configured log level.
+     */
+    public function fatal(string $message): void {
+        $ts = date('Y-m-d H:i:s');
+        $mem = round(memory_get_usage(true) / 1024 / 1024, 1);
+        $peak = round(memory_get_peak_usage(true) / 1024 / 1024, 1);
+        echo "[FATAL] [{$ts}] [mem {$mem}MB peak {$peak}MB] {$message}\n";
+    }
 }
