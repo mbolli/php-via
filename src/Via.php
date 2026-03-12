@@ -397,6 +397,7 @@ class Via {
                 'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
                 'reload_async' => true,  // Enable async reload
                 'enable_reuse_port' => true,  // Allow immediate rebind on restart
+                'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
             ];
             $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings()));
 
