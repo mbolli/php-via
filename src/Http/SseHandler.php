@@ -4,20 +4,25 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
 use starfederation\datastar\enums\ElementPatchMode;
-use starfederation\datastar\ServerSentEventGenerator;
 
 /**
  * Handles Server-Sent Events (SSE) connections for real-time updates.
  */
 class SseHandler {
     private Via $via;
+    private ?RequestLogger $requestLogger = null;
 
     public function __construct(Via $via) {
         $this->via = $via;
+    }
+
+    public function setRequestLogger(RequestLogger $logger): void {
+        $this->requestLogger = $logger;
     }
 
     /**
@@ -35,9 +40,9 @@ class SseHandler {
             return;
         }
 
-        $sse = new ServerSentEventGenerator();
+        $sse = new SwooleSSEGenerator();
         // Set SSE headers using Datastar SDK
-        foreach (ServerSentEventGenerator::headers() as $name => $value) {
+        foreach (SwooleSSEGenerator::headers() as $name => $value) {
             $response->header($name, $value);
         }
 
@@ -79,7 +84,7 @@ class SseHandler {
             $this->via->getApp()->registerClient($contextId, $clientInfo);
         }
 
-        $this->via->log('debug', "SSE connection established for context: {$contextId}");
+        $this->requestLogger?->logSseConnect($contextId);
 
         // Cancel any pending cleanup timer for this context (reconnection)
         $this->via->getApp()->cancelContextCleanup($contextId);
@@ -151,7 +156,7 @@ class SseHandler {
             }
         }
 
-        $this->via->log('debug', "SSE connection closed for context: {$context->getId()}");
+        $this->requestLogger?->logSseDisconnect($contextId);
 
         // Unregister from all scopes immediately to stop receiving broadcasts
         // This prevents wasting resources syncing a context with no active SSE connection
@@ -168,7 +173,7 @@ class SseHandler {
      *
      * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode} $patch
      */
-    private function sendSSEPatch(ServerSentEventGenerator $sse, array $patch): string {
+    private function sendSSEPatch(SwooleSSEGenerator $sse, array $patch): string {
         $type = $patch['type'];
         $content = $patch['content'];
         $selector = $patch['selector'] ?? null;

@@ -7,6 +7,7 @@ namespace Mbolli\PhpVia\Http;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\PrometheusExporter;
+use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
@@ -22,6 +23,7 @@ class RequestHandler {
     private SseHandler $sseHandler;
     private ActionHandler $actionHandler;
     private ?PrometheusExporter $prometheusExporter = null;
+    private ?RequestLogger $requestLogger = null;
 
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
@@ -32,6 +34,10 @@ class RequestHandler {
     /**
      * Enable Prometheus metrics endpoint at /_metrics.
      */
+    public function setRequestLogger(RequestLogger $logger): void {
+        $this->requestLogger = $logger;
+    }
+
     public function enablePrometheus(?PrometheusExporter $exporter = null): void {
         $this->prometheusExporter = $exporter ?? new PrometheusExporter();
     }
@@ -56,6 +62,7 @@ class RequestHandler {
     public function handleRequest(Request $request, Response $response): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
+        $requestStart = hrtime(true);
 
         // Detect basePath from X-Base-Path header (set by reverse proxy like Caddy)
         $basePathHeader = $request->header['x-base-path'] ?? null;
@@ -74,11 +81,10 @@ class RequestHandler {
             return;
         }
 
-        $this->via->log('debug', "Request: {$method} {$path}");
-
         // Serve Datastar.js
         if ($path === '/datastar.js') {
             $this->serveDatastarJs($response);
+            $this->logRequest($method, $path, 200, $requestStart);
 
             return;
         }
@@ -86,18 +92,19 @@ class RequestHandler {
         // Serve Via CSS
         if ($path === '/via.css') {
             $this->serveViaCss($response);
+            $this->logRequest($method, $path, 200, $requestStart);
 
             return;
         }
 
-        // Handle SSE connection
+        // Handle SSE connection (logged separately by SseHandler)
         if ($path === '/_sse') {
             $this->sseHandler->handleSSE($request, $response);
 
             return;
         }
 
-        // Handle action triggers
+        // Handle action triggers (logged separately by ActionHandler)
         if (preg_match('#^/_action/(.+)$#', $path, $matches)) {
             $this->actionHandler->handleAction($request, $response, $matches[1]);
 
@@ -107,6 +114,7 @@ class RequestHandler {
         // Handle session close
         if ($path === '/_session/close' && $method === 'POST') {
             $this->handleSessionClose($request, $response);
+            $this->logRequest($method, $path, 200, $requestStart);
 
             return;
         }
@@ -132,7 +140,7 @@ class RequestHandler {
             // Extract route pattern from matched route
             foreach ($this->routes as $route => $h) {
                 if ($h === $handler) {
-                    $this->handlePage($request, $response, $route, $handler, $params);
+                    $this->handlePage($request, $response, $route, $handler, $params, $method, $path, $requestStart);
 
                     return;
                 }
@@ -140,8 +148,14 @@ class RequestHandler {
         }
 
         // 404 Not Found
+        $this->logRequest($method, $path, 404, $requestStart);
         $response->status(404);
         $response->end('Not Found');
+    }
+
+    private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {
+        $durationUs = (hrtime(true) - $hrtimeStart) / 1000;
+        $this->requestLogger?->logRequest($method, $path, $statusCode, $durationUs);
     }
 
     /**
@@ -167,7 +181,7 @@ class RequestHandler {
      *
      * @param array<string, string> $params Route parameters
      */
-    private function handlePage(Request $request, Response $response, string $route, callable $handler, array $params = []): void {
+    private function handlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart): void {
         // Get or create session ID
         $sessionId = $this->via->getSessionId($request);
 
@@ -192,6 +206,7 @@ class RequestHandler {
                 'Page handler exception on ' . $route . ': ' . \get_class($e) . ': ' . $e->getMessage()
                 . "\n" . $e->getTraceAsString()
             );
+            $this->logRequest($method, $path, 500, $requestStart);
             $response->status(500);
             $response->end('Internal Server Error');
 
@@ -211,6 +226,8 @@ class RequestHandler {
 
         // Set session cookie
         $this->via->setSessionCookie($response, $sessionId);
+
+        $this->logRequest($method, $path, 200, $requestStart);
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
         $response->end($html);

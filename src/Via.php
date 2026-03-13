@@ -19,6 +19,7 @@ use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\PrometheusExporter;
+use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\Stats;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
@@ -64,6 +65,7 @@ class Via {
     private SessionManager $sessionManager;
     private RequestHandler $requestHandler;
     private Logger $logger;
+    private RequestLogger $requestLogger;
     private Stats $stats;
     private ViewCache $viewCache;
     private ViewRenderer $viewRenderer;
@@ -75,6 +77,8 @@ class Via {
     public function __construct(private Config $config) {
         // Initialize support classes
         $this->logger = new Logger($this->config->getLogLevel());
+        $this->requestLogger = new RequestLogger($this->config->getDevMode());
+        $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
         $this->viewCache = new ViewCache();
         $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate());
@@ -98,6 +102,11 @@ class Via {
         $sseHandler = new SseHandler($this);
         $actionHandler = new ActionHandler($this);
         $this->requestHandler = new RequestHandler($this, $sseHandler, $actionHandler);
+
+        // Share request logger with HTTP handlers
+        $sseHandler->setRequestLogger($this->requestLogger);
+        $actionHandler->setRequestLogger($this->requestLogger);
+        $this->requestHandler->setRequestLogger($this->requestLogger);
 
         // Initialize ViewRenderer with Twig from Application
         $this->viewRenderer = new ViewRenderer($this->app->getTwig(), $this->viewCache, $this->stats, $this->logger);
@@ -217,8 +226,8 @@ class Via {
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
             $this->invalidateViewCache($scope);
-            $this->log('debug', 'Broadcasting to GLOBAL scope (all contexts)');
             $this->syncAllContexts();
+            $this->requestLogger->logBroadcast($scope, \count($this->contexts));
 
             return;
         }
@@ -230,7 +239,6 @@ class Via {
 
             // If no specific route provided, broadcast to all routes
             if ($route === null) {
-                $this->log('debug', 'Broadcasting to all ROUTE scopes (all routes)');
                 // Find all route scopes and invalidate their caches
                 // Note: getKeys() returns cache keys with :initial or :update suffix
                 // We need to extract the base scope before invalidating
@@ -247,12 +255,13 @@ class Via {
                 }
                 // Sync all contexts
                 $this->syncAllContexts();
+                $this->requestLogger->logBroadcast($scope, \count($this->contexts));
             } else {
                 // Important: Invalidate cache using the full scope string (route:/path)
                 // The context's primary scope is "route:/path", not just "route"
                 $this->invalidateViewCache($scope);
-                $this->log('debug', "Broadcasting to ROUTE scope: {$route}");
                 $this->syncContextsOnRoute($route);
+                $this->requestLogger->logBroadcast($scope, 0);
             }
 
             return;
@@ -261,12 +270,6 @@ class Via {
         // Handle custom scopes (with wildcard support)
         $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
 
-        if (str_contains($scope, '*')) {
-            $this->log('debug', "Broadcasting to wildcard scope: {$scope} (" . \count($matchedContexts) . ' contexts)');
-        } else {
-            $this->log('debug', "Broadcasting to scope: {$scope} (" . \count($matchedContexts) . ' contexts)');
-        }
-
         // Invalidate cache for this scope
         $this->invalidateViewCache($scope);
 
@@ -274,6 +277,8 @@ class Via {
         foreach ($matchedContexts as $context) {
             $context->sync();
         }
+
+        $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
     }
 
     /**
@@ -398,6 +403,7 @@ class Via {
                 'reload_async' => true,  // Enable async reload
                 'enable_reuse_port' => true,  // Allow immediate rebind on restart
                 'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
+                'log_level' => 4,  // SWOOLE_LOG_WARNING — suppress NOTICE about sending to closed connections
             ];
             $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings()));
 

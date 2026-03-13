@@ -20,9 +20,17 @@ class Logger {
     ];
 
     private int $minLevel;
+    private ?RequestLogger $requestLogger = null;
 
     public function __construct(string $logLevel = 'info') {
         $this->minLevel = self::LEVELS[$logLevel] ?? self::LEVELS['info'];
+    }
+
+    /**
+     * Attach a TUI request logger to absorb debug messages into its output.
+     */
+    public function setRequestLogger(RequestLogger $requestLogger): void {
+        $this->requestLogger = $requestLogger;
     }
 
     /**
@@ -35,10 +43,19 @@ class Logger {
     public function log(string $level, string $message, ?Context $context = null): void {
         $levelValue = self::LEVELS[$level] ?? self::LEVELS['info'];
 
-        if ($levelValue >= $this->minLevel) {
-            $prefix = $context ? "[{$context->getId()}] " : '';
-            echo '[' . mb_strtoupper($level) . "] {$prefix}{$message}\n";
+        if ($levelValue < $this->minLevel) {
+            return;
         }
+
+        // When TUI logger is active, buffer debug messages for structured output
+        if ($level === 'debug' && $this->requestLogger?->isEnabled()) {
+            $this->requestLogger->bufferDebug($message);
+
+            return;
+        }
+
+        $prefix = $context ? "[{$context->getId()}] " : '';
+        echo '[' . mb_strtoupper($level) . "] {$prefix}{$message}\n";
     }
 
     /**

@@ -150,7 +150,6 @@ $app->page('/room/{room}', function (Context $c, string $room): void {
         ];
 
         ChatState::$rooms[$room]['messages'][] = $newMessage;
-        var_dump(ChatState::$rooms[$room]['messages']);
 
         // Clear message input (TAB-scoped, only affects this user)
         $messageInput->setValue('');
@@ -175,7 +174,6 @@ $app->page('/room/{room}', function (Context $c, string $room): void {
     $c->onDisconnect(function (Context $ctx) use ($room, $roomScope, $sessionId): void {
         if (isset(ChatState::$roomUsers[$room][$sessionId])) {
             unset(ChatState::$roomUsers[$room][$sessionId]);
-            var_dump(ChatState::$roomUsers[$room], $sessionId);
 
             // Broadcast updated user list to remaining room members
             ChatState::$app?->broadcast($roomScope);

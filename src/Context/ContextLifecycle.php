@@ -53,15 +53,12 @@ class ContextLifecycle {
      * Execute cleanup callbacks and release resources.
      */
     public function cleanup(): void {
-        error_log("ContextLifecycle::cleanup() called for context: {$this->context->getId()}");
-
         // Clear all timers first
         foreach ($this->timerIds as $timerId) {
             Timer::clear($timerId);
         }
         $this->timerIds = [];
 
-        error_log('Executing ' . \count($this->cleanupCallbacks) . ' cleanup callbacks');
         foreach ($this->cleanupCallbacks as $callback) {
             try {
                 $callback($this->context);
