@@ -6,7 +6,6 @@ namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
-use Mbolli\PhpVia\Support\PrometheusExporter;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
@@ -22,7 +21,6 @@ class RequestHandler {
     private Via $via;
     private SseHandler $sseHandler;
     private ActionHandler $actionHandler;
-    private ?PrometheusExporter $prometheusExporter = null;
     private ?RequestLogger $requestLogger = null;
 
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
@@ -31,22 +29,8 @@ class RequestHandler {
         $this->actionHandler = $actionHandler;
     }
 
-    /**
-     * Enable Prometheus metrics endpoint at /_metrics.
-     */
     public function setRequestLogger(RequestLogger $logger): void {
         $this->requestLogger = $logger;
-    }
-
-    public function enablePrometheus(?PrometheusExporter $exporter = null): void {
-        $this->prometheusExporter = $exporter ?? new PrometheusExporter();
-    }
-
-    /**
-     * Get the Prometheus exporter instance.
-     */
-    public function getPrometheusExporter(): ?PrometheusExporter {
-        return $this->prometheusExporter;
     }
 
     /**
@@ -122,13 +106,6 @@ class RequestHandler {
         // Handle stats endpoint
         if ($path === '/_stats' && $method === 'GET') {
             $this->handleStats($request, $response);
-
-            return;
-        }
-
-        // Handle Prometheus metrics endpoint
-        if ($path === '/_metrics' && $method === 'GET') {
-            $this->handleMetrics($request, $response);
 
             return;
         }
@@ -269,31 +246,6 @@ class RequestHandler {
 
         $response->header('Content-Type', 'application/json');
         $response->end(json_encode($stats, JSON_PRETTY_PRINT));
-    }
-
-    /**
-     * Handle Prometheus metrics endpoint.
-     */
-    private function handleMetrics(Request $request, Response $response): void {
-        if ($this->prometheusExporter === null) {
-            $response->status(404);
-            $response->end('Prometheus metrics not enabled. Call enablePrometheus() first.');
-
-            return;
-        }
-
-        // Update metrics from current state
-        $this->prometheusExporter->updateFromStats($this->via->getStats());
-
-        // Add memory metrics
-        $this->prometheusExporter->gauge('memory_usage_bytes', (float) memory_get_usage(true), 'Current memory usage in bytes');
-        $this->prometheusExporter->gauge('memory_peak_bytes', (float) memory_get_peak_usage(true), 'Peak memory usage in bytes');
-
-        // Add context count
-        $this->prometheusExporter->gauge('contexts_active', (float) \count($this->via->contexts), 'Currently active contexts');
-
-        // Serve metrics
-        $this->prometheusExporter->handleRequest($request, $response);
     }
 
     /**

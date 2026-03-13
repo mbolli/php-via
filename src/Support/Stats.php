@@ -94,7 +94,7 @@ class Stats {
     }
 
     /**
-     * Get all statistics for Prometheus export.
+     * Get all statistics.
      *
      * @return array<string, float|int>
      */

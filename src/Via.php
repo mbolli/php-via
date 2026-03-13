@@ -18,7 +18,6 @@ use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\Logger;
-use Mbolli\PhpVia\Support\PrometheusExporter;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\Stats;
 use OpenSwoole\Event;
@@ -516,25 +515,9 @@ class Via {
 
     /**
      * Get the Stats instance for metrics tracking.
-     *
-     * @internal Used by HTTP handlers for Prometheus metrics
      */
     public function getStats(): Stats {
         return $this->stats;
-    }
-
-    /**
-     * Enable Prometheus metrics endpoint at /_metrics.
-     *
-     * @param null|PrometheusExporter $exporter Optional custom exporter instance
-     *
-     * @return PrometheusExporter The exporter instance (for adding custom metrics)
-     */
-    public function enablePrometheus(?PrometheusExporter $exporter = null): PrometheusExporter {
-        $exporter ??= new PrometheusExporter();
-        $this->requestHandler->enablePrometheus($exporter);
-
-        return $exporter;
     }
 
     /**
