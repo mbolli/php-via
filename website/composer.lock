@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "708cb7dbaeda0d5223056a060ec7a599",
+    "content-hash": "4f40bf5755b4b44cd379ced0dc1a4500",
     "packages": [
         {
             "name": "mbolli/php-via",
@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "..",
-                "reference": "86b38a69dc923e2617aa901b7621be3c77f487c2"
+                "reference": "821c43454993a26e2a3d608d202f220f47edc832"
             },
             "require": {
                 "ext-openswoole": "*",
@@ -22,6 +22,7 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.90.0",
+                "openswoole/ide-helper": "^22.1",
                 "pestphp/pest": "^4.0",
                 "phpstan/extension-installer": "^1.4",
                 "phpstan/phpstan": "^2.1.0",
@@ -57,6 +58,56 @@
                 "symlink": true,
                 "relative": true
             }
+        },
+        {
+            "name": "mbolli/tempest-highlight-datastar",
+            "version": "v1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/mbolli/tempest-highlight-datastar.git",
+                "reference": "03eefc556dca96ffeea20344f0be29fe23c4b9ed"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/mbolli/tempest-highlight-datastar/zipball/03eefc556dca96ffeea20344f0be29fe23c4b9ed",
+                "reference": "03eefc556dca96ffeea20344f0be29fe23c4b9ed",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.4",
+                "tempest/highlight": "^2.17"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "phpstan/phpstan": "^2.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Mbolli\\TempestHighlightDatastar\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Michael Bolli",
+                    "email": "michael@zweiundeins.gmbh"
+                }
+            ],
+            "description": "Datastar language support for tempest/highlight — highlights data-* attributes, $signals, @actions, and expressions.",
+            "keywords": [
+                "Datastar",
+                "syntax-highlighting",
+                "tempest-highlight"
+            ],
+            "support": {
+                "issues": "https://github.com/mbolli/tempest-highlight-datastar/issues",
+                "source": "https://github.com/mbolli/tempest-highlight-datastar/tree/v1.0.0"
+            },
+            "time": "2026-03-16T13:00:13+00:00"
         },
         {
             "name": "starfederation/datastar-php",

@@ -5,6 +5,7 @@
     "require": {
         "php": "^8.4",
         "mbolli/php-via": "*",
+        "mbolli/tempest-highlight-datastar": "^1.0.0",
         "tempest/highlight": "^2.17"
     },
     "license": "MIT",

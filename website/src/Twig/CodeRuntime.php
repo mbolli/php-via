@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace PhpVia\Website\Twig;
 
-use PhpVia\Website\Highlight\DatastarHtmlLanguage;
+use Mbolli\TempestHighlightDatastar\Html\DatastarHtmlLanguage;
+use Mbolli\TempestHighlightDatastar\Twig\DatastarTwigLanguage;
 use Tempest\Highlight\Highlighter;
 use Tempest\Highlight\Themes\CssTheme;
 use Twig\Extension\RuntimeExtensionInterface;
@@ -15,6 +16,7 @@ final class CodeRuntime implements RuntimeExtensionInterface {
     public function __construct() {
         $this->highlighter = new Highlighter(new CssTheme());
         $this->highlighter->addLanguage(new DatastarHtmlLanguage());
+        $this->highlighter->addLanguage(new DatastarTwigLanguage());
     }
 
     public function highlight(string $code, string $language, ?int $gutter = null): string {
