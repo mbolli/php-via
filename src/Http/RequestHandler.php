@@ -81,6 +81,25 @@ class RequestHandler {
             return;
         }
 
+        // Serve static files from configured staticDir (if set)
+        $staticDir = $this->via->getConfig()->getStaticDir();
+        if ($staticDir !== null) {
+            // Prevent directory traversal
+            $relPath = ltrim(parse_url($path, PHP_URL_PATH) ?? '', '/');
+            $filePath = $staticDir . '/' . $relPath;
+            $realBase = realpath($staticDir);
+            $realFile = realpath($filePath);
+
+            if ($realBase !== false && $realFile !== false
+                && str_starts_with($realFile, $realBase . '/')
+                && is_file($realFile)) {
+                $this->serveStaticFile($realFile, $response);
+                $this->logRequest($method, $path, 200, $requestStart);
+
+                return;
+            }
+        }
+
         // Handle SSE connection (logged separately by SseHandler)
         if ($path === '/_sse') {
             $this->sseHandler->handleSSE($request, $response);
@@ -256,6 +275,30 @@ class RequestHandler {
 
         $response->header('Content-Type', 'application/javascript');
         $response->end($datastarJs);
+    }
+
+    /**
+     * Serve a static file with correct Content-Type.
+     */
+    private function serveStaticFile(string $filePath, Response $response): void {
+        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+        $contentType = match ($ext) {
+            'css' => 'text/css; charset=utf-8',
+            'js' => 'application/javascript',
+            'svg' => 'image/svg+xml',
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            'ico' => 'image/x-icon',
+            'woff2' => 'font/woff2',
+            'woff' => 'font/woff',
+            default => 'application/octet-stream',
+        };
+
+        $response->header('Content-Type', $contentType);
+        // 1 hour cache for static assets
+        $response->header('Cache-Control', 'public, max-age=3600');
+        $response->end(file_get_contents($filePath));
     }
 
     /**

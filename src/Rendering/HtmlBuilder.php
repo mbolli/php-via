@@ -55,8 +55,9 @@ class HtmlBuilder {
      * @return string Complete HTML document
      */
     public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
-        $headContent = implode("\n", $this->headIncludes);
-        $footContent = implode("\n", $this->footIncludes);
+        // Merge global includes with per-context includes
+        $headContent = implode("\n", array_merge($this->headIncludes, $context->getContextHeadIncludes()));
+        $footContent = implode("\n", array_merge($this->footIncludes, $context->getContextFootIncludes()));
 
         // If it's a full page (already processed by processView), return it
         if (stripos($content, '<html') !== false) {
@@ -77,6 +78,7 @@ class HtmlBuilder {
             '{{ head_content }}' => $headContent,
             '{{ content }}' => $content,
             '{{ foot_content }}' => $footContent,
+            '{{ styles }}' => '',
         ];
 
         // Add signal replacements - extract signal name from ID for route-scoped signals
@@ -92,8 +94,8 @@ class HtmlBuilder {
             $replacements['{{ ' . $baseName . '.id }}'] = $signal->id();
         }
 
-        // Simple template replacement for the shell
-        $shellPath = $this->shellTemplate ?? __DIR__ . '/../../templates/shell.html';
+        // Simple template replacement for the shell (per-context override takes priority)
+        $shellPath = $context->getShellTemplate() ?? $this->shellTemplate ?? __DIR__ . '/../../templates/shell.html';
         $shell = file_get_contents($shellPath);
 
         if ($shell === false) {

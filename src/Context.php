@@ -40,6 +40,15 @@ class Context {
     /** @var null|string Session ID for this context */
     private ?string $sessionId = null;
 
+    /** @var null|string Per-route shell template override */
+    private ?string $shellTemplate = null;
+
+    /** @var array<string> Per-context additions to <head> */
+    private array $contextHeadIncludes = [];
+
+    /** @var array<string> Per-context additions before </body> */
+    private array $contextFootIncludes = [];
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -194,6 +203,77 @@ class Context {
 
     public function getRoute(): string {
         return $this->route;
+    }
+
+    /**
+     * Override the shell template for this page.
+     *
+     * Allows different routes to use different outer layouts
+     * (e.g., marketing shell vs docs shell vs debug shell).
+     *
+     * @param string $path Absolute path to the shell HTML template
+     */
+    public function setShellTemplate(string $path): self {
+        $this->shellTemplate = $path;
+
+        return $this;
+    }
+
+    /**
+     * Get the shell template override for this context, if any.
+     */
+    public function getShellTemplate(): ?string {
+        return $this->shellTemplate;
+    }
+
+    /**
+     * Add content to the <head> section for this page only.
+     *
+     * Useful for per-page <title>, <meta>, and <link> tags.
+     *
+     * @param string ...$elements HTML elements to append
+     */
+    public function appendToHead(string ...$elements): self {
+        foreach ($elements as $element) {
+            $this->contextHeadIncludes[] = $element;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Add content before closing </body> for this page only.
+     *
+     * @param string ...$elements HTML elements to append
+     */
+    public function appendToFoot(string ...$elements): self {
+        foreach ($elements as $element) {
+            $this->contextFootIncludes[] = $element;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Get per-context head includes.
+     *
+     * @internal Used by HtmlBuilder
+     *
+     * @return array<string>
+     */
+    public function getContextHeadIncludes(): array {
+        return $this->contextHeadIncludes;
+    }
+
+    /**
+     * Get per-context foot includes.
+     *
+     * @internal Used by HtmlBuilder
+     *
+     * @return array<string>
+     */
+    public function getContextFootIncludes(): array {
+        return $this->contextFootIncludes;
     }
 
     /**

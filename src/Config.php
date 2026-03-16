@@ -16,6 +16,7 @@ class Config {
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private bool $basePathDetected = false;
+    private ?string $staticDir = null;
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -70,6 +71,16 @@ class Config {
         $this->templateDir = $dir;
 
         return $this;
+    }
+
+    public function withStaticDir(string $dir): self {
+        $this->staticDir = rtrim($dir, '/');
+
+        return $this;
+    }
+
+    public function getStaticDir(): ?string {
+        return $this->staticDir;
     }
 
     public function withShellTemplate(string $path): self {
