@@ -23,7 +23,7 @@
     1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%,
     1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%,
     0.997 69.8%, 1.003 76.9%, 1
-  );--green-6:#40c057;--red-5:#ff6b6b;--ease-out-3:cubic-bezier(0, 0, .3, 1);--font-weight-8:800;--red-4:#ff8787;--green-8:#2f9e44;--yellow-1:#fff3bf;--yellow-8:#f08c00;--red-7:#f03e3e;--green-2:#b2f2bb;--yellow-9:#e67700;--yellow-2:#ffec99;--green-4:#69db7c;--font-lineheight-5:2;--blue-6:#228be6;--violet-6:#7950f2;--font-size-7:3rem;--shadow-color:220 3% 15%;--shadow-strength-3:calc(var(--shadow-strength) + 2%);--shadow-strength-4:calc(var(--shadow-strength) + 3%);--shadow-strength-5:calc(var(--shadow-strength) + 4%);--shadow-strength-6:calc(var(--shadow-strength) + 5%);--shadow-strength-7:calc(var(--shadow-strength) + 6%);--shadow-strength-8:calc(var(--shadow-strength) + 7%);--shadow-strength:1%}
+  );--green-6:#40c057;--red-5:#ff6b6b;--font-weight-4:400;--ease-out-3:cubic-bezier(0, 0, .3, 1);--font-weight-8:800;--red-4:#ff8787;--green-8:#2f9e44;--yellow-1:#fff3bf;--yellow-8:#f08c00;--red-7:#f03e3e;--green-2:#b2f2bb;--yellow-9:#e67700;--yellow-2:#ffec99;--green-4:#69db7c;--font-lineheight-5:2;--blue-6:#228be6;--violet-6:#7950f2;--font-size-7:3rem;--shadow-color:220 3% 15%;--shadow-strength-3:calc(var(--shadow-strength) + 2%);--shadow-strength-4:calc(var(--shadow-strength) + 3%);--shadow-strength-5:calc(var(--shadow-strength) + 4%);--shadow-strength-6:calc(var(--shadow-strength) + 5%);--shadow-strength-7:calc(var(--shadow-strength) + 6%);--shadow-strength-8:calc(var(--shadow-strength) + 7%);--shadow-strength:1%}
 
 /* php-via website styles
    Built on Open Props (https://open-props.style/)
@@ -987,6 +987,88 @@ main, .site-footer { position: relative; }
 
 .partial { color: var(--orange-5); }
 
+.coming-soon {
+  font-size: 0.6rem;
+  font-weight: var(--font-weight-7);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--radius-1);
+  padding: 0.1em 0.4em;
+  background: color-mix(in srgb, var(--blue-5) 20%, transparent);
+  color: var(--blue-4);
+  border: 1px solid color-mix(in srgb, var(--blue-5) 45%, transparent);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.comparison-footnotes {
+  max-width: 48rem;
+  margin-inline: auto;
+  margin-block-start: var(--size-4);
+  padding-inline-start: 1.2em;
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+}
+
+.comparison-footnotes li {
+  margin-block-end: 0.25em;
+}
+
+/* ─── Comparison table tooltips ────────────────────────── */
+
+.has-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  cursor: help;
+  position: relative;
+}
+
+.tooltip {
+  /* Fallback: absolute relative to .has-tooltip */
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  translate: -50% 0;
+  /* Appearance */
+  max-width: min(22rem, 60vw);
+  width: max-content;
+  background: var(--gray-9);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--size-2) var(--size-3);
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-4);
+  line-height: var(--line-height-3);
+  text-align: left;
+  z-index: 100;
+  box-shadow: var(--shadow-3);
+  /* Hidden by default */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 150ms, visibility 150ms;
+}
+
+/* CSS Anchor Positioning — Chrome 125+, Edge 125+ */
+
+@supports (anchor-name: --x) {
+  .tooltip {
+    position: fixed;
+    bottom: anchor(top);
+    left: anchor(center);
+    translate: -50% -6px;
+    position-try-fallbacks: flip-block;
+  }
+}
+
+.has-tooltip:hover .tooltip,
+.has-tooltip:focus-within .tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
 /* ─── Poll demo ────────────────────────────────────────── */
 
 .poll-section-inner {
@@ -1152,7 +1234,6 @@ main, .site-footer { position: relative; }
 
 .docs-content {
   padding: var(--size-7) var(--size-6);
-  max-width: 54rem;
 }
 
 .docs-content h1 { font-size: var(--font-size-6); margin-block-end: var(--size-5); }

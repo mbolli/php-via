@@ -290,7 +290,7 @@ $app->start();
 </section>
 
 <!-- Comparison table -->
-<section class="page-section page-section--tinted"></div>
+<section class="page-section page-section--tinted">
     <h2 class="section-title">Honest comparison.</h2>
     <p class="section-lead">Every tool has trade-offs. Here's where php-via stands.</p>
 
@@ -303,15 +303,17 @@ $app->start();
                     <th>Livewire</th>
                     <th>htmx + Alpine</th>
                     <th>Inertia.js</th>
+                    <th>LiveView</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td>Real-time SSE</td>
+                    <td>Native real-time push</td>
                     <td><span class="check">✓</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-1"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-1">Requires Laravel Reverb + Echo for server push; native Livewire uses HTTP round-trips.</span></span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-2"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-2">SSE extension available but requires manual wiring.</span></span></td>
                     <td><span class="cross">✗</span></td>
-                    <td><span class="partial">~</span></td>
-                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
                 </tr>
                 <tr>
                     <td>Multiplayer / shared state</td>
@@ -319,20 +321,7 @@ $app->start();
                     <td><span class="cross">✗</span></td>
                     <td><span class="cross">✗</span></td>
                     <td><span class="cross">✗</span></td>
-                </tr>
-                <tr>
-                    <td>No JavaScript to write</td>
                     <td><span class="check">✓</span></td>
-                    <td><span class="partial">~</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                </tr>
-                <tr>
-                    <td>No build step</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="cross">✗</span></td>
                 </tr>
                 <tr>
                     <td>Scoped state system</td>
@@ -340,20 +329,87 @@ $app->start();
                     <td><span class="cross">✗</span></td>
                     <td><span class="cross">✗</span></td>
                     <td><span class="cross">✗</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-3"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-3">PubSub topics achieve similar results without a declarative scope system.</span></span></td>
                 </tr>
                 <tr>
-                    <td>Laravel / framework required</td>
-                    <td><span class="check">No</span></td>
-                    <td><span class="cross">Yes</span></td>
-                    <td><span class="check">No</span></td>
-                    <td><span class="partial">Optional</span></td>
+                    <td>No JS to author</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-4"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-4">Alpine.js is bundled; complex interactions may need JS hooks.</span></span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-5"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-5">JS hooks needed for some client-side interactions.</span></span></td>
                 </tr>
                 <tr>
-                    <td>PHP runtime</td>
+                    <td>No build step</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td>File uploads</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td>Form validation</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-6"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-6">HTML5 constraint API only; no built-in server-side validation.</span></span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td>Auth / middleware</td>
+                    <td><span class="cross">✗</span> <span class="coming-soon">coming soon</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td>Ecosystem &amp; community</td>
+                    <td>Early</td>
+                    <td>Large</td>
+                    <td>Medium</td>
+                    <td>Large</td>
+                    <td>Large</td>
+                </tr>
+                <tr>
+                    <td>Multi-server scaling</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td>Framework required</td>
+                    <td><span class="check">No</span></td>
+                    <td><span class="cross">Laravel</span></td>
+                    <td><span class="check">No</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-7"><span class="partial">Any</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-7">Primarily targets Laravel but also supports Rails, Django, and Phoenix.</span></span></td>
+                    <td><span class="cross">Phoenix</span></td>
+                </tr>
+                <tr>
+                    <td>Language</td>
+                    <td>PHP</td>
+                    <td>PHP</td>
+                    <td>PHP + JS</td>
+                    <td>PHP + JS</td>
+                    <td>Elixir</td>
+                </tr>
+                <tr>
+                    <td>Runtime</td>
                     <td>Swoole</td>
                     <td>PHP-FPM</td>
                     <td>PHP-FPM</td>
                     <td>PHP-FPM</td>
+                    <td>BEAM VM</td>
                 </tr>
             </tbody>
         </table>

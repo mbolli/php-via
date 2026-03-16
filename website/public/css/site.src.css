@@ -692,7 +692,80 @@ main, .site-footer { position: relative; }
 .check { color: var(--green-6); }
 .cross { color: var(--red-5); }
 .partial { color: var(--orange-5); }
+.coming-soon {
+  font-size: 0.6rem;
+  font-weight: var(--font-weight-7);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--radius-1);
+  padding: 0.1em 0.4em;
+  background: color-mix(in srgb, var(--blue-5) 20%, transparent);
+  color: var(--blue-4);
+  border: 1px solid color-mix(in srgb, var(--blue-5) 45%, transparent);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.comparison-footnotes {
+  max-width: 48rem;
+  margin-inline: auto;
+  margin-block-start: var(--size-4);
+  padding-inline-start: 1.2em;
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+}
+.comparison-footnotes li {
+  margin-block-end: 0.25em;
+}
 
+/* ─── Comparison table tooltips ────────────────────────── */
+.has-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  cursor: help;
+  position: relative;
+}
+.tooltip {
+  /* Fallback: absolute relative to .has-tooltip */
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  translate: -50% 0;
+  /* Appearance */
+  max-width: min(22rem, 60vw);
+  width: max-content;
+  background: var(--gray-9);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--size-2) var(--size-3);
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-4);
+  line-height: var(--line-height-3);
+  text-align: left;
+  z-index: 100;
+  box-shadow: var(--shadow-3);
+  /* Hidden by default */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 150ms, visibility 150ms;
+}
+/* CSS Anchor Positioning — Chrome 125+, Edge 125+ */
+@supports (anchor-name: --x) {
+  .tooltip {
+    position: fixed;
+    bottom: anchor(top);
+    left: anchor(center);
+    translate: -50% -6px;
+    position-try-fallbacks: flip-block;
+  }
+}
+.has-tooltip:hover .tooltip,
+.has-tooltip:focus-within .tooltip {
+  opacity: 1;
+  visibility: visible;
+}
 /* ─── Poll demo ────────────────────────────────────────── */
 .poll-section-inner {
   display: grid;
@@ -836,7 +909,6 @@ main, .site-footer { position: relative; }
 
 .docs-content {
   padding: var(--size-7) var(--size-6);
-  max-width: 54rem;
 }
 
 .docs-content h1 { font-size: var(--font-size-6); margin-block-end: var(--size-5); }
