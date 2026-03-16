@@ -4,16 +4,14 @@
         What's your favorite php-via scope?
     </p>
     {% for option in options %}
-    <div class="poll-option">
+    <div class="poll-option" id="poll-option-{{ option.key }}">
         <button class="poll-vote-btn" data-on:click="@get('{{ option.url }}')">
             {{ option.label }}
         </button>
-        <span style="font-size: var(--font-size-0); color: var(--text-3); font-variant-numeric: tabular-nums;"
-              data-text="${{ votes_id }}.{{ option.key }}">{{ option.count }}</span>
+        <span style="font-size: var(--font-size-0); color: var(--text-3); font-variant-numeric: tabular-nums;">{{ option.count }}</span>
         <div class="poll-bar-wrap">
-            <div class="poll-bar" style="width: {{ option.pct }}%; background: {{ option.color }};"></div>
+            <div class="poll-bar" id="poll-bar-{{ option.key }}" style="width: {{ option.pct }}%; background: {{ option.color }};"></div>
         </div>
     </div>
     {% endfor %}
-    <pre data-json-signals></pre>
 </div>

@@ -160,39 +160,23 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
         $app->setGlobalState('poll_initialized', true);
     }
 
-    $votes = $c->signal([
-        'tab' => $app->globalState('poll_tab'),
-        'route' => $app->globalState('poll_route'),
-        'session' => $app->globalState('poll_session'),
-        'global' => $app->globalState('poll_global'),
-    ], 'votes');
-
-    $vote = $c->action(function (Context $c) use ($app, $votes): void {
+    $vote = $c->action(function (Context $c) use ($app): void {
         $raw = $_POST['option'] ?? ($_GET['option'] ?? null);
         if (!in_array($raw, ['tab', 'route', 'session', 'global'], true)) {
             return;
         }
         $key = 'poll_' . $raw;
         $app->setGlobalState($key, ($app->globalState($key) ?? 0) + 1);
-        $votes->setValue([
-            'tab' => $app->globalState('poll_tab'),
-            'route' => $app->globalState('poll_route'),
-            'session' => $app->globalState('poll_session'),
-            'global' => $app->globalState('poll_global'),
-        ]);
         $app->broadcast(Scope::routeScope('/'));
     }, 'vote');
 
-    $c->view(function () use ($app, $votes, $vote, $twig) {
+    $c->view(function () use ($app, $vote, $twig) {
         $counts = [
             'tab'     => (int) ($app->globalState('poll_tab') ?? 0),
             'route'   => (int) ($app->globalState('poll_route') ?? 0),
             'session' => (int) ($app->globalState('poll_session') ?? 0),
             'global'  => (int) ($app->globalState('poll_global') ?? 0),
         ];
-        // Keep the signal in sync for all clients receiving this broadcast update
-        // so data-text="$poll_votes.*" reads fresh values.
-        $votes->setValue($counts);
         $total = max(1, array_sum($counts));
         $defs = [
             'tab' => ['TAB', 'var(--blue-6)'],
@@ -214,7 +198,6 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
 
         return $twig->render('components/live-poll.html.twig', [
             'options' => $options,
-            'votes_id' => $votes->id(),
         ]);
     }, cacheUpdates: false);
 };
