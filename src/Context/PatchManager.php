@@ -47,9 +47,22 @@ class PatchManager {
     /**
      * Queue a patch for transmission to the client.
      *
+     * For component contexts, patches are forwarded to the parent page context's
+     * channel — the SSE loop only reads from the top-level page channel.
+     *
      * @param array<string, mixed> $patch
      */
     public function queuePatch(array $patch): void {
+        // Components don't have their own SSE reader — forward to the parent page.
+        if ($this->componentManager->isComponent()) {
+            $parent = $this->componentManager->getParentPageContext();
+            if ($parent !== null) {
+                $parent->getPatchManager()->queuePatch($patch);
+
+                return;
+            }
+        }
+
         if ($this->useArray) {
             // Array-based queue for tests
             if (\count($this->patchChannel) >= self::CHANNEL_CAPACITY) {
@@ -135,6 +148,14 @@ class PatchManager {
 
         // Sync signals
         $this->syncSignals();
+
+        // For page (non-component) contexts, also sync all registered component sub-contexts.
+        // Component patches are automatically forwarded to this page's channel via queuePatch().
+        if (!$this->componentManager->isComponent()) {
+            foreach ($this->componentManager->getComponents() as $component) {
+                $component->sync();
+            }
+        }
     }
 
     /**
