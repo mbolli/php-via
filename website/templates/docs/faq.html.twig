@@ -1,0 +1,190 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Common Pitfalls</h1>
+    <p>
+        A collection of bugs that are easy to hit and hard to diagnose. Each one describes what goes wrong,
+        why it happens, and how to fix it.
+    </p>
+
+    <details open>
+        <summary><strong>Broadcast re-renders other clients with stale data</strong></summary>
+        <p>
+            You call <code>$app->broadcast()</code> after an action, but other clients' views show outdated values.
+        </p>
+        <p><strong>Why:</strong> When <code>broadcast()</code> fires, every context in the scope re-runs its view
+        closure. If the view reads from a per-client signal (e.g. <code>$votes->getValue()</code>), each client
+        reads its <em>own</em> signal — which was only updated for the client that triggered the action.
+        Clients that didn't trigger the action still have stale signal values.
+        </p>
+        <p><strong>Fix:</strong> Read shared state directly inside the view closure instead of from a
+        per-client signal. <code>$app->globalState()</code> is always correct for all clients:</p>
+        <pre><code class="language-php">// ❌ stale for other clients
+$c->view(function () use ($votes) {
+    $count = $votes->int(); // only correct for the client that called $votes->setValue()
+});
+
+// ✅ correct for everyone
+$c->view(function () use ($app) {
+    $count = (int) ($app->globalState('vote_count') ?? 0);
+});</code></pre>
+    </details>
+
+    <details>
+        <summary><strong>data-text uses the wrong signal ID</strong></summary>
+        <p>
+            You write <code>data-text="$votes.tab"</code> in your template, but the counter never updates
+            (or updates with empty/undefined).
+        </p>
+        <p><strong>Why:</strong> Signal IDs are namespaced. A signal named <code>votes</code> inside a component
+        with namespace <code>poll</code> gets the ID <code>poll.votes</code> — but inside a component the dot
+        is rendered as-is in Datastar's signal store. If you hardcode the ID you'll likely get it wrong.
+        </p>
+        <p><strong>Fix:</strong> Always use <code>$signal->id()</code> in PHP and pass it to the template.
+        Never hard-code signal IDs in HTML:</p>
+        <pre><code class="language-php">$c->view(function () use ($votes, $twig) {
+    return $twig->render('poll.html.twig', [
+        'votes_id' => $votes->id(), // e.g. "poll.votes"
+    ]);
+});</code></pre>
+        <pre><code class="language-html">&lt;!-- ❌ hard-coded, will break if namespace changes --&gt;
+{% verbatim %}<span data-text="$poll.votes.tab">0</span>
+
+&lt;!-- ✅ dynamic, always correct --&gt;
+<span data-text="${{ votes_id }}.tab">0</span>{% endverbatim %}</code></pre>
+    </details>
+
+    <details>
+        <summary><strong>Full-page patch overwrites component updates</strong></summary>
+        <p>
+            You use <code>$c->component()</code> to build isolated sub-contexts but on every broadcast
+            the entire page is replaced, wiping out or replacing the fresher component patches.
+        </p>
+        <p><strong>Why:</strong> A page-level <code>$c->view()</code> with a Twig template re-renders the
+        whole page HTML on every broadcast and sends it as an <code>elements</code> patch with no selector —
+        Datastar morphs the entire body. Component patches target specific <code>#c-...</code> divs, but the
+        page patch can arrive after and overwrite them with stale embedded HTML.
+        </p>
+        <p><strong>Fix:</strong> Make the page-level view closure a no-op on update renders. Components own
+        their own patches:
+        </p>
+        <pre><code class="language-php">$c->view(function (bool $isUpdate) use ($twig, $data): string {
+    if ($isUpdate) {
+        return ''; // components handle their own patches
+    }
+    return $twig->render('page.html.twig', $data);
+});</code></pre>
+    </details>
+
+    <details>
+        <summary><strong>Variable is null inside a view closure</strong></summary>
+        <p>
+            You get a fatal "Call to a member function on null" inside a <code>$c->view()</code> closure.
+        </p>
+        <p><strong>Why:</strong> PHP closures don't capture outer variables automatically. The <code>use</code>
+        list on the outer page handler and the inner view closure are separate. A variable available in the
+        route handler (e.g. <code>$twig</code>, <code>$app</code>) is not available inside the view closure
+        unless explicitly listed in its <code>use</code>.
+        </p>
+        <p><strong>Fix:</strong> Add the variable to both the route handler's <code>use</code> and the inner
+        view closure's <code>use</code>:</p>
+        <pre><code class="language-php">// ❌ $twig is null inside the view closure
+$app->page('/', function (Context $c) use ($shell): void {
+    $c->view(function () use ($twig) { // $twig was never captured by the outer closure
+        return $twig->render('home.html.twig');
+    });
+});
+
+// ✅
+$app->page('/', function (Context $c) use ($shell, $twig): void {
+    $c->view(function () use ($twig): string {
+        return $twig->render('home.html.twig');
+    });
+});</code></pre>
+    </details>
+
+    <details>
+        {% verbatim %}<summary><strong>Twig syntax in code examples gets evaluated</strong></summary>
+        <p>
+            You document Twig syntax in a docs page and get a "block already defined" error or silent
+            output — the <code>{% block %}</code>, <code>{{ }}</code>, or <code>{# #}</code> tags in your
+            <code>&lt;pre&gt;&lt;code&gt;</code> blocks are being processed by Twig.
+        </p>
+        <p><strong>Why:</strong> Twig processes all <code>{% %}</code>, <code>{{ }}</code>, and
+        <code>{# #}</code> tags regardless of whether they are inside <code>&lt;pre&gt;</code> or
+        <code>&lt;code&gt;</code> elements.
+        </p>
+        <p><strong>Fix:</strong> Wrap any literal Twig syntax in code examples with
+        <code>{&percnt; verbatim &percnt;}...{&percnt; endverbatim &percnt;}</code>:</p>
+        <pre><code class="language-html">{&percnt; verbatim &percnt;}&lt;pre&gt;&lt;code&gt;
+{% block content %}...{% endblock %}
+{{ some_variable }}
+{# this comment would vanish #}
+&lt;/code&gt;&lt;/pre&gt;{&percnt; endverbatim &percnt;}</code></pre>{% endverbatim %}
+    </details>
+
+    <details>
+        <summary><strong>Scoped signals return stale values after broadcast</strong></summary>
+        <p>
+            You create a signal with a non-TAB scope (e.g. <code>Scope::routeScope('/')</code>).
+            After calling <code>broadcast()</code>, some clients re-render with the old value.
+        </p>
+        <p><strong>Why:</strong> Scoped signals are shared objects. If the view is cached (default for
+        ROUTE/SESSION/GLOBAL scopes), later clients reuse the cached HTML without re-rendering. The cached
+        HTML contains the old value baked in. Only the first render after a cache miss picks up the new value.
+        </p>
+        <p><strong>Fix:</strong> Disable view caching for views that must always reflect current state:
+        </p>
+        <pre><code class="language-php">$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);</code></pre>
+    </details>
+
+    <details>
+        <summary><strong>Timer keeps firing after every client disconnects</strong></summary>
+        <p>
+            You set up a <code>$app->setInterval()</code> timer on server start that broadcasts to a route.
+            Even when no clients are on that route, the timer keeps running and broadcasts uselessly.
+        </p>
+        <p><strong>Why:</strong> <code>setInterval</code> runs for the lifetime of the server, not per client.
+        It has no built-in awareness of connected clients.
+        </p>
+        <p><strong>Fix:</strong> Guard broadcasts with a client check, or use <code>onClientConnect</code>
+        and <code>onClientDisconnect</code> hooks instead of a timer for presence-style updates:
+        </p>
+        <pre><code class="language-php">// Guard the timer
+$app->setInterval(function () use ($app): void {
+    if (empty($app->getClients())) {
+        return;
+    }
+    $app->broadcast(Scope::GLOBAL);
+}, 1000);
+
+// Or eliminate the timer entirely with connect/disconnect hooks
+$app->onClientConnect(function (Context $c) use ($app): void {
+    $app->broadcast(Scope::routeScope($c->getRoute()));
+});
+$app->onClientDisconnect(function (Context $c) use ($app): void {
+    $app->broadcast(Scope::routeScope($c->getRoute()));
+});</code></pre>
+    </details>
+
+    <h2 id="debugging-tips">Debugging tips</h2>
+    <ul>
+        <li>Add <code>&lt;pre data-json-signals&gt;&lt;/pre&gt;</code> to your template to see the live
+            Datastar signal store in the browser. Remove before deploying.</li>
+        <li>Check signal IDs with <code>var_dump($signal->id())</code> — namespace prefixing can produce
+            unexpected IDs.</li>
+        <li>Run the server with <code>LOG_LEVEL=debug</code> to see every render, cache hit, and broadcast
+            in the terminal output.</li>
+        <li>If the view closure is never called, confirm <code>$c->view()</code> is actually reached —
+            missing or mis-ordered <code>use</code> variables silently skip execution if a
+            required call throw for a null object.</li>
+    </ul>
+
+    <h2 id="more">See also</h2>
+    <ul>
+        <li><a href="/docs/broadcasting">Broadcasting</a> — scope targets and update strategies</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, timers</li>
+        <li><a href="/docs/views">Views</a> — caching behaviour and update cycles</li>
+        <li><a href="/docs/signals">Signals</a> — scope types and sharing state</li>
+    </ul>
+</article>
+{% endapply %}

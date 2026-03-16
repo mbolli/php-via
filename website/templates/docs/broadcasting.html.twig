@@ -1,0 +1,85 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Broadcasting</h1>
+    <p>
+        Broadcasting is how php-via pushes updates to multiple clients at once. When a user's action should
+        change what <em>everyone</em> sees — not just themselves — you broadcast to a scope.
+    </p>
+
+    <h2 id="the-basics">The basics</h2>
+    <p>
+        Call <code>$app-&gt;broadcast(scope)</code> after modifying shared state. Every context registered
+        in that scope will re-render its view and push the update via SSE:
+    </p>
+    <pre><code class="language-php">$increment = $c->action(function (Context $c) use ($app, $counter): void {
+    $newVal = $app->globalState('shared_counter') + 1;
+    $app->setGlobalState('shared_counter', $newVal);
+    $counter->setValue($newVal);
+
+    // Push to everyone on this route
+    $app->broadcast(Scope::routeScope('/'));
+}, 'increment');</code></pre>
+
+    <h2 id="scope-targets">Scope targets</h2>
+    <p>You can broadcast to any scope string:</p>
+    <pre><code class="language-php">// All connected clients everywhere
+$app->broadcast(Scope::GLOBAL);
+
+// All clients on a specific route
+$app->broadcast(Scope::routeScope('/dashboard'));
+
+// A custom scope (e.g. a chat room)
+$app->broadcast('room:lobby');
+
+// Equivalent shorthand when inside a context:
+$c->broadcast(); // broadcasts to $c's primary scope</code></pre>
+
+    <h2 id="auto-broadcast">Auto-broadcast on scoped signals</h2>
+    <p>
+        Scoped signals auto-broadcast when <code>setValue()</code> is called — you don't always need
+        an explicit <code>broadcast()</code>. The auto-broadcast fires to the signal's scope:
+    </p>
+    <pre><code class="language-php">// This signal is ROUTE-scoped. Calling setValue() auto-broadcasts to route:/
+$shared = $c->signal($app->globalState('count'), 'count', Scope::routeScope('/'));
+
+$c->action(function (Context $c) use ($app, $shared): void {
+    $shared->setValue($app->globalState('count') + 1);
+    // No explicit broadcast needed — auto-broadcast fires for Scope::routeScope('/')
+}, 'inc');</code></pre>
+
+    <h2 id="connect-disconnect">Broadcasting on connect and disconnect</h2>
+    <p>
+        Use <code>onClientConnect</code> / <code>onClientDisconnect</code> app-level hooks to broadcast
+        whenever a client joins or leaves. This replaces polling timers for presence features:
+    </p>
+    <pre><code class="language-php">// Broadcast to the route when occupancy changes — presence counter stays live
+$app->onClientConnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
+$app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));</code></pre>
+    <p>See <a href="/docs/lifecycle">Lifecycle</a> for full details on connect/disconnect hooks.</p>
+
+    <h2 id="global-state">Combining global state and broadcast</h2>
+    <p>
+        Use <code>setGlobalState</code> to store shared data in process memory, then broadcast to re-render
+        all clients with the new value. The standard multiplayer pattern:
+    </p>
+    <pre><code class="language-php">// Initialize once
+$app->setGlobalState('messages', []);
+
+// In an action:
+$send = $c->action(function (Context $c) use ($app): void {
+    $msgs = $app->globalState('messages');
+    $msgs[] = ['user' => substr($c->getId(), -4), 'text' => $_POST['text'] ?? ''];
+    $app->setGlobalState('messages', array_slice($msgs, -50)); // keep last 50
+
+    $app->broadcast(Scope::routeScope('/chat'));
+}, 'send');</code></pre>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/scopes">Scopes</a> — understanding scope types and targets</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a> — connect/disconnect hooks and timers</li>
+        <li><a href="/docs/actions">Actions</a> — server-side handlers that trigger broadcasts</li>
+        <li><a href="/docs/api#via-broadcast">API: broadcast()</a> — method signature</li>
+    </ul>
+</article>
+{% endapply %}

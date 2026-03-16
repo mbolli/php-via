@@ -1,0 +1,97 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Components</h1>
+    <p>
+        Components are reusable UI blocks backed by their own sub-context. Each component has isolated signals, actions,
+        and a view — but shares the parent connection. They're the building block for composable real-time UIs.
+    </p>
+
+    <h2 id="creating">Creating a component</h2>
+    <p>Define a component as a callable that configures a <code>Context</code>:</p>
+    <pre><code class="language-php">$counterComponent = function (Context $c) use ($twig): void {
+    $count = $c->signal(0, 'count');
+    $inc   = $c->action(fn() => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
+
+    $c->view('components/counter.html.twig', [
+        'count_id'  => $count->id(),
+        'count_val' => $count->int(),
+        'inc_url'   => $inc->url(),
+    ]);
+};</code></pre>
+
+    <h2 id="mounting">Mounting a component</h2>
+    <p>
+        Mount a component inside a page handler via <code>$c-&gt;component()</code>, giving it a namespace to prevent
+        signal ID collisions. The returned callable renders the component's initial HTML:
+    </p>
+    <pre><code class="language-php">$app->page('/', function (Context $c) use ($counterComponent): void {
+    $counter = $c->component($counterComponent, 'counter');
+
+    $c->view('pages/home.html.twig', [
+        'counter' => $counter(), // initial HTML string
+    ]);
+});</code></pre>
+
+    {% verbatim %}<pre><code class="language-html">{# pages/home.html.twig #}
+&lt;main&gt;
+    &lt;h1&gt;Welcome&lt;/h1&gt;
+    {{ counter | raw }}
+&lt;/main&gt;</code></pre>{% endverbatim %}
+
+    <h2 id="namespacing">Namespacing</h2>
+    <p>
+        The namespace prefixes all signal and action IDs in the component. This lets you mount the same component
+        multiple times on one page without signal conflicts:
+    </p>
+    <pre><code class="language-php">$counterA = $c->component($counterComponent, 'counter-a');
+$counterB = $c->component($counterComponent, 'counter-b');
+
+// counter-a has signal ID 'counter-a_count', action '/_action/counter-a_inc'
+// counter-b has signal ID 'counter-b_count', action '/_action/counter-b_inc'
+
+$c->view('page.html.twig', [
+    'counterA' => $counterA(),
+    'counterB' => $counterB(),
+]);</code></pre>
+
+    <h2 id="scoped-components">Scoped components</h2>
+    <p>
+        Components can set their own scope, independent of the parent. This is how the website's
+        shared counter and presence indicator work — they're ROUTE-scoped components inside a page:
+    </p>
+    <pre><code class="language-php">$presenceComponent = function (Context $c) use ($app, $twig): void {
+    $c->scope(Scope::ROUTE); // shared with everyone on this route
+
+    $c->view(function () use ($app, $twig): string {
+        $count = count($app->getClients());
+        return $twig->render('components/presence.html.twig', [
+            'count'  => $count,
+            'person' => $count === 1 ? 'person' : 'people',
+        ]);
+    }, cacheUpdates: false);
+};</code></pre>
+
+    <h2 id="lifecycle">Component lifecycle</h2>
+    <p>
+        Components follow the same lifecycle as contexts. They support <code>onDisconnect</code>,
+        <code>setInterval</code>, and all other context methods:
+    </p>
+    <pre><code class="language-php">$roomComponent = function (Context $c) use ($room, $app): void {
+    $c->addScope('room:' . $room);
+    // ... signals, view ...
+
+    $c->onDisconnect(function (Context $c) use ($room, $app): void {
+        Room::$members[$room]--;
+        $app->broadcast('room:' . $room);
+    });
+};</code></pre>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/scopes">Scopes</a> — share component state across users</li>
+        <li><a href="/docs/views">Views</a> — how component views update independently</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, and timer hooks</li>
+        <li><a href="/docs/api#context-component">API: component()</a> — full method signature</li>
+    </ul>
+</article>
+{% endapply %}

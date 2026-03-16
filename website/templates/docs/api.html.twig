@@ -1,0 +1,210 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>API Reference</h1>
+    <p>Complete reference for the php-via public API. Methods marked <code>@internal</code> may change between versions.</p>
+
+    <h2 id="via">Via</h2>
+
+    <h3 id="via-constructor"><code>new Via(Config $config)</code></h3>
+    <pre><code class="language-php">$app = new Via(
+    (new Config())
+        ->withHost('0.0.0.0')
+        ->withPort(3000)
+        ->withTemplateDir(__DIR__ . '/templates')
+);</code></pre>
+
+    <h3 id="via-page"><code>page(string $route, callable $handler): void</code></h3>
+    <p>Register a page route. Path params use <code>{name}</code> syntax and are injected as typed arguments.</p>
+    <pre><code class="language-php">$app->page('/', fn(Context $c) => $c->view('home.html.twig'));
+
+$app->page('/users/{id}', function (Context $c, int $id): void {
+    $c->view('user.html.twig', ['id' => $id]);
+});</code></pre>
+
+    <h3 id="via-broadcast"><code>broadcast(string $scope): void</code></h3>
+    <p>Push updates to all contexts in a scope. Use after modifying global state outside an action.</p>
+    <pre><code class="language-php">$app->broadcast(Scope::GLOBAL);
+$app->broadcast(Scope::routeScope('/'));
+$app->broadcast('room:lobby');</code></pre>
+
+    <h3 id="via-global-state"><code>globalState(string $key, mixed $default = null): mixed</code></h3>
+    <h3 id="via-set-global-state"><code>setGlobalState(string $key, mixed $value): void</code></h3>
+    <p>Shared in-memory state across all contexts. Persists for the server lifetime; cleared on restart.</p>
+    <pre><code class="language-php">$app->setGlobalState('counter', 0);
+$count = $app->globalState('counter', 0);</code></pre>
+
+    <h3 id="via-on-start"><code>onStart(callable $callback): void</code></h3>
+    <h3 id="via-on-shutdown"><code>onShutdown(callable $callback): void</code></h3>
+    <p>Server lifecycle hooks. Use <code>onStart</code> to create timers; <code>onShutdown</code> to clear them.</p>
+    <pre><code class="language-php">$timerId = null;
+$app->onStart(function () use ($app, &amp;$timerId): void {
+    $timerId = Timer::tick(5000, fn() => $app->broadcast(Scope::GLOBAL));
+});
+$app->onShutdown(function () use (&amp;$timerId): void {
+    if ($timerId !== null) Timer::clear($timerId);
+});</code></pre>
+
+    <h3 id="via-on-client-connect"><code>onClientConnect(callable $callback): void</code></h3>
+    <h3 id="via-on-client-disconnect"><code>onClientDisconnect(callable $callback): void</code></h3>
+    <p>
+        Fire when a client opens or closes an SSE connection. The callback receives the client's <code>Context</code>.
+        On disconnect, the client has already been removed from <code>getClients()</code>.
+        See <a href="/docs/lifecycle">Lifecycle</a> for usage.
+    </p>
+    <pre><code class="language-php">$app->onClientConnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
+$app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));</code></pre>
+
+    <h3 id="via-get-clients"><code>getClients(): array</code></h3>
+    <pre><code class="language-php">$clients = $app->getClients();
+// ['contextId' => ['id' => '...', 'ip' => '...', 'connected_at' => 1234567890]]
+$count = count($app->getClients());</code></pre>
+
+    <h3 id="via-append-to-head"><code>appendToHead(string ...$elements): void</code></h3>
+    <pre><code class="language-php">$c->appendToHead(
+    '&lt;title&gt;My Page&lt;/title&gt;',
+    '&lt;meta name="description" content="..."&gt;'
+);</code></pre>
+
+    <h3 id="via-get-twig"><code>getTwig(): Twig\Environment</code></h3>
+    <pre><code class="language-php">$app->getTwig()->addExtension(new MyExtension());</code></pre>
+
+    <h3 id="via-log"><code>log(string $level, string $message, ?Context $context = null): void</code></h3>
+    <pre><code class="language-php">$app->log('info', 'Server ready');
+$app->log('debug', 'Action fired', $c);</code></pre>
+
+    <h3 id="via-start"><code>start(): void</code></h3>
+    <p>Start the Swoole server. Call this last, after all routes are registered.</p>
+
+    ---
+
+    <h2 id="context">Context</h2>
+    <p>One context per connected browser tab. Holds signals, actions, and view definition for that client.</p>
+
+    <h3 id="context-signal"><code>signal(mixed $initial, ?string $name = null, ?string $scope = null): Signal</code></h3>
+    <pre><code class="language-php">$count  = $c->signal(0);                            // TAB scope, auto-named
+$count  = $c->signal(0, 'count');                   // named
+$shared = $c->signal(0, 'count', Scope::ROUTE);     // shared across route
+$pref   = $c->signal('light', 'theme', Scope::SESSION);
+$room   = $c->signal('', 'note', 'room:lobby');     // custom scope</code></pre>
+
+    <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>
+    <pre><code class="language-php">$inc = $c->action(function (Context $c) use ($count): void {
+    $count->setValue($count->int() + 1);
+    $c->sync();
+}, 'increment');
+
+// In Twig: data-on:click="@post('/_action/increment')"</code></pre>
+
+    <h3 id="context-view"><code>view(callable|string $view, array $data = [], bool $cacheUpdates = true): void</code></h3>
+    <pre><code class="language-php">$c->view('counter.html.twig', ['count_val' => $count->int()]);
+
+$c->view(fn() => "&lt;p&gt;Count: {$count->int()}&lt;/p&gt;");
+
+// Disable caching for views that read external state:
+$c->view('presence.html.twig', ['n' => count($app->getClients())], cacheUpdates: false);</code></pre>
+
+    <h3 id="context-component"><code>component(callable $fn, string $namespace): callable</code></h3>
+    <p>Create a reusable sub-context. See <a href="/docs/components">Components</a>.</p>
+    <pre><code class="language-php">$counter = $c->component(function (Context $c): void {
+    $n   = $c->signal(0, 'n');
+    $inc = $c->action(fn() => $n->setValue($n->int() + 1), 'inc');
+    $c->view('counter.html.twig', ['n_val' => $n->int(), 'inc_url' => $inc->url()]);
+}, 'counter');
+
+$c->view('page.html.twig', ['counter' => $counter()]);</code></pre>
+
+    <h3 id="context-scope"><code>scope(string $scope): void</code></h3>
+    <h3 id="context-add-scope"><code>addScope(string $scope): void</code></h3>
+    <pre><code class="language-php">$c->scope(Scope::ROUTE);          // set primary scope
+$c->addScope('room:' . $roomId);  // add additional scope</code></pre>
+
+    <h3 id="context-sync"><code>sync(): void</code></h3>
+    <h3 id="context-sync-signals"><code>syncSignals(): void</code></h3>
+    <p><code>sync()</code> re-renders the view and pushes signals. <code>syncSignals()</code> pushes only signals, skipping view re-render.</p>
+
+    <h3 id="context-broadcast"><code>broadcast(): void</code></h3>
+    <p>Broadcast to all contexts in this context's primary scope.</p>
+
+    <h3 id="context-exec-script"><code>execScript(string $script): void</code></h3>
+    <pre><code class="language-php">$c->execScript('document.querySelector(".flash").classList.add("show")');</code></pre>
+
+    <h3 id="context-set-interval"><code>setInterval(callable $callback, int $ms): int</code></h3>
+    <p>Recurring timer, auto-cancelled when the context is destroyed.</p>
+    <pre><code class="language-php">$c->setInterval(function () use ($count, $c): void {
+    $count->setValue($count->int() + 1);
+    $c->sync();
+}, 1000);</code></pre>
+
+    <h3 id="context-on-disconnect"><code>onDisconnect(callable $callback): void</code></h3>
+    <h3 id="context-on-cleanup"><code>onCleanup(callable $callback): void</code></h3>
+    <p>Per-context disconnect hook for cleaning up resources. <code>onCleanup</code> is an alias. See <a href="/docs/lifecycle">Lifecycle</a>.</p>
+    <pre><code class="language-php">$c->onDisconnect(function (Context $c) use ($room, $app): void {
+    unset(Room::$members[$room][$c->getId()]);
+    $app->broadcast('room:' . $room);
+});</code></pre>
+
+    <h3 id="context-getters">Getters</h3>
+    <pre><code class="language-php">$c->getId();              // unique context ID
+$c->getRoute();           // current route, e.g. '/chat/lobby'
+$c->getSessionId();       // session ID shared across tabs
+$c->getPathParam('id');   // path parameter by name
+$c->getNamespace();       // component namespace, or null</code></pre>
+
+    ---
+
+    <h2 id="signal">Signal</h2>
+    <pre><code class="language-php">// Reading
+$s->getValue();   // raw mixed
+$s->int();        // cast to int
+$s->string();     // cast to string
+$s->bool();       // cast to bool
+
+// Writing
+$s->setValue(42); // triggers broadcast if scoped
+
+// Template helpers
+$s->id();     // signal name, e.g. 'count'
+$s->bind();   // 'data-bind="count"'
+$s->text();   // '&lt;span data-text="$count"&gt;&lt;/span&gt;'</code></pre>
+
+    ---
+
+    <h2 id="action">Action</h2>
+    <pre><code class="language-php">$a->url();  // '/_action/increment'
+$a->id();   // 'increment'</code></pre>
+
+    ---
+
+    <h2 id="scope">Scope</h2>
+    <pre><code class="language-php">Scope::TAB      // default — per browser tab
+Scope::ROUTE    // all clients on same URL
+Scope::SESSION  // all tabs of same user
+Scope::GLOBAL   // every connected client
+
+Scope::routeScope('/path')  // explicit: 'route:/path'</code></pre>
+
+    ---
+
+    <h2 id="config">Config</h2>
+    <p>All methods return <code>self</code> for chaining.</p>
+    <pre><code class="language-php">(new Config())
+    ->withHost('0.0.0.0')           // default: '0.0.0.0'
+    ->withPort(3000)                // default: 3000
+    ->withDevMode(true)             // enables debug logging
+    ->withLogLevel('info')          // 'debug' | 'info' | 'error'
+    ->withTemplateDir(__DIR__ . '/templates')
+    ->withShellTemplate(__DIR__ . '/shell.html')
+    ->withStaticDir(__DIR__ . '/public')
+    ->withBasePath('/')             // URL base path prefix
+    ->withSsePollIntervalMs(50)     // SSE poll interval in ms
+    ->withSwooleSettings([...])     // raw Swoole server settings</code></pre>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/signals">Signals</a> — reactive state in depth</li>
+        <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
+        <li><a href="/docs/scopes">Scopes</a> — sharing state across clients</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, timers</li>
+    </ul>
+</article>
+{% endapply %}

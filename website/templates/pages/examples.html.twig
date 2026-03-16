@@ -1,0 +1,104 @@
+<section class="page-section">
+    <div class="section-label">See it in action</div>
+    <h1 class="section-title">Live Examples</h1>
+    <p class="section-lead">
+        Each example runs as an independent Swoole server. Click any card to open the live demo.
+    </p>
+
+    {% set examples = [
+        {
+            title: '🔢 Counter Basic',
+            subpath: '/counter-basic',
+            difficulty: 'Beginner',
+            description: 'The simplest possible php-via app. Reactive signal, one action, inline Twig render.',
+        },
+        {
+            title: '⚡ Counter',
+            subpath: '/counter',
+            difficulty: 'Beginner',
+            description: 'Counter with configurable step. Uses data-bind for two-way input binding.',
+        },
+        {
+            title: '👋 Greeter',
+            subpath: '/greeter',
+            difficulty: 'Beginner',
+            description: 'Form inputs, multiple actions, and signal updates with Twig templates.',
+        },
+        {
+            title: '📊 All Scopes Demo',
+            subpath: '/all-scopes',
+            difficulty: 'Intermediate',
+            description: 'See TAB, ROUTE, SESSION, and GLOBAL scopes working together on one page.',
+        },
+        {
+            title: '👁️ Client Monitor',
+            subpath: '/monitor',
+            difficulty: 'Intermediate',
+            description: 'Live dashboard of connected clients with identicons, IPs, and render statistics.',
+        },
+        {
+            title: '🧩 Components',
+            subpath: '/components',
+            difficulty: 'Intermediate',
+            description: 'Three independent counters on one page. Each is an isolated component with its own signals.',
+        },
+        {
+            title: '🛣️ Path Parameters',
+            subpath: '/path-params',
+            difficulty: 'Intermediate',
+            description: 'Dynamic routing with automatic type-cast parameter injection.',
+        },
+        {
+            title: '✓ Todo List',
+            subpath: '/todo',
+            difficulty: 'Intermediate',
+            description: 'Multiplayer todo app. One shared list for all connected clients — ROUTE scope.',
+        },
+        {
+            title: '💬 Chat Room',
+            subpath: '/chat',
+            difficulty: 'Advanced',
+            description: 'Multi-room chat with custom scopes, typing indicators, and session-based usernames.',
+        },
+        {
+            title: '🎮 Game of Life',
+            subpath: '/gameoflife',
+            difficulty: 'Advanced',
+            description: 'Multiplayer Conway\'s Game of Life. Everyone draws and evolves the same board.',
+        },
+        {
+            title: '🔔 Global Notifications',
+            subpath: '/notifications',
+            difficulty: 'Advanced',
+            description: 'System-wide notification banner using Scope::GLOBAL. All routes, all clients.',
+        },
+        {
+            title: '📈 Stock Ticker',
+            subpath: '/stocks',
+            difficulty: 'Advanced',
+            description: 'Real-time stock prices with ECharts visualization. Timer-based route-scoped broadcasting.',
+        },
+    ] %}
+
+    <div class="examples-grid">
+        {% for example in examples %}
+        <a class="example-card"
+           href="{{ example.subpath }}"
+           target="_blank"
+           rel="noopener"
+           data-signals="{'p_{{ loop.index }}': {'online': false}}"
+           data-on-interval__duration.10s.leading="fetch('{{ example.subpath }}', { method: 'HEAD', mode: 'no-cors' }).then(() => $p_{{ loop.index }}.online = true).catch(() => $p_{{ loop.index }}.online = false)">
+            <h3>{{ example.title }}</h3>
+            <div style="display: flex; align-items: center; gap: var(--size-2); font-size: var(--font-size-0); color: var(--text-3);">
+                <span class="status-indicator"
+                      data-class="{'online': $p_{{ loop.index }}.online, 'offline': !$p_{{ loop.index }}.online}"></span>
+                <code>{{ example.subpath }}</code>
+            </div>
+            <div class="description">{{ example.description }}</div>
+            <div class="meta">
+                <span class="badge badge-{{ example.difficulty | lower }}">{{ example.difficulty }}</span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</section>

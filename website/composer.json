@@ -1,0 +1,31 @@
+{
+    "name": "mbolli/php-via-website",
+    "description": "Marketing site and documentation for php-via",
+    "type": "project",
+    "require": {
+        "php": "^8.4",
+        "mbolli/php-via": "*",
+        "tempest/highlight": "^2.17"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "PhpVia\\Website\\": "src/"
+        }
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "..",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "optimize-autoloader": true,
+        "allow-plugins": {}
+    }
+}

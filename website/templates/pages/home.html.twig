@@ -1,0 +1,252 @@
+<!-- Hero -->
+<section class="hero">
+    <div class="hero-inner">
+        <div class="hero-eyebrow">
+            <span>⚡</span> Real-time PHP
+        </div>
+
+        <h1>
+            PHP finally has<br>
+            <em>real-time superpowers.</em>
+        </h1>
+
+        <p class="hero-tagline">
+            php-via turns your PHP into a reactive, multiplayer-ready server.
+            No JavaScript. No build step. No API layer. Just PHP and Swoole.
+        </p>
+
+        {{ presence | raw }}
+
+        <div class="hero-ctas">
+            <a href="/docs/getting-started" class="btn btn-primary">Get started →</a>
+            <a href="https://github.com/mbolli/php-via" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+            </a>
+        </div>
+
+        {{ sharedCounter | raw }}
+    </div>
+</section>
+
+<!-- Code + result demo -->
+<section class="page-section">
+    <div class="section-label">Minimal API</div>
+    <h2 class="section-title">This is all the code.</h2>
+    <p class="section-lead">
+        A reactive counter, synced to all connected browsers, in about 15 lines of PHP.
+        No JavaScript to write. No REST endpoint to build. No serialization layer.
+    </p>
+    {{ codeResult | raw }}
+</section>
+
+<!-- Why php-via -->
+<section class="page-section" style="background: var(--surface-2);">
+    <div style="max-width: 56rem; margin-inline: auto;">
+        <div class="section-label">The case for server-centric reactivity</div>
+        <h2 class="section-title">PHP deserves real-time.</h2>
+        <div class="prose">
+            <p>
+                The PHP ecosystem bent itself into a pretzel trying to add real-time to the stack.
+                WebSockets bolted onto traditional PHP-FPM. Livewire polling every second.
+                Inertia.js adding a React layer on top of Laravel. All of these add complexity,
+                JavaScript, and build tooling to solve a problem that should be solved at the server.
+            </p>
+            <p>
+                <strong>php-via takes a different approach.</strong> Built on Swoole's persistent event loop,
+                every page maintains a live SSE connection. When your PHP changes state, the browser
+                updates instantly — no polling, no WebSocket handshake ceremony, no client-side
+                state management. The server is the source of truth, and the browser is a live view into it.
+            </p>
+            <p>
+                The <strong>scope system</strong> is the killer feature. Set a signal to
+                <code>Scope::ROUTE</code> and it automatically synchronizes across every browser
+                on that route. Change it to <code>Scope::SESSION</code> and it follows the user
+                across their tabs. Change it to <code>Scope::GLOBAL</code> and every user in
+                the entire application sees the update. One line of code changes who sees what.
+            </p>
+            <p>
+                We built this because PHP developers deserve the same multiplayer-by-default
+                experience that Elixir's LiveView gives to Elixir developers.
+                Without needing to learn Elixir.
+            </p>
+        </div>
+    </div>
+</section>
+
+<!-- Features grid -->
+<section class="page-section">
+    <div class="section-label">What you get</div>
+    <h2 class="section-title">Everything you need. Nothing you don't.</h2>
+    <div class="features-grid">
+        <div class="feature-card">
+            <span class="feature-icon">🚫</span>
+            <h3>No JavaScript</h3>
+            <p>Write server-side PHP. Datastar handles client-side reactivity through HTML attributes. Zero JavaScript to author.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-icon">⚡</span>
+            <h3>No build step</h3>
+            <p><code>php app.php</code> and you're running. No bundler, no transpiler, no <code>npm install</code> before you can see a page.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-icon">🎯</span>
+            <h3>Scoped state</h3>
+            <p>TAB, ROUTE, SESSION, and GLOBAL scopes. One line changes whether state is private to a visitor or shared across everyone.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-icon">🤝</span>
+            <h3>Multiplayer by default</h3>
+            <p>Route-scoped signals broadcast to every user on the page. Build collaborative apps without pub/sub infrastructure.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-icon">🔄</span>
+            <h3>Single SSE stream</h3>
+            <p>One persistent connection per client carries all updates. Compresses exceptionally well with Brotli over a reverse proxy.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-icon">🧩</span>
+            <h3>Components</h3>
+            <p>Compose complex pages from isolated sub-contexts. Each component gets its own signals, actions, and rendering scope.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Live poll -->
+<section class="page-section" style="background: var(--surface-2);">
+    <div style="max-width: 40rem; margin-inline: auto; text-align: center;">
+        <div class="section-label">Broadcasting in action</div>
+        <h2 class="section-title">Vote. Watch it update everywhere.</h2>
+        <p class="section-lead" style="margin-inline: auto;">
+            Cast a vote. Every browser on this page sees the bars shift in real-time.
+            That's <code>Scope::ROUTE</code> broadcasting in action.
+        </p>
+        {{ poll | raw }}
+    </div>
+</section>
+
+<!-- How it works -->
+<section class="page-section">
+    <div class="section-label">Mental model</div>
+    <h2 class="section-title">Three primitives. That's the whole API.</h2>
+    <p class="section-lead">
+        Every php-via application is built from signals (reactive state), actions (event handlers),
+        and views (rendering). The framework wires them together over SSE automatically.
+    </p>
+
+    <div class="how-it-works">
+        <div class="how-step">
+            <div class="how-step-number">1</div>
+            <h3>Signal</h3>
+            <p>Declare reactive state. The browser watches it and updates when it changes.</p>
+            <code style="font-size: var(--font-size-0);">$c->signal(0, 'count')</code>
+        </div>
+        <div class="how-arrow">→</div>
+        <div class="how-step">
+            <div class="how-step-number">2</div>
+            <h3>Action</h3>
+            <p>Handle browser events server-side. Modify signals in the handler.</p>
+            <code style="font-size: var(--font-size-0);">$c->action(fn() => ...)</code>
+        </div>
+        <div class="how-arrow">→</div>
+        <div class="how-step">
+            <div class="how-step-number">3</div>
+            <h3>View</h3>
+            <p>Render HTML with Twig or inline PHP. The framework pushes updates via SSE.</p>
+            <code style="font-size: var(--font-size-0);">$c->view('page.twig')</code>
+        </div>
+        <div class="how-arrow">→</div>
+        <div class="how-step">
+            <div class="how-step-number">🌐</div>
+            <h3>Browser</h3>
+            <p>Datastar applies the HTML patch. No page reload. No flash. Instant.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Comparison table -->
+<section class="page-section" style="background: var(--surface-2);">
+    <div class="section-label">How it compares</div>
+    <h2 class="section-title">Honest comparison.</h2>
+    <p class="section-lead">Every tool has trade-offs. Here's where php-via stands.</p>
+
+    <div style="overflow-x: auto;">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th style="text-align:left;">Feature</th>
+                    <th>php-via</th>
+                    <th>Livewire</th>
+                    <th>htmx + Alpine</th>
+                    <th>Inertia.js</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Real-time SSE</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="partial">~</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td>Multiplayer / shared state</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td>No JavaScript to write</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="partial">~</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td>No build step</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td>Scoped state system</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td>Laravel / framework required</td>
+                    <td><span class="check">No</span></td>
+                    <td><span class="cross">Yes</span></td>
+                    <td><span class="check">No</span></td>
+                    <td><span class="partial">Optional</span></td>
+                </tr>
+                <tr>
+                    <td>PHP runtime</td>
+                    <td>Swoole</td>
+                    <td>PHP-FPM</td>
+                    <td>PHP-FPM</td>
+                    <td>PHP-FPM</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Getting started CTA -->
+<section class="page-section" style="text-align: center;">
+    <div class="section-label">Ready?</div>
+    <h2 class="section-title">Try it in under 5 minutes.</h2>
+
+    <div class="install-block" style="max-width: 42rem; margin-inline: auto; margin-block: var(--size-6);">
+        <code>composer require mbolli/php-via</code>
+    </div>
+
+    <div class="hero-ctas">
+        <a href="/docs/getting-started" class="btn btn-primary">Getting started guide →</a>
+        <a href="/examples" class="btn btn-secondary">Browse live examples</a>
+    </div>
+</section>

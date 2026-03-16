@@ -1,0 +1,15 @@
+{
+  "name": "php-via-website",
+  "private": true,
+  "scripts": {
+    "dev": "postcss public/css/site.src.css -o public/css/site.css --watch",
+    "build": "postcss public/css/site.src.css -o public/css/site.css --env production"
+  },
+  "devDependencies": {
+    "open-props": "^1.7.7",
+    "postcss": "^8.5.3",
+    "postcss-cli": "^11.0.0",
+    "postcss-import": "^16.1.0",
+    "postcss-jit-props": "^1.0.15"
+  }
+}

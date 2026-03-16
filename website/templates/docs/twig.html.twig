@@ -1,0 +1,154 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Twig Templates</h1>
+    <p>
+        php-via supports two rendering paths that serve different purposes and can be mixed freely in the same app.
+    </p>
+
+    <h2 id="two-paths">Two rendering paths</h2>
+    <div class="code-result-split" style="align-items: start;">
+        <div>
+            <h3 style="margin-block-start:0">Shell — <code>shell.html</code></h3>
+            <p>
+                A static <code>.html</code> file set with <code>withShellTemplate()</code>.
+                php-via performs a simple string replacement of
+                {% verbatim %}<code>{{ placeholder }}</code>{% endverbatim %} tokens —
+                <strong>not Twig</strong>. The shell is sent once per page load and never re-sent over SSE.
+                Use it for the outer chrome: doctype, nav, scripts, footer.
+            </p>
+            {% verbatim %}<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    &lt;meta charset="UTF-8"&gt;
+    &lt;meta data-signals='{{ signals_json }}'&gt;
+    {{ head_content }}
+&lt;/head&gt;
+&lt;body&gt;
+    {{ content }}
+    &lt;script type="module"
+        src=".../datastar.js"&gt;&lt;/script&gt;
+    {{ foot_content }}
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>{% endverbatim %}
+        </div>
+        <div>
+            <h3 style="margin-block-start:0">Views — Twig or closure</h3>
+            <p>
+                The page content, set with <code>$c-&gt;view()</code>.
+                Re-rendered on every SSE update. Can be a Twig template
+                (requires <code>withTemplateDir()</code>) or a plain PHP closure.
+            </p>
+            <pre><code class="language-php">// Twig template (string name)
+$c->view('counter.html.twig', [
+    'count' => $count->int(),
+    'id'    => $count->id(),
+]);
+
+// PHP closure — no Twig needed
+$c->view(function () use ($count): string {
+    return '&lt;p&gt;' . $count->int() . '&lt;/p&gt;';
+});</code></pre>
+        </div>
+    </div>
+
+    <h3 id="twig-shell">Alternative: Twig as the shell</h3>
+    <p>
+        The framework ships a <code>base.html.twig</code> in <code>templates/</code> that defines
+        the full outer document using Twig blocks. When a view extends it, Twig renders
+        the complete <code>&lt;html&gt;...&lt;/html&gt;</code> document — php-via detects this and skips
+        the plain-HTML shell entirely.
+    </p>
+    {% verbatim %}<pre><code class="language-twig">{# my-page.html.twig #}
+{% extends "base.html.twig" %}
+
+{% block title %}My App{% endblock %}
+
+{% block content %}
+    &lt;h1&gt;Hello&lt;/h1&gt;
+{% endblock %}</code></pre>{% endverbatim %}
+    <p>
+        This path is a good fit when you want Twig inheritance across multiple pages but don't need
+        a separate static shell file.
+        The downside: <code>base.html.twig</code> is re-rendered on every SSE update (unlike a shell,
+        which is sent once), so keep it lightweight.
+    </p>
+
+    <h2 id="setup">Setup</h2>
+    <p>Configure the template directory and optional shell in <code>Config</code>:</p>
+    <pre><code class="language-php">$app = new Via(
+    (new Config())
+        ->withTemplateDir(__DIR__ . '/templates')    // Twig views
+        ->withShellTemplate(__DIR__ . '/shell.html') // optional plain-HTML shell
+);</code></pre>
+    <p>Skip <code>withTemplateDir()</code> if you use only PHP closures for views, and skip <code>withShellTemplate()</code> if your views extend <code>base.html.twig</code>.</p>
+
+    <h2 id="passing-data">Passing data to templates</h2>
+    <p>Pass signal IDs and current values from PHP into Twig via <code>$c-&gt;view()</code>'s data array:</p>
+    <pre><code class="language-php">$count = $c->signal(0, 'count');
+$inc   = $c->action(fn() => $count->setValue($count->int() + 1), 'inc');
+
+$c->view('counter.html.twig', [
+    'count_id'  => $count->id(),    // 'count'
+    'count_val' => $count->int(),   // 0
+    'inc_url'   => $inc->url(),     // '/_action/inc'
+]);</code></pre>
+
+    <h2 id="reactive-text">Reactive text</h2>
+    <p>Use <code>data-text</code> to keep an element in sync with a signal. Always seed the initial value to avoid a flash:</p>
+    {% verbatim %}<pre><code class="language-html">&lt;!-- counter.html.twig --&gt;
+&lt;span data-text="${{ count_id }}"&gt;{{ count_val }}&lt;/span&gt;</code></pre>{% endverbatim %}
+
+    <p>Or use <code>$signal-&gt;text()</code> in PHP to generate the span directly, then output with <code>| raw</code>:</p>
+    <pre><code class="language-php">$c->view('counter.html.twig', [
+    'count_span' => $count->text(), // '&lt;span data-text="$count"&gt;&lt;/span&gt;'
+]);</code></pre>
+    {% verbatim %}<pre><code class="language-html">{{ count_span | raw }}</code></pre>{% endverbatim %}
+
+    <h2 id="two-way-binding">Two-way binding</h2>
+    <p>Use <code>data-bind</code> for inputs that should reflect <em>and update</em> a signal:</p>
+    {% verbatim %}<pre><code class="language-html">&lt;input data-bind="{{ name_id }}" type="text"&gt;
+
+&lt;!-- Or use the bind() Twig function with the Signal object: --&gt;
+&lt;input {{ bind(name_signal) }} type="text"&gt;</code></pre>{% endverbatim %}
+
+    <p>Pass the Signal object itself when using <code>bind()</code>:</p>
+    <pre><code class="language-php">$c->view('form.html.twig', ['name' => $nameSignal]);</code></pre>
+
+    <h2 id="actions">Triggering actions</h2>
+    <p>Use Datastar's event attributes to POST to an action URL:</p>
+    {% verbatim %}<pre><code class="language-html">&lt;button data-on:click="@post('{{ inc_url }}')"&gt;+1&lt;/button&gt;
+
+&lt;!-- Pass data via query params --&gt;
+&lt;button data-on:click="@post('{{ vote_url }}?option=tab')"&gt;Vote TAB&lt;/button&gt;</code></pre>{% endverbatim %}
+
+    <h2 id="template-inheritance">Template inheritance</h2>
+    <p>Standard Twig inheritance works as expected:</p>
+    {% verbatim %}<pre><code class="language-html">{# base.html.twig #}
+&lt;nav&gt;&lt;a href="/"&gt;Home&lt;/a&gt;&lt;/nav&gt;
+&lt;main&gt;{% block content %}{% endblock %}&lt;/main&gt;</code></pre>
+    <pre><code class="language-html">{# page.html.twig #}
+{% extends "base.html.twig" %}
+{% block content %}
+    &lt;h1&gt;My page&lt;/h1&gt;
+{% endblock %}</code></pre>{% endverbatim %}
+
+    <h2 id="cache-updates">Disabling view caching</h2>
+    <p>
+        php-via caches view renders and skips re-rendering if signals haven't changed.
+        Disable this when your view reads external state (e.g. <code>getClients()</code>):
+    </p>
+    <pre><code class="language-php">$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);</code></pre>
+
+    <h2 id="debugging">Debugging</h2>
+    <p>The <code>dump()</code> Twig function renders any variable as a <code>&lt;pre&gt;</code> block:</p>
+    {% verbatim %}<pre><code class="language-html">{{ dump(some_variable) }}</code></pre>{% endverbatim %}
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/signals">Signals</a> — reactive state primitives</li>
+        <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
+        <li><a href="/docs/views">Views</a> — view lifecycle and caching</li>
+        <li><a href="/docs/api">API Reference</a> — complete method signatures</li>
+    </ul>
+</article>
+{% endapply %}

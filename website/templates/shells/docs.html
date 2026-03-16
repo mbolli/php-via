@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2563eb">
+    <meta data-signals='{{ signals_json }}'>
+    <meta data-indicator="_connecting"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ base_path }}_sse')"
+        data-on-datastar-fetch="el === evt.detail.el &&
+                           ((evt.detail.type.startsWith('datastar') && ($_disconnected = false)) ||
+                           (['retrying', 'error', 'finished'].includes(evt.detail.type) && ($_disconnected = true)))">
+    <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ base_path }}_session/close', '{{ context_id }}'); });">
+    <link rel="stylesheet" href="{{ base_path }}css/site.css">
+    {{ head_content }}
+</head>
+<body class="docs-body">
+    <div data-show="$_disconnected" class="connection-warning">⚠️ Reconnecting…</div>
+
+    <nav class="site-nav" role="navigation" aria-label="Main navigation">
+        <div class="nav-inner">
+            <a href="{{ base_path }}" class="nav-logo" aria-label="php-via home">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">php-via</span>
+            </a>
+            <input type="checkbox" id="nav-toggle" class="nav-toggle-input" aria-hidden="true">
+            <label for="nav-toggle" class="nav-toggle-label" aria-label="Toggle menu">
+                <span></span><span></span><span></span>
+            </label>
+            <ul class="nav-links" role="list">
+                <li><a href="{{ base_path }}docs/getting-started" aria-current="page">Docs</a></li>
+                <li><a href="{{ base_path }}examples">Examples</a></li>
+                <li><a href="{{ base_path }}docs/comparisons">vs others</a></li>
+                <li>
+                    <a href="https://github.com/mbolli/php-via" class="nav-github" target="_blank" rel="noopener" aria-label="GitHub">
+                        <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="docs-layout">
+        <!-- Sidebar navigation -->
+        <aside class="docs-sidebar" role="complementary" aria-label="Documentation navigation">
+            <nav class="sidebar-nav">
+                <section class="sidebar-section">
+                    <h3 class="sidebar-heading">Get started</h3>
+                    <ul role="list">
+                        <li><a href="{{ base_path }}docs/getting-started">Installation</a></li>
+                        <li><a href="{{ base_path }}docs/getting-started#your-first-app">Your first app</a></li>
+                    </ul>
+                </section>
+                <section class="sidebar-section">
+                    <h3 class="sidebar-heading">Concepts</h3>
+                    <ul role="list">
+                        <li><a href="{{ base_path }}docs/signals">Signals</a></li>
+                        <li><a href="{{ base_path }}docs/actions">Actions</a></li>
+                        <li><a href="{{ base_path }}docs/views">Views</a></li>
+                        <li><a href="{{ base_path }}docs/scopes">Scopes</a></li>
+                        <li><a href="{{ base_path }}docs/components">Components</a></li>
+                        <li><a href="{{ base_path }}docs/broadcasting">Broadcasting</a></li>
+                        <li><a href="{{ base_path }}docs/lifecycle">Lifecycle</a></li>
+                    </ul>
+                </section>
+                <section class="sidebar-section">
+                    <h3 class="sidebar-heading">Guides</h3>
+                    <ul role="list">
+                        <li><a href="{{ base_path }}docs/twig">Twig templates</a></li>
+                        <li><a href="{{ base_path }}docs/deployment">Deployment</a></li>
+                    </ul>
+                </section>
+                <section class="sidebar-section">
+                    <h3 class="sidebar-heading">Reference</h3>
+                    <ul role="list">
+                        <li><a href="{{ base_path }}docs/api">API reference</a></li>
+                        <li><a href="{{ base_path }}docs/comparisons">vs other frameworks</a></li>
+                        <li><a href="{{ base_path }}docs/faq">Common pitfalls</a></li>
+                        <li><a href="https://github.com/mbolli/php-via/blob/master/CHANGELOG.md" target="_blank" rel="noopener">Changelog ↗</a></li>
+                    </ul>
+                </section>
+            </nav>
+        </aside>
+
+        <!-- Main content -->
+        <main class="docs-content" id="content">
+            {{ content }}
+        </main>
+    </div>
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <p>
+                Built with <strong>php-via</strong> &amp; <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a>.
+                <a href="https://github.com/mbolli/php-via" target="_blank" rel="noopener">GitHub</a> ·
+                <a href="https://packagist.org/packages/mbolli/php-via" target="_blank" rel="noopener">Packagist</a> ·
+                MIT License.
+            </p>
+        </div>
+    </footer>
+
+    {{ foot_content }}
+    <script type="module" src="{{ base_path }}datastar.js"></script>
+    <script>
+        // Highlight the active sidebar link based on current path
+        const path = window.location.pathname.replace(/\/+$/, '') || '/';
+        document.querySelectorAll('.sidebar-nav a').forEach(a => {
+            const href = a.getAttribute('href').replace(/\/+$/, '');
+            if (href === path) {
+                a.setAttribute('aria-current', 'page');
+                a.classList.add('active');
+            }
+        });
+    </script>
+</body>
+</html>

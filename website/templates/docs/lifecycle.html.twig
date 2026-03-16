@@ -1,0 +1,101 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Lifecycle</h1>
+    <p>
+        php-via provides hooks at every stage of a context's life — from server start to client disconnect.
+        Use them to manage timers, presence tracking, and resource cleanup.
+    </p>
+
+    <h2 id="connection-lifecycle">Connection lifecycle</h2>
+    <p>Here's what happens for each client:</p>
+    <ol>
+        <li><strong>Page load (GET)</strong> — page handler runs, initial HTML rendered</li>
+        <li><strong>SSE connect (GET /_sse)</strong> — <code>onClientConnect</code> fires, context syncs</li>
+        <li><strong>Actions</strong> — POST to <code>/_action/{name}</code>, callback runs, patches stream back</li>
+        <li><strong>SSE disconnect</strong> — <code>onClientDisconnect</code> fires immediately</li>
+        <li><strong>Cleanup (after timeout)</strong> — <code>onDisconnect</code> / <code>onCleanup</code> fire, timers cancelled</li>
+    </ol>
+    <p>
+        If the browser reconnects within the cleanup timeout (default: 5 seconds), the context is reused
+        and cleanup is cancelled — you won't see a spurious disconnect/reconnect for normal page refreshes.
+    </p>
+
+    <h2 id="on-client-connect">onClientConnect (app-level)</h2>
+    <p>
+        Register an app-level callback that fires whenever <em>any</em> client's SSE connection is established.
+        The callback receives the connecting client's <code>Context</code>:
+    </p>
+    <pre><code class="language-php">$app->onClientConnect(function (Context $c) use ($app): void {
+    // Re-render the route to update presence counters for everyone there
+    $app->broadcast(Scope::routeScope($c->getRoute()));
+});</code></pre>
+
+    <h2 id="on-client-disconnect">onClientDisconnect (app-level)</h2>
+    <p>
+        Fires when an SSE connection closes. The client has already been removed from <code>getClients()</code>
+        when this fires, so any presence count reflects the departure:
+    </p>
+    <pre><code class="language-php">$app->onClientDisconnect(function (Context $c) use ($app): void {
+    $app->broadcast(Scope::routeScope($c->getRoute()));
+});</code></pre>
+
+    <p>These two hooks together replace a polling timer for presence features. See <a href="/docs/broadcasting">Broadcasting</a>.</p>
+
+    <h2 id="on-disconnect">onDisconnect / onCleanup (per-context)</h2>
+    <p>
+        Register cleanup logic <em>per context</em>. Fires after the SSE connection has been closed and the
+        cleanup timeout has elapsed (or the browser sent a close beacon). Use this for resource cleanup
+        specific to that user's session:
+    </p>
+    <pre><code class="language-php">$c->onDisconnect(function (Context $c) use ($room, $app): void {
+    unset(Room::$members[$room][$c->getId()]);
+    $app->broadcast('room:' . $room);
+});
+
+// onCleanup() is an alias:
+$c->onCleanup(function (Context $c): void {
+    // same thing
+});</code></pre>
+
+    <h2 id="set-interval">Recurring timers</h2>
+    <p>
+        <code>$c-&gt;setInterval()</code> creates a Swoole timer scoped to the context.
+        It fires repeatedly at the given interval (ms) and is <em>automatically cancelled</em> when the context is cleaned up:
+    </p>
+    <pre><code class="language-php">$c->setInterval(function () use ($elapsed, $c): void {
+    $elapsed->setValue($elapsed->int() + 1);
+    $c->sync();
+}, 1000); // every 1 second</code></pre>
+
+    <p>No need to store the timer ID or cancel it manually — it cleans up with the context.</p>
+
+    <h2 id="server-timers">Server-level timers</h2>
+    <p>
+        For timers that run regardless of who is connected (e.g. a stock price tick), use
+        <code>onStart</code> with an OpenSwoole <code>Timer::tick()</code>, and clean up in <code>onShutdown</code>:
+    </p>
+    <pre><code class="language-php">$timerId = null;
+
+$app->onStart(function () use ($app, &amp;$timerId): void {
+    $timerId = Timer::tick(5000, function () use ($app): void {
+        $price = fetchStockPrice();
+        $app->setGlobalState('price', $price);
+        $app->broadcast(Scope::routeScope('/ticker'));
+    });
+});
+
+$app->onShutdown(function () use (&amp;$timerId): void {
+    if ($timerId !== null) {
+        Timer::clear($timerId);
+    }
+});</code></pre>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to multiple clients</li>
+        <li><a href="/docs/components">Components</a> — component-level lifecycle hooks</li>
+        <li><a href="/docs/api#context-on-disconnect">API: onDisconnect()</a> — method signature</li>
+        <li><a href="/docs/api#via-on-client-connect">API: onClientConnect()</a> — app-level hook signature</li>
+    </ul>
+</article>
+{% endapply %}

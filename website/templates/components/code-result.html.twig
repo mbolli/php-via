@@ -1,0 +1,50 @@
+{% apply highlight_blocks %}
+<div class="code-result-split" id="code-result-demo">
+    <div class="code-panel">
+        <div class="code-panel-header">
+            <span>⚡</span> app.php — the complete source
+        </div>
+        <pre><code class="language-php">&lt;?php
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+$app = new Via(new Config());
+
+$app-&gt;page('/', function (Context $c): void {
+    $count = $c-&gt;signal(0);
+
+    $increment = $c-&gt;action(
+        fn() =&gt; $count-&gt;setValue($count-&gt;int() + 1)
+    );
+
+    $c-&gt;view(fn() =&gt; &lt;&lt;&lt;HTML
+        &lt;p&gt;Count: &lt;strong data-text="$count"&gt;
+            {$count-&gt;int()}
+        &lt;/strong&gt;&lt;/p&gt;
+        &lt;button data-on:click="@post('{$increment-&gt;url()}')"&gt;
+            +1
+        &lt;/button&gt;
+    HTML);
+});
+
+$app-&gt;start();</code></pre>
+    </div>
+    <div class="demo-box" style="align-self: center;">
+        <div class="demo-box-label">Live result</div>
+        <div style="text-align: center; padding: var(--size-4) 0;">
+            <p style="font-size: var(--font-size-3); margin-block-end: var(--size-3);">
+                Count: <strong data-text="${{ count_id }}" style="color: var(--brand); font-size: 1.4em;">{{ count_val }}</strong>
+            </p>
+            <button class="btn btn-primary" data-on:click="@post('{{ increment_url }}')">
+                +1
+            </button>
+            <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-start: var(--size-3);">
+                This is your counter. Only you see it.
+            </p>
+        </div>
+    </div>
+</div>
+{% endapply %}

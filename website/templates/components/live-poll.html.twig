@@ -1,0 +1,19 @@
+<div class="demo-box" id="poll-demo">
+    <div class="demo-box-label">Live poll — vote updates for everyone instantly</div>
+    <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
+        What's your favorite php-via scope?
+    </p>
+    {% for option in options %}
+    <div class="poll-option">
+        <button class="poll-vote-btn" data-on:click="@get('{{ option.url }}')">
+            {{ option.label }}
+        </button>
+        <span style="font-size: var(--font-size-0); color: var(--text-3); font-variant-numeric: tabular-nums;"
+              data-text="${{ votes_id }}.{{ option.key }}">{{ option.count }}</span>
+        <div class="poll-bar-wrap">
+            <div class="poll-bar" style="width: {{ option.pct }}%; background: {{ option.color }};"></div>
+        </div>
+    </div>
+    {% endfor %}
+    <pre data-json-signals></pre>
+</div>

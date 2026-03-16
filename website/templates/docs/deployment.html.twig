@@ -1,0 +1,111 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Deployment</h1>
+    <p>
+        php-via runs as a long-lived <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> server process.
+        Unlike traditional PHP-FPM setups, the process stays running — all state lives in memory.
+        This page covers production setup with systemd, Caddy, and process management.
+    </p>
+
+    <h2 id="requirements">Requirements</h2>
+    <ul>
+        <li>PHP 8.4+</li>
+        <li>OpenSwoole extension (<code>pecl install openswoole</code> or packaged as <code>php8.4-openswoole</code>)</li>
+        <li>A reverse proxy (Caddy or nginx) to handle TLS and serve static assets</li>
+    </ul>
+
+    <h2 id="systemd">systemd service</h2>
+    <p>Create a service unit at <code>/etc/systemd/system/myapp.service</code>:</p>
+    <pre><code class="language-ini">[Unit]
+Description=My php-via app
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/myapp
+ExecStart=/usr/bin/php /var/www/myapp/app.php
+Restart=on-failure
+RestartSec=5s
+Environment=APP_ENV=production
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+    <pre><code class="language-bash">systemctl daemon-reload
+systemctl enable myapp
+systemctl start myapp
+systemctl status myapp</code></pre>
+
+    <h2 id="caddy">Caddy reverse proxy</h2>
+    <p>
+        Caddy handles TLS automatically. The key requirement is disabling response buffering for SSE
+        (the <code>/_sse</code> endpoint streams indefinitely):
+    </p>
+    <pre><code class="language-caddy">myapp.example.com {
+    # Serve static assets directly
+    handle /public/* {
+        root * /var/www/myapp
+        file_server
+    }
+
+    # Proxy everything else to Swoole
+    reverse_proxy localhost:3000 {
+        # Required for SSE: disable buffering
+        flush_interval -1
+
+        # Optional: pass real IP to app
+        header_up X-Real-IP {remote_host}
+    }
+}</code></pre>
+
+    <h2 id="production-config">Production config</h2>
+    <p>Tune php-via for production in your <code>app.php</code>:</p>
+    <pre><code class="language-php">$config = (new Config())
+    ->withHost('127.0.0.1')    // bind locally, let Caddy handle external
+    ->withPort(3000)
+    ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
+    ->withTemplateDir(__DIR__ . '/templates')
+    ->withStaticDir(__DIR__ . '/public')
+    ->withSwooleSettings([
+        'worker_num'        => swoole_cpu_num(),
+        'max_request'       => 0,      // long-lived process
+        'enable_coroutine'  => true,
+    ]);</code></pre>
+
+    <h2 id="graceful-restart">Graceful restart</h2>
+    <p>
+        To deploy new code without dropping connections, reload the service:
+    </p>
+    <pre><code class="language-bash">systemctl reload myapp
+# or:
+kill -USR1 $(cat /var/run/myapp.pid)</code></pre>
+
+    <p>
+        php-via listens for <code>SIGTERM</code> and <code>SIGINT</code> and calls your <code>onShutdown</code>
+        callbacks before stopping. Register cleanup callbacks for any timers or open resources.
+    </p>
+
+    <h2 id="multiple-instances">Multiple instances</h2>
+    <p>
+        php-via uses Swoole's in-memory shared state for the scope system. This means multiple instances
+        do <em>not</em> share state — a broadcast on instance A won't reach clients on instance B.
+        For now, horizontal scaling requires a sticky-session load balancer and the understanding that
+        per-route state won't be globally consistent.
+    </p>
+
+    <h2 id="static-assets">Static assets</h2>
+    <p>
+        Configure a static directory to serve files directly from Swoole in development:
+    </p>
+    <pre><code class="language-php">$config->withStaticDir(__DIR__ . '/public');</code></pre>
+
+    <p>In production, serve static files from Caddy (or nginx) directly — it's faster and avoids passing binary content through PHP.</p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
+        <li><a href="/docs/api">API Reference</a> — Config class options</li>
+    </ul>
+</article>
+{% endapply %}

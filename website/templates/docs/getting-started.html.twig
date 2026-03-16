@@ -1,0 +1,88 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Getting Started</h1>
+    <p>
+        php-via is a real-time engine for PHP. It brings server-centric reactivity to PHP using
+        <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> as the runtime and
+        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> as the client-side reactive layer.
+    </p>
+    <p>
+        The result: you write PHP, the browser updates in real-time. No JavaScript. No build step. No API layer to maintain.
+    </p>
+
+    <h2 id="requirements">Requirements</h2>
+    <ul>
+        <li>PHP 8.4+</li>
+        <li><a href="https://openswoole.com/docs/get-started/installation" target="_blank" rel="noopener">OpenSwoole extension</a></li>
+        <li>Composer</li>
+    </ul>
+
+    <h2 id="installation">Installation</h2>
+    <pre><code class="language-bash">composer require mbolli/php-via</code></pre>
+
+    <h2 id="your-first-app">Your first app</h2>
+    <p>
+        Create <code>app.php</code> in a new directory. Here's the most minimal
+        php-via application — a counter:
+    </p>
+
+    <pre><code class="language-php">&lt;?php
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+$app = new Via(new Config());
+
+$app-&gt;page('/', function (Context $c): void {
+    // 1. Declare a reactive signal
+    $count = $c-&gt;signal(0);
+
+    // 2. Define an action (server-side event handler)
+    $increment = $c-&gt;action(function () use ($count): void {
+        $count-&gt;setValue($count-&gt;int() + 1);
+    });
+
+    // 3. Render a view (the framework pushes updates via SSE)
+    $c-&gt;view(fn() =&gt; &lt;&lt;&lt;HTML
+        &lt;p&gt;Count: &lt;strong data-text="$count"&gt;{$count-&gt;int()}&lt;/strong&gt;&lt;/p&gt;
+        &lt;button data-on:click="@post('{$increment-&gt;url()}')"&gt;+1&lt;/button&gt;
+    HTML);
+});
+
+$app-&gt;start();</code></pre>
+
+    <pre><code class="language-bash">php app.php
+# ⚡ Server started on http://0.0.0.0:3000</code></pre>
+
+    <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. Then open a second tab — the counter stays independent. That's <strong>TAB scope</strong>, the default.</p>
+
+    <div class="docs-demo">
+        <div class="docs-demo-header">▶ Try it — interactive version of the code above</div>
+        <div class="docs-demo-body">
+            {{ demo | raw }}
+        </div>
+    </div>
+
+    <h2 id="how-it-works">How it works</h2>
+    <p>When the page loads, php-via:</p>
+    <ol>
+        <li>Executes your page handler to build the initial HTML</li>
+        <li>Injects signal state into the page as JSON <code>&lt;meta data-signals&gt;</code></li>
+        <li>Datastar establishes an SSE connection to <code>/_sse</code></li>
+        <li>When you click a button, Datastar POSTs to <code>/_action/{id}</code></li>
+        <li>Your action callback runs, signals update, view re-renders</li>
+        <li>The patch arrives via SSE and Datastar morphs the DOM</li>
+    </ol>
+    <p>No page reload. No flash. Just seamless updates.</p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/signals">Signals</a> — reactive state and two-way binding</li>
+        <li><a href="/docs/scopes">Scopes</a> — share state across users with one line</li>
+        <li><a href="/docs/components">Components</a> — compose complex pages from isolated sub-contexts</li>
+        <li><a href="/examples">Examples</a> — live, editable examples of every feature</li>
+    </ul>
+</article>
+{% endapply %}

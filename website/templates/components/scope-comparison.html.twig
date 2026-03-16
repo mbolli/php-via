@@ -1,0 +1,16 @@
+<div class="scope-split" id="scope-demo">
+    <div class="scope-card tab-scoped">
+        <div class="scope-label">TAB scope</div>
+        <div class="scope-count" data-text="${{ tab_count_id }}">{{ tab_count_val }}</div>
+        <div class="scope-description">Only you see this counter.</div>
+        <button class="btn btn-secondary" style="width: 100%"
+                data-on:click="@post('{{ inc_tab_url }}')">+1 (just me)</button>
+    </div>
+    <div class="scope-card route-scoped">
+        <div class="scope-label">ROUTE scope</div>
+        <div class="scope-count" data-text="${{ route_count_id }}">{{ route_count_val }}</div>
+        <div class="scope-description">Everyone on this page shares this.</div>
+        <button class="btn btn-secondary" style="width: 100%; border-color: var(--violet-6);"
+                data-on:click="@post('{{ inc_route_url }}')">+1 (everyone)</button>
+    </div>
+</div>

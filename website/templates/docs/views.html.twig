@@ -1,0 +1,91 @@
+{% apply highlight_blocks %}
+<article class="docs-content">
+    <h1>Views</h1>
+    <p>
+        A view is the HTML a context renders for its client. php-via re-renders and patches it automatically
+        whenever signals change — no manual DOM manipulation required.
+    </p>
+
+    <h2 id="defining">Defining a view</h2>
+    <p>Call <code>$c-&gt;view()</code> once per context. It accepts either a Twig template name or a callable:</p>
+    <pre><code class="language-php">// Twig template
+$c->view('counter.html.twig', [
+    'count_id'  => $count->id(),
+    'count_val' => $count->int(),
+    'inc_url'   => $increment->url(),
+]);
+
+// Callable (inline)
+$c->view(function () use ($count, $increment): string {
+    return "&lt;p&gt;Count: {$count->int()}&lt;/p&gt;"
+         . "&lt;button data-on:click=\"@post('{$increment->url()}')\"&gt;+1&lt;/button&gt;";
+});</code></pre>
+
+    <h2 id="update-cycle">How updates work</h2>
+    <p>When a signal changes inside an action:</p>
+    <ol>
+        <li><code>$c-&gt;sync()</code> is called (either explicitly or via auto-broadcast on scoped signals)</li>
+        <li>php-via re-renders the view callable/template with fresh values</li>
+        <li>The new HTML is diffed against the previous render and patched to the browser via SSE</li>
+        <li>Datastar morphs only the changed DOM nodes — no full page reload</li>
+    </ol>
+
+    <h2 id="sync-vs-sync-signals">sync() vs syncSignals()</h2>
+    <p>
+        <code>$c-&gt;sync()</code> re-renders the view <em>and</em> pushes signal values.
+        If only signal values changed (no structural HTML change), use <code>$c-&gt;syncSignals()</code> — it skips
+        view re-rendering and is faster:
+    </p>
+    <pre><code class="language-php">// Only a signal label changed — no need to re-render the whole view
+$c->action(function (Context $c) use ($status): void {
+    $status->setValue('Saved!');
+    $c->syncSignals();
+}, 'save');</code></pre>
+
+    <h2 id="caching">View caching</h2>
+    <p>
+        By default, php-via caches the last render per scope and skips re-rendering if no signals in the context changed.
+        This is safe for most views. Disable it when the view reads <em>external</em> state that isn't tracked by signals:
+    </p>
+    <pre><code class="language-php">// This view reads $app->getClients() — not a signal, so caching must be disabled
+$c->view(function () use ($app, $twig): string {
+    $count = count($app->getClients());
+    return $twig->render('presence.html.twig', [
+        'count'  => $count,
+        'person' => $count === 1 ? 'person' : 'people',
+    ]);
+}, cacheUpdates: false);</code></pre>
+
+    <h2 id="components">Views in components</h2>
+    <p>
+        Each <a href="/docs/components">component</a> defines its own view. Component views update independently
+        from the parent context — only the signals owned by that component need to change for it to re-render.
+    </p>
+    <pre><code class="language-php">$counter = $c->component(function (Context $c): void {
+    $n   = $c->signal(0, 'n');
+    $inc = $c->action(fn() => $n->setValue($n->int() + 1) & $c->sync(), 'inc');
+    $c->view('counter.html.twig', ['n_val' => $n->int(), 'inc_url' => $inc->url()]);
+}, 'counter');
+
+$c->view('page.html.twig', ['counter' => $counter()]);</code></pre>
+
+    <h2 id="exec-script">Executing scripts on update</h2>
+    <p>
+        To run JavaScript as part of an update (e.g. open a modal or trigger an animation),
+        use <code>$c-&gt;execScript()</code> inside an action:
+    </p>
+    <pre><code class="language-php">$c->action(function (Context $c) use ($msg): void {
+    $msg->setValue('Saved!');
+    $c->execScript('document.querySelector(".toast").classList.add("visible")');
+    $c->sync();
+}, 'save');</code></pre>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/signals">Signals</a> — state that drives view updates</li>
+        <li><a href="/docs/actions">Actions</a> — triggers that cause re-renders</li>
+        <li><a href="/docs/components">Components</a> — isolated views with their own signal scope</li>
+        <li><a href="/docs/twig">Twig templates</a> — binding signals in templates</li>
+    </ul>
+</article>
+{% endapply %}
