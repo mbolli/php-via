@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Lifecycle — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Lifecycle</h1>
     <p>
@@ -25,19 +27,23 @@
         Register an app-level callback that fires whenever <em>any</em> client's SSE connection is established.
         The callback receives the connecting client's <code>Context</code>:
     </p>
-    <pre><code class="language-php">$app->onClientConnect(function (Context $c) use ($app): void {
+    {% code 'php' %}{% verbatim %}
+$app->onClientConnect(function (Context $c) use ($app): void {
     // Re-render the route to update presence counters for everyone there
     $app->broadcast(Scope::routeScope($c->getRoute()));
-});</code></pre>
+});
+{% endverbatim %}{% endcode %}
 
     <h2 id="on-client-disconnect">onClientDisconnect (app-level)</h2>
     <p>
         Fires when an SSE connection closes. The client has already been removed from <code>getClients()</code>
         when this fires, so any presence count reflects the departure:
     </p>
-    <pre><code class="language-php">$app->onClientDisconnect(function (Context $c) use ($app): void {
+    {% code 'php' %}{% verbatim %}
+$app->onClientDisconnect(function (Context $c) use ($app): void {
     $app->broadcast(Scope::routeScope($c->getRoute()));
-});</code></pre>
+});
+{% endverbatim %}{% endcode %}
 
     <p>These two hooks together replace a polling timer for presence features. See <a href="/docs/broadcasting">Broadcasting</a>.</p>
 
@@ -47,7 +53,8 @@
         cleanup timeout has elapsed (or the browser sent a close beacon). Use this for resource cleanup
         specific to that user's session:
     </p>
-    <pre><code class="language-php">$c->onDisconnect(function (Context $c) use ($room, $app): void {
+    {% code 'php' %}{% verbatim %}
+$c->onDisconnect(function (Context $c) use ($room, $app): void {
     unset(Room::$members[$room][$c->getId()]);
     $app->broadcast('room:' . $room);
 });
@@ -55,17 +62,20 @@
 // onCleanup() is an alias:
 $c->onCleanup(function (Context $c): void {
     // same thing
-});</code></pre>
+});
+{% endverbatim %}{% endcode %}
 
     <h2 id="set-interval">Recurring timers</h2>
     <p>
         <code>$c-&gt;setInterval()</code> creates a Swoole timer scoped to the context.
         It fires repeatedly at the given interval (ms) and is <em>automatically cancelled</em> when the context is cleaned up:
     </p>
-    <pre><code class="language-php">$c->setInterval(function () use ($elapsed, $c): void {
+    {% code 'php' %}{% verbatim %}
+$c->setInterval(function () use ($elapsed, $c): void {
     $elapsed->setValue($elapsed->int() + 1);
     $c->sync();
-}, 1000); // every 1 second</code></pre>
+}, 1000); // every 1 second
+{% endverbatim %}{% endcode %}
 
     <p>No need to store the timer ID or cancel it manually — it cleans up with the context.</p>
 
@@ -74,9 +84,10 @@ $c->onCleanup(function (Context $c): void {
         For timers that run regardless of who is connected (e.g. a stock price tick), use
         <code>onStart</code> with an OpenSwoole <code>Timer::tick()</code>, and clean up in <code>onShutdown</code>:
     </p>
-    <pre><code class="language-php">$timerId = null;
+    {% code 'php' %}{% verbatim %}
+$timerId = null;
 
-$app->onStart(function () use ($app, &amp;$timerId): void {
+$app->onStart(function () use ($app, &$timerId): void {
     $timerId = Timer::tick(5000, function () use ($app): void {
         $price = fetchStockPrice();
         $app->setGlobalState('price', $price);
@@ -84,11 +95,12 @@ $app->onStart(function () use ($app, &amp;$timerId): void {
     });
 });
 
-$app->onShutdown(function () use (&amp;$timerId): void {
+$app->onShutdown(function () use (&$timerId): void {
     if ($timerId !== null) {
         Timer::clear($timerId);
     }
-});</code></pre>
+});
+{% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
@@ -98,4 +110,5 @@ $app->onShutdown(function () use (&amp;$timerId): void {
         <li><a href="/docs/api#via-on-client-connect">API: onClientConnect()</a> — app-level hook signature</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

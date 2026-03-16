@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Broadcasting — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Broadcasting</h1>
     <p>
@@ -11,18 +13,21 @@
         Call <code>$app-&gt;broadcast(scope)</code> after modifying shared state. Every context registered
         in that scope will re-render its view and push the update via SSE:
     </p>
-    <pre><code class="language-php">$increment = $c->action(function (Context $c) use ($app, $counter): void {
+    {% code 'php' %}{% verbatim %}
+$increment = $c->action(function (Context $c) use ($app, $counter): void {
     $newVal = $app->globalState('shared_counter') + 1;
     $app->setGlobalState('shared_counter', $newVal);
     $counter->setValue($newVal);
 
     // Push to everyone on this route
     $app->broadcast(Scope::routeScope('/'));
-}, 'increment');</code></pre>
+}, 'increment');
+{% endverbatim %}{% endcode %}
 
     <h2 id="scope-targets">Scope targets</h2>
     <p>You can broadcast to any scope string:</p>
-    <pre><code class="language-php">// All connected clients everywhere
+    {% code 'php' %}{% verbatim %}
+// All connected clients everywhere
 $app->broadcast(Scope::GLOBAL);
 
 // All clients on a specific route
@@ -32,29 +37,34 @@ $app->broadcast(Scope::routeScope('/dashboard'));
 $app->broadcast('room:lobby');
 
 // Equivalent shorthand when inside a context:
-$c->broadcast(); // broadcasts to $c's primary scope</code></pre>
+$c->broadcast(); // broadcasts to $c's primary scope
+{% endverbatim %}{% endcode %}
 
     <h2 id="auto-broadcast">Auto-broadcast on scoped signals</h2>
     <p>
         Scoped signals auto-broadcast when <code>setValue()</code> is called — you don't always need
         an explicit <code>broadcast()</code>. The auto-broadcast fires to the signal's scope:
     </p>
-    <pre><code class="language-php">// This signal is ROUTE-scoped. Calling setValue() auto-broadcasts to route:/
+    {% code 'php' %}{% verbatim %}
+// This signal is ROUTE-scoped. Calling setValue() auto-broadcasts to route:/
 $shared = $c->signal($app->globalState('count'), 'count', Scope::routeScope('/'));
 
 $c->action(function (Context $c) use ($app, $shared): void {
     $shared->setValue($app->globalState('count') + 1);
     // No explicit broadcast needed — auto-broadcast fires for Scope::routeScope('/')
-}, 'inc');</code></pre>
+}, 'inc');
+{% endverbatim %}{% endcode %}
 
     <h2 id="connect-disconnect">Broadcasting on connect and disconnect</h2>
     <p>
         Use <code>onClientConnect</code> / <code>onClientDisconnect</code> app-level hooks to broadcast
         whenever a client joins or leaves. This replaces polling timers for presence features:
     </p>
-    <pre><code class="language-php">// Broadcast to the route when occupancy changes — presence counter stays live
+    {% code 'php' %}{% verbatim %}
+// Broadcast to the route when occupancy changes — presence counter stays live
 $app->onClientConnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
-$app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));</code></pre>
+$app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
+{% endverbatim %}{% endcode %}
     <p>See <a href="/docs/lifecycle">Lifecycle</a> for full details on connect/disconnect hooks.</p>
 
     <h2 id="global-state">Combining global state and broadcast</h2>
@@ -62,7 +72,8 @@ $app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c-
         Use <code>setGlobalState</code> to store shared data in process memory, then broadcast to re-render
         all clients with the new value. The standard multiplayer pattern:
     </p>
-    <pre><code class="language-php">// Initialize once
+    {% code 'php' %}{% verbatim %}
+// Initialize once
 $app->setGlobalState('messages', []);
 
 // In an action:
@@ -72,7 +83,8 @@ $send = $c->action(function (Context $c) use ($app): void {
     $app->setGlobalState('messages', array_slice($msgs, -50)); // keep last 50
 
     $app->broadcast(Scope::routeScope('/chat'));
-}, 'send');</code></pre>
+}, 'send');
+{% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
@@ -82,4 +94,5 @@ $send = $c->action(function (Context $c) use ($app): void {
         <li><a href="/docs/api#via-broadcast">API: broadcast()</a> — method signature</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

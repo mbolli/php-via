@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Getting Started — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Getting Started</h1>
     <p>
@@ -18,7 +20,9 @@
     </ul>
 
     <h2 id="installation">Installation</h2>
-    <pre><code class="language-bash">composer require mbolli/php-via</code></pre>
+    {% code 'bash' %}{% verbatim %}
+composer require mbolli/php-via
+    {% endverbatim %}{% endcode %}
 
     <h2 id="your-first-app">Your first app</h2>
     <p>
@@ -26,7 +30,8 @@
         php-via application — a counter:
     </p>
 
-    <pre><code class="language-php">&lt;?php
+    {% code 'php' %}{% verbatim %}
+<?php
 require __DIR__ . '/vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
@@ -35,26 +40,29 @@ use Mbolli\PhpVia\Via;
 
 $app = new Via(new Config());
 
-$app-&gt;page('/', function (Context $c): void {
+$app->page('/', function (Context $c): void {
     // 1. Declare a reactive signal
-    $count = $c-&gt;signal(0);
+    $count = $c->signal(0);
 
     // 2. Define an action (server-side event handler)
-    $increment = $c-&gt;action(function () use ($count): void {
-        $count-&gt;setValue($count-&gt;int() + 1);
+    $increment = $c->action(function () use ($count): void {
+        $count->setValue($count->int() + 1);
     });
 
     // 3. Render a view (the framework pushes updates via SSE)
-    $c-&gt;view(fn() =&gt; &lt;&lt;&lt;HTML
-        &lt;p&gt;Count: &lt;strong data-text="$count"&gt;{$count-&gt;int()}&lt;/strong&gt;&lt;/p&gt;
-        &lt;button data-on:click="@post('{$increment-&gt;url()}')"&gt;+1&lt;/button&gt;
+    $c->view(fn() => <<<HTML
+        <p>Count: <strong data-text="$count">{$count->int()}</strong></p>
+        <button data-on:click="@post('{$increment->url()}')"}>+1</button>
     HTML);
 });
 
-$app-&gt;start();</code></pre>
+$app->start();
+    {% endverbatim %}{% endcode %}
 
-    <pre><code class="language-bash">php app.php
-# ⚡ Server started on http://0.0.0.0:3000</code></pre>
+    {% code 'bash' %}{% verbatim %}
+php app.php
+# ⚡ Server started on http://0.0.0.0:3000
+    {% endverbatim %}{% endcode %}
 
     <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. Then open a second tab — the counter stays independent. That's <strong>TAB scope</strong>, the default.</p>
 
@@ -85,4 +93,5 @@ $app-&gt;start();</code></pre>
         <li><a href="/examples">Examples</a> — live, editable examples of every feature</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

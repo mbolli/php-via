@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Components — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Components</h1>
     <p>
@@ -8,7 +10,8 @@
 
     <h2 id="creating">Creating a component</h2>
     <p>Define a component as a callable that configures a <code>Context</code>:</p>
-    <pre><code class="language-php">$counterComponent = function (Context $c) use ($twig): void {
+    {% code 'php' %}{% verbatim %}
+$counterComponent = function (Context $c) use ($twig): void {
     $count = $c->signal(0, 'count');
     $inc   = $c->action(fn() => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
 
@@ -17,33 +20,39 @@
         'count_val' => $count->int(),
         'inc_url'   => $inc->url(),
     ]);
-};</code></pre>
+};
+{% endverbatim %}{% endcode %}
 
     <h2 id="mounting">Mounting a component</h2>
     <p>
         Mount a component inside a page handler via <code>$c-&gt;component()</code>, giving it a namespace to prevent
         signal ID collisions. The returned callable renders the component's initial HTML:
     </p>
-    <pre><code class="language-php">$app->page('/', function (Context $c) use ($counterComponent): void {
+    {% code 'php' %}{% verbatim %}
+$app->page('/', function (Context $c) use ($counterComponent): void {
     $counter = $c->component($counterComponent, 'counter');
 
     $c->view('pages/home.html.twig', [
         'counter' => $counter(), // initial HTML string
     ]);
-});</code></pre>
+});
+{% endverbatim %}{% endcode %}
 
-    {% verbatim %}<pre><code class="language-html">{# pages/home.html.twig #}
-&lt;main&gt;
-    &lt;h1&gt;Welcome&lt;/h1&gt;
+    {% code 'html' %}{% verbatim %}
+{# pages/home.html.twig #}
+<main>
+    <h1>Welcome</h1>
     {{ counter | raw }}
-&lt;/main&gt;</code></pre>{% endverbatim %}
+</main>
+{% endverbatim %}{% endcode %}
 
     <h2 id="namespacing">Namespacing</h2>
     <p>
         The namespace prefixes all signal and action IDs in the component. This lets you mount the same component
         multiple times on one page without signal conflicts:
     </p>
-    <pre><code class="language-php">$counterA = $c->component($counterComponent, 'counter-a');
+    {% code 'php' %}{% verbatim %}
+$counterA = $c->component($counterComponent, 'counter-a');
 $counterB = $c->component($counterComponent, 'counter-b');
 
 // counter-a has signal ID 'counter-a_count', action '/_action/counter-a_inc'
@@ -52,14 +61,16 @@ $counterB = $c->component($counterComponent, 'counter-b');
 $c->view('page.html.twig', [
     'counterA' => $counterA(),
     'counterB' => $counterB(),
-]);</code></pre>
+]);
+{% endverbatim %}{% endcode %}
 
     <h2 id="scoped-components">Scoped components</h2>
     <p>
         Components can set their own scope, independent of the parent. This is how the website's
         shared counter and presence indicator work — they're ROUTE-scoped components inside a page:
     </p>
-    <pre><code class="language-php">$presenceComponent = function (Context $c) use ($app, $twig): void {
+    {% code 'php' %}{% verbatim %}
+$presenceComponent = function (Context $c) use ($app, $twig): void {
     $c->scope(Scope::ROUTE); // shared with everyone on this route
 
     $c->view(function () use ($app, $twig): string {
@@ -69,14 +80,16 @@ $c->view('page.html.twig', [
             'person' => $count === 1 ? 'person' : 'people',
         ]);
     }, cacheUpdates: false);
-};</code></pre>
+};
+{% endverbatim %}{% endcode %}
 
     <h2 id="lifecycle">Component lifecycle</h2>
     <p>
         Components follow the same lifecycle as contexts. They support <code>onDisconnect</code>,
         <code>setInterval</code>, and all other context methods:
     </p>
-    <pre><code class="language-php">$roomComponent = function (Context $c) use ($room, $app): void {
+    {% code 'php' %}{% verbatim %}
+$roomComponent = function (Context $c) use ($room, $app): void {
     $c->addScope('room:' . $room);
     // ... signals, view ...
 
@@ -84,7 +97,8 @@ $c->view('page.html.twig', [
         Room::$members[$room]--;
         $app->broadcast('room:' . $room);
     });
-};</code></pre>
+};
+{% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
@@ -94,4 +108,5 @@ $c->view('page.html.twig', [
         <li><a href="/docs/api#context-component">API: component()</a> — full method signature</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

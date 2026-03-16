@@ -1,10 +1,10 @@
-{% apply highlight_blocks %}
 <div class="code-result-split" id="code-result-demo">
     <div class="code-panel">
         <div class="code-panel-header">
             <span>⚡</span> app.php — the complete source
         </div>
-        <pre><code class="language-php">&lt;?php
+        {% code 'php' %}{% verbatim %}
+<?php
 require __DIR__ . '/vendor/autoload.php';
 
 use Mbolli\PhpVia\Config;
@@ -13,24 +13,25 @@ use Mbolli\PhpVia\Via;
 
 $app = new Via(new Config());
 
-$app-&gt;page('/', function (Context $c): void {
-    $count = $c-&gt;signal(0);
+$app->page('/', function (Context $c): void {
+    $count = $c->signal(0);
 
-    $increment = $c-&gt;action(
-        fn() =&gt; $count-&gt;setValue($count-&gt;int() + 1)
+    $increment = $c->action(
+        fn() => $count->setValue($count->int() + 1)
     );
 
-    $c-&gt;view(fn() =&gt; &lt;&lt;&lt;HTML
-        &lt;p&gt;Count: &lt;strong data-text="$count"&gt;
-            {$count-&gt;int()}
-        &lt;/strong&gt;&lt;/p&gt;
-        &lt;button data-on:click="@post('{$increment-&gt;url()}')"&gt;
+    $c->view(fn() => <<<HTML
+        <p>Count: <strong data-text="$count">
+            {$count->int()}
+        </strong></p>
+        <button data-on:click="@post('{$increment->url()}')">
             +1
-        &lt;/button&gt;
+        </button>
     HTML);
 });
 
-$app-&gt;start();</code></pre>
+$app->start();
+        {% endverbatim %}{% endcode %}
     </div>
     <div class="demo-box" style="align-self: center;">
         <div class="demo-box-label">Live result</div>
@@ -47,4 +48,3 @@ $app-&gt;start();</code></pre>
         </div>
     </div>
 </div>
-{% endapply %}

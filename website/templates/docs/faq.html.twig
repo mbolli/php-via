@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Common Pitfalls — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Common Pitfalls</h1>
     <p>
@@ -18,7 +20,8 @@
         </p>
         <p><strong>Fix:</strong> Read shared state directly inside the view closure instead of from a
         per-client signal. <code>$app->globalState()</code> is always correct for all clients:</p>
-        <pre><code class="language-php">// ❌ stale for other clients
+        {% code 'php' %}{% verbatim %}
+// ❌ stale for other clients
 $c->view(function () use ($votes) {
     $count = $votes->int(); // only correct for the client that called $votes->setValue()
 });
@@ -26,7 +29,8 @@ $c->view(function () use ($votes) {
 // ✅ correct for everyone
 $c->view(function () use ($app) {
     $count = (int) ($app->globalState('vote_count') ?? 0);
-});</code></pre>
+});
+        {% endverbatim %}{% endcode %}
     </details>
 
     <details>
@@ -41,16 +45,20 @@ $c->view(function () use ($app) {
         </p>
         <p><strong>Fix:</strong> Always use <code>$signal->id()</code> in PHP and pass it to the template.
         Never hard-code signal IDs in HTML:</p>
-        <pre><code class="language-php">$c->view(function () use ($votes, $twig) {
+        {% code 'php' %}{% verbatim %}
+$c->view(function () use ($votes, $twig) {
     return $twig->render('poll.html.twig', [
         'votes_id' => $votes->id(), // e.g. "poll.votes"
     ]);
-});</code></pre>
-        <pre><code class="language-html">&lt;!-- ❌ hard-coded, will break if namespace changes --&gt;
-{% verbatim %}<span data-text="$poll.votes.tab">0</span>
+});
+        {% endverbatim %}{% endcode %}
+        {% code 'html' %}{% verbatim %}
+<!-- ❌ hard-coded, will break if namespace changes -->
+<span data-text="$poll.votes.tab">0</span>
 
-&lt;!-- ✅ dynamic, always correct --&gt;
-<span data-text="${{ votes_id }}.tab">0</span>{% endverbatim %}</code></pre>
+<!-- ✅ dynamic, always correct -->
+<span data-text="${{ votes_id }}.tab">0</span>
+        {% endverbatim %}{% endcode %}
     </details>
 
     <details>
@@ -67,12 +75,14 @@ $c->view(function () use ($app) {
         <p><strong>Fix:</strong> Make the page-level view closure a no-op on update renders. Components own
         their own patches:
         </p>
-        <pre><code class="language-php">$c->view(function (bool $isUpdate) use ($twig, $data): string {
+        {% code 'php' %}{% verbatim %}
+$c->view(function (bool $isUpdate) use ($twig, $data): string {
     if ($isUpdate) {
         return ''; // components handle their own patches
     }
     return $twig->render('page.html.twig', $data);
-});</code></pre>
+});
+        {% endverbatim %}{% endcode %}
     </details>
 
     <details>
@@ -87,7 +97,8 @@ $c->view(function () use ($app) {
         </p>
         <p><strong>Fix:</strong> Add the variable to both the route handler's <code>use</code> and the inner
         view closure's <code>use</code>:</p>
-        <pre><code class="language-php">// ❌ $twig is null inside the view closure
+        {% code 'php' %}{% verbatim %}
+// ❌ $twig is null inside the view closure
 $app->page('/', function (Context $c) use ($shell): void {
     $c->view(function () use ($twig) { // $twig was never captured by the outer closure
         return $twig->render('home.html.twig');
@@ -99,7 +110,8 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
     $c->view(function () use ($twig): string {
         return $twig->render('home.html.twig');
     });
-});</code></pre>
+});
+        {% endverbatim %}{% endcode %}
     </details>
 
     <details>
@@ -115,7 +127,7 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
         </p>
         <p><strong>Fix:</strong> Wrap any literal Twig syntax in code examples with
         <code>{&percnt; verbatim &percnt;}...{&percnt; endverbatim &percnt;}</code>:</p>
-        <pre><code class="language-html">{&percnt; verbatim &percnt;}&lt;pre&gt;&lt;code&gt;
+        <pre data-lang="html"><code>{&percnt; verbatim &percnt;}&lt;pre&gt;&lt;code&gt;
 {% block content %}...{% endblock %}
 {{ some_variable }}
 {# this comment would vanish #}
@@ -134,7 +146,9 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
         </p>
         <p><strong>Fix:</strong> Disable view caching for views that must always reflect current state:
         </p>
-        <pre><code class="language-php">$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);</code></pre>
+        {% code 'php' %}{% verbatim %}
+$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);
+        {% endverbatim %}{% endcode %}
     </details>
 
     <details>
@@ -149,7 +163,8 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
         <p><strong>Fix:</strong> Guard broadcasts with a client check, or use <code>onClientConnect</code>
         and <code>onClientDisconnect</code> hooks instead of a timer for presence-style updates:
         </p>
-        <pre><code class="language-php">// Guard the timer
+        {% code 'php' %}{% verbatim %}
+// Guard the timer
 $app->setInterval(function () use ($app): void {
     if (empty($app->getClients())) {
         return;
@@ -163,7 +178,51 @@ $app->onClientConnect(function (Context $c) use ($app): void {
 });
 $app->onClientDisconnect(function (Context $c) use ($app): void {
     $app->broadcast(Scope::routeScope($c->getRoute()));
-});</code></pre>
+});
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>Shell templates don't support Twig — use page-level inheritance instead</strong></summary>
+        {% verbatim %}<p>
+            You try to use <code>{% extends %}</code>, <code>{% block %}</code>, or other Twig tags inside
+            a shell template (the HTML file passed to <code>withShellTemplate()</code> or
+            <code>setShellTemplate()</code>), but nothing happens or you get a parse error.
+        </p>
+        <p><strong>Why:</strong> Shell templates are processed by <code>HtmlBuilder</code> using a plain
+        <code>str_replace()</code>, not the Twig engine. They only understand the six literal
+        placeholders: <code>{{ signals_json }}</code>, <code>{{ context_id }}</code>,
+        <code>{{ base_path }}</code>, <code>{{ head_content }}</code>, <code>{{ content }}</code>,
+        and <code>{{ foot_content }}</code>. Twig tags are invisible to this processor and will be
+        emitted as raw text.
+        </p>
+        <p><strong>Fix:</strong> Don't put Twig logic in shell templates. Instead, move the layout into
+        a proper Twig base template and have your page templates extend it. The full HTML document
+        (including <code>&lt;!DOCTYPE html&gt;</code>, nav, footer) lives in the base template;
+        page templates fill in <code>{% block content %}</code>. <code>HtmlBuilder</code> detects a
+        rendered <code>&lt;html&gt;</code> response and passes it through unchanged:</p>
+        <pre data-lang="twig"><code>{# templates/shells/base.html.twig #}
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    &lt;meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'&gt;
+    &lt;title&gt;{% block title %}{% endblock %}&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;nav&gt;...shared nav...&lt;/nav&gt;
+    &lt;main&gt;{% block content %}{% endblock %}&lt;/main&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+
+{# templates/pages/home.html.twig #}
+{% extends 'shells/base.html.twig' %}
+{% block title %}Home{% endblock %}
+{% block content %}
+    &lt;h1&gt;Hello&lt;/h1&gt;
+{% endblock %}</code></pre>
+        <p>The key variable is <code>{{ contextId }}</code> (injected automatically by
+        <code>Context::render()</code>) — not <code>{{ context_id }}</code> or
+        <code>{{ via_ctx }}</code> which are the <code>HtmlBuilder</code> placeholders.</p>{% endverbatim %}
     </details>
 
     <h2 id="debugging-tips">Debugging tips</h2>
@@ -187,4 +246,5 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         <li><a href="/docs/signals">Signals</a> — scope types and sharing state</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

@@ -1,3 +1,7 @@
+{% extends 'shells/base.html.twig' %}
+{% block title %}php-via — Real-time PHP. No JavaScript. No build step.{% endblock %}
+{% block head %}<meta name="description" content="php-via is a real-time engine for building reactive PHP web applications with Swoole and Datastar. No JavaScript, no build step, multiplayer by default.">{% endblock %}
+{% block content %}
 <!-- Hero -->
 <section class="hero">
     <div class="hero-inner">
@@ -24,8 +28,6 @@
                 GitHub
             </a>
         </div>
-
-        {{ sharedCounter | raw }}
     </div>
 </section>
 
@@ -34,11 +36,119 @@
     <div class="section-label">Minimal API</div>
     <h2 class="section-title">This is all the code.</h2>
     <p class="section-lead">
-        A reactive counter, synced to all connected browsers, in about 15 lines of PHP.
-        No JavaScript to write. No REST endpoint to build. No serialization layer.
+        A counter in ~15 lines of PHP. Switch the tab to see the only change needed to make it
+        multiplayer — one scope, broadcast to every visitor in real-time.
+        No JavaScript. No WebSockets. No API glue.
     </p>
-    {{ codeResult | raw }}
+    <div class="code-examples-split">
+        <div class="code-panel">
+            <input type="radio" name="home-code-tab" id="home-tab-private" class="tab-radio" checked>
+            <input type="radio" name="home-code-tab" id="home-tab-global" class="tab-radio">
+            <div class="code-panel-header code-panel-tabs">
+                <label for="home-tab-private" class="code-tab-label">
+                    <span class="scope-badge scope-tab">TAB</span> Private counter
+                </label>
+                <label for="home-tab-global" class="code-tab-label">
+                    <span class="scope-badge scope-global">GLOBAL</span> Shared counter
+                </label>
+            </div>
+            <div class="tab-panes-wrapper">
+            <div class="tab-pane tab-pane-private">
+                {% code 'php' gutter %}{% verbatim %}
+<?php
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+$app = new Via(new Config());
+
+$app->page('/', function (Context $c): void {
+    // TAB scope (default) — each visitor has their own counter
+    $count = $c->signal(0);
+
+    $increment = $c->action(
+        fn() => $count->setValue($count->int() + 1)
+    );
+
+    $c->view(fn() => <<<HTML
+        <p>Count: <strong data-text="$count">
+            {$count->int()}
+        </strong></p>
+        <button data-on:click="@post('{$increment->url()}')">
+            +1
+        </button>
+    HTML);
+});
+
+$app->start();
+                {% endverbatim %}{% endcode %}
+            </div>
+            <div class="tab-pane tab-pane-global">
+                {% code 'php' gutter %}{% verbatim %}
+<?php
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+{+use Mbolli\PhpVia\Scope;+}
+use Mbolli\PhpVia\Via;
+
+$app = new Via(new Config());
+{+$app->setGlobalState('count', 0);+}
+
+$app->page('/', function (Context $c) use ($app): void {
+{-    // TAB scope (default) — each visitor has their own counter
+    $count = $c->signal(0);-}
+{+    // GLOBAL scope — one shared counter for every visitor
+    $c->scope(Scope::GLOBAL);
+    $count = $c->signal($app->globalState('count'));+}
+
+{-    $increment = $c->action(
+        fn() => $count->setValue($count->int() + 1)
+    );-}
+{+    $increment = $c->action(function () use ($app, $count): void {
+        $newVal = $app->globalState('count') + 1;
+        $app->setGlobalState('count', $newVal);
+        $count->setValue($newVal);
+        $app->broadcast(Scope::GLOBAL);
+    });+}
+
+    $c->view(fn() => <<<HTML
+        <p>Count: <strong data-text="$count">
+            {$count->int()}
+        </strong></p>
+        <button data-on:click="@post('{$increment->url()}')">
+            +1
+        </button>
+    HTML);
+});
+
+$app->start();
+                {% endverbatim %}{% endcode %}
+            </div>
+            </div>{# /tab-panes-wrapper #}
+        </div>
+        <div class="demos-stack">
+            {{ sessionCounter | raw }}
+            {{ sharedCounter | raw }}
+        </div>
+    </div>
 </section>
+<script>
+(function () {
+    document.querySelectorAll('.code-tab-label').forEach(function (label) {
+        label.addEventListener('click', function (e) {
+            var radio = document.getElementById(label.htmlFor);
+            if (!radio || radio.checked) return;
+            e.preventDefault();
+            var apply = function () { radio.checked = true; };
+            document.startViewTransition ? document.startViewTransition(apply) : apply();
+        });
+    });
+}());
+</script>
 
 <!-- Why php-via -->
 <section class="page-section" style="background: var(--surface-2);">
@@ -250,3 +360,5 @@
         <a href="/examples" class="btn btn-secondary">Browse live examples</a>
     </div>
 </section>
+
+{% endblock %}

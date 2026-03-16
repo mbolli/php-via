@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Comparisons — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Comparisons</h1>
     <p>
@@ -164,4 +166,5 @@
         <li><a href="/docs/api">API Reference</a> — complete method signatures</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Scopes — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Scopes</h1>
     <p>
@@ -46,11 +48,13 @@
     </table>
 
     <h2 id="setting-a-scope">Setting a scope</h2>
-    <pre><code class="language-php">// Set the context's primary scope
-$c-&gt;scope(Scope::ROUTE);
+    {% code 'php' %}{% verbatim %}
+// Set the context's primary scope
+$c->scope(Scope::ROUTE);
 
 // Add a secondary scope (this context belongs to both)
-$c-&gt;addScope('room:lobby');</code></pre>
+$c->addScope('room:lobby');
+{% endverbatim %}{% endcode %}
     <p>
         Calling <code>$c-&gt;scope()</code> with <code>Scope::ROUTE</code> expands to the actual route path automatically.
         So on <code>/blog/post-1</code>, it becomes <code>route:/blog/post-1</code>.
@@ -58,11 +62,13 @@ $c-&gt;addScope('room:lobby');</code></pre>
 
     <h2 id="broadcasting">Broadcasting</h2>
     <p>When signals change inside an action, clients in the same scope get updated automatically. To push updates from outside an action (e.g., a timer):</p>
-    <pre><code class="language-php">// Push to all clients on this route
-$app-&gt;broadcast(Scope::routeScope('/'));
+    {% code 'php' %}{% verbatim %}
+// Push to all clients on this route
+$app->broadcast(Scope::routeScope('/'));
 
 // Push to a custom scope
-$app-&gt;broadcast('room:lobby');</code></pre>
+$app->broadcast('room:lobby');
+{% endverbatim %}{% endcode %}
 
     <div class="docs-demo">
         <div class="docs-demo-header">▶ TAB vs ROUTE — feel the difference</div>
@@ -76,13 +82,16 @@ $app-&gt;broadcast('room:lobby');</code></pre>
 
     <h2 id="custom-scopes">Custom scopes</h2>
     <p>You can create any custom scope string. Clients that share the same scope string receive each other's broadcasts:</p>
-    <pre><code class="language-php">$roomId = $request-&gt;getQueryParam('room');
+    {% code 'php' %}{% verbatim %}
+$roomId = $request->getQueryParam('room');
 $roomScope = 'room:' . $roomId;
 
-$c-&gt;addScope($roomScope);
+$c->addScope($roomScope);
 
 // All clients in this room get the update
-$app-&gt;broadcast($roomScope);</code></pre>
+$app->broadcast($roomScope);
+{% endverbatim %}{% endcode %}
     <p>See the <a href="/examples">chat room example</a> for a full implementation.</p>
 </article>
-{% endapply %}
+
+{% endblock %}

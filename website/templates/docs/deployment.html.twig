@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Deployment — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Deployment</h1>
     <p>
@@ -16,7 +18,8 @@
 
     <h2 id="systemd">systemd service</h2>
     <p>Create a service unit at <code>/etc/systemd/system/myapp.service</code>:</p>
-    <pre><code class="language-ini">[Unit]
+    {% code 'ini' %}{% verbatim %}
+[Unit]
 Description=My php-via app
 After=network.target
 
@@ -30,19 +33,23 @@ RestartSec=5s
 Environment=APP_ENV=production
 
 [Install]
-WantedBy=multi-user.target</code></pre>
+WantedBy=multi-user.target
+    {% endverbatim %}{% endcode %}
 
-    <pre><code class="language-bash">systemctl daemon-reload
+    {% code 'bash' %}{% verbatim %}
+systemctl daemon-reload
 systemctl enable myapp
 systemctl start myapp
-systemctl status myapp</code></pre>
+systemctl status myapp
+    {% endverbatim %}{% endcode %}
 
     <h2 id="caddy">Caddy reverse proxy</h2>
     <p>
         Caddy handles TLS automatically. The key requirement is disabling response buffering for SSE
         (the <code>/_sse</code> endpoint streams indefinitely):
     </p>
-    <pre><code class="language-caddy">myapp.example.com {
+    {% code 'caddy' %}{% verbatim %}
+myapp.example.com {
     # Serve static assets directly
     handle /public/* {
         root * /var/www/myapp
@@ -57,11 +64,13 @@ systemctl status myapp</code></pre>
         # Optional: pass real IP to app
         header_up X-Real-IP {remote_host}
     }
-}</code></pre>
+}
+    {% endverbatim %}{% endcode %}
 
     <h2 id="production-config">Production config</h2>
     <p>Tune php-via for production in your <code>app.php</code>:</p>
-    <pre><code class="language-php">$config = (new Config())
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
     ->withHost('127.0.0.1')    // bind locally, let Caddy handle external
     ->withPort(3000)
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
@@ -71,15 +80,18 @@ systemctl status myapp</code></pre>
         'worker_num'        => swoole_cpu_num(),
         'max_request'       => 0,      // long-lived process
         'enable_coroutine'  => true,
-    ]);</code></pre>
+    ]);
+    {% endverbatim %}{% endcode %}
 
     <h2 id="graceful-restart">Graceful restart</h2>
     <p>
         To deploy new code without dropping connections, reload the service:
     </p>
-    <pre><code class="language-bash">systemctl reload myapp
+    {% code 'bash' %}{% verbatim %}
+systemctl reload myapp
 # or:
-kill -USR1 $(cat /var/run/myapp.pid)</code></pre>
+kill -USR1 $(cat /var/run/myapp.pid)
+    {% endverbatim %}{% endcode %}
 
     <p>
         php-via listens for <code>SIGTERM</code> and <code>SIGINT</code> and calls your <code>onShutdown</code>
@@ -98,7 +110,9 @@ kill -USR1 $(cat /var/run/myapp.pid)</code></pre>
     <p>
         Configure a static directory to serve files directly from Swoole in development:
     </p>
-    <pre><code class="language-php">$config->withStaticDir(__DIR__ . '/public');</code></pre>
+    {% code 'php' %}{% verbatim %}
+$config->withStaticDir(__DIR__ . '/public');
+    {% endverbatim %}{% endcode %}
 
     <p>In production, serve static files from Caddy (or nginx) directly — it's faster and avoids passing binary content through PHP.</p>
 
@@ -108,4 +122,5 @@ kill -USR1 $(cat /var/run/myapp.pid)</code></pre>
         <li><a href="/docs/api">API Reference</a> — Config class options</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}

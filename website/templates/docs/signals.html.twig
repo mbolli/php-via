@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Signals — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Signals</h1>
     <p>
@@ -6,45 +8,53 @@
     </p>
 
     <h2 id="creating-signals">Creating a signal</h2>
-    <pre><code class="language-php">$count = $c-&gt;signal(0);           // anonymous signal
-$step  = $c-&gt;signal(1, 'step');   // named signal (better Datastar binding)</code></pre>
+    {% code 'php' %}{% verbatim %}
+$count = $c->signal(0);           // anonymous signal
+$step  = $c->signal(1, 'step');   // named signal (better Datastar binding)
+    {% endverbatim %}{% endcode %}
 
     <p>The first argument is the initial value. Signals can hold any JSON-serializable value: integers, strings, booleans, arrays.</p>
 
     <h2 id="reading-and-writing">Reading and writing</h2>
-    <pre><code class="language-php">$count-&gt;int();        // read as int
-$count-&gt;string();     // read as string
-$count-&gt;getValue();   // raw value
+    {% code 'php' %}{% verbatim %}
+$count->int();        // read as int
+$count->string();     // read as string
+$count->getValue();   // raw value
 
-$count-&gt;setValue(42); // update — queues a patch to every subscribed client</code></pre>
+$count->setValue(42); // update — queues a patch to every subscribed client
+    {% endverbatim %}{% endcode %}
 
     <h2 id="binding-in-templates">Binding in templates</h2>
     <p>In a Twig template, use Datastar attributes to bind signals to the DOM:</p>
-    <pre><code class="language-html">{% verbatim %}&lt;!-- Display value (one-way, signal named 'count') --&gt;
-&lt;span data-text="${count}"&gt;&lt;/span&gt;
+    {% code 'html' %}{% verbatim %}
+<!-- Display value (one-way, signal named 'count') -->
+<span data-text="${count}"></span>
 
-&lt;!-- Two-way binding for input (signal named 'step') --&gt;
-&lt;input data-bind="step" type="number"&gt;
+<!-- Two-way binding for input (signal named 'step') -->
+<input data-bind="step" type="number">
 
-&lt;!-- Conditional visibility --&gt;
-&lt;div data-show="$visible"&gt;...&lt;/div&gt;
+<!-- Conditional visibility -->
+<div data-show="$visible">...</div>
 
-&lt;!-- Use signal.id() when the name is auto-generated --&gt;
-&lt;span data-text="{{ count.id() }}"&gt;&lt;/span&gt;{% endverbatim %}</code></pre>
+<!-- Use signal.id() when the name is auto-generated -->
+<span data-text="{{ count.id() }}"></span>
+    {% endverbatim %}{% endcode %}
 
     <h2 id="scopes">Scopes &amp; sharing</h2>
     <p>
         By default, signals are <strong>TAB-scoped</strong>: each visitor has their own independent copy.
         You can change the scope to share state across visitors:
     </p>
-    <pre><code class="language-php">use Mbolli\PhpVia\Scope;
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Scope;
 
 // Only this browser tab sees this
-$private = $c-&gt;signal(0, 'count');
+$private = $c->signal(0, 'count');
 
 // Everyone on this URL sees the same value
-$shared = $c-&gt;signal(0, 'count', Scope::routeScope('/'));
-$c-&gt;scope(Scope::ROUTE);  // equivalent shorthand</code></pre>
+$shared = $c->signal(0, 'count', Scope::routeScope('/'));
+$c->scope(Scope::ROUTE);  // equivalent shorthand
+    {% endverbatim %}{% endcode %}
 
     <div class="docs-demo">
         <div class="docs-demo-header">▶ TAB scope vs ROUTE scope — live comparison</div>
@@ -61,9 +71,12 @@ $c-&gt;scope(Scope::ROUTE);  // equivalent shorthand</code></pre>
         When signals change inside an action, the framework automatically queues patches for connected clients.
         If you update signals <em>outside</em> an action (e.g., in a timer callback), call <code>$c-&gt;sync()</code> or <code>$app-&gt;broadcast($scope)</code>:
     </p>
-    <pre><code class="language-php">$c-&gt;setInterval(function () use ($count, $c): void {
-    $count-&gt;setValue($count-&gt;int() + 1);
-    $c-&gt;sync(); // push the update
-}, 1000);</code></pre>
+    {% code 'php' %}{% verbatim %}
+$c->setInterval(function () use ($count, $c): void {
+    $count->setValue($count->int() + 1);
+    $c->sync(); // push the update
+}, 1000);
+    {% endverbatim %}{% endcode %}
 </article>
-{% endapply %}
+
+{% endblock %}

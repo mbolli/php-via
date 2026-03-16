@@ -1,4 +1,6 @@
-{% apply highlight_blocks %}
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Actions — php-via Docs{% endblock %}
+{% block content %}
 <article class="docs-content">
     <h1>Actions</h1>
     <p>
@@ -7,10 +9,12 @@
     </p>
 
     <h2 id="creating">Creating an action</h2>
-    <pre><code class="language-php">$increment = $c->action(function (Context $c) use ($count): void {
+    {% code 'php' %}{% verbatim %}
+$increment = $c->action(function (Context $c) use ($count): void {
     $count->setValue($count->int() + 1);
     $c->sync();
-}, 'increment');</code></pre>
+}, 'increment');
+    {% endverbatim %}{% endcode %}
 
     <p>
         The first argument is the callback; the second is an optional name used in the URL.
@@ -19,14 +23,19 @@
 
     <h2 id="url">Action URL</h2>
     <p>Get the URL to pass into your Twig template:</p>
-    <pre><code class="language-php">$increment->url();  // '/_action/increment'</code></pre>
+    {% code 'php' %}{% verbatim %}
+$increment->url();  // '/_action/increment'
+    {% endverbatim %}{% endcode %}
 
     <p>In Twig, bind it to a Datastar event attribute:</p>
-    {% verbatim %}<pre><code class="language-html">&lt;button data-on:click="@post('{{ increment_url }}')"&gt;+1&lt;/button&gt;</code></pre>{% endverbatim %}
+    {% code 'html' %}{% verbatim %}
+<button data-on:click="@post('{{ increment_url }}')">>+1</button>
+    {% endverbatim %}{% endcode %}
 
     <h2 id="post-data">Reading POST data</h2>
     <p>POST body and query params are accessible via <code>$_POST</code> and <code>$_GET</code> inside the callback:</p>
-    <pre><code class="language-php">$vote = $c->action(function (Context $c) use ($app, $votes): void {
+    {% code 'php' %}{% verbatim %}
+$vote = $c->action(function (Context $c) use ($app, $votes): void {
     $option = $_POST['option'] ?? ($_GET['option'] ?? null);
     if (!in_array($option, ['a', 'b', 'c'], true)) {
         return; // ignore unknown values
@@ -34,20 +43,25 @@
     $app->setGlobalState('vote_' . $option, ($app->globalState('vote_' . $option) ?? 0) + 1);
     $votes->setValue(['a' => $app->globalState('vote_a'), 'b' => $app->globalState('vote_b')]);
     $app->broadcast(Scope::routeScope('/'));
-}, 'vote');</code></pre>
+}, 'vote');
+    {% endverbatim %}{% endcode %}
 
-    {% verbatim %}<pre><code class="language-html">&lt;!-- Pass option as query param --&gt;
-&lt;button data-on:click="@post('{{ vote_url }}?option=a')"&gt;Vote A&lt;/button&gt;</code></pre>{% endverbatim %}
+    {% code 'html' %}{% verbatim %}
+<!-- Pass option as query param -->
+<button data-on:click="@post('{{ vote_url }}?option=a')">Vote A</button>
+    {% endverbatim %}{% endcode %}
 
     <h2 id="syncing">Syncing after an action</h2>
     <p>
         Actions don't auto-sync. You must call <code>$c-&gt;sync()</code> (view + signals) or <code>$c-&gt;syncSignals()</code>
         (signals only, faster) to push changes to the browser:
     </p>
-    <pre><code class="language-php">$c->action(function (Context $c) use ($label): void {
+    {% code 'php' %}{% verbatim %}
+$c->action(function (Context $c) use ($label): void {
     $label->setValue('Saved!');
     $c->syncSignals(); // only the signal changed — skip view re-render
-}, 'save');</code></pre>
+}, 'save');
+    {% endverbatim %}{% endcode %}
 
     <p>
         For ROUTE-scoped signals, use <code>$app-&gt;broadcast()</code> instead so <em>all</em> clients on the route receive the update.
@@ -56,19 +70,23 @@
 
     <h2 id="multiple-actions">Multiple actions per context</h2>
     <p>A context can have as many actions as needed. Each gets its own URL:</p>
-    <pre><code class="language-php">$inc   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
+    {% code 'php' %}{% verbatim %}
+$inc   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
 $dec   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int() - 1) & $c->sync(), 'dec');
-$reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->sync(), 'reset');</code></pre>
+$reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->sync(), 'reset');
+    {% endverbatim %}{% endcode %}
 
     <h2 id="cleanup">Cleanup actions</h2>
     <p>
         For actions that should only run once, or that need cleanup when the user leaves,
         combine with <a href="/docs/lifecycle">lifecycle hooks</a>:
     </p>
-    <pre><code class="language-php">$c->onDisconnect(function (Context $c) use ($room, $app): void {
+    {% code 'php' %}{% verbatim %}
+$c->onDisconnect(function (Context $c) use ($room, $app): void {
     Room::$members[$room]--;
     $app->broadcast('room:' . $room);
-});</code></pre>
+});
+    {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
@@ -78,4 +96,5 @@ $reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->syn
         <li><a href="/docs/lifecycle">Lifecycle</a> — cleanup hooks and timers</li>
     </ul>
 </article>
-{% endapply %}
+
+{% endblock %}
