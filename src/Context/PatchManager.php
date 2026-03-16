@@ -153,6 +153,13 @@ class PatchManager {
         // Component patches are automatically forwarded to this page's channel via queuePatch().
         if (!$this->componentManager->isComponent()) {
             foreach ($this->componentManager->getComponents() as $component) {
+                // Skip components with no dirty signals whose view is a pure function
+                // of those signals (cacheUpdates=true). Components with cacheUpdates=false
+                // may read external state (e.g. globalState), so always sync them.
+                if ($component->shouldCacheUpdates()
+                    && !$component->getSignalFactory()->hasChangedSignals()) {
+                    continue;
+                }
                 $component->sync();
             }
         }

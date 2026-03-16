@@ -156,6 +156,19 @@ class SignalFactory {
     }
 
     /**
+     * Check if any TAB-scoped signal has changed since last sync.
+     */
+    public function hasChangedSignals(): bool {
+        foreach ($this->signals as $signal) {
+            if ($signal->hasChanged()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Inject signals from the client.
      *
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
