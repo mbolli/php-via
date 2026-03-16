@@ -402,7 +402,7 @@ class Context {
      * @param null|string          $block Optional block name to render only that block
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
-        $data += ['contextId' => $this->id];
+        $data += ['contextId' => $this->id, 'currentRoute' => $this->route];
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
     }
