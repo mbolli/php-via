@@ -138,20 +138,31 @@ $app->start();
 </section>
 <script>
 (function () {
+    function paneFor(panel, radioId) {
+        return panel.querySelector(radioId === 'home-tab-private' ? '.tab-pane-private' : '.tab-pane-global');
+    }
+    function syncHeight(panel) {
+        var checked = panel.querySelector('.tab-radio:checked');
+        if (!checked) return;
+        var pane = paneFor(panel, checked.id);
+        if (pane) panel.querySelector('.tab-panes-wrapper').style.height = pane.scrollHeight + 'px';
+    }
+    document.querySelectorAll('.code-panel').forEach(syncHeight);
     document.querySelectorAll('.code-tab-label').forEach(function (label) {
-        label.addEventListener('click', function (e) {
+        label.addEventListener('click', function () {
             var radio = document.getElementById(label.htmlFor);
             if (!radio || radio.checked) return;
-            e.preventDefault();
-            var apply = function () { radio.checked = true; };
-            document.startViewTransition ? document.startViewTransition(apply) : apply();
+            var panel = label.closest('.code-panel');
+            var wrapper = panel.querySelector('.tab-panes-wrapper');
+            wrapper.style.height = paneFor(panel, radio.id).scrollHeight + 'px';
+            radio.checked = true;
         });
     });
 }());
 </script>
 
 <!-- Why php-via -->
-<section class="page-section" style="background: var(--surface-2);">
+<section class="page-section page-section--tinted">
     <div style="max-width: 56rem; margin-inline: auto;">
         <div class="section-label">The case for server-centric reactivity</div>
         <h2 class="section-title">PHP deserves real-time.</h2>
@@ -223,15 +234,19 @@ $app->start();
 </section>
 
 <!-- Live poll -->
-<section class="page-section" style="background: var(--surface-2);">
-    <div style="max-width: 40rem; margin-inline: auto; text-align: center;">
-        <div class="section-label">Broadcasting in action</div>
-        <h2 class="section-title">Vote. Watch it update everywhere.</h2>
-        <p class="section-lead" style="margin-inline: auto;">
-            Cast a vote. Every browser on this page sees the bars shift in real-time.
-            That's <code>Scope::ROUTE</code> broadcasting in action.
-        </p>
-        {{ poll | raw }}
+<section class="page-section page-section--tinted">
+    <div class="poll-section-inner">
+        <div class="poll-section-text">
+            <div class="section-label">Broadcasting in action</div>
+            <h2 class="section-title">Vote. Watch it update everywhere.</h2>
+            <p class="section-lead" style="margin-block-end: 0;">
+                Cast a vote. Every browser on this page sees the bars shift in real-time.
+                That's <code>Scope::ROUTE</code> broadcasting in action.
+            </p>
+        </div>
+        <div class="poll-section-demo">
+            {{ poll | raw }}
+        </div>
     </div>
 </section>
 
@@ -275,8 +290,7 @@ $app->start();
 </section>
 
 <!-- Comparison table -->
-<section class="page-section" style="background: var(--surface-2);">
-    <div class="section-label">How it compares</div>
+<section class="page-section page-section--tinted"></div>
     <h2 class="section-title">Honest comparison.</h2>
     <p class="section-lead">Every tool has trade-offs. Here's where php-via stands.</p>
 

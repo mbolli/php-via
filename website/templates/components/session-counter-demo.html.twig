@@ -1,0 +1,6 @@
+<div class="session-counter-demo demo-box" id="session-counter-demo">
+    <div class="demo-box-label">Your counter — private to your tab</div>
+    <div class="counter-value" data-text="${{ count_id }}">{{ count_val }}</div>
+    <button class="counter-btn" data-on:click="@post('{{ increment_url }}')">+1</button>
+    <div class="counter-last-click">Only visible to you</div>
+</div>

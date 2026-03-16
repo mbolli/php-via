@@ -1,12 +1,15 @@
 <div class="shared-counter demo-box" id="shared-counter">
-    <div class="demo-box-label">Live counter — shared with everyone on this page</div>
+    <div class="demo-box-label"><span class="live-dot"></span> Live — shared with everyone on this page</div>
     <div class="counter-value" data-text="${{ counter_id }}">
         {{ counter_val }}
     </div>
-    <button class="counter-btn" data-on:click="@post('{{ increment_url }}')">
-        +1
-    </button>
-    <div class="counter-last-click" data-text="${{ last_click_id }} ? 'Last click: ' + ${{ last_click_id }} : ''">
-        {{ last_click_val }}
+    <button class="counter-btn" data-on:click="@post('{{ increment_url }}')">+1</button>
+    <div class="counter-last-click">
+        <span data-show="${{ last_click_id }}" style="display: {{ last_click_val ? 'inline' : 'none' }}">Last click:
+            <span class="visitor-chip"
+                  data-text="${{ last_click_id }}"
+                  data-attr:style="'--chip-hue:' + ${{ last_click_hue_id }}"
+                  style="--chip-hue: {{ last_click_hue_val }}">{{ last_click_val }}</span>
+        </span>
     </div>
 </div>
