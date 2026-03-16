@@ -9,6 +9,8 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use PhpVia\Website\SyntaxHighlightExtension;
+use PhpVia\Website\Twig\CodeRuntime;
+use Twig\RuntimeLoader\FactoryRuntimeLoader;
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -17,25 +19,23 @@ $config = (new Config())
     ->withPort(3100)
     ->withDevMode(true)
     ->withTemplateDir(__DIR__ . '/templates')
-    ->withShellTemplate(__DIR__ . '/templates/shells/marketing.html')
     ->withStaticDir(__DIR__ . '/public')
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
 ;
 
 $app = new Via($config);
 $app->getTwig()->addExtension(new SyntaxHighlightExtension());
+$app->getTwig()->addRuntimeLoader(new FactoryRuntimeLoader([
+    CodeRuntime::class => fn() => new CodeRuntime(),
+]));
 $twig = $app->getTwig();
-
-// ─── Shell helpers ───────────────────────────────────────────────────────────
-
-$marketingShell = __DIR__ . '/templates/shells/marketing.html';
-$docsShell = __DIR__ . '/templates/shells/docs.html';
 
 // ─── Shared state ────────────────────────────────────────────────────────────
 
 // Shared global counter (persists across connections in memory)
 $app->setGlobalState('shared_counter', 0);
 $app->setGlobalState('last_click_visitor', '');
+$app->setGlobalState('last_click_hue', 0);
 
 // ─── Presence: broadcast to route on connect/disconnect ─────────────────────
 
@@ -72,27 +72,33 @@ $presenceDemo = function (Context $c) use ($app, $twig): void {
 $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
     $c->scope(Scope::ROUTE);
 
-    $counter = $c->signal($app->globalState('shared_counter'), 'counter');
-    $lastClick = $c->signal($app->globalState('last_click_visitor'), 'lastClick');
+    $counter       = $c->signal($app->globalState('shared_counter'), 'counter');
+    $lastClick     = $c->signal($app->globalState('last_click_visitor'), 'lastClick');
+    $lastClickHue  = $c->signal($app->globalState('last_click_hue'), 'lastClickHue');
 
-    $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick): void {
+    $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
         $newVal = $app->globalState('shared_counter') + 1;
         $app->setGlobalState('shared_counter', $newVal);
 
         $visitorNum = substr($c->getId(), -4);
         $app->setGlobalState('last_click_visitor', 'Visitor #' . strtoupper($visitorNum));
+        $hue = hexdec($visitorNum) % 360;
+        $app->setGlobalState('last_click_hue', $hue);
 
         $counter->setValue($newVal);
         $lastClick->setValue($app->globalState('last_click_visitor'));
+        $lastClickHue->setValue($hue);
         $app->broadcast(Scope::routeScope('/'));
     }, 'increment');
 
     $c->view(fn () => $twig->render('components/shared-counter.html.twig', [
-        'counter_id' => $counter->id(),
-        'counter_val' => $counter->int(),
-        'last_click_id' => $lastClick->id(),
-        'last_click_val' => $lastClick->string(),
-        'increment_url' => $increment->url(),
+        'counter_id'        => $counter->id(),
+        'counter_val'       => $counter->int(),
+        'last_click_id'     => $lastClick->id(),
+        'last_click_val'    => $lastClick->string(),
+        'last_click_hue_id' => $lastClickHue->id(),
+        'last_click_hue_val' => $lastClickHue->int(),
+        'increment_url'     => $increment->url(),
     ]));
 };
 
@@ -109,6 +115,24 @@ $codeResultDemo = function (Context $c) use ($twig): void {
     $c->view(fn () => $twig->render('components/code-result.html.twig', [
         'count_id' => $count->id(),
         'count_val' => $count->int(),
+        'increment_url' => $increment->url(),
+    ]));
+};
+
+/**
+ * Session counter for the home page demo section (demo box only, no code panel).
+ * TAB-scoped so each visitor sees their own private counter.
+ */
+$homeSessionDemo = function (Context $c) use ($twig): void {
+    $count = $c->signal(0, 'count');
+    $increment = $c->action(function (Context $c) use ($count): void {
+        $count->setValue($count->int() + 1);
+        $c->sync();
+    }, 'increment');
+
+    $c->view(fn () => $twig->render('components/session-counter-demo.html.twig', [
+        'count_id'     => $count->id(),
+        'count_val'    => $count->int(),
         'increment_url' => $increment->url(),
     ]));
 };
@@ -205,47 +229,40 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Home page
-$app->page('/', function (Context $c) use ($marketingShell, $presenceDemo, $sharedCounterDemo, $codeResultDemo, $livePollDemo, $twig): void {
-    $c->setShellTemplate($marketingShell);
-    $c->appendToHead('<title>php-via — Real-time PHP. No JavaScript. No build step.</title>');
-    $c->appendToHead('<meta name="description" content="php-via is a real-time engine for building reactive PHP web applications with Swoole and Datastar. No JavaScript, no build step, multiplayer by default.">');
+$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo, $twig): void {
 
     $c->scope(Scope::routeScope('/'));
 
-    $presence = $c->component($presenceDemo, 'presence');
-    $sharedCounter = $c->component($sharedCounterDemo, 'shared-counter');
-    $codeResult = $c->component($codeResultDemo, 'code-result');
-    $poll = $c->component($livePollDemo, 'poll');
+    $presence       = $c->component($presenceDemo, 'presence');
+    $sharedCounter  = $c->component($sharedCounterDemo, 'shared-counter');
+    $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
+    $poll           = $c->component($livePollDemo, 'poll');
 
     // On broadcast updates, skip re-rendering the full page — component sub-contexts
     // handle their own patches via their own target divs. Re-rendering here with stale
     // embedded component HTML would overwrite those fresh patches.
-    $c->view(function (bool $isUpdate) use ($twig, $presence, $sharedCounter, $codeResult, $poll): string {
+    $c->view(function (bool $isUpdate) use ($c, $presence, $sharedCounter, $sessionCounter, $poll): string {
         if ($isUpdate) {
             return '';
         }
 
-        return $twig->render('pages/home.html.twig', [
-            'presence'      => $presence(),
-            'sharedCounter' => $sharedCounter(),
-            'codeResult'    => $codeResult(),
-            'poll'          => $poll(),
+        return $c->render('pages/home.html.twig', [
+            'presence'       => $presence(),
+            'sharedCounter'  => $sharedCounter(),
+            'sessionCounter' => $sessionCounter(),
+            'poll'           => $poll(),
         ]);
     });
 });
 
 // Docs landing
-$app->page('/docs', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Documentation — php-via</title>');
+$app->page('/docs', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs'));
     $c->view('docs/index.html.twig');
 });
 
 // Getting started (tutorial with embedded demo)
-$app->page('/docs/getting-started', function (Context $c) use ($docsShell, $codeResultDemo): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Getting Started — php-via Docs</title>');
+$app->page('/docs/getting-started', function (Context $c) use ($codeResultDemo): void {
     $c->scope(Scope::routeScope('/docs/getting-started'));
 
     $demo = $c->component($codeResultDemo, 'gs-demo');
@@ -256,9 +273,7 @@ $app->page('/docs/getting-started', function (Context $c) use ($docsShell, $code
 });
 
 // Signals concept page
-$app->page('/docs/signals', function (Context $c) use ($docsShell, $scopeComparisonDemo): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Signals — php-via Docs</title>');
+$app->page('/docs/signals', function (Context $c) use ($scopeComparisonDemo): void {
     $c->scope(Scope::routeScope('/docs/signals'));
 
     $demo = $c->component($scopeComparisonDemo, 'scope-demo');
@@ -269,9 +284,7 @@ $app->page('/docs/signals', function (Context $c) use ($docsShell, $scopeCompari
 });
 
 // Scopes concept page
-$app->page('/docs/scopes', function (Context $c) use ($docsShell, $scopeComparisonDemo): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Scopes — php-via Docs</title>');
+$app->page('/docs/scopes', function (Context $c) use ($scopeComparisonDemo): void {
     $c->scope(Scope::routeScope('/docs/scopes'));
 
     $demo = $c->component($scopeComparisonDemo, 'scope-demo');
@@ -282,89 +295,67 @@ $app->page('/docs/scopes', function (Context $c) use ($docsShell, $scopeComparis
 });
 
 // Actions
-$app->page('/docs/actions', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Actions — php-via Docs</title>');
+$app->page('/docs/actions', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/actions'));
     $c->view('docs/actions.html.twig');
 });
 
 // Views
-$app->page('/docs/views', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Views — php-via Docs</title>');
+$app->page('/docs/views', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/views'));
     $c->view('docs/views.html.twig');
 });
 
 // Components
-$app->page('/docs/components', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Components — php-via Docs</title>');
+$app->page('/docs/components', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/components'));
     $c->view('docs/components.html.twig');
 });
 
 // Broadcasting
-$app->page('/docs/broadcasting', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Broadcasting — php-via Docs</title>');
+$app->page('/docs/broadcasting', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/broadcasting'));
     $c->view('docs/broadcasting.html.twig');
 });
 
 // Lifecycle
-$app->page('/docs/lifecycle', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Lifecycle — php-via Docs</title>');
+$app->page('/docs/lifecycle', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/lifecycle'));
     $c->view('docs/lifecycle.html.twig');
 });
 
 // Twig templates
-$app->page('/docs/twig', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Twig Templates — php-via Docs</title>');
+$app->page('/docs/twig', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/twig'));
     $c->view('docs/twig.html.twig');
 });
 
 // Deployment
-$app->page('/docs/deployment', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Deployment — php-via Docs</title>');
+$app->page('/docs/deployment', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/deployment'));
     $c->view('docs/deployment.html.twig');
 });
 
 // API reference
-$app->page('/docs/api', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>API Reference — php-via Docs</title>');
+$app->page('/docs/api', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/api'));
     $c->view('docs/api.html.twig');
 });
 
 // Comparisons
-$app->page('/docs/comparisons', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Comparisons — php-via Docs</title>');
+$app->page('/docs/comparisons', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/comparisons'));
     $c->view('docs/comparisons.html.twig');
 });
 
 // FAQ / common pitfalls
-$app->page('/docs/faq', function (Context $c) use ($docsShell): void {
-    $c->setShellTemplate($docsShell);
-    $c->appendToHead('<title>Common Pitfalls — php-via Docs</title>');
+$app->page('/docs/faq', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/faq'));
     $c->view('docs/faq.html.twig');
 });
 
 // Examples gallery
-$app->page('/examples', function (Context $c) use ($marketingShell): void {
-    $c->setShellTemplate($marketingShell);
-    $c->appendToHead('<title>Examples — php-via</title>');
+$app->page('/examples', function (Context $c): void {
     $c->scope(Scope::routeScope('/examples'));
     $c->view('pages/examples.html.twig');
 });
