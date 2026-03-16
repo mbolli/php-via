@@ -32,7 +32,7 @@ final class CodeTokenParser extends AbstractTokenParser {
 
         $stream->expect(Token::BLOCK_END_TYPE);
 
-        $body = $this->parser->subparse(fn(Token $t): bool => $t->test('endcode'), true);
+        $body = $this->parser->subparse(fn (Token $t): bool => $t->test('endcode'), true);
         $stream->expect(Token::BLOCK_END_TYPE);
 
         return new CodeNode($body, $language, $gutter, $lineno);

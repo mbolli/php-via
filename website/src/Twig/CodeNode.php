@@ -18,7 +18,7 @@ final class CodeNode extends Node {
 
     public function compile(Compiler $compiler): void {
         $language = $this->getAttribute('language');
-        $gutter   = $this->getAttribute('gutter');
+        $gutter = $this->getAttribute('gutter');
 
         $compiler
             ->addDebugInfo($this)
@@ -29,6 +29,7 @@ final class CodeNode extends Node {
             ->repr($language)
             ->raw(', ')
             ->repr($gutter)
-            ->raw(');' . "\n");
+            ->raw(');' . "\n")
+        ;
     }
 }
