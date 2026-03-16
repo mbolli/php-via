@@ -107,6 +107,9 @@ class SseHandler {
         // Do this AFTER starting the loop to ensure patches are consumed
         $context->sync();
 
+        // Notify app-level onClientConnect callbacks
+        $this->via->triggerClientConnect($context);
+
         // Keep connection alive and listen for patches
         $lastKeepalive = time();
 
@@ -163,6 +166,14 @@ class SseHandler {
         foreach ($context->getScopes() as $scope) {
             $this->via->getScopeRegistry()->unregisterContext($context, $scope);
         }
+
+        // Unregister client immediately so getClients() reflects the departure
+        // when onClientDisconnect callbacks fire (before the delayed context cleanup)
+        unset($this->via->clients[$contextId]);
+        $this->via->getApp()->unregisterClient($contextId);
+
+        // Notify app-level onClientDisconnect callbacks
+        $this->via->triggerClientDisconnect($context);
 
         // Schedule delayed cleanup
         $this->via->scheduleContextCleanup($contextId);

@@ -56,6 +56,12 @@ class Via {
     /** @var array<callable> Callbacks to run on graceful shutdown */
     private array $shutdownCallbacks = [];
 
+    /** @var array<callable(Context): void> Callbacks to run when a client connects via SSE */
+    private array $clientConnectCallbacks = [];
+
+    /** @var array<callable(Context): void> Callbacks to run when a client disconnects from SSE */
+    private array $clientDisconnectCallbacks = [];
+
     private bool $shuttingDown = false;
     private bool $signalsRegistered = false;
 
@@ -477,6 +483,52 @@ class Via {
      */
     public function onShutdown(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a callback to run when a client connects via SSE.
+     * The callback receives the Context of the connecting client.
+     *
+     * @param callable(Context): void $callback
+     */
+    public function onClientConnect(callable $callback): void {
+        $this->clientConnectCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a callback to run when a client disconnects from SSE.
+     * The client has already been removed from getClients() when the callback fires.
+     *
+     * @param callable(Context): void $callback
+     */
+    public function onClientDisconnect(callable $callback): void {
+        $this->clientDisconnectCallbacks[] = $callback;
+    }
+
+    /**
+     * @internal called by SseHandler when a client SSE connection is established
+     */
+    public function triggerClientConnect(Context $context): void {
+        foreach ($this->clientConnectCallbacks as $callback) {
+            try {
+                $callback($context);
+            } catch (\Throwable $e) {
+                $this->log('error', 'onClientConnect callback error: ' . $e->getMessage(), $context);
+            }
+        }
+    }
+
+    /**
+     * @internal called by SseHandler just before a client SSE connection is torn down
+     */
+    public function triggerClientDisconnect(Context $context): void {
+        foreach ($this->clientDisconnectCallbacks as $callback) {
+            try {
+                $callback($context);
+            } catch (\Throwable $e) {
+                $this->log('error', 'onClientDisconnect callback error: ' . $e->getMessage(), $context);
+            }
+        }
     }
 
     /**
