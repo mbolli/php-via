@@ -1,0 +1,59 @@
+{% extends 'shells/base.html.twig' %}
+
+{% block body_class %}docs-body{% endblock %}
+
+{% block layout %}
+<div class="docs-layout">
+    <aside class="docs-sidebar" role="complementary" aria-label="Documentation navigation">
+        <nav class="sidebar-nav">
+            {% macro navlink(href, label, currentRoute, basePath) %}
+                <li><a href="{{ basePath }}{{ href }}"
+                    {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}
+                    >{{ label }}</a></li>
+            {% endmacro %}
+            {% import _self as m %}
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Get started</h3>
+                <ul role="list">
+                    {{ m.navlink('docs/getting-started', 'Installation', currentRoute, basePath) }}
+                    <li><a href="{{ basePath }}docs/getting-started#your-first-app">Your first app</a></li>
+                </ul>
+            </section>
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Concepts</h3>
+                <ul role="list">
+                    {{ m.navlink('docs/signals', 'Signals', currentRoute, basePath) }}
+                    {{ m.navlink('docs/actions', 'Actions', currentRoute, basePath) }}
+                    {{ m.navlink('docs/views', 'Views', currentRoute, basePath) }}
+                    {{ m.navlink('docs/scopes', 'Scopes', currentRoute, basePath) }}
+                    {{ m.navlink('docs/components', 'Components', currentRoute, basePath) }}
+                    {{ m.navlink('docs/broadcasting', 'Broadcasting', currentRoute, basePath) }}
+                    {{ m.navlink('docs/lifecycle', 'Lifecycle', currentRoute, basePath) }}
+                </ul>
+            </section>
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Guides</h3>
+                <ul role="list">
+                    {{ m.navlink('docs/twig', 'Twig templates', currentRoute, basePath) }}
+                    {{ m.navlink('docs/deployment', 'Deployment', currentRoute, basePath) }}
+                </ul>
+            </section>
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Reference</h3>
+                <ul role="list">
+                    {{ m.navlink('docs/api', 'API reference', currentRoute, basePath) }}
+                    {{ m.navlink('docs/comparisons', 'vs other frameworks', currentRoute, basePath) }}
+                    {{ m.navlink('docs/faq', 'Common pitfalls', currentRoute, basePath) }}
+                    <li><a href="https://github.com/mbolli/php-via/blob/master/CHANGELOG.md" target="_blank" rel="noopener">Changelog ↗</a></li>
+                </ul>
+            </section>
+        </nav>
+    </aside>
+
+    <main class="docs-content" id="content">
+        {% block content %}{% endblock %}
+    </main>
+</div>
+{% endblock %}
+
+{% block foot_scripts %}{% endblock %}
