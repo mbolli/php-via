@@ -53,23 +53,6 @@ class RequestLogger {
     }
 
     /**
-     * Drain buffered debug lines as formatted TUI rows.
-     */
-    private function drainDebugLines(string $borderColor): string {
-        if ($this->debugBuffer === []) {
-            return '';
-        }
-
-        $lines = '';
-        foreach ($this->debugBuffer as $msg) {
-            $lines .= $borderColor . '│' . self::RESET . '  .debug:         ' . self::DIM . self::GRAY . $msg . self::RESET . "\n";
-        }
-        $this->debugBuffer = [];
-
-        return $lines;
-    }
-
-    /**
      * Log a completed HTTP request with structured TUI output.
      */
     public function logRequest(
@@ -91,7 +74,7 @@ class RequestLogger {
         $statusColor = $this->statusColor($statusCode);
 
         // Top line: timestamp, request ID, method, duration
-        $header = $borderColor . '── ' . self::GRAY . $timestamp . self::RESET
+        $header = $borderColor . '╭─ ' . self::GRAY . $timestamp . self::RESET
             . ' ' . self::DIM . self::WHITE . $requestId . self::RESET
             . ' ' . $methodColor . self::BOLD . $method . self::RESET
             . ' ' . self::DIM . self::GRAY . '(' . $duration . ')' . self::RESET . ' ─';
@@ -121,7 +104,7 @@ class RequestLogger {
         $timestamp = date('H:i:s.') . substr((string) microtime(true), -3, 3);
         $shortCtx = substr($contextId, -8);
 
-        $header = self::BLUE . '── ' . self::GRAY . $timestamp . self::RESET
+        $header = self::BLUE . '╭─ ' . self::GRAY . $timestamp . self::RESET
             . ' ' . self::DIM . self::WHITE . $shortCtx . self::RESET
             . ' ' . self::BLUE . self::BOLD . 'SSE' . self::RESET
             . ' ' . self::DIM . self::CYAN . '↑ connected' . self::RESET;
@@ -142,7 +125,7 @@ class RequestLogger {
         $timestamp = date('H:i:s.') . substr((string) microtime(true), -3, 3);
         $shortCtx = substr($contextId, -8);
 
-        $header = self::GRAY . '── ' . self::GRAY . $timestamp . self::RESET
+        $header = self::GRAY . '╭─ ' . self::GRAY . $timestamp . self::RESET
             . ' ' . self::DIM . self::WHITE . $shortCtx . self::RESET
             . ' ' . self::GRAY . self::BOLD . 'SSE' . self::RESET
             . ' ' . self::DIM . self::GRAY . '↓ disconnected' . self::RESET;
@@ -167,7 +150,7 @@ class RequestLogger {
         $resultColor = $success ? self::GREEN : self::RED;
         $resultText = $success ? '✓ ok' : '✗ failed';
 
-        $header = "{$color}── {$color}" . self::GRAY . $timestamp . self::RESET
+        $header = "{$color}╭─ {$color}" . self::GRAY . $timestamp . self::RESET
             . ' ' . self::DIM . self::WHITE . $shortCtx . self::RESET
             . ' ' . $color . self::BOLD . 'ACTION' . self::RESET
             . ' ' . self::DIM . self::GRAY . '(' . $duration . ')' . self::RESET;
@@ -189,7 +172,7 @@ class RequestLogger {
 
         $timestamp = date('H:i:s.') . substr((string) microtime(true), -3, 3);
 
-        $header = self::CYAN . '── ' . self::GRAY . $timestamp . self::RESET
+        $header = self::CYAN . '╭─ ' . self::GRAY . $timestamp . self::RESET
             . ' ' . self::CYAN . self::BOLD . 'BROADCAST' . self::RESET
             . ' → ' . self::WHITE . $scope . self::RESET
             . ' ' . self::DIM . self::GRAY . '(' . $contextCount . ' contexts)' . self::RESET;
@@ -197,6 +180,23 @@ class RequestLogger {
         $debugLines = $this->drainDebugLines(self::CYAN);
 
         echo "\n{$header}\n{$debugLines}{$footer}\n";
+    }
+
+    /**
+     * Drain buffered debug lines as formatted TUI rows.
+     */
+    private function drainDebugLines(string $borderColor): string {
+        if ($this->debugBuffer === []) {
+            return '';
+        }
+
+        $lines = '';
+        foreach ($this->debugBuffer as $msg) {
+            $lines .= $borderColor . '│' . self::RESET . '  .debug:         ' . self::DIM . self::GRAY . $msg . self::RESET . "\n";
+        }
+        $this->debugBuffer = [];
+
+        return $lines;
     }
 
     private function formatDuration(float $microseconds): string {
