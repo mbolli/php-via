@@ -1,0 +1,14 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<p class="greeter-display">
+    Greeting: <span class="text-brand font-bold" data-text="${{ greeting.id }}">{{ greeting.string }}</span>
+</p>
+
+<div class="flex gap-2 justify-center">
+    <button data-on:click="@get('{{ greet_bob.url }}')">Greet Bob</button>
+    <button class="secondary" data-on:click="@get('{{ greet_alice.url }}')">Greet Alice</button>
+</div>
+{# via:cut #}
+{% endblock %}

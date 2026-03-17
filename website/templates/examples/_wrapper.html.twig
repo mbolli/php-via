@@ -1,0 +1,48 @@
+{% extends 'shells/examples.html.twig' %}
+
+{% block content %}
+<div class="example-page-header">
+    <h1>{{ title }}</h1>
+    <p>{{ description }}</p>
+    {% if summary is defined and summary %}
+    <div class="example-summary">
+        {% for paragraph in summary %}
+        <div class="example-summary-col">{{ paragraph|raw }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="example-split">
+    <div class="example-demo">
+        {% block demo %}{% endblock %}
+    </div>
+
+    <div class="example-source">
+        {% set tplFiles = templateFiles is defined ? templateFiles : (templateFile is defined and templateFile ? [templateFile] : []) %}
+        {% if tplFiles|length > 0 %}
+        <input type="radio" name="src-tab" id="src-tab-0" class="tab-radio" checked>
+        {% for tplFile in tplFiles %}
+        <input type="radio" name="src-tab" id="src-tab-{{ loop.index }}" class="tab-radio">
+        {% endfor %}
+        <div class="example-source-tabs">
+            <label for="src-tab-0" class="code-tab-label">📄 {{ sourceFile }}</label>
+            {% for tplFile in tplFiles %}
+            <label for="src-tab-{{ loop.index }}" class="code-tab-label">🌐 {{ tplFile }}</label>
+            {% endfor %}
+        </div>
+        <div class="tab-pane tab-pane-0">
+            {{ exampleSources[sourceFile] | raw }}
+        </div>
+        {% for tplFile in tplFiles %}
+        <div class="tab-pane tab-pane-{{ loop.index }}">
+            {{ templateSources[tplFile] | raw }}
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="example-source-header">📄 {{ sourceFile }}</div>
+        {{ exampleSources[sourceFile] | raw }}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

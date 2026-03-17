@@ -1,0 +1,19 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<p class="counter-display">
+    Count: <span data-text="${{ count.id }}">{{ count.int }}</span>
+</p>
+
+<div class="flex gap-1 items-center justify-center mb-2 mt-2">
+    <label>Step: <input type="number" data-bind="{{ step.id }}" class="counter-step"></label>
+</div>
+
+<div class="flex gap-1 justify-center">
+    <button data-on:click="@post('{{ increment.url }}')">+ Increment</button>
+    <button class="secondary" data-on:click="@post('{{ decrement.url }}')">− Decrement</button>
+    <button class="danger" data-on:click="@post('{{ reset.url }}')">Reset</button>
+</div>
+{# via:cut #}
+{% endblock %}

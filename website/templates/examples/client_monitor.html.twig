@@ -1,0 +1,10 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+    <h3>Connected Clients ({{ clientCount }})</h3>
+    <div class="client-grid">
+        {{ clientsHtml | raw }}
+    </div>
+{# via:cut #}
+{% endblock %}

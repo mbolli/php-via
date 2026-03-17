@@ -1,0 +1,86 @@
+{% extends 'shells/base.html.twig' %}
+{% block title %}Examples — php-via{% endblock %}
+{% block content %}
+<section class="page-section">
+    <div class="section-label">See it in action</div>
+    <h1 class="section-title">Live Examples</h1>
+    <p class="section-lead">
+        Interactive demos running inside this website. Click any card to try it — live code on the left, source on the right.
+    </p>
+
+    {% set examples = [
+        {
+            title: '⚡ Counter',
+            href: 'examples/counter',
+            difficulty: 'Beginner',
+            description: 'Counter with configurable step. Uses data-bind for two-way input binding.',
+        },
+        {
+            title: '👋 Greeter',
+            href: 'examples/greeter',
+            difficulty: 'Beginner',
+            description: 'Form inputs, multiple actions, and signal updates with Twig templates.',
+        },
+        {
+            title: '✓ Todo List',
+            href: 'examples/todo',
+            difficulty: 'Intermediate',
+            description: 'Multiplayer todo app. One shared list for all connected clients — ROUTE scope.',
+        },
+        {
+            title: '🧩 Components',
+            href: 'examples/components',
+            difficulty: 'Intermediate',
+            description: 'Three independent counters on one page. Each is an isolated component with its own signals.',
+        },
+        {
+            title: 'Path Parameters',
+            href: 'examples/path-params',
+            difficulty: 'Intermediate',
+            description: 'Dynamic routing with automatic type-cast parameter injection.',
+        },
+        {
+            title: '👁️ Client Monitor',
+            href: 'examples/client-monitor',
+            difficulty: 'Intermediate',
+            description: 'Live dashboard of connected clients with identicons, IPs, and render statistics.',
+        },
+        {
+            title: '📈 Stock Ticker',
+            href: 'examples/stock-ticker',
+            difficulty: 'Advanced',
+            description: 'Real-time stock prices with ECharts visualization. Timer-based route-scoped broadcasting.',
+        },
+        {
+            title: '💬 Chat Room',
+            href: 'examples/chat-room',
+            difficulty: 'Advanced',
+            description: 'Multi-room chat with custom scopes, typing indicators, and session-based usernames.',
+        },
+        {
+            title: '🎮 Game of Life',
+            href: 'examples/game-of-life',
+            difficulty: 'Advanced',
+            description: 'Multiplayer Conway\'s Game of Life. Everyone draws and evolves the same board.',
+        },
+        {
+            title: ' All Scopes',
+            href: 'examples/all-scopes',
+            difficulty: 'Advanced',
+            description: 'See TAB, ROUTE, and GLOBAL scopes working together on one page.',
+        },
+    ] %}
+
+    <div class="examples-grid">
+        {% for example in examples %}
+        <a class="example-card" href="{{ basePath }}{{ example.href }}">
+            <h3>{{ example.title }}</h3>
+            <div class="description">{{ example.description }}</div>
+            <div class="meta">
+                <span class="badge badge-{{ example.difficulty | lower }}">{{ example.difficulty }}</span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

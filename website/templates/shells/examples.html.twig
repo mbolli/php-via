@@ -1,0 +1,53 @@
+{% extends 'shells/base.html.twig' %}
+
+{% block body_class %}docs-body{% endblock %}
+
+{% block layout %}
+<div class="docs-layout">
+    <aside class="docs-sidebar" role="complementary" aria-label="Examples navigation">
+        <nav class="sidebar-nav">
+            {% macro navlink(href, label, currentRoute, basePath, badge) %}
+                <li>
+                    <a href="{{ basePath }}{{ href }}"
+                        {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}>
+                        {{ label }}
+                        {% if badge %}<span class="badge badge-{{ badge | lower }}">{{ badge }}</span>{% endif %}
+                    </a>
+                </li>
+            {% endmacro %}
+            {% import _self as m %}
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Beginner</h3>
+                <ul role="list">
+                    {{ m.navlink('examples/counter', '⚡ Counter', currentRoute, basePath) }}
+                    {{ m.navlink('examples/greeter', '👋 Greeter', currentRoute, basePath) }}
+                </ul>
+            </section>
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Intermediate</h3>
+                <ul role="list">
+                    {{ m.navlink('examples/todo', '✓ Todo List', currentRoute, basePath) }}
+                    {{ m.navlink('examples/components', '🧩 Components', currentRoute, basePath) }}
+                    {{ m.navlink('examples/path-params', 'Path Parameters', currentRoute, basePath) }}
+                    {{ m.navlink('examples/client-monitor', '👁️ Client Monitor', currentRoute, basePath) }}
+                </ul>
+            </section>
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Advanced</h3>
+                <ul role="list">
+                    {{ m.navlink('examples/stock-ticker', '📈 Stock Ticker', currentRoute, basePath) }}
+                    {{ m.navlink('examples/chat-room', '💬 Chat Room', currentRoute, basePath) }}
+                    {{ m.navlink('examples/game-of-life', '🎮 Game of Life', currentRoute, basePath) }}
+                    {{ m.navlink('examples/all-scopes', '📊 All Scopes', currentRoute, basePath) }}
+                </ul>
+            </section>
+        </nav>
+    </aside>
+
+    <main class="docs-content" id="content">
+        {% block content %}{% endblock %}
+    </main>
+    <pre data-json-signals></pre>
+
+</div>
+{% endblock %}

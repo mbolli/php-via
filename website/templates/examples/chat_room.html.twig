@@ -1,0 +1,64 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div class="card">
+    <div class="chat-header">
+        You are: <strong class="text-brand">{{ username }}</strong>
+        <a href="{{ basePath }}examples/chat-room" class="font-semibold">← Back to rooms</a>
+    </div>
+    <div>
+        <h3 class="text-sm mb-1">👥 Active Users</h3>
+        <div class="flex flex-wrap gap-1">
+            {% for user in users %}
+            <span class="chat-user-badge{% if user == username %} is-you{% endif %}">
+                {{ user }}{% if user == username %} (you){% endif %}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div id="messages" class="chat-messages">
+        {% if messages is empty %}
+            <div class="chat-empty">
+                No messages yet. Be the first to say something!
+            </div>
+        {% else %}
+            {% for msg in messages %}
+            <div class="chat-bubble{% if msg.username == username %} is-own{% endif %}">
+                <div class="chat-bubble-header">
+                    <span class="chat-bubble-user">{{ msg.username }}</span>
+                    <span class="chat-bubble-time">{{ msg.timestamp }}</span>
+                </div>
+                <div class="chat-bubble-body">{{ msg.message }}</div>
+            </div>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <div class="chat-typing"
+         data-on-interval__duration.5s__viewtransition="$['{{ typingIndicatorId }}'] = ''"
+         data-text="$['{{ typingIndicatorId }}']"></div>
+
+    <div class="chat-input-row">
+        <input type="text"
+               placeholder="Type a message..."
+               data-bind="{{ messageInputId }}"
+               data-on:keyup__throttle.500ms="evt.key != 'Enter' && @get('{{ updateTypingUrl }}')"
+               data-on:keydown="evt.key === 'Enter' && @get('{{ sendMessageUrl }}')"
+               autofocus
+               class="flex-1">
+        <button class="secondary" data-on:click="@get('{{ sendMessageUrl }}')">Send</button>
+    </div>
+</div>
+
+<script>
+const messagesDiv = document.getElementById('messages');
+const observer = new MutationObserver(() => { messagesDiv.scrollTop = messagesDiv.scrollHeight; });
+observer.observe(messagesDiv, { childList: true, subtree: true });
+messagesDiv.scrollTop = messagesDiv.scrollHeight;
+</script>
+{# via:cut #}
+{% endblock %}

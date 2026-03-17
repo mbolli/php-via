@@ -1,0 +1,22 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+    <p class="mb-2">You are: <strong class="text-brand">{{ username }}</strong></p>
+
+    <ul class="list-reset">
+        {% for room in rooms %}
+        <li class="mb-1">
+            <a href="{{ basePath }}examples/chat-room/room/{{ room.id }}" class="chat-room-link">
+                {{ room.name }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+
+    <p class="text-muted text-sm border-top">
+        <strong>Multi-User Chat Demo</strong> — Open multiple tabs to test real-time chat.
+        Each room has separate message history and user lists.
+    </p>
+{# via:cut #}
+{% endblock %}

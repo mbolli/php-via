@@ -1,0 +1,107 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div id="stockDetail">
+    <a href="{{ basePath }}examples/stock-ticker" class="font-semibold mb-2 inline-block">← Back to Dashboard</a>
+
+    <div class="card">
+        <div class="stock-detail-header">
+            <div>
+                <div class="text-2xl font-bold">{{ symbol }}</div>
+                <div class="stock-detail-name">{{ name }}</div>
+            </div>
+            <div class="stock-price-lg">
+                $<span data-text="${{ priceSignal.id }}"></span>
+            </div>
+        </div>
+        <div class="stock-live-indicator">
+            <span class="live-dot"></span>
+            Live Updates
+        </div>
+    </div>
+
+    <div class="card mt-2">
+        <stock-chart
+            symbol="{{ symbol }}"
+            color="{{ color }}"
+            data-attr:times="${{ timesSignal.id }}"
+            data-attr:prices="${{ pricesSignal.id }}"
+        ></stock-chart>
+    </div>
+
+    <div class="card mt-2">
+        <h3>Other Stocks</h3>
+        <div class="mt-1">
+            {{ otherStocks|raw }}
+        </div>
+    </div>
+</div>
+
+<script type="module">
+class StockChart extends HTMLElement {
+    constructor() {
+        super();
+        this.chart = null;
+        this.echarts = null;
+        this.times = [];
+        this.prices = [];
+    }
+
+    async connectedCallback() {
+        try {
+            this.times = JSON.parse(this.getAttribute('times') || '[]');
+            this.prices = JSON.parse(this.getAttribute('prices') || '[]');
+        } catch (e) {
+            this.times = [];
+            this.prices = [];
+        }
+
+        this.echarts = await import('https://cdn.jsdelivr.net/npm/echarts@6/dist/echarts.esm.min.js');
+        this.chart = this.echarts.init(this);
+        this.updateChart();
+
+        this.resizeHandler = () => { if (this.chart) this.chart.resize(); };
+        window.addEventListener('resize', this.resizeHandler);
+        this.startPriceWatcher();
+    }
+
+    disconnectedCallback() {
+        if (this.resizeHandler) window.removeEventListener('resize', this.resizeHandler);
+        if (this.observer) this.observer.disconnect();
+        if (this.chart) { this.chart.dispose(); this.chart = null; }
+    }
+
+    startPriceWatcher() {
+        this.observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type !== 'attributes') continue;
+                try {
+                    this.times = JSON.parse(this.getAttribute('times') || '[]');
+                    this.prices = JSON.parse(this.getAttribute('prices') || '[]');
+                    this.updateChart();
+                } catch (e) {}
+                break;
+            }
+        });
+        this.observer.observe(this, { attributes: true, attributeFilter: ['times', 'prices'] });
+    }
+
+    updateChart() {
+        if (!this.chart) return;
+        const color = this.getAttribute('color') || '#667eea';
+        this.chart.setOption({
+            tooltip: { trigger: 'axis', formatter: p => p[0].name + '<br/>$' + p[0].value.toFixed(2) },
+            xAxis: { type: 'category', data: this.times, boundaryGap: false, axisLabel: { rotate: 45 } },
+            yAxis: { type: 'value', scale: true, axisLabel: { formatter: '${value}' } },
+            series: [{ type: 'line', data: this.prices, smooth: true, lineStyle: { color, width: 3 }, itemStyle: { color },
+                areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: color + '80' }, { offset: 1, color: color + '10' }] } }
+            }],
+            grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true }
+        });
+    }
+}
+if (!customElements.get('stock-chart')) customElements.define('stock-chart', StockChart);
+</script>
+{# via:cut #}
+{% endblock %}

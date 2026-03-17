@@ -8,6 +8,17 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
+use PhpVia\Website\Examples\AllScopesExample;
+use PhpVia\Website\Examples\ChatRoomExample;
+use PhpVia\Website\Examples\ClientMonitorExample;
+use PhpVia\Website\Examples\ComponentsExample;
+use PhpVia\Website\Examples\CounterExample;
+use PhpVia\Website\Examples\DoomExample;
+use PhpVia\Website\Examples\GameOfLifeExample;
+use PhpVia\Website\Examples\GreeterExample;
+use PhpVia\Website\Examples\PathParamsExample;
+use PhpVia\Website\Examples\StockTickerExample;
+use PhpVia\Website\Examples\TodoExample;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
 use Twig\RuntimeLoader\FactoryRuntimeLoader;
@@ -26,9 +37,64 @@ $config = (new Config())
 $app = new Via($config);
 $app->getTwig()->addExtension(new SyntaxHighlightExtension());
 $app->getTwig()->addRuntimeLoader(new FactoryRuntimeLoader([
-    CodeRuntime::class => fn() => new CodeRuntime(),
+    CodeRuntime::class => fn () => new CodeRuntime(),
 ]));
 $twig = $app->getTwig();
+
+// ─── Examples: pre-highlight source files + register routes ──────────────────
+
+$codeRuntime = new CodeRuntime();
+$sourceDir = __DIR__ . '/examples-source';
+$exampleSources = [];
+foreach (glob($sourceDir . '/*.php') ?: [] as $file) {
+    $name = basename($file, '.php');
+    $content = file_get_contents($file);
+    if ($content !== false) {
+        $exampleSources[$name . '.php'] = $codeRuntime->highlight($content, 'php');
+    }
+}
+$twig->addGlobal('exampleSources', $exampleSources);
+
+$templateDir = __DIR__ . '/templates/examples';
+$templateSources = [];
+foreach (glob($templateDir . '/*.html.twig') ?: [] as $file) {
+    $name = basename($file);
+    if ($name === '_wrapper.html.twig') {
+        continue;
+    }
+    $content = file_get_contents($file);
+    if ($content !== false) {
+        // Strip boilerplate outside {# via:cut #} markers
+        if (preg_match('/{# via:cut #}(.*){# via:cut #}/s', $content, $matches)) {
+            $content = trim($matches[1]);
+        }
+        $templateSources[$name] = $codeRuntime->highlight($content, 'twig');
+    }
+}
+$twig->addGlobal('templateSources', $templateSources);
+
+CounterExample::register($app);
+GreeterExample::register($app);
+TodoExample::register($app);
+ComponentsExample::register($app);
+PathParamsExample::register($app);
+StockTickerExample::register($app);
+ChatRoomExample::register($app);
+ClientMonitorExample::register($app);
+ClientMonitorExample::registerHooks($app);
+AllScopesExample::register($app);
+GameOfLifeExample::register($app);
+DoomExample::register($app);
+
+$app->onStart(function () use ($app): void {
+    StockTickerExample::startTimer($app);
+    GameOfLifeExample::startTimer($app);
+});
+
+$app->onShutdown(function (): void {
+    StockTickerExample::stopTimer();
+    GameOfLifeExample::stopTimer();
+});
 
 // ─── Shared state ────────────────────────────────────────────────────────────
 
@@ -72,9 +138,9 @@ $presenceDemo = function (Context $c) use ($app, $twig): void {
 $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
     $c->scope(Scope::ROUTE);
 
-    $counter       = $c->signal($app->globalState('shared_counter'), 'counter');
-    $lastClick     = $c->signal($app->globalState('last_click_visitor'), 'lastClick');
-    $lastClickHue  = $c->signal($app->globalState('last_click_hue'), 'lastClickHue');
+    $counter = $c->signal($app->globalState('shared_counter'), 'counter');
+    $lastClick = $c->signal($app->globalState('last_click_visitor'), 'lastClick');
+    $lastClickHue = $c->signal($app->globalState('last_click_hue'), 'lastClickHue');
 
     $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
         $newVal = $app->globalState('shared_counter') + 1;
@@ -92,13 +158,13 @@ $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
     }, 'increment');
 
     $c->view(fn () => $twig->render('components/shared-counter.html.twig', [
-        'counter_id'        => $counter->id(),
-        'counter_val'       => $counter->int(),
-        'last_click_id'     => $lastClick->id(),
-        'last_click_val'    => $lastClick->string(),
+        'counter_id' => $counter->id(),
+        'counter_val' => $counter->int(),
+        'last_click_id' => $lastClick->id(),
+        'last_click_val' => $lastClick->string(),
         'last_click_hue_id' => $lastClickHue->id(),
         'last_click_hue_val' => $lastClickHue->int(),
-        'increment_url'     => $increment->url(),
+        'increment_url' => $increment->url(),
     ]));
 };
 
@@ -131,8 +197,8 @@ $homeSessionDemo = function (Context $c) use ($twig): void {
     }, 'increment');
 
     $c->view(fn () => $twig->render('components/session-counter-demo.html.twig', [
-        'count_id'     => $count->id(),
-        'count_val'    => $count->int(),
+        'count_id' => $count->id(),
+        'count_val' => $count->int(),
         'increment_url' => $increment->url(),
     ]));
 };
@@ -196,10 +262,10 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
 
     $c->view(function () use ($app, $vote, $twig) {
         $counts = [
-            'tab'     => (int) ($app->globalState('poll_tab') ?? 0),
-            'route'   => (int) ($app->globalState('poll_route') ?? 0),
+            'tab' => (int) ($app->globalState('poll_tab') ?? 0),
+            'route' => (int) ($app->globalState('poll_route') ?? 0),
             'session' => (int) ($app->globalState('poll_session') ?? 0),
-            'global'  => (int) ($app->globalState('poll_global') ?? 0),
+            'global' => (int) ($app->globalState('poll_global') ?? 0),
         ];
         $total = max(1, array_sum($counts));
         $defs = [
@@ -211,12 +277,12 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
         $options = [];
         foreach ($defs as $key => [$label, $color]) {
             $options[] = [
-                'key'   => $key,
+                'key' => $key,
                 'label' => $label,
                 'color' => $color,
                 'count' => (int) ($counts[$key] ?? 0),
-                'pct'   => round(((int) ($counts[$key] ?? 0) / $total) * 100),
-                'url'   => $vote->url() . '?option=' . $key,
+                'pct' => round(((int) ($counts[$key] ?? 0) / $total) * 100),
+                'url' => $vote->url() . '?option=' . $key,
             ];
         }
 
@@ -229,14 +295,13 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Home page
-$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo, $twig): void {
-
+$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo): void {
     $c->scope(Scope::routeScope('/'));
 
-    $presence       = $c->component($presenceDemo, 'presence');
-    $sharedCounter  = $c->component($sharedCounterDemo, 'shared-counter');
+    $presence = $c->component($presenceDemo, 'presence');
+    $sharedCounter = $c->component($sharedCounterDemo, 'shared-counter');
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
-    $poll           = $c->component($livePollDemo, 'poll');
+    $poll = $c->component($livePollDemo, 'poll');
 
     // On broadcast updates, skip re-rendering the full page — component sub-contexts
     // handle their own patches via their own target divs. Re-rendering here with stale
@@ -247,10 +312,10 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
         }
 
         return $c->render('pages/home.html.twig', [
-            'presence'       => $presence(),
-            'sharedCounter'  => $sharedCounter(),
+            'presence' => $presence(),
+            'sharedCounter' => $sharedCounter(),
             'sessionCounter' => $sessionCounter(),
-            'poll'           => $poll(),
+            'poll' => $poll(),
         ]);
     });
 });
@@ -342,6 +407,12 @@ $app->page('/docs/api', function (Context $c): void {
     $c->view('docs/api.html.twig');
 });
 
+// Design decisions
+$app->page('/docs/design', function (Context $c): void {
+    $c->scope(Scope::routeScope('/docs/design'));
+    $c->view('docs/design.html.twig');
+});
+
 // Comparisons
 $app->page('/docs/comparisons', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/comparisons'));
@@ -357,7 +428,7 @@ $app->page('/docs/faq', function (Context $c): void {
 // Examples gallery
 $app->page('/examples', function (Context $c): void {
     $c->scope(Scope::routeScope('/examples'));
-    $c->view('pages/examples.html.twig');
+    $c->view('pages/examples-index.html.twig');
 });
 
 // ─── Start ───────────────────────────────────────────────────────────────────

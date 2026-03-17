@@ -1,0 +1,28 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div class="card">
+    <div class="param-value-block">
+        <div><span class="param-key">year:</span> <span class="param-val">{{ year }}</span></div>
+        <div><span class="param-key">month:</span> <span class="param-val">{{ month }}</span></div>
+        <div><span class="param-key">slug:</span> <span class="param-val">{{ slug }}</span></div>
+    </div>
+
+    {% if method == 'manual' %}
+    <p class="text-subtle">Parameters extracted with <code>$c-&gt;getPathParam()</code>.</p>
+    {% else %}
+    <p class="text-subtle">All three parameters auto-injected into the function signature.</p>
+    {% endif %}
+
+    <div class="flex gap-1 flex-wrap mt-2">
+        <a href="{{ basePath }}examples/path-params" class="font-semibold">&larr; Back</a>
+        {% if method == 'manual' %}
+        <a href="{{ basePath }}examples/path-params/articles/2025/01/testing" class="font-semibold">Auto-injection example &rarr;</a>
+        {% else %}
+        <a href="{{ basePath }}examples/path-params/blog/2024/12/hello-world" class="font-semibold">Manual example &rarr;</a>
+        {% endif %}
+    </div>
+</div>
+{# via:cut #}
+{% endblock %}

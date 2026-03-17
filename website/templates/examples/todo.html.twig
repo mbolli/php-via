@@ -1,0 +1,43 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div id="todo-list">
+    <div class="todo-input-row">
+        <input type="text"
+               placeholder="Add a new todo..."
+               {{ bind(newTodo) }}
+               data-on:keydown="evt.key == 'Enter' && @post('{{ addTodo.url }}')"
+               class="flex-1">
+        <button data-on:click="@post('{{ addTodo.url }}')">Add</button>
+    </div>
+
+    <ul class="list-reset">
+        {% for todo in todos %}
+            <li class="card todo-item{% if todo.completed %} completed{% endif %}" id="todo-{{ todo.id }}">
+                <div class="todo-item-content"
+                     data-on:click="@post('{{ toggleTodo.url }}?id={{ todo.id }}')">
+                    <input type="checkbox" autocomplete="off" readonly {% if todo.completed %}checked{% endif %}>
+                    <span class="flex-1{% if todo.completed %} todo-item-text completed{% endif %}">{{ todo.text }}</span>
+                </div>
+                <button class="danger todo-delete-btn"
+                        data-on:click="@delete('{{ deleteTodo.url }}?id={{ todo.id }}')">🗑️</button>
+            </li>
+        {% else %}
+            <li class="card todo-empty">
+                No todos yet. Add one above!
+            </li>
+        {% endfor %}
+    </ul>
+
+    <div class="mt-2">
+        <p class="todo-summary">
+            Total: {{ todos|length }} items
+            {% if todos|filter(t => t.completed)|length > 0 %}
+                · {{ todos|filter(t => t.completed)|length }} completed
+            {% endif %}
+        </p>
+    </div>
+</div>
+{# via:cut #}
+{% endblock %}

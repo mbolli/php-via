@@ -1,0 +1,10 @@
+<div class="card">
+    <h3 class="mt-1">Counter: {{ namespace }}</h3>
+    <p class="component-counter-value">
+        Count: {{ count.value }}
+    </p>
+    <div class="flex gap-1">
+        <button class="danger component-counter-btn" data-on:click="@get('{{ decrement.url }}')">➖ Decrement</button>
+        <button class="success component-counter-btn" data-on:click="@get('{{ increment.url }}')">➕ Increment</button>
+    </div>
+</div>

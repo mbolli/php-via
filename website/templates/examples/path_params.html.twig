@@ -1,0 +1,27 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div class="card">
+    <h3>Two Ways to Use Path Parameters</h3>
+    <div class="params-grid">
+        <div class="info-box info-box--red">
+            <h4 class="mb-1">Manual Access</h4>
+            <code class="text-sm">$name = $c-&gt;getPathParam('name');</code>
+        </div>
+        <div class="info-box info-box--green">
+            <h4 class="mb-1">Auto-Injection</h4>
+            <code class="text-sm">function(Context $c, string $name) {…}</code>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-2">
+    <h3>Try It Out</h3>
+    <div class="flex gap-1 flex-wrap mt-2">
+        <a href="{{ basePath }}examples/path-params/blog/2024/12/hello-world" class="font-semibold">Manual access example &rarr;</a>
+        <a href="{{ basePath }}examples/path-params/articles/2025/01/testing" class="font-semibold">Auto-injection example &rarr;</a>
+    </div>
+</div>
+{# via:cut #}
+{% endblock %}

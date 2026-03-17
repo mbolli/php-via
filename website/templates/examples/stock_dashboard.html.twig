@@ -1,0 +1,22 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div class="stock-grid">
+    {% for symbol, stock in stocks %}
+    <a href="{{ basePath }}examples/stock-ticker/stock/{{ symbol }}" class="card stock-card">
+        <div class="stock-card-header">
+            <span class="stock-symbol">{{ symbol }}</span>
+            <span class="stock-name">{{ stock.name }}</span>
+        </div>
+        <div class="stock-price">
+            ${{ stock.price|round(2) }}
+        </div>
+        <div class="stock-cta">
+            View Chart →
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{# via:cut #}
+{% endblock %}
