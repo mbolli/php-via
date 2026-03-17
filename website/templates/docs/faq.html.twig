@@ -34,6 +34,46 @@ $c->view(function () use ($app) {
     </details>
 
     <details>
+        <summary><strong>Shared counter uses <code>globalState</code> + manual broadcast instead of scoped signals</strong></summary>
+        <p>
+            You track shared state with <code>$app->globalState()</code> <em>and</em> a Signal,
+            manually keeping both in sync and calling <code>$app->broadcast()</code> yourself.
+            The action is verbose and error-prone.
+        </p>
+        <p><strong>Why:</strong> Scoped signals already <em>are</em> shared state. When a context has
+        a non-TAB scope, every <code>$c->signal()</code> call for the same name returns the same
+        <code>Signal</code> object across all contexts in that scope. Calling <code>setValue()</code>
+        updates the single shared instance and auto-broadcasts by default. Mirroring the value into
+        <code>globalState</code> creates two sources of truth you must synchronize manually.
+        </p>
+        {% code 'php' %}{% verbatim %}
+// ❌ dual state — globalState + signal kept in sync manually
+$c->scope(Scope::GLOBAL);
+$count = $c->signal($app->globalState('count'));
+
+$increment = $c->action(function () use ($app, $count): void {
+    $newVal = $app->globalState('count') + 1;
+    $app->setGlobalState('count', $newVal);
+    $count->setValue($newVal);
+    $app->broadcast(Scope::GLOBAL);
+});
+
+// ✅ scoped signal is the single source of truth
+$c->scope(Scope::GLOBAL);
+$count = $c->signal(0);
+
+$increment = $c->action(
+    fn () => $count->setValue($count->int() + 1)
+    // auto-broadcasts because signal scope != TAB
+);
+        {% endverbatim %}{% endcode %}
+        <p><strong>When <em>is</em> <code>globalState</code> appropriate?</strong> For server-side values
+        that are not signals — e.g. a status string read inside a view closure, or data shared across
+        different routes that don't have a common scope. If the value drives a <code>data-text</code>
+        or <code>data-bind</code> in the browser, use a scoped signal instead.</p>
+    </details>
+
+    <details>
         <summary><strong>data-text uses the wrong signal ID</strong></summary>
         <p>
             You write <code>data-text="$votes.tab"</code> in your template, but the counter never updates
@@ -112,26 +152,6 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
     });
 });
         {% endverbatim %}{% endcode %}
-    </details>
-
-    <details>
-        {% verbatim %}<summary><strong>Twig syntax in code examples gets evaluated</strong></summary>
-        <p>
-            You document Twig syntax in a docs page and get a "block already defined" error or silent
-            output — the <code>{% block %}</code>, <code>{{ }}</code>, or <code>{# #}</code> tags in your
-            <code>&lt;pre&gt;&lt;code&gt;</code> blocks are being processed by Twig.
-        </p>
-        <p><strong>Why:</strong> Twig processes all <code>{% %}</code>, <code>{{ }}</code>, and
-        <code>{# #}</code> tags regardless of whether they are inside <code>&lt;pre&gt;</code> or
-        <code>&lt;code&gt;</code> elements.
-        </p>
-        <p><strong>Fix:</strong> Wrap any literal Twig syntax in code examples with
-        <code>{&percnt; verbatim &percnt;}...{&percnt; endverbatim &percnt;}</code>:</p>
-        <pre data-lang="html"><code>{&percnt; verbatim &percnt;}&lt;pre&gt;&lt;code&gt;
-{% block content %}...{% endblock %}
-{{ some_variable }}
-{# this comment would vanish #}
-&lt;/code&gt;&lt;/pre&gt;{&percnt; endverbatim &percnt;}</code></pre>{% endverbatim %}
     </details>
 
     <details>

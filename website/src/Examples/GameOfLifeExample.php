@@ -162,6 +162,9 @@ final class GameOfLifeExample
                     'summary' => [
                         '<strong>Shared board</strong> via ROUTE scope — everyone on this page sees and edits the same 50×50 grid. Click to draw a cross pattern in your color.',
                         '<strong>200ms timer</strong> evolves the board every 200 milliseconds server-side. The entire board state is re-rendered and pushed via SSE to all viewers.',
+                        '<strong>2,500 divs, no problem</strong> — each tick sends all 2,500 cells as plain HTML. No diffing, no virtual DOM, no clever protocol. The "stupid" solution just works because Brotli compression over SSE is absurdly efficient: 18 seconds of continuous updates transferred only 58 KB over the wire from 15 MB of raw HTML — roughly 250× compression.',
+                        '<strong>No canvas, no JS drawing</strong> — the grid is a flat CSS Grid of server-rendered <code>&lt;div&gt;</code> elements with color classes. Datastar morphs them in place. The entire rendering pipeline is PHP string concatenation.',
+                        '<strong>Why this matters</strong> — frameworks that diff on the client or send fine-grained patches add complexity for marginal gains. SSE + Brotli makes the brute-force approach viable even at 5 fps with thousands of elements, which covers the vast majority of real-world UIs.',
                         '<strong>Color identity</strong> — each connected session gets a unique color. Your cells are visually distinct from other players\' cells.',
                         '<strong>Lazy timer</strong> — the evolution loop pauses itself when no clients are connected. Re-open the page and it resumes from where it left off.',
                         '<strong>CSS Grid rendering</strong> uses inline styles on a flat grid of divs. No canvas, no JavaScript drawing code — the server sends pre-colored HTML cells.',

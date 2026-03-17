@@ -1,8 +1,8 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Twig Templates — php-via Docs{% endblock %}
+{% block title %}Templates — php-via Docs{% endblock %}
 {% block content %}
 <article class="docs-content">
-    <h1>Twig Templates</h1>
+    <h1>Templates</h1>
     <p>
         php-via supports two rendering paths that serve different purposes and can be mixed freely in the same app.
     </p>
@@ -59,13 +59,29 @@ $c->view(function () use ($count): string {
 
     <h3 id="twig-shell">Alternative: Twig as the shell</h3>
     <p>
-        The framework ships a <code>base.html.twig</code> in <code>templates/</code> that defines
-        the full outer document using Twig blocks. When a view extends it, Twig renders
+        Instead of a static <code>shell.html</code>, you can create your own Twig base template that
+        defines the full outer document using Twig blocks. When a view extends it, Twig renders
         the complete <code>&lt;html&gt;...&lt;/html&gt;</code> document — php-via detects this and skips
         the plain-HTML shell entirely.
     </p>
     {% code 'twig' %}{% verbatim %}
-{# my-page.html.twig #}
+{# templates/base.html.twig — you create this #}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
+    <title>{% block title %}{% endblock %}</title>
+</head>
+<body>
+    <nav>...shared nav...</nav>
+    <main>{% block content %}{% endblock %}</main>
+    <script type="module" src="/datastar.js"></script>
+</body>
+</html>
+    {% endverbatim %}{% endcode %}
+    {% code 'twig' %}{% verbatim %}
+{# templates/my-page.html.twig #}
 {% extends "base.html.twig" %}
 
 {% block title %}My App{% endblock %}
@@ -75,9 +91,15 @@ $c->view(function () use ($count): string {
 {% endblock %}
     {% endverbatim %}{% endcode %}
     <p>
+        The key variable is <code>{% verbatim %}{{ contextId }}{% endverbatim %}</code>, which is injected
+        automatically by <code>Context::render()</code>. Don't confuse it with
+        <code>{% verbatim %}{{ context_id }}{% endverbatim %}</code>, which is the <code>HtmlBuilder</code>
+        placeholder for the plain-HTML shell path.
+    </p>
+    <p>
         This path is a good fit when you want Twig inheritance across multiple pages but don't need
         a separate static shell file.
-        The downside: <code>base.html.twig</code> is re-rendered on every SSE update (unlike a shell,
+        The downside: the base template is re-rendered on every SSE update (unlike a shell,
         which is sent once), so keep it lightweight.
     </p>
 

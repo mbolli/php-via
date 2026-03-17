@@ -98,10 +98,7 @@ $app->onShutdown(function (): void {
 
 // ─── Shared state ────────────────────────────────────────────────────────────
 
-// Shared global counter (persists across connections in memory)
-$app->setGlobalState('shared_counter', 0);
-$app->setGlobalState('last_click_visitor', '');
-$app->setGlobalState('last_click_hue', 0);
+// (Scoped signals handle shared counter state — no globalState needed)
 
 // ─── Presence: broadcast to route on connect/disconnect ─────────────────────
 
@@ -135,26 +132,20 @@ $presenceDemo = function (Context $c) use ($app, $twig): void {
  * Shared multiplayer counter. ROUTE-scoped: all visitors share one counter.
  * The "aha" moment — click and everyone sees it.
  */
-$sharedCounterDemo = function (Context $c) use ($app, $twig): void {
+$sharedCounterDemo = function (Context $c) use ($twig): void {
     $c->scope(Scope::ROUTE);
 
-    $counter = $c->signal($app->globalState('shared_counter'), 'counter');
-    $lastClick = $c->signal($app->globalState('last_click_visitor'), 'lastClick');
-    $lastClickHue = $c->signal($app->globalState('last_click_hue'), 'lastClickHue');
+    $counter = $c->signal(0, 'counter');
+    $lastClick = $c->signal('', 'lastClick');
+    $lastClickHue = $c->signal(0, 'lastClickHue');
 
-    $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
-        $newVal = $app->globalState('shared_counter') + 1;
-        $app->setGlobalState('shared_counter', $newVal);
+    $increment = $c->action(function (Context $c) use ($counter, $lastClick, $lastClickHue): void {
+        $counter->setValue($counter->int() + 1, broadcast: false);
 
         $visitorNum = substr($c->getId(), -4);
-        $app->setGlobalState('last_click_visitor', 'Visitor #' . strtoupper($visitorNum));
-        $hue = hexdec($visitorNum) % 360;
-        $app->setGlobalState('last_click_hue', $hue);
-
-        $counter->setValue($newVal);
-        $lastClick->setValue($app->globalState('last_click_visitor'));
-        $lastClickHue->setValue($hue);
-        $app->broadcast(Scope::routeScope('/'));
+        $lastClick->setValue('Visitor #' . strtoupper($visitorNum), broadcast: false);
+        $lastClickHue->setValue(hexdec($visitorNum) % 360, broadcast: false);
+        $c->broadcast();
     }, 'increment');
 
     $c->view(fn () => $twig->render('components/shared-counter.html.twig', [

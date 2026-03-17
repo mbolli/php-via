@@ -37,8 +37,7 @@
     <h2 class="section-title">This is all the code.</h2>
     <p class="section-lead">
         A counter in ~15 lines of PHP. Switch the tab to see the only change needed to make it
-        multiplayer — one scope, broadcast to every visitor in real-time.
-        No JavaScript. No WebSockets. No API glue.
+        multiplayer — one line sets the scope. No JavaScript. No WebSockets. No API glue.
     </p>
     <div class="code-examples-split">
         <div class="code-panel">
@@ -96,24 +95,16 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
 $app = new Via(new Config());
-{+$app->setGlobalState('count', 0);+}
 
-$app->page('/', function (Context $c) use ($app): void {
-{-    // TAB scope (default) — each visitor has their own counter
-    $count = $c->signal(0);-}
+$app->page('/', function (Context $c): void {
+{-    // TAB scope (default) — each visitor has their own counter-}
 {+    // GLOBAL scope — one shared counter for every visitor
-    $c->scope(Scope::GLOBAL);
-    $count = $c->signal($app->globalState('count'));+}
+    $c->scope(Scope::GLOBAL);+}
+    $count = $c->signal(0);
 
-{-    $increment = $c->action(
+    $increment = $c->action(
         fn() => $count->setValue($count->int() + 1)
-    );-}
-{+    $increment = $c->action(function () use ($app, $count): void {
-        $newVal = $app->globalState('count') + 1;
-        $app->setGlobalState('count', $newVal);
-        $count->setValue($newVal);
-        $app->broadcast(Scope::GLOBAL);
-    });+}
+    );
 
     $c->view(fn() => <<<HTML
         <p>Count: <strong data-text="$count">

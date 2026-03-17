@@ -14,10 +14,9 @@ final class AllScopesExample
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Three scopes on one page</strong> — GLOBAL (purple banner), ROUTE (orange counter), and TAB (green message). Each component lives in a different scope to show the contrast.',
+        '<strong>Three scopes on one page</strong> — GLOBAL (status banner), ROUTE (shared page counter), and TAB (personal message). Each component lives in a different scope to show the contrast.',
         '<strong>Navigate between sub-pages</strong> to see the difference: the GLOBAL banner stays identical everywhere, the ROUTE counter resets per page, and the TAB message is unique per browser tab.',
         '<strong>Components</strong> encapsulate each scope layer. The same page factory mounts all three components, so adding a new sub-page is a single function call.',
-        '<strong>globalState()</strong> stores server-wide values on the Application instance. Unlike signals, global state lives outside any single connection and survives page navigations — perfect for shared counters or status banners.',
         '<strong>Scope hierarchy</strong> visualised: GLOBAL lives for the entire server lifetime, ROUTE resets when you change URL, and TAB is born and dies with each browser tab.',
         '<strong>Try it</strong>: open two tabs on the same sub-page and click the ROUTE counter. Both tabs update. Now open a tab on a different sub-page — its counter is independent.',
     ];

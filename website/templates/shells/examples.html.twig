@@ -41,13 +41,19 @@
                     {{ m.navlink('examples/all-scopes', '📊 All Scopes', currentRoute, basePath) }}
                 </ul>
             </section>
+            <section class="sidebar-section">
+                <h3 class="sidebar-heading">Debug</h3>
+                <details class="signals-debug" data-ignore-morph>
+                    <summary>Live signals</summary>
+                    <pre data-json-signals class="signals-debug-pre"></pre>
+                </details>
+            </section>
         </nav>
     </aside>
 
     <main class="docs-content" id="content">
         {% block content %}{% endblock %}
     </main>
-    <pre data-json-signals></pre>
 
 </div>
 {% endblock %}
