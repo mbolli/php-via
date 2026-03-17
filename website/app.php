@@ -27,7 +27,7 @@ use Twig\RuntimeLoader\FactoryRuntimeLoader;
 
 $config = (new Config())
     ->withHost('0.0.0.0')
-    ->withPort(3100)
+    ->withPort(3000)
     ->withDevMode(true)
     ->withTemplateDir(__DIR__ . '/templates')
     ->withStaticDir(__DIR__ . '/public')
@@ -424,5 +424,5 @@ $app->page('/examples', function (Context $c): void {
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
-echo "⚡ php-via website running on http://0.0.0.0:3100\n";
+echo "⚡ php-via website running on http://0.0.0.0:3000\n";
 $app->start();

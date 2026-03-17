@@ -369,15 +369,15 @@ This section covers running the php-via website (which includes all examples) be
 
 ### Overview
 
-The website is a single Swoole HTTP server (`website/app.php`) running on port 3100. All examples are accessible at `/examples/{name}` routes.
+The website is a single Swoole HTTP server (`website/app.php`) running on port 3000. All examples are accessible at `/examples/{name}` routes.
 
 In production:
 
 - **systemd** manages the single server process with automatic restarts
-- **Caddy** terminates TLS and proxies to port 3100
+- **Caddy** terminates TLS and proxies to port 3000
 
 ```
-Browser → Caddy (TLS) → Swoole :3100 (website + all examples)
+Browser → Caddy (TLS) → Swoole :3000 (website + all examples)
 ```
 
 See `deploy/` for systemd service files and Caddy configurations.
