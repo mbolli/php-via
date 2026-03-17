@@ -9,9 +9,9 @@
 
 ![php-via logo](https://raw.githubusercontent.com/mbolli/php-via/master/logo.png)
 
-Real-time engine for building reactive web applications in PHP with Swoole.
+Real-time engine for building reactive web applications in PHP with OpenSwoole.
 
-Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using Swoole's async capabilities. [Datastar](https://data-star.dev) (RC.8) acts as the glue between server and client, handling DOM morphing and SSE communication.
+Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using OpenSwoole's async capabilities. [Datastar](https://data-star.dev) (RC.8) acts as the glue between server and client, handling DOM morphing and SSE communication.
 
 **[🎮 Try Live Examples](https://via.zweiundeins.gmbh)** - See php-via in action with interactive demos
 
@@ -23,12 +23,12 @@ Inspired by [go-via/via](https://github.com/go-via/via), this library brings the
 - **No build step** - No transpilation or bundling
 - **Full reactivity** - Real-time updates via SSE
 - **Single SSE stream** - Efficient communication (very efficient with Brotli)
-- **Pure PHP** - Leveraging Swoole's coroutines
+- **Pure PHP** - Leveraging OpenSwoole's coroutines
 
 ## Requirements
 
 - PHP 8.4+
-- Swoole extension
+- OpenSwoole extension
 - Composer
 
 ## Installation
@@ -96,7 +96,7 @@ Then open your browser to `http://localhost:3000`
 
 ### Via Application
 
-The main application class that manages routing and the Swoole HTTP server.
+The main application class that manages routing and the OpenSwoole HTTP server.
 
 ```php
 use Mbolli\PhpVia\Config;
@@ -318,7 +318,7 @@ $app->page('/', function (Context $c) use ($counterComponent) {
 
 php-via fundamentally relies on:
 
-1. **Long-lived event loop** - Swoole provides coroutines and async I/O, similar to Go's goroutines
+1. **Long-lived event loop** - OpenSwoole provides coroutines and async I/O, similar to Go's goroutines
 2. **Reactive state on the server** - Signals track changes and sync with the browser
 3. **Server-side actions** - Client events trigger server-side PHP functions
 4. **UI defined on the server** - Views are rendered with PHP, not templates
@@ -337,7 +337,7 @@ php-via fundamentally relies on:
 
 ### Technology Stack
 
-- **Swoole**: Provides async I/O, coroutines, and HTTP server
+- **OpenSwoole**: Provides async I/O, coroutines, and HTTP server
 - **Datastar**: The glue between server and client - handles SSE communication, DOM merging, and reactive data binding
 - **Twig**: Server-side templating with Datastar attributes
 - **Server-Sent Events**: Unidirectional stream from server to browser for real-time updates
@@ -369,7 +369,7 @@ This section covers running the php-via website (which includes all examples) be
 
 ### Overview
 
-The website is a single Swoole HTTP server (`website/app.php`) running on port 3000. All examples are accessible at `/examples/{name}` routes.
+The website is a single OpenSwoole HTTP server (`website/app.php`) running on port 3000. All examples are accessible at `/examples/{name}` routes.
 
 In production:
 
@@ -377,7 +377,7 @@ In production:
 - **Caddy** terminates TLS and proxies to port 3000
 
 ```
-Browser → Caddy (TLS) → Swoole :3000 (website + all examples)
+Browser → Caddy (TLS) → OpenSwoole :3000 (website + all examples)
 ```
 
 See `deploy/` for systemd service files and Caddy configurations.
@@ -399,7 +399,7 @@ This library is inspired by and builds upon:
 
 - 🚀 [go-via/via](https://github.com/go-via/via) - The original Go implementation
 - 🌟 [Datastar](https://data-star.dev/) - The reactive hypermedia framework
-- 🐘 [Swoole](https://www.swoole.co.uk/) - PHP async/coroutine framework
+- 🐘 [OpenSwoole](https://www.swoole.co.uk/) - PHP async/coroutine framework
 
 ## License
 

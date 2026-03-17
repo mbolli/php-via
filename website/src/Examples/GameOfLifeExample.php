@@ -7,7 +7,7 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use Swoole\Timer;
+use OpenSwoole\Timer;
 
 final class GameOfLifeExample
 {

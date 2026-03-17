@@ -40,9 +40,9 @@
         dashboards, game boards, tickers that update every second.
     </p>
     <p>
-        The tradeoff is real: a persistent Swoole process is harder to operate than PHP-FPM.
+        The tradeoff is real: a persistent OpenSwoole process is harder to operate than PHP-FPM.
         The process must be managed as a long-running service, not a stateless CGI handler.
-        Swoole coroutines are lightweight (~8KB each), so holding thousands of open connections is
+        OpenSwoole coroutines are lightweight (~8KB each), so holding thousands of open connections is
         cheap — the real scaling constraint is the single-process shared memory model, not RAM per
         connection. For teams already running PHP-FPM infrastructure who don't need real-time push,
         the operational shift may not be worth it.
@@ -105,7 +105,7 @@ $c->scope('room:lobby');     // a custom group you define
     </p>
     <p>
         The tradeoff is that the scope system is currently single-process only — it uses in-process
-        PHP arrays shared across Swoole coroutines, not an external broker. Multi-server deployments require an external state layer
+        PHP arrays shared across OpenSwoole coroutines, not an external broker. Multi-server deployments require an external state layer
         (not yet built). <a href="/docs/comparisons#datastar-ecosystem">Datapages with NATS</a>
         is the right choice today if you need multi-instance horizontal scaling.
     </p>
@@ -115,7 +115,7 @@ $c->scope('room:lobby');     // a custom group you define
         <li><a href="/docs/scopes">Scopes</a> — the full scope API and custom scope patterns</li>
         <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to groups of clients</li>
         <li><a href="/docs/comparisons">Comparisons</a> — how php-via positions against Livewire, htmx, Inertia, LiveView</li>
-        <li><a href="/docs/deployment">Deployment</a> — running Swoole behind Caddy with Brotli enabled</li>
+        <li><a href="/docs/deployment">Deployment</a> — running OpenSwoole behind Caddy with Brotli enabled</li>
     </ul>
 </article>
 

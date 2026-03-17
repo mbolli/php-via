@@ -56,7 +56,7 @@ myapp.example.com {
         file_server
     }
 
-    # Proxy everything else to Swoole
+    # Proxy everything else to OpenSwoole
     reverse_proxy localhost:3000 {
         # Required for SSE: disable buffering
         flush_interval -1
@@ -100,7 +100,7 @@ kill -USR1 $(cat /var/run/myapp.pid)
 
     <h2 id="multiple-instances">Multiple instances</h2>
     <p>
-        php-via uses Swoole's in-memory shared state for the scope system. This means multiple instances
+        php-via uses OpenSwoole's in-memory shared state for the scope system. This means multiple instances
         do <em>not</em> share state — a broadcast on instance A won't reach clients on instance B.
         For now, horizontal scaling requires a sticky-session load balancer and the understanding that
         per-route state won't be globally consistent.
@@ -108,7 +108,7 @@ kill -USR1 $(cat /var/run/myapp.pid)
 
     <h2 id="static-assets">Static assets</h2>
     <p>
-        Configure a static directory to serve files directly from Swoole in development:
+        Configure a static directory to serve files directly from OpenSwoole in development:
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withStaticDir(__DIR__ . '/public');

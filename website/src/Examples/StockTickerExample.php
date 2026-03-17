@@ -7,7 +7,7 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use Swoole\Timer;
+use OpenSwoole\Timer;
 
 final class StockTickerExample
 {
@@ -15,7 +15,7 @@ final class StockTickerExample
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Simulated market data</strong> updates every 2 seconds via a server-side Swoole timer. Prices drift randomly and history is tracked for each symbol.',
+        '<strong>Simulated market data</strong> updates every 2 seconds via a server-side OpenSwoole timer. Prices drift randomly and history is tracked for each symbol.',
         '<strong>ROUTE scope</strong> on the dashboard means all viewers share the same rendered output. Per-stock detail pages use custom scopes so each symbol updates independently.',
         '<strong>Lazy timers</strong> — the price ticker only runs while at least one client is connected. Zero viewers means zero CPU cost.',
         '<strong>Deep linking</strong> — each stock has its own URL (<code>/stock/{symbol}</code>). Navigate directly to a ticker or click through from the dashboard.',

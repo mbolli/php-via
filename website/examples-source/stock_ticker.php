@@ -8,7 +8,7 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use Swoole\Timer;
+use OpenSwoole\Timer;
 
 $app = new Via(
     (new Config())

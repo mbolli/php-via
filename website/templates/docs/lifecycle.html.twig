@@ -67,7 +67,7 @@ $c->onCleanup(function (Context $c): void {
 
     <h2 id="set-interval">Recurring timers</h2>
     <p>
-        <code>$c-&gt;setInterval()</code> creates a Swoole timer scoped to the context.
+        <code>$c-&gt;setInterval()</code> creates a OpenSwoole timer scoped to the context.
         It fires repeatedly at the given interval (ms) and is <em>automatically cancelled</em> when the context is cleaned up:
     </p>
     {% code 'php' %}{% verbatim %}

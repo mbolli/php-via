@@ -95,7 +95,7 @@ $app->log('debug', 'Action fired', $c);
     {% endverbatim %}{% endcode %}
 
     <h3 id="via-start"><code>start(): void</code></h3>
-    <p>Start the Swoole server. Call this last, after all routes are registered.</p>
+    <p>Start the OpenSwoole server. Call this last, after all routes are registered.</p>
 
     ---
 
@@ -244,7 +244,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withStaticDir(__DIR__ . '/public')
     ->withBasePath('/')             // URL base path prefix
     ->withSsePollIntervalMs(50)     // SSE poll interval in ms
-    ->withSwooleSettings([...])     // raw Swoole server settings
+    ->withSwooleSettings([...])     // raw OpenSwoole server settings
     {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>

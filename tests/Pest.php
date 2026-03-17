@@ -29,7 +29,7 @@ expect()->extend('toBeOneOf', fn (array $values) => $this->toBeIn($values));
 |--------------------------------------------------------------------------
 */
 
-// Set environment variable to indicate we're in test mode (no Swoole)
+// Set environment variable to indicate we're in test mode (no OpenSwoole)
 putenv('VIA_TEST_MODE=1');
 
 /**

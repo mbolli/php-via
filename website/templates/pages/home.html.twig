@@ -1,6 +1,6 @@
 {% extends 'shells/base.html.twig' %}
 {% block title %}php-via — Real-time PHP. No JavaScript. No build step.{% endblock %}
-{% block head %}<meta name="description" content="php-via is a real-time engine for building reactive PHP web applications with Swoole and Datastar. No JavaScript, no build step, multiplayer by default.">{% endblock %}
+{% block description %}php-via is a real-time engine for building reactive PHP web applications with OpenSwoole and Datastar. No JavaScript, no build step, multiplayer by default.{% endblock %}
 {% block content %}
 <!-- Hero -->
 <section class="hero">
@@ -16,7 +16,7 @@
 
         <p class="hero-tagline">
             php-via turns your PHP into a reactive, multiplayer-ready server.
-            No JavaScript. No build step. No API layer. Just PHP and Swoole.
+            No JavaScript. No build step. No API layer. Just PHP and OpenSwoole.
         </p>
 
         {{ presence | raw }}
@@ -165,7 +165,7 @@ $app->start();
                 JavaScript, and build tooling to solve a problem that should be solved at the server.
             </p>
             <p>
-                <strong>php-via takes a different approach.</strong> Built on Swoole's persistent event loop,
+                <strong>php-via takes a different approach.</strong> Built on OpenSwoole's persistent event loop,
                 every page maintains a live SSE connection. When your PHP changes state, the browser
                 updates instantly — no polling, no WebSocket handshake ceremony, no client-side
                 state management. The server is the source of truth, and the browser is a live view into it.
@@ -396,7 +396,7 @@ $app->start();
                 </tr>
                 <tr>
                     <td>Runtime</td>
-                    <td>Swoole</td>
+                    <td>OpenSwoole</td>
                     <td>PHP-FPM</td>
                     <td>PHP-FPM</td>
                     <td>PHP-FPM</td>
