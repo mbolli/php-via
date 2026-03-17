@@ -95,7 +95,7 @@ class HtmlBuilder {
         }
 
         // Simple template replacement for the shell (per-context override takes priority)
-        $shellPath = $context->getShellTemplate() ?? $this->shellTemplate ?? __DIR__ . '/../../templates/shell.html';
+        $shellPath = $context->getShellTemplate() ?? $this->shellTemplate ?? __DIR__ . '/shell.html';
         $shell = file_get_contents($shellPath);
 
         if ($shell === false) {
