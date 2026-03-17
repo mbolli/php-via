@@ -11,7 +11,7 @@
 
 Real-time engine for building reactive web applications in PHP with Swoole.
 
-Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using Swoole's async capabilities. [Datastar](https://data-star.dev) (RC.7) acts as the glue between server and client, handling DOM morphing and SSE communication.
+Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using Swoole's async capabilities. [Datastar](https://data-star.dev) (RC.8) acts as the glue between server and client, handling DOM morphing and SSE communication.
 
 **[🎮 Try Live Examples](https://via.zweiundeins.gmbh)** - See php-via in action with interactive demos
 

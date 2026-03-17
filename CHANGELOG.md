@@ -2,6 +2,34 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.3.0] - 2026-03-17
+
+### Features
+- **App-level hooks** — `onClientConnect()` / `onClientDisconnect()` callbacks fire when SSE connections open or close
+- **Per-context overrides** — custom shell template, head/foot HTML per page via `Context` API
+- **Static file serving** — built-in for development; serve CSS/JS/images without a reverse proxy
+- **TUI request logger** — colorful structured terminal output with method/status/timing glyphs
+- **Component re-rendering** — components participate in broadcast sync; dirty components re-render on page-level broadcasts
+- **Performance** — skip re-rendering clean components during page sync, reducing unnecessary SSE patches
+
+### Bug Fixes
+- fix: `Coroutine::sleep()` TypeError on OpenSwoole — use `usleep()` with `SWOOLE_HOOK_ALL`
+- fix: broken signal approach in live-poll replaced with `patchElements`
+- fix: component re-rendering wired into broadcast sync correctly
+- fix: shell template path co-located with `HtmlBuilder` (no more `../../templates/` relative path)
+
+### Website
+- **Consolidated examples** — 11 standalone example apps merged into the website's single Via server under `/examples/{name}`
+- **Tabbed source panel** — each example shows PHP handler and Twig template in switchable tabs (CSS-only, no JS)
+- **Example summaries** — 3–6 paragraph descriptions per example explaining the concepts demonstrated
+- **Examples-source accuracy** — all source display files updated to match actual handler logic (board model, scope prefixes, signal names, template variables)
+- **Client Monitor revamp** — replaced timer-driven polling with `onClientConnect`/`onClientDisconnect` hooks
+- **Removed Global Notifications** example (concepts merged into All Scopes)
+- **All Scopes redesign** — CSS class-based cards replacing inline styles, reduced emoji usage
+- **Docs section** — FAQ entries for `PatchElementsNoTargetsFound` and duplicate ID collision pitfalls; design philosophy page; comparison table with Phoenix LiveView column
+- **Home page overhaul** — tabbed code demos, glass UI, scope badges, animations
+- **Twig `{% code %}` tag** — syntax highlighting via `mbolli/tempest-highlight-datastar` package
+
 ## [0.2.0] - 2026-03-12
 
 ### Dependencies
