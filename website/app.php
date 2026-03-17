@@ -41,6 +41,11 @@ $app->getTwig()->addRuntimeLoader(new FactoryRuntimeLoader([
 ]));
 $twig = $app->getTwig();
 
+// Asset cache-busting version (based on CSS file mtime)
+$cssPath = __DIR__ . '/public/css/site.css';
+$twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
+$twig->addGlobal('siteUrl', 'https://via.zweiundeins.gmbh/');
+
 // ─── Examples: pre-highlight source files + register routes ──────────────────
 
 $codeRuntime = new CodeRuntime();
