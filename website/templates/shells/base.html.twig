@@ -13,10 +13,8 @@
     <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ basePath }}_session/close', '{{ contextId }}'); });">
     <link rel="stylesheet" href="{{ basePath }}css/site.css?v={{ assetVersion }}">
     <title>{% block title %}php-via{% endblock %}</title>
-    {% block description %}{% endblock %}
     {% set _title = block('title') %}
-    {% set _desc = block('description') %}
-    {% set _description = _desc ? _desc : 'Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole and Datastar.' %}
+    {% set _description %}{% block description %}Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole and Datastar.{% endblock %}{% endset %}
     <meta name="description" content="{{ _description }}">
     <meta property="og:type" content="website">
     <meta property="og:title" content="{{ _title }}">
