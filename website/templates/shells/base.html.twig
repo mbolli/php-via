@@ -16,7 +16,7 @@
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
-    <div data-show="$_disconnected" class="connection-warning">⚠️ Reconnecting…</div>
+    <div data-show="$_disconnected" style="display:none" class="connection-warning">⚠️ Reconnecting…</div>
 
     <div class="bg-watermark" aria-hidden="true"></div>
     <nav class="site-nav" role="navigation" aria-label="Main navigation">
@@ -62,6 +62,7 @@
     </footer>
 
     <script type="module" src="{{ basePath }}datastar.js"></script>
+    <script type="speculationrules">{"prefetch":[{"source":"document","eagerness":"eager","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":"/*\\?*"}},{"selector_matches":".nav-links a, .sidebar-nav a"}]}}]}</script>
     {% block foot_scripts %}{% endblock %}
 </body>
 </html>

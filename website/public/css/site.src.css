@@ -57,6 +57,9 @@
 
 html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-height) + var(--size-3)); }
 
+/* Cross-document View Transitions (MPA) — progressive enhancement */
+@view-transition { navigation: auto; }
+
 body {
   font-family: var(--font-sans);
   font-size: var(--font-size-1);
@@ -104,6 +107,7 @@ code, pre {
 
 /* ─── Site Nav ─────────────────────────────────────────── */
 .site-nav {
+  view-transition-name: site-nav;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -161,6 +165,7 @@ code, pre {
 }
 
 main, .site-footer { position: relative; }
+#content { view-transition-name: main-content; }
 
 .nav-links {
   display: flex;
@@ -230,6 +235,7 @@ main, .site-footer { position: relative; }
 
 /* ─── Site Footer ──────────────────────────────────────── */
 .site-footer {
+  view-transition-name: site-footer;
   border-block-start: 1px solid var(--border);
   padding-block: var(--size-5);
 }
@@ -865,6 +871,7 @@ main, .site-footer { position: relative; }
 }
 
 .docs-sidebar {
+  view-transition-name: sidebar;
   border-inline-end: 1px solid var(--border);
   padding: var(--size-5) var(--size-4);
   position: sticky;
@@ -1897,4 +1904,48 @@ stock-chart {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--size-2);
   margin-block-start: var(--size-3);
+}
+
+/* ─── Cross-document View Transitions ──────────────────── */
+
+/* Nav stays put — no animation */
+::view-transition-old(site-nav),
+::view-transition-new(site-nav),
+::view-transition-old(site-footer),
+::view-transition-new(site-footer) {
+  animation: none;
+}
+
+/* Sidebar cross-fades quickly */
+::view-transition-old(sidebar) {
+  animation: vt-fade-out 150ms ease;
+}
+::view-transition-new(sidebar) {
+  animation: vt-fade-in 200ms ease 50ms;
+}
+
+/* Main content: slide + fade */
+@keyframes vt-slide-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+@keyframes vt-slide-out {
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+@keyframes vt-fade-in  { from { opacity: 0; } }
+@keyframes vt-fade-out { to   { opacity: 0; } }
+
+::view-transition-old(main-content) {
+  animation: vt-slide-out 150ms ease;
+}
+::view-transition-new(main-content) {
+  animation: vt-slide-in 250ms ease 80ms;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
 }
