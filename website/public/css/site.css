@@ -1042,7 +1042,8 @@ main, .site-footer { position: relative; }
 }
 
 .tooltip {
-  /* Fallback: absolute relative to .has-tooltip */
+  /* Hidden by default — display:none so it can't affect layout/overflow */
+  display: none;
   position: absolute;
   bottom: calc(100% + 6px);
   left: 50%;
@@ -1061,11 +1062,6 @@ main, .site-footer { position: relative; }
   text-align: left;
   z-index: 100;
   box-shadow: var(--shadow-3);
-  /* Hidden by default */
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 150ms, visibility 150ms;
 }
 
 /* CSS Anchor Positioning — Chrome 125+, Edge 125+ */
@@ -1082,8 +1078,7 @@ main, .site-footer { position: relative; }
 
 .has-tooltip:hover .tooltip,
 .has-tooltip:focus-within .tooltip {
-  opacity: 1;
-  visibility: visible;
+  display: block;
 }
 
 /* ─── Poll demo ────────────────────────────────────────── */
@@ -1304,6 +1299,14 @@ main, .site-footer { position: relative; }
 
 .docs-content {
   padding: var(--size-7) var(--size-6);
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 768px) {
+  .docs-content {
+    padding: var(--size-4) var(--size-3);
+  }
 }
 
 .docs-content h1 { font-size: var(--font-size-6); margin-block-end: var(--size-5); }
@@ -1736,6 +1739,13 @@ main, .site-footer { position: relative; }
   box-shadow: var(--shadow-2);
   max-height: 80vh;
   overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .example-source {
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 .example-source-header {
