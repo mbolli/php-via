@@ -57,6 +57,27 @@
     </aside>
 
     <main class="docs-content" id="content">
+        <details class="mobile-subnav">
+            <summary>Documentation menu</summary>
+            <nav class="sidebar-nav">
+                <ul role="list">
+                    {{ m.navlink('docs/getting-started', 'Installation', currentRoute, basePath) }}
+                    {{ m.navlink('docs/signals', 'Signals', currentRoute, basePath) }}
+                    {{ m.navlink('docs/actions', 'Actions', currentRoute, basePath) }}
+                    {{ m.navlink('docs/views', 'Views', currentRoute, basePath) }}
+                    {{ m.navlink('docs/scopes', 'Scopes', currentRoute, basePath) }}
+                    {{ m.navlink('docs/components', 'Components', currentRoute, basePath) }}
+                    {{ m.navlink('docs/broadcasting', 'Broadcasting', currentRoute, basePath) }}
+                    {{ m.navlink('docs/lifecycle', 'Lifecycle', currentRoute, basePath) }}
+                    {{ m.navlink('docs/twig', 'Templates', currentRoute, basePath) }}
+                    {{ m.navlink('docs/deployment', 'Deployment', currentRoute, basePath) }}
+                    {{ m.navlink('docs/design', 'Design decisions', currentRoute, basePath) }}
+                    {{ m.navlink('docs/api', 'API reference', currentRoute, basePath) }}
+                    {{ m.navlink('docs/comparisons', 'vs other frameworks', currentRoute, basePath) }}
+                    {{ m.navlink('docs/faq', 'Common pitfalls', currentRoute, basePath) }}
+                </ul>
+            </nav>
+        </details>
         {% block content %}{% endblock %}
     </main>
 </div>

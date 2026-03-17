@@ -52,6 +52,23 @@
     </aside>
 
     <main class="docs-content" id="content">
+        <details class="mobile-subnav">
+            <summary>Examples menu</summary>
+            <nav class="sidebar-nav">
+                <ul role="list">
+                    {{ m.navlink('examples/counter', '⚡ Counter', currentRoute, basePath) }}
+                    {{ m.navlink('examples/greeter', '👋 Greeter', currentRoute, basePath) }}
+                    {{ m.navlink('examples/todo', '✓ Todo List', currentRoute, basePath) }}
+                    {{ m.navlink('examples/components', '🧩 Components', currentRoute, basePath) }}
+                    {{ m.navlink('examples/path-params', 'Path Parameters', currentRoute, basePath) }}
+                    {{ m.navlink('examples/client-monitor', '👁️ Client Monitor', currentRoute, basePath) }}
+                    {{ m.navlink('examples/stock-ticker', '📈 Stock Ticker', currentRoute, basePath) }}
+                    {{ m.navlink('examples/chat-room', '💬 Chat Room', currentRoute, basePath) }}
+                    {{ m.navlink('examples/game-of-life', '🎮 Game of Life', currentRoute, basePath) }}
+                    {{ m.navlink('examples/all-scopes', '📊 All Scopes', currentRoute, basePath) }}
+                </ul>
+            </nav>
+        </details>
         {% block content %}{% endblock %}
     </main>
 
