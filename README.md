@@ -344,130 +344,43 @@ php-via fundamentally relies on:
 
 ## Examples
 
-**[🎮 Try Live Examples](https://via.zweiundeins.gmbh)** - Interactive demos running in production
+**[🎮 Try Live Examples](https://via.zweiundeins.gmbh/examples)** — Interactive demos running inside the website
 
-Check the `examples/` directory for more examples:
+All examples are consolidated into the website (`website/app.php`) and available at `/examples/{name}`:
 
-- `counter_basic.php` - Simple counter with reactive signals
-- `counter.php` - Counter with step control and components
-- `greeter.php` - Form handling with multiple inputs
-- `path_params.php` - Dynamic path parameters demonstration
-- `components.php` - Reusable component patterns
-- `todo.php` - Todo list (multiplayer)
-- `game_of_life.php` - Conway's Game of Life with real-time updates (multiplayer)
-- `global_notifications.php` - Global scope notification system
-- `stock_ticker.php` - Real-time stock ticker with custom scopes and Apache ECharts
-- `chat_room.php` - Multi-room chat application
-- `all_scopes.php` - Demonstrates all scope types in one example
-- `client_monitor.php` - Live client monitoring with server stats
+- Counter — Reactive signals with step control
+- Greeter — Form handling with multiple inputs
+- Todo — Multiplayer shared todo list (ROUTE scope)
+- Components — Reusable component patterns
+- Path Params — Dynamic path parameters with auto-injection
+- Stock Ticker — Real-time prices with ECharts (timer + custom scopes)
+- Chat Room — Multi-room chat with typing indicators (SESSION scope)
+- Client Monitor — Live client dashboard with render stats
+- Game of Life — Multiplayer Conway's Game of Life (timer + ROUTE scope)
+- Global Notifications — GLOBAL scope notification system
+- All Scopes — TAB, ROUTE, and GLOBAL scopes side by side
+- DOOM — Server-side DOOM streaming (requires system deps)
+
+Example handler classes live in `website/src/Examples/`, source display files in `website/examples-source/`.
 
 ## Production Deployment
 
-This section covers running php-via examples behind a reverse proxy with systemd. The setup here matches the live demo at [via.zweiundeins.gmbh](https://via.zweiundeins.gmbh).
+This section covers running the php-via website (which includes all examples) behind a reverse proxy with systemd.
 
 ### Overview
 
-Each example is a long-running Swoole HTTP server on its own port. In production:
+The website is a single Swoole HTTP server (`website/app.php`) running on port 3100. All examples are accessible at `/examples/{name}` routes.
 
-- **systemd** manages each process independently with automatic restarts
-- **Caddy** terminates TLS, strips subpath prefixes, and proxies to the correct port
-- **Static assets** (`datastar.js`, `via.css`) are served directly by Caddy from disk
+In production:
+
+- **systemd** manages the single server process with automatic restarts
+- **Caddy** terminates TLS and proxies to port 3100
 
 ```
-Browser → Caddy (TLS, /counter/*) → strip prefix → Swoole :3001
-                 (TLS, /chat/*)   → strip prefix → Swoole :3006
-                 (/datastar.js)   → file_server (public/)
-                 (/via.css)       → file_server (public/)
+Browser → Caddy (TLS) → Swoole :3100 (website + all examples)
 ```
 
-### systemd Setup
-
-Two unit files are provided in `deploy/`:
-
-| File | Purpose |
-|---|---|
-| `via@.service` | Template unit — one instance per example |
-| `via.target` | Groups all instances; start/stop everything at once |
-
-```bash
-# Copy unit files
-sudo cp deploy/via@.service deploy/via.target /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# Enable the target and all examples (adjust list to match your examples/)
-sudo systemctl enable via.target \
-  via@index \
-  via@counter \
-  via@counter_basic \
-  via@greeter \
-  via@todo \
-  via@components \
-  via@chat_room \
-  via@game_of_life \
-  via@global_notifications \
-  via@stock_ticker \
-  via@client_monitor \
-  via@path_params \
-  via@all_scopes
-
-# Start everything
-sudo systemctl start via.target
-```
-
-Each service unit runs `/usr/bin/php /opt/php-via/examples/%i.php` with `USE_SUBPATHS=1` and a 128 MB memory ceiling. See `deploy/via@.service` for full crash logging and security settings.
-
-**Useful commands:**
-
-```bash
-systemctl status 'via@*'                        # status of all instances
-journalctl -u via@counter -f                    # tail one example's log
-journalctl -t via-crash --since today           # all crash events across all instances
-systemctl restart via@stock_ticker              # restart one example
-systemctl reset-failed via@counter && systemctl start via@counter  # recover after crash limit
-```
-
-### Reverse Proxy (Caddy)
-
-A ready-made Caddyfile is at `deploy/examples.caddy`. The key pattern for each example:
-
-```caddy
-handle /counter/* {
-    uri strip_prefix /counter
-    reverse_proxy 127.0.0.1:3001 {
-        header_up X-Base-Path /counter/
-        transport http {
-            read_timeout 0s   # required for SSE
-            write_timeout 0s
-        }
-    }
-}
-redir /counter /counter/
-```
-
-The `X-Base-Path` header tells php-via what prefix to use for internal URLs (`_sse`, `_session/close`, asset paths). It is picked up automatically from the first proxied request — no manual configuration needed in the example code.
-
-Static assets are served by Caddy directly from disk, bypassing PHP entirely:
-
-```caddy
-handle /datastar.js {
-    root * /opt/php-via/public
-    file_server
-}
-handle /via.css {
-    root * /opt/php-via/public
-    file_server
-}
-```
-
-### Base Path in Development
-
-When running locally through a sub-path proxy (e.g. nginx at `/php-via`), set the base path explicitly in your example:
-
-```php
-$config->withBasePath('/php-via/');
-```
-
-When running directly on a port (the common case), no configuration is needed — the base path defaults to `/`.
+See `deploy/` for systemd service files and Caddy configurations.
 
 ## Versioning
 
@@ -506,8 +419,8 @@ cd php-via
 # Install dependencies
 composer install
 
-# Run the counter example
-php examples/counter.php
+# Run the website (includes all examples)
+cd website && php app.php
 
 # Code quality tools
 composer phpstan        # Run static analysis
