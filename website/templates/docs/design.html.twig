@@ -1,0 +1,122 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Design decisions — php-via Docs{% endblock %}
+{% block content %}
+<article class="docs-content">
+    <h1>Design decisions</h1>
+    <p>
+        php-via makes three architectural bets that differentiate it from every alternative in the PHP ecosystem.
+        They're constraints as much as features — each one closes off certain use cases while enabling others.
+        This page explains the reasoning.
+    </p>
+
+    <h2 id="bandwidth">One connection. Brotli dictionary. Near-zero incremental bytes.</h2>
+    <p>
+        Every request/response framework — Livewire, htmx, Inertia — works by making <em>new</em> HTTP
+        requests when something changes. Each round-trip pays the full cost: TCP connection (or reuse
+        overhead), TLS resumption, HTTP headers, and a compressor that starts from a cold dictionary.
+        Even with HTTP/2 and keep-alive, each response is independently compressed.
+    </p>
+    <p>
+        php-via opens a <strong>single SSE connection per client and keeps it open for the entire page session</strong>.
+        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a>, a small JS runtime,
+        receives incremental DOM patches down that stream and morphs the page — not full re-renders,
+        not JSON state trees, just the exact changed fragment. When a reverse proxy like Caddy applies
+        Brotli compression to the SSE stream, the compressor operates on a sliding window over the
+        entire connection. Its dictionary grows richer over time: after a warm-up period, repeated
+        patterns (HTML structure, signal names, attribute values) are already in the dictionary.
+    </p>
+    <p>
+        In practice this means <strong>100× compression ratios are achievable</strong> on high-frequency
+        updates. A counter increment or a single changed boolean — something that would be hundreds of
+        bytes in a fresh Livewire response — becomes single-digit bytes on the wire after the first
+        few dozen updates. (The dictionary resets on SSE reconnect or page navigation, so 100× is a
+        steady-state number, not a guaranteed minimum.)
+    </p>
+    <p>
+        This matters most on <strong>slow or metered connections</strong>: mobile data, low-bandwidth
+        regions, satellite. Where a Livewire app is paying per-click HTTP overhead, a php-via app is
+        paying it once at connect time and then sending near-zero bytes per update for the rest of the
+        page session. The difference compounds on high-frequency UIs: live feeds, collaborative
+        dashboards, game boards, tickers that update every second.
+    </p>
+    <p>
+        The tradeoff is real: a persistent Swoole process is harder to operate than PHP-FPM.
+        The process must be managed as a long-running service, not a stateless CGI handler.
+        Swoole coroutines are lightweight (~8KB each), so holding thousands of open connections is
+        cheap — the real scaling constraint is the single-process shared memory model, not RAM per
+        connection. For teams already running PHP-FPM infrastructure who don't need real-time push,
+        the operational shift may not be worth it.
+    </p>
+
+    <h2 id="server-truth">The server is the source of truth. Always.</h2>
+    <p>
+        Most modern web frameworks treat the client as a peer: you send state to the browser, the
+        browser modifies it, you reconcile. React, Vue, Livewire with wire:model — all of these
+        involve a client-side copy of state that must be kept in sync with the server.
+    </p>
+    <p>
+        In php-via, <strong>the server owns the canonical value of every signal.</strong>
+        Datastar maintains a client-side store for display and two-way input binding, but it's a
+        transient cache — not the source of truth. When a user clicks a button or submits a form,
+        the action runs on the server, signals are mutated on the server, and the server pushes the
+        new DOM fragment. The client store is overwritten, not reconciled.
+    </p>
+    <p>
+        This eliminates an entire class of bugs: stale reads, optimistic update rollbacks, and cache
+        invalidation. There is no hydration step at all — the server sends ready-to-display HTML
+        fragments, not serialized state that the client must rehydrate. When users share a scope
+        (e.g. <code>Scope::ROUTE</code>), they always see exactly what the server says they should
+        see, with no client-side reconciliation logic to reason about.
+    </p>
+    <p>
+        The tradeoff: every interaction requires a server round-trip. Animations and gestures that need
+        sub-10ms response times are not a good fit. php-via is designed for UIs where correctness
+        matters more than perceived instantaneity — dashboards, collaborative tools, admin panels, data
+        entry, real-time feeds.
+    </p>
+    <p>
+        php-via is <strong>MPA-first</strong>: navigating between pages closes the SSE connection and
+        opens a new one. Each page gets its own context, signals, and Brotli dictionary. This keeps
+        the mental model simple — one page, one context — and the View Transition API can provide
+        SPA-like visual continuity between navigations without client-side routing.
+    </p>
+
+    <h2 id="scope-over-pubsub">Declarative scope over hand-wired pub/sub.</h2>
+    <p>
+        Building a multiplayer feature in a traditional stack means choosing a pub/sub transport
+        (Redis, Pusher, Ably, a WebSocket server), defining channel names, subscribing and unsubscribing
+        in the client, and writing glue code to translate server events into DOM mutations. It's at
+        least four moving parts even for the simplest case.
+    </p>
+    <p>
+        php-via replaces all of that with a single declaration:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->scope(Scope::ROUTE);     // every user on this URL shares signals
+$c->scope(Scope::SESSION);   // follows the user across their tabs
+$c->scope(Scope::GLOBAL);    // every connected client, every route
+$c->scope('room:lobby');     // a custom group you define
+{% endverbatim %}{% endcode %}
+    <p>
+        Changing one line changes who sees what. There's no channel subscription code in the browser,
+        no backend event bus to configure, no mapping between signal names and channel topics.
+        The framework infers the broadcast topology from the scope, handles subscribe/unsubscribe at
+        connect/disconnect time, and routes patches to the right clients automatically.
+    </p>
+    <p>
+        The tradeoff is that the scope system is currently single-process only — it uses in-process
+        PHP arrays shared across Swoole coroutines, not an external broker. Multi-server deployments require an external state layer
+        (not yet built). <a href="/docs/comparisons#datastar-ecosystem">Datapages with NATS</a>
+        is the right choice today if you need multi-instance horizontal scaling.
+    </p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/scopes">Scopes</a> — the full scope API and custom scope patterns</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to groups of clients</li>
+        <li><a href="/docs/comparisons">Comparisons</a> — how php-via positions against Livewire, htmx, Inertia, LiveView</li>
+        <li><a href="/docs/deployment">Deployment</a> — running Swoole behind Caddy with Brotli enabled</li>
+    </ul>
+</article>
+
+{% endblock %}

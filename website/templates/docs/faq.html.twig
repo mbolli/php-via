@@ -152,6 +152,67 @@ $c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpda
     </details>
 
     <details>
+        <summary><strong>PatchElementsNoTargetsFound on partial block rendering</strong></summary>
+        <p>
+            You use Twig block rendering to send only a fragment on updates
+            (e.g. <code>$c->render('page.html.twig', $data, 'content')</code>), but the browser
+            console shows <code>PatchElementsNoTargetsFound</code> and nothing updates.
+        </p>
+        <p><strong>Why:</strong> Datastar's merge-fragments mode looks at the outermost element's
+        <code>id</code> in the patch to find a matching DOM node. If you render a Twig block whose
+        first child has no <code>id</code>, Datastar can't locate a morph target. This commonly
+        happens when the block contains a wrapper div (e.g. <code>.page-header</code>) before the
+        actual content div.
+        </p>
+        <p><strong>Fix:</strong> Render a block whose outermost element carries the <code>id</code>
+        that Datastar can match. For example, if your template uses nested blocks:</p>
+        {% code 'twig' %}{% verbatim %}
+{# _wrapper.html.twig — the outer 'content' block has no id on its first child #}
+{% block content %}
+<div class="page-header">...</div>     {# no id — Datastar can't target this #}
+<div class="main">
+    <div id="list">                     {# this is what we actually want to morph #}
+        {% block inner %}{% endblock %}
+    </div>
+</div>
+{% endblock %}
+        {% endverbatim %}{% endcode %}
+        {% code 'php' %}{% verbatim %}
+// ❌ renders the outer 'content' block — starts with .page-header (no id)
+$c->view(fn (bool $isUpdate) => $c->render('page.html.twig', $data, $isUpdate ? 'content' : null));
+
+// ✅ renders just the 'inner' block — starts with <div id="list">
+$c->view(fn (bool $isUpdate) => $c->render('page.html.twig', $data, $isUpdate ? 'inner' : null));
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>Partial update replaces the entire page (duplicate <code>id="content"</code>)</strong></summary>
+        <p>
+            You render a block on update whose outermost element uses <code>id="content"</code>, but so
+            does the <code>&lt;main&gt;</code> wrapper in your shell template. After the first broadcast,
+            the entire page (header, source panel, layout) disappears and only the fragment remains.
+        </p>
+        <p><strong>Why:</strong> Datastar's merge-fragments mode looks for a DOM element matching the
+        root element's <code>id</code> in the patch. If your fragment and the shell both use
+        <code>id="content"</code>, Datastar replaces the outer <code>&lt;main&gt;</code> — wiping out
+        everything around the fragment.
+        </p>
+        <p><strong>Fix:</strong> Give the inner fragment a unique ID that doesn't collide with the shell:</p>
+        {% code 'twig' %}{% verbatim %}
+{# ❌ collides with <main id="content"> in the shell #}
+{% block demo %}
+<div id="content">...</div>
+{% endblock %}
+
+{# ✅ unique ID — only this div gets morphed #}
+{% block demo %}
+<div id="todo-list">...</div>
+{% endblock %}
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
         <summary><strong>Timer keeps firing after every client disconnects</strong></summary>
         <p>
             You set up a <code>$app->setInterval()</code> timer on server start that broadcasts to a route.

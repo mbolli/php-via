@@ -4,160 +4,239 @@
 <article class="docs-content">
     <h1>Comparisons</h1>
     <p>
-        How does php-via compare to other frameworks in the <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> ecosystem?
-        This page summarises the key trade-offs against two peers: <strong>Datapages</strong> (Go) and <strong>Stario</strong> (Python).
+        php-via is a PHP framework. The realistic question for a PHP developer is:
+        <em>when should I use this instead of Livewire, htmx, Inertia, or LiveView?</em>
+        This page answers that honestly — including where php-via falls short.
     </p>
 
-    <h2 id="datapages">php-via vs Datapages</h2>
+    <h2 id="feature-table">Feature comparison</h2>
+
     <p>
-        <a href="https://datapages.dev" target="_blank" rel="noopener">Datapages</a> (v0.2.1) is a Go + Templ + Datastar
-        <em>code-generation</em> framework. It parses your Go source and generates routing, SSE glue, auth, CSRF, and URL helpers.
+        <span class="partial">~</span> means partial support. Hover the markers for details.
     </p>
 
-    <table style="width:100%; border-collapse:collapse; font-size:var(--font-size-0); margin-block:var(--size-5);">
-        <thead>
-            <tr style="border-block-end:2px solid var(--border);">
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">Area</th>
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">Datapages</th>
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">php-via</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Approach</td>
-                <td style="padding:var(--size-2) var(--size-3);">Code generator — CLI parses Go source, outputs routing &amp; auth glue</td>
-                <td style="padding:var(--size-2) var(--size-3);">Runtime framework — call <code>$via-&gt;page()</code>, <code>$c-&gt;signal()</code> directly</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">State scoping</td>
-                <td style="padding:var(--size-2) var(--size-3);">Per-page / per-request only</td>
-                <td style="padding:var(--size-2) var(--size-3);"><strong>TAB / ROUTE / SESSION / GLOBAL + custom</strong> — built-in</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Auth / CSRF</td>
-                <td style="padding:var(--size-2) var(--size-3);">Built-in: HMAC-SHA256 tokens, pluggable session backends</td>
-                <td style="padding:var(--size-2) var(--size-3);">Not built-in</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Events</td>
-                <td style="padding:var(--size-2) var(--size-3);">Typed events + NATS broker — multi-instance friendly</td>
-                <td style="padding:var(--size-2) var(--size-3);">Scope-based broadcast — single-process only</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Tooling</td>
-                <td style="padding:var(--size-2) var(--size-3);">Full CLI: <code>init</code>, <code>gen</code>, <code>watch</code>, <code>lint</code></td>
-                <td style="padding:var(--size-2) var(--size-3);">None — just <code>php app.php</code></td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Components</td>
-                <td style="padding:var(--size-2) var(--size-3);">Struct embedding</td>
-                <td style="padding:var(--size-2) var(--size-3);"><code>$c-&gt;component()</code> — sub-contexts with isolated state &amp; signals</td>
-            </tr>
-            <tr>
-                <td style="padding:var(--size-2) var(--size-3);">Templating</td>
-                <td style="padding:var(--size-2) var(--size-3);">Templ (compiled, type-safe)</td>
-                <td style="padding:var(--size-2) var(--size-3);">Twig (familiar, flexible)</td>
-            </tr>
-        </tbody>
-    </table>
+    <div style="overflow-x: auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:var(--font-size-0); margin-block:var(--size-5);">
+            <thead>
+                <tr style="border-block-end:2px solid var(--border);">
+                    <th style="text-align:left; padding:var(--size-2) var(--size-3);">Feature</th>
+                    <th style="padding:var(--size-2) var(--size-3); text-align:center;">php-via</th>
+                    <th style="padding:var(--size-2) var(--size-3); text-align:center;">Livewire</th>
+                    <th style="padding:var(--size-2) var(--size-3); text-align:center;">htmx + Alpine</th>
+                    <th style="padding:var(--size-2) var(--size-3); text-align:center;">Inertia.js</th>
+                    <th style="padding:var(--size-2) var(--size-3); text-align:center;">LiveView</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Native real-time push</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-1"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-1">Requires Laravel Reverb + Echo for server push; native Livewire uses HTTP round-trips.</span></span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-2"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-2">SSE extension available but requires manual wiring.</span></span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Multiplayer / shared state</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Scoped state system</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-3"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-3">PubSub topics achieve similar results without a declarative scope system.</span></span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">No JS to author</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-4"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-4">Alpine.js is bundled; complex interactions may need JS hooks.</span></span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-5"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-5">JS hooks needed for some client-side interactions.</span></span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">No build step</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">File uploads</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Form validation</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-6"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-6">HTML5 constraint API only; no built-in server-side validation.</span></span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Auth / middleware</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span> <span class="coming-soon">coming soon</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Multi-server scaling</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">✗</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">✓</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Ecosystem &amp; community</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Early</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Large</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Medium</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Large</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Large</td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Framework required</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">No</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">Laravel</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="check">No</span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="has-tooltip" style="anchor-name:--ctip-7"><span class="partial">Any</span><span role="tooltip" class="tooltip" style="position-anchor:--ctip-7">Primarily targets Laravel but also supports Rails, Django, and Phoenix.</span></span></td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;"><span class="cross">Phoenix</span></td>
+                </tr>
+                <tr style="border-block-end:1px solid var(--border);">
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Language</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP + JS</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP + JS</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Elixir</td>
+                </tr>
+                <tr>
+                    <td style="padding:var(--size-2) var(--size-3); font-weight:var(--font-weight-6);">Runtime</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">Swoole</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP-FPM</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP-FPM</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">PHP-FPM</td>
+                    <td style="padding:var(--size-2) var(--size-3); text-align:center;">BEAM VM</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 
-    <p><strong>When to choose Datapages:</strong> you need CSRF protection, typed auth, pluggable session backends, or multi-instance deployment via NATS. Go's type system and generated code give you compile-time safety and a mature CLI workflow.</p>
-    <p><strong>When to choose php-via:</strong> you want to be productive in PHP immediately, need the scoped state system for real-time multiplayer features, and don't want a build step.</p>
-
-    <h2 id="stario">php-via vs Stario</h2>
+    <h2 id="bandwidth">One connection. Brotli dictionary. Near-zero incremental bytes.</h2>
     <p>
-        <a href="https://stario.dev" target="_blank" rel="noopener">Stario</a> (v2.0) is a Python 3.14+ async framework with Datastar integration.
-        It follows a Go-style stateless handler pattern with a rich response-writer API.
+        Every alternative in this table works by making a <em>new</em> HTTP request when something changes.
+        php-via keeps a single SSE connection open for the entire session and pushes incremental DOM
+        patches down it — not full re-renders, not state trees, just the changed fragment.
+        Because Brotli's sliding-window dictionary spans the whole session, patch compression improves
+        as the connection ages: <strong>100× compression ratios are achievable</strong> on
+        high-frequency updates. On slow or metered connections (mobile, satellite) that gap is
+        significant. The tradeoff is a persistent Swoole process instead of stateless PHP-FPM.
+    </p>
+    <p>
+        <a href="/docs/design#bandwidth">Full explanation in Design decisions →</a>
     </p>
 
-    <table style="width:100%; border-collapse:collapse; font-size:var(--font-size-0); margin-block:var(--size-5);">
-        <thead>
-            <tr style="border-block-end:2px solid var(--border);">
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">Area</th>
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">Stario</th>
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">php-via</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">State model</td>
-                <td style="padding:var(--size-2) var(--size-3);">Stateless handlers — read from <code>c</code>, write to <code>w</code></td>
-                <td style="padding:var(--size-2) var(--size-3);">Stateful contexts — live for the entire SSE connection</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">State scoping</td>
-                <td style="padding:var(--size-2) var(--size-3);">None — signals are per-request</td>
-                <td style="padding:var(--size-2) var(--size-3);"><strong>TAB / ROUTE / SESSION / GLOBAL + custom</strong></td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Response API</td>
-                <td style="padding:var(--size-2) var(--size-3);">Rich: <code>w.html()</code>, <code>w.json()</code>, <code>w.redirect()</code>, cookies, compression</td>
-                <td style="padding:var(--size-2) var(--size-3);">Higher-level: <code>$c-&gt;sync()</code>, <code>$c-&gt;view()</code>, <code>$c-&gt;execScript()</code></td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Routing</td>
-                <td style="padding:var(--size-2) var(--size-3);">Full HTTP methods, sub-routers, host routing, middleware</td>
-                <td style="padding:var(--size-2) var(--size-3);"><code>$via-&gt;page()</code> only — actions handle POST internally</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Disconnect</td>
-                <td style="padding:var(--size-2) var(--size-3);"><code>w.alive()</code> async iterator exits on disconnect</td>
-                <td style="padding:var(--size-2) var(--size-3);"><code>$c-&gt;onDisconnect(fn)</code> callback</td>
-            </tr>
-            <tr>
-                <td style="padding:var(--size-2) var(--size-3);">Templating</td>
-                <td style="padding:var(--size-2) var(--size-3);">Python functions composing HTML elements</td>
-                <td style="padding:var(--size-2) var(--size-3);">Twig template files</td>
-            </tr>
-        </tbody>
-    </table>
+    <h2 id="vs-livewire">vs Livewire</h2>
+    <p>
+        <a href="https://livewire.laravel.com" target="_blank" rel="noopener">Livewire</a> is the most direct PHP alternative.
+        It's mature, well-documented, and has a large ecosystem.
+    </p>
+    <p>
+        <strong>Choose Livewire when:</strong> you're in a Laravel project, need built-in form validation,
+        file uploads, auth scaffolding, or the safety net of a large community and years of production use.
+    </p>
+    <p>
+        <strong>Choose php-via when:</strong> you need real-time push without bolting on Reverb, or you
+        want multiplayer state synced across users without writing pub/sub infrastructure — and you're
+        comfortable with an early-stage library.
+    </p>
 
-    <p><strong>When to choose Stario:</strong> you work in Python, need full HTTP method routing, middleware, rich response control (cookies, redirects, compression), or built-in request tracing.</p>
-    <p><strong>When to choose php-via:</strong> you work in PHP, want the scoped state system for multiplayer features, and prefer Twig templates with a persistent context model.</p>
+    <h2 id="vs-htmx">vs htmx + Alpine</h2>
+    <p>
+        htmx + Alpine is not a framework — it's a composition of two libraries. It works with any PHP
+        backend and lets you stay on PHP-FPM.
+    </p>
+    <p>
+        <strong>Choose htmx + Alpine when:</strong> you want to add interactivity incrementally to an
+        existing app, need full control of the request/response cycle, or aren't comfortable running
+        a persistent Swoole process.
+    </p>
+    <p>
+        <strong>Choose php-via when:</strong> you want reactive state that live-updates without
+        request/response cycles, and need the scope system to broadcast changes across users.
+    </p>
 
-    <h2 id="summary">Summary table</h2>
-    <table style="width:100%; border-collapse:collapse; font-size:var(--font-size-0); margin-block:var(--size-5);">
-        <thead>
-            <tr style="border-block-end:2px solid var(--border);">
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">Advantage area</th>
-                <th style="text-align:left; padding:var(--size-2) var(--size-3);">Leader</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">State scoping (TAB/ROUTE/SESSION/GLOBAL)</td>
-                <td style="padding:var(--size-2) var(--size-3);"><strong>php-via</strong></td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Simplicity / onboarding</td>
-                <td style="padding:var(--size-2) var(--size-3);"><strong>php-via</strong></td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Component system (isolated sub-contexts)</td>
-                <td style="padding:var(--size-2) var(--size-3);"><strong>php-via</strong></td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Auth / CSRF / sessions</td>
-                <td style="padding:var(--size-2) var(--size-3);">Datapages</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Type safety</td>
-                <td style="padding:var(--size-2) var(--size-3);">Datapages (Go + Templ)</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Routing / middleware / HTTP</td>
-                <td style="padding:var(--size-2) var(--size-3);">Stario</td>
-            </tr>
-            <tr style="border-block-end:1px solid var(--border);">
-                <td style="padding:var(--size-2) var(--size-3);">Request tracing / observability</td>
-                <td style="padding:var(--size-2) var(--size-3);">Stario</td>
-            </tr>
-            <tr>
-                <td style="padding:var(--size-2) var(--size-3);">Multi-instance deployment</td>
-                <td style="padding:var(--size-2) var(--size-3);">Datapages (NATS)</td>
-            </tr>
-        </tbody>
-    </table>
+    <h2 id="vs-inertia">vs Inertia.js</h2>
+    <p>
+        <a href="https://inertiajs.com" target="_blank" rel="noopener">Inertia</a> is a protocol layer
+        that connects a server-side framework (typically Laravel) to a React, Vue, or Svelte frontend.
+        It requires a build step and JavaScript knowledge.
+    </p>
+    <p>
+        <strong>Choose Inertia when:</strong> your team already knows React/Vue/Svelte, you want
+        SPA-style navigation with a PHP backend, or you need the full power of a JS component ecosystem.
+    </p>
+    <p>
+        <strong>Choose php-via when:</strong> you want to stay in PHP entirely and push DOM patches
+        server-side — no client-side routing, no JavaScript build pipeline.
+    </p>
+
+    <h2 id="vs-liveview">vs Phoenix LiveView</h2>
+    <p>
+        <a href="https://hexdocs.pm/phoenix_live_view" target="_blank" rel="noopener">Phoenix LiveView</a>
+        is the clearest inspiration for php-via's architecture: persistent server-side state over a live
+        connection, with DOM diffing pushed to the client.
+    </p>
+    <p>
+        <strong>Choose LiveView when:</strong> you work in Elixir, need the fault tolerance and
+        distributed capabilities of the BEAM VM, or require production-grade multi-server deployment
+        with PubSub baked in.
+    </p>
+    <p>
+        <strong>Choose php-via when:</strong> you work in PHP. The scope system (<code>Scope::ROUTE</code>,
+        <code>Scope::SESSION</code>, <code>Scope::GLOBAL</code>) intentionally mirrors LiveView's
+        PubSub model with a simpler declarative API.
+    </p>
+
+    <h2 id="datastar-ecosystem">The Datastar ecosystem</h2>
+    <p>
+        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> is the underlying
+        SSE + DOM-morphing library that php-via builds on top of. Several other frameworks in other
+        languages use the same protocol:
+    </p>
+    <ul>
+        <li>
+            <strong><a href="https://datapages.dev" target="_blank" rel="noopener">Datapages</a></strong> (Go + Templ) —
+            a code-generation framework with built-in CSRF, typed auth, a full CLI, and NATS-based
+            multi-instance broadcasting. The better choice if you're working in Go or need
+            multi-server deployments today.
+        </li>
+        <li>
+            <strong><a href="https://stario.dev" target="_blank" rel="noopener">Stario</a></strong> (Python 3.14+) —
+            a stateless async handler framework with rich HTTP primitives (cookies, redirects,
+            compression), full HTTP method routing, and request tracing. The better choice if
+            you're working in Python or need fine-grained HTTP control.
+        </li>
+    </ul>
+    <p>
+        These are different languages targeting different teams. Comparing php-via to Datapages or
+        Stario is less useful than comparing it to Livewire — you don't switch languages because of
+        a framework comparison.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
