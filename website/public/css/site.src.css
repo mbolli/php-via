@@ -1908,7 +1908,13 @@ stock-chart {
 
 /* ─── Cross-document View Transitions ──────────────────── */
 
-/* Nav stays put — no animation */
+/* Suppress the default root cross-fade (we animate individual elements) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+/* Nav & footer stay put — no animation */
 ::view-transition-old(site-nav),
 ::view-transition-new(site-nav),
 ::view-transition-old(site-footer),
