@@ -2,6 +2,48 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.4.0] - 2026-03-18
+
+### Features
+
+- **Auto-block view rendering** — `view()` now accepts a `block:` named parameter. On SSE updates the
+  named Twig block is extracted and sent instead of the full page, eliminating the need to manually
+  thread `$isUpdate` through view callables.
+  ```php
+  // Before
+  $c->view(fn (bool $isUpdate) => $c->render('todo.html.twig', $data, $isUpdate ? 'demo' : null));
+
+  // After
+  $c->view(fn () => $c->render('todo.html.twig', $data), block: 'demo');
+  ```
+  The block content must have a root element with a unique `id` — Datastar uses it to find the morph
+  target in the DOM.
+
+- **`clientWritable` flag for scoped signals** — Scoped signals (ROUTE / SESSION / GLOBAL / custom)
+  are now **server-authoritative** by default: client-sent values are silently ignored, preventing
+  arbitrary clients from overwriting shared state. Pass `clientWritable: true` to opt a scoped signal
+  in to client writes:
+  ```php
+  // Server-authoritative (default) — client cannot overwrite
+  $counter = $c->signal(0, 'count', Scope::ROUTE);
+
+  // Collaborative — client may push values (e.g. data-bind on a shared input)
+  $note = $c->signal('', 'note', Scope::ROUTE, clientWritable: true);
+  ```
+  TAB-scoped signals (the default) are always client-writable and unaffected by this change.
+
+### Bug Fixes
+
+- Fixed examples (GameOfLife, ChatRoom, ClientMonitor) that were sending full-page HTML patches
+  instead of only the dynamic block. All three now use `block: 'demo'` and emit partial patches.
+
+### Website
+
+- Applied `block:` to all examples with a named update block (GameOfLife, ChatRoom, ClientMonitor,
+  Todo, Components)
+- Added **Signal Injection** and **Block Rendering** test suites (17 new tests)
+- Updated docs: views, FAQ, and API reference reflect `block:` convention and `clientWritable` flag
+
 ## [0.3.0] - 2026-03-17
 
 ### Features

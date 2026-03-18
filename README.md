@@ -185,7 +185,6 @@ $app->broadcast('room:lobby');      // custom scope
 | [Client Monitor](https://via.zweiundeins.gmbh/examples/client-monitor) | ROUTE | Live dashboard of connected clients with identicons |
 | [Game of Life](https://via.zweiundeins.gmbh/examples/game-of-life) | ROUTE | Multiplayer Conway's Game of Life with colored cells |
 | [All Scopes](https://via.zweiundeins.gmbh/examples/all-scopes) | Mixed | TAB, ROUTE, and GLOBAL scopes side by side |
-| [DOOM](https://via.zweiundeins.gmbh/examples/doom) | TAB | Server-side DOOM streamed to browser via SSE |
 
 ## Development
 
