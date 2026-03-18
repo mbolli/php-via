@@ -102,14 +102,22 @@ $app->log('debug', 'Action fired', $c);
     <h2 id="context">Context</h2>
     <p>One context per connected browser tab. Holds signals, actions, and view definition for that client.</p>
 
-    <h3 id="context-signal"><code>signal(mixed $initial, ?string $name = null, ?string $scope = null): Signal</code></h3>
+    <h3 id="context-signal"><code>signal(mixed $initial, ?string $name, ?string $scope, bool $autoBroadcast, bool $clientWritable)</code></h3>
     {% code 'php' %}{% verbatim %}
 $count  = $c->signal(0);                            // TAB scope, auto-named
 $count  = $c->signal(0, 'count');                   // named
 $shared = $c->signal(0, 'count', Scope::ROUTE);     // shared across route
 $pref   = $c->signal('light', 'theme', Scope::SESSION);
 $room   = $c->signal('', 'note', 'room:lobby');     // custom scope
+
+// Collaborative: allow clients to write to a scoped signal
+$input  = $c->signal('', 'note', Scope::ROUTE, clientWritable: true);
     {% endverbatim %}{% endcode %}
+    <p>
+        Scoped signals are <strong>server-authoritative</strong> by default — clients cannot overwrite
+        shared state. Use <code>clientWritable: true</code> for collaborative inputs where multiple
+        clients need to push values (e.g. shared text fields with <code>data-bind</code>).
+    </p>
 
     <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>
     {% code 'php' %}{% verbatim %}
@@ -121,11 +129,14 @@ $inc = $c->action(function (Context $c) use ($count): void {
 // In Twig: data-on:click="@post('/_action/increment')"
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-view"><code>view(callable|string $view, array $data = [], bool $cacheUpdates = true): void</code></h3>
+    <h3 id="context-view"><code>view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void</code></h3>
     {% code 'php' %}{% verbatim %}
 $c->view('counter.html.twig', ['count_val' => $count->int()]);
 
 $c->view(fn() => "<p>Count: {$count->int()}</p>");
+
+// Send only {% block demo %} on SSE updates (full template on initial load):
+$c->view(fn() => $c->render('todo.html.twig', $data), block: 'demo');
 
 // Disable caching for views that read external state:
 $c->view('presence.html.twig', ['n' => count($app->getClients())], cacheUpdates: false);

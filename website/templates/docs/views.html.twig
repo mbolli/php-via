@@ -25,6 +25,85 @@ $c->view(function () use ($count, $increment): string {
 });
 {% endverbatim %}{% endcode %}
 
+    <h2 id="partial-updates">Partial updates with <code>block:</code></h2>
+    <p>
+        By default, every SSE update re-renders the <em>entire</em> Twig template and sends it to
+        the browser. When your template uses Twig blocks, you can tell php-via to send only a named
+        block on updates — keeping the initial page load complete while making SSE patches smaller
+        and faster:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// On initial load: renders the full template (layout, nav, content)
+// On SSE updates:  renders only {% block demo %}
+$c->view(fn () => $c->render('todo.html.twig', [
+    'todos' => self::$todos,
+    'addTodo' => $addTodo,
+]), block: 'demo', cacheUpdates: false);
+{% endverbatim %}{% endcode %}
+    {% code 'twig' %}{% verbatim %}
+{# todo.html.twig #}
+{% extends 'base.html.twig' %}
+
+{% block content %}
+    <h1>My App</h1>
+    <p>Description and chrome that only renders on initial load.</p>
+
+    {% block demo %}
+    <div id="todo-list">
+        {# This block is all that gets sent on SSE updates #}
+        {# The root element needs a unique id so Datastar can find the morph target #}
+        {% for todo in todos %}
+            <li>{{ todo.text }}</li>
+        {% endfor %}
+    </div>
+    {% endblock %}
+{% endblock %}
+{% endverbatim %}{% endcode %}
+
+    <p>The <code>block:</code> parameter works with both string and callable views:</p>
+    {% code 'php' %}{% verbatim %}
+// String view — block auto-applied on updates
+$c->view('todo.html.twig', ['todos' => $todos], block: 'demo');
+
+// Callable view — same behavior, block auto-applied when $c->render() is called
+$c->view(fn () => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo');
+{% endverbatim %}{% endcode %}
+
+    <h3>When to use <code>block:</code></h3>
+    <ul>
+        <li><strong>Use it</strong> when your template has a named block wrapping the dynamic content
+            and the surrounding layout is static (header, description, nav).</li>
+        <li><strong>Give block content a root element with a unique <code>id</code></strong> —
+            Datastar uses the root element's <code>id</code> to find the morph target in the DOM.
+            Any unique ID works (e.g. <code>todo-list</code>, <code>game-grid</code>).</li>
+        <li><strong>Don't need it</strong> for signal-only updates (<code>syncSignals()</code>) — no
+            HTML is re-rendered at all.</li>
+        <li><strong>Don't need it</strong> for <a href="/docs/components">components</a> — each
+            component already patches only its own <code>&lt;div&gt;</code>.</li>
+    </ul>
+
+    <details>
+        <summary>Advanced: the <code>$isUpdate</code> parameter</summary>
+        <p>
+            View callables receive <code>(bool $isUpdate, string $basePath)</code> as arguments.
+            Most views don't need these — <code>block:</code> handles the common case. But for
+            advanced scenarios (e.g. returning an empty string when components handle their own patches),
+            you can use <code>$isUpdate</code> directly:
+        </p>
+        {% code 'php' %}{% verbatim %}
+// Page with components — skip page-level re-render entirely
+$c->view(function (bool $isUpdate) use ($c, $counter, $chat): string {
+    if ($isUpdate) {
+        return ''; // components handle their own patches
+    }
+    return $c->render('page.html.twig', [
+        'counter' => $counter(),
+        'chat' => $chat(),
+    ]);
+});
+{% endverbatim %}{% endcode %}
+    </details>
+
     <h2 id="update-cycle">How updates work</h2>
     <p>When a signal changes inside an action:</p>
     <ol>

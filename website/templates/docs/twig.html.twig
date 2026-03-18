@@ -182,6 +182,21 @@ $c->view('form.html.twig', ['name' => $nameSignal]);
 {% endblock %}
     {% endverbatim %}{% endcode %}
 
+    <h3 id="block-updates">Blocks as SSE update targets</h3>
+    <p>
+        When you name a Twig block, you can tell <code>$c-&gt;view()</code> to send <em>only</em> that
+        block on SSE updates while still rendering the full template on the initial page load:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->view(fn () => $c->render('page.html.twig', $data), block: 'demo');
+    {% endverbatim %}{% endcode %}
+    <p>
+        This keeps SSE payloads small — the outer layout, nav, and static content are sent once on
+        page load and never re-transmitted. Wrap the block content in
+        <code>&lt;div id="via-block-{name}"&gt;</code> so Datastar can target it.
+        See <a href="/docs/views#partial-updates">Views → Partial updates</a> for details.
+    </p>
+
     <h2 id="cache-updates">Disabling view caching</h2>
     <p>
         php-via caches view renders and skips re-rendering if signals haven't changed.

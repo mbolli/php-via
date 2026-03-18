@@ -112,15 +112,20 @@ $c->view(function () use ($votes, $twig) {
         Datastar morphs the entire body. Component patches target specific <code>#c-...</code> divs, but the
         page patch can arrive after and overwrite them with stale embedded HTML.
         </p>
-        <p><strong>Fix:</strong> Make the page-level view closure a no-op on update renders. Components own
-        their own patches:
-        </p>
+        <p><strong>Fix:</strong> If your page doesn't use components and the template has a named block
+        around the dynamic content, use <code>block:</code> to send only that block on updates:</p>
         {% code 'php' %}{% verbatim %}
-$c->view(function (bool $isUpdate) use ($twig, $data): string {
+// Preferred: send only the 'demo' block on SSE updates
+$c->view(fn() => $c->render('page.html.twig', $data), block: 'demo');
+        {% endverbatim %}{% endcode %}
+        <p>If the page <em>does</em> use components, make the page-level view a no-op on updates instead.
+        Components own their own patches:</p>
+        {% code 'php' %}{% verbatim %}
+$c->view(function (bool $isUpdate) use ($c, $data): string {
     if ($isUpdate) {
         return ''; // components handle their own patches
     }
-    return $twig->render('page.html.twig', $data);
+    return $c->render('page.html.twig', $data);
 });
         {% endverbatim %}{% endcode %}
     </details>
@@ -178,31 +183,24 @@ $c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpda
             (e.g. <code>$c->render('page.html.twig', $data, 'content')</code>), but the browser
             console shows <code>PatchElementsNoTargetsFound</code> and nothing updates.
         </p>
-        <p><strong>Why:</strong> Datastar's merge-fragments mode looks at the outermost element's
-        <code>id</code> in the patch to find a matching DOM node. If you render a Twig block whose
-        first child has no <code>id</code>, Datastar can't locate a morph target. This commonly
-        happens when the block contains a wrapper div (e.g. <code>.page-header</code>) before the
-        actual content div.
+        <p><strong>Why:</strong> Datastar's merge-fragments mode reads the <code>id</code> from the
+        root element in the fragment and looks for a matching element in the DOM. If the block content
+        has no root element with an <code>id</code>, there's nothing to match against.
         </p>
-        <p><strong>Fix:</strong> Render a block whose outermost element carries the <code>id</code>
-        that Datastar can match. For example, if your template uses nested blocks:</p>
+        <p><strong>Fix:</strong> Make sure block content has a single root element with a unique <code>id</code>:</p>
         {% code 'twig' %}{% verbatim %}
-{# _wrapper.html.twig — the outer 'content' block has no id on its first child #}
-{% block content %}
-<div class="page-header">...</div>     {# no id — Datastar can't target this #}
-<div class="main">
-    <div id="list">                     {# this is what we actually want to morph #}
-        {% block inner %}{% endblock %}
-    </div>
+{# template.html.twig #}
+{% block demo %}
+<div id="todo-list">
+    {# ✅ Datastar reads id="todo-list" from the fragment and morphs that element #}
+    {% for item in items %}
+        <li>{{ item.text }}</li>
+    {% endfor %}
 </div>
 {% endblock %}
         {% endverbatim %}{% endcode %}
         {% code 'php' %}{% verbatim %}
-// ❌ renders the outer 'content' block — starts with .page-header (no id)
-$c->view(fn (bool $isUpdate) => $c->render('page.html.twig', $data, $isUpdate ? 'content' : null));
-
-// ✅ renders just the 'inner' block — starts with <div id="list">
-$c->view(fn (bool $isUpdate) => $c->render('page.html.twig', $data, $isUpdate ? 'inner' : null));
+$c->view(fn () => $c->render('template.html.twig', $data), block: 'demo');
         {% endverbatim %}{% endcode %}
     </details>
 
@@ -218,14 +216,15 @@ $c->view(fn (bool $isUpdate) => $c->render('page.html.twig', $data, $isUpdate ? 
         <code>id="content"</code>, Datastar replaces the outer <code>&lt;main&gt;</code> — wiping out
         everything around the fragment.
         </p>
-        <p><strong>Fix:</strong> Give the inner fragment a unique ID that doesn't collide with the shell:</p>
+        <p><strong>Fix:</strong> Give the block's root element a unique ID that doesn't collide
+        with the shell:</p>
         {% code 'twig' %}{% verbatim %}
 {# ❌ collides with <main id="content"> in the shell #}
 {% block demo %}
 <div id="content">...</div>
 {% endblock %}
 
-{# ✅ unique ID — only this div gets morphed #}
+{# ✅ unique ID — Datastar morphs only this element #}
 {% block demo %}
 <div id="todo-list">...</div>
 {% endblock %}
