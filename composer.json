@@ -15,7 +15,8 @@
         "tomasvotruba/type-coverage": "^2.0",
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan-deprecation-rules": "^2.0",
-        "pestphp/pest": "^4.0"
+        "pestphp/pest": "^4.0",
+        "openswoole/ide-helper": "^22.1"
     },
     "license": "MIT",
     "autoload": {

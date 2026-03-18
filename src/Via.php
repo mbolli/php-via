@@ -298,8 +298,6 @@ class Via {
     /**
      * Get all contexts registered under a specific scope.
      *
-     * @internal
-     *
      * @return array<Context>
      */
     public function getContextsByScope(string $scope): array {

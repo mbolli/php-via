@@ -93,6 +93,8 @@ class PatchManager {
      * Uses a non-blocking pop so the SSE loop can sleep explicitly via
      * Coroutine::sleep(), which is the only reliable way to yield a coroutine
      * in OpenSwoole regardless of channel state (closed, empty, etc.).
+     *
+     * @return array<string, mixed>|null
      */
     public function getPatch(): ?array {
         if ($this->useArray) {

@@ -26,7 +26,6 @@ final class GameOfLifeExample
     private static array $sessionIds = [];
     private static bool $initialized = false;
     private static ?int $timerId = null;
-    private static ?Via $app = null;
 
     private static function init(): void
     {
@@ -111,7 +110,6 @@ final class GameOfLifeExample
     public static function register(Via $app): void
     {
         self::init();
-        self::$app = $app;
 
         $app->page('/examples/game-of-life', function (Context $c) use ($app): void {
             $contextId = $c->getId();

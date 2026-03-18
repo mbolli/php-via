@@ -13,7 +13,6 @@ use PhpVia\Website\Examples\ChatRoomExample;
 use PhpVia\Website\Examples\ClientMonitorExample;
 use PhpVia\Website\Examples\ComponentsExample;
 use PhpVia\Website\Examples\CounterExample;
-use PhpVia\Website\Examples\DoomExample;
 use PhpVia\Website\Examples\GameOfLifeExample;
 use PhpVia\Website\Examples\GreeterExample;
 use PhpVia\Website\Examples\PathParamsExample;
@@ -89,7 +88,6 @@ ClientMonitorExample::register($app);
 ClientMonitorExample::registerHooks($app);
 AllScopesExample::register($app);
 GameOfLifeExample::register($app);
-DoomExample::register($app);
 
 $app->onStart(function () use ($app): void {
     StockTickerExample::startTimer($app);

@@ -1,8 +1,18 @@
 parameters:
+  bootstrapFiles:
+    - phpstan-bootstrap.php
+    - website/vendor/autoload.php
+  dynamicConstantNames:
+    - SWOOLE_EVENT_READ
+    - SWOOLE_IPC_NONE
   level: 6
   paths:
-    - examples/
     - src/
+  ignoreErrors:
+    # OpenSwoole IDE-helper stub for Timer::clear() declares 0 required params,
+    # but the real OpenSwoole extension requires the timer ID argument.
+    - message: '#Timer::clear\(\)#'
+      identifier: arguments.count
   editorUrl: 'phpstorm://open?file=%%file%%&line=%%line%%'
   editorUrlTitle: '%%file%%:%%line%%'
   type_perfect:
