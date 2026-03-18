@@ -1,4 +1,4 @@
-# 🚀 php-via
+# php-via
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
 [![Total Downloads](https://img.shields.io/packagist/dt/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
@@ -6,24 +6,22 @@
 [![PHP Version](https://img.shields.io/packagist/php-v/mbolli/php-via.svg?style=flat-square)](https://packagist.org/packages/mbolli/php-via)
 [![CI](https://img.shields.io/github/actions/workflow/status/mbolli/php-via/ci.yml?branch=master&style=flat-square&label=CI)](https://github.com/mbolli/php-via/actions)
 [![PHPStan](https://img.shields.io/badge/PHPStan-level%206-brightgreen.svg?style=flat-square)](https://phpstan.org/)
+[![Docs](https://img.shields.io/badge/docs-via.zweiundeins.gmbh-blue?style=flat-square)](https://via.zweiundeins.gmbh)
 
-![php-via logo](https://raw.githubusercontent.com/mbolli/php-via/master/logo.png)
+<a href="https://via.zweiundeins.gmbh"><img src="https://raw.githubusercontent.com/mbolli/php-via/master/logo.png" alt="php-via"></a>
 
-Real-time engine for building reactive web applications in PHP with OpenSwoole.
+Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using [OpenSwoole](https://openswoole.com/) for async PHP, [Datastar](https://data-star.dev) (RC.8) for SSE + DOM morphing, and [Twig](https://twig.symfony.com/) for templating.
 
-Inspired by [go-via/via](https://github.com/go-via/via), this library brings the same reactive programming model to PHP using OpenSwoole's async capabilities. [Datastar](https://data-star.dev) (RC.8) acts as the glue between server and client, handling DOM morphing and SSE communication.
-
-**[🎮 Try Live Examples](https://via.zweiundeins.gmbh)** - See php-via in action with interactive demos
+**[Documentation & Live Examples](https://via.zweiundeins.gmbh)**
 
 ## Why php-via?
 
-- **Datastar-powered** - Reactive hypermedia framework handles client-side reactivity
-- **Twig templates** - Familiar, powerful templating with Twig
-- **No JavaScript** - Write server-side code only, Datastar handles the rest
-- **No build step** - No transpilation or bundling
-- **Full reactivity** - Real-time updates via SSE
-- **Single SSE stream** - Efficient communication (very efficient with Brotli)
-- **Pure PHP** - Leveraging OpenSwoole's coroutines
+- **No JavaScript to write** — Datastar handles client-side reactivity, SSE, and DOM morphing
+- **Twig templates** — familiar, powerful server-side templating
+- **No build step** — no transpilation, no bundling, no node_modules
+- **Real-time by default** — every page gets a live SSE connection
+- **Scoped state** — TAB, ROUTE, SESSION, GLOBAL, and custom scopes control who shares what
+- **Single SSE stream** — extremely efficient with Brotli compression
 
 ## Requirements
 
@@ -33,7 +31,7 @@ Inspired by [go-via/via](https://github.com/go-via/via), this library brings the
 
 ## Installation
 
-```bash
+```
 composer require mbolli/php-via
 ```
 
@@ -41,407 +39,201 @@ composer require mbolli/php-via
 
 ```php
 <?php
-
 require 'vendor/autoload.php';
 
 use Mbolli\PhpVia\Via;
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
 
 $config = new Config();
 $config->withTemplateDir(__DIR__ . '/templates');
-
 $app = new Via($config);
 
-$app->page('/', function (Context $c) {
-    $count = 0;
-    $step = $c->signal(1);
-    
-    $increment = $c->action(function () use (&$count, $step, $c): void {
-        $count += $step->int();
-        $c->sync();
-    });
-    
-    $c->view(function () use (&$count, $step, $increment, $c): string {
-        return $c->renderString('
-            <div id="counter"><!-- id is used to morph -->
-                <p>Count: {{ count }}</p>
-                <label>
-                    Step: 
-                    <input type="number" data-bind="{{ step.id }}">
-                </label>
-                <button data-on:click="@post(\'{{ increment.url() }}\')">
-                    Increment
-                </button>
-            </div>
-        ', [
-            'count' => $count,
-            'step' => $step,
-            'increment' => $increment
-        ]);
-    });
+$app->page('/', function (Context $c): void {
+    $count = $c->signal(0, 'count');
+    $step  = $c->signal(1, 'step');
+
+    $increment = $c->action(function () use ($count, $step, $c): void {
+        $count->setValue($count->int() + $step->int());
+        $c->syncSignals();
+    }, 'increment');
+
+    $c->view('counter.html.twig', [
+        'count'     => $count,
+        'step'      => $step,
+        'increment' => $increment,
+    ]);
 });
 
 $app->start();
 ```
 
-Run the server:
+**counter.html.twig:**
 
-```bash
-php counter.php
+```twig
+<div id="counter">
+    <p>Count: <span data-text="${{ count.id }}">{{ count.int }}</span></p>
+    <label>Step: <input type="number" data-bind="{{ step.id }}"></label>
+    <button data-on-click="@post('{{ increment.url }}')">Increment</button>
+</div>
 ```
 
-Then open your browser to `http://localhost:3000`
+```
+php app.php
+# → http://localhost:3000
+```
 
 ## Core Concepts
 
-### Via Application
+Full documentation at **[via.zweiundeins.gmbh/docs](https://via.zweiundeins.gmbh/docs)**
 
-The main application class that manages routing and the OpenSwoole HTTP server.
-
-```php
-use Mbolli\PhpVia\Config;
-
-$config = new Config();
-$config->withHost('0.0.0.0')
-    ->withPort(3000)
-    ->withDevMode(true)
-    ->withLogLevel('debug');
-
-$app = new Via($config);
-```
-
-### Context
-
-A Context represents a living connection between the server and browser. Each page gets its own context.
+### Signals — reactive state that syncs between server and client
 
 ```php
-$app->page('/dashboard', function (Context $c) {
-    // Define signals, actions, and views here
-});
+$name = $c->signal('Alice', 'name');
+$name->string();          // read
+$name->setValue('Bob');    // write → auto-pushes to browser
 ```
-
-### Path Parameters
-
-Routes can include dynamic path parameters using curly braces. Parameters are automatically injected into your callable by matching parameter names:
-
-```php
-// Automatic parameter injection - matched by name, not order
-$app->page('/blog/{year}/{month}/{slug}', function (Context $c, string $year, string $month, string $slug) {
-    // All parameters are automatically injected
-    echo "Blog post: $year/$month/$slug";
-});
-
-// Alternative: Manual parameter retrieval
-$app->page('/users/{username}', function (Context $c) {
-    $username = $c->getPathParam('username');
-    // Both methods work - choose your preference
-});
-```
-
-**How it works:**
-- Parameters are matched by **name** from your function signature
-- Order doesn't matter - `function($c, $slug, $year)` works the same
-- Missing parameters get their default value, or empty string if no default
-- The Context `$c` is always passed first
-- Both new (auto-injection) and old (`getPathParam()`) methods work
-
-### Signals
-
-Signals are reactive values that sync between server and client automatically using Datastar's data model.
-
-```php
-$name = $c->signal('Alice');
-
-// In your Twig template:
-<input type="text" data-bind="{{ name.id }}">
-<span data-text="${{ name.id }}"></span>
-
-// Access the value in PHP:
-$name->string()  // Get as string
-$name->int()     // Get as integer
-$name->bool()    // Get as boolean
-$name->float()   // Get as float
-```
-
-### Actions
-
-Actions are server-side functions triggered by client events via Datastar.
-
-```php
-$saveAction = $c->action(function () use ($c): void {
-    // Do something
-    $c->sync();  // Push updates to browser
-});
-
-// In your Twig template:
-<button data-on:click="@post('{{ saveAction.url }}')">Save</button>
-```
-
-### Views
-
-Views can use Twig templates (inline or from files) or plain PHP functions. php-via automatically registers a `@via` Twig namespace for accessing templates.
-
-**Inline Twig:**
-```php
-$c->view(function () use ($data, $c): string {
-    return $c->renderString('<h1>Hello, {{ name }}!</h1>', [
-        'name' => $data->name
-    ]);
-});
-```
-
-### Datastar Attributes
-
-php-via uses Datastar attributes for reactivity:
 
 ```twig
-{# Two-way data binding with signals - use the bind() Twig function #}
-<input type="text" data-bind="{{ nameSignal.id() }}">
-
-{# Display signal value (note the $ sign to access the signal) #}
-<span data-text="${{ nameSignal.id() }}"></span>
-
-{# Trigger actions on events - actions use @get() #}
-<button data-on:click="@get('{{ saveAction.url() }}')">Save</button>
-
-{# Actions with specific keys #}
-<input data-on:keydown="evt.key == 'Enter' && @get('{{ submitAction.url() }}')">
-
-{# Change events #}
-<select data-on:change="@get('{{ updateAction.url() }}')">...</select>
+<input data-bind="{{ name.id }}">
+<span data-text="${{ name.id }}">{{ name.string }}</span>
 ```
 
-See [Datastar documentation](https://data-star.dev/) for more attributes and patterns.
-
-### Scopes
-
-php-via automatically detects the **scope** of each page and optimizes rendering accordingly:
-
-**Global Scope** (app-wide state):
-- Pages using **only** global actions (no route actions, no signals)
-- State is shared across **ALL routes and users**
-- View is rendered once and cached globally (maximum performance)
-- Example: Notification system visible on every page
-
-**Route Scope** (shared state):
-- Pages using **only** route actions (no global actions, no signals)
-- State is shared across all users/tabs **on the same route**
-- View is rendered once per route and cached
-- Example: Game of Life with global board state
-
-**Custom Scope** (domain-specific state):
-- Define custom scopes for specific resources (e.g., `stock:NFLX`, `chat:room123`)
-- State is shared across all users/tabs accessing the same resource
-- Example: Stock ticker showing real-time data for a specific stock symbol
-
-**Tab Scope** (per-user state):
-- Pages using signals (personal state) or mixing scopes
-- Each user/tab has independent state
-- View renders fresh for each context
-- Example: User profile, shopping cart
+### Actions — server-side functions triggered by client events
 
 ```php
-// Global scope (cached app-wide):
-$app->page('/anywhere', function (Context $c) use ($app) {
-    $c->scope(Scope::GLOBAL);
-    $notify = $c->action(function (Context $c) use ($app): void {
-        $count = $app->globalState('notifications', 0);
-        $app->setGlobalState('notifications', $count + 1);
-        $app->broadcast(Scope::GLOBAL); // Updates ALL pages
-    }, 'notify');
-    // No signals, no route actions = Global scope
-});
-
-// Route scope (cached per route):
-$app->page('/game', function (Context $c) {
-    $c->scope(Scope::ROUTE);
-    $toggle = $c->action(function (Context $c): void {
-        GameState::toggle();
-        $c->broadcast();
-    }, 'toggle');
-    // No signals, no global actions = Route scope
-});
-
-// Tab scope (not cached):
-$app->page('/profile', function (Context $c) {
-    $name = $c->signal('Alice');
-    // Uses signals = Tab scope
-});
+$save = $c->action(function () use ($c): void {
+    $c->sync();
+}, 'save');
 ```
 
-The scope is detected automatically - no manual configuration needed!
+```twig
+<button data-on-click="@post('{{ save.url }}')">Save</button>
+```
 
-### Components
+### Scopes — control who shares state and receives broadcasts
 
-Components are reusable sub-contexts with their own state and actions:
+| Scope | Sharing | Use Case |
+|-------|---------|----------|
+| `Scope::TAB` | Isolated per tab (default) | Personal forms, settings |
+| `Scope::ROUTE` | All users on same route | Shared boards, multiplayer |
+| `Scope::SESSION` | All tabs in same session | Cross-tab state |
+| `Scope::GLOBAL` | All users everywhere | Notifications, announcements |
+| Custom (`"room:lobby"`) | All contexts in that scope | Chat rooms, game lobbies |
+
+### Views — Twig template files or inline strings
 
 ```php
-$counterComponent = function (Context $c) {
-    $count = 0;
-    
-    $increment = $c->action(function () use (&$count, $c): void {
-        $count++;
-        $c->sync();
-    });
-    
-    $c->view(function () use (&$count, $increment, $c): string {
-        return $c->renderString('
-            <div>
-                <p>Count: {{ count }}</p>
-                <button data-on:click="@post(\'{{ increment.url() }}\')">Increment</button>
-            </div>
-        ', [
-            'count' => $count,
-            'increment' => $increment
-        ]);
-    });
-};
+$c->view('dashboard.html.twig', ['user' => $user]);
+```
 
-$app->page('/', function (Context $c) use ($counterComponent) {
-    $counter1 = $c->component($counterComponent);
-    $counter2 = $c->component($counterComponent);
-    
-    $c->view(function () use ($counter1, $counter2): string {
-        return <<<HTML
-        <div>
-            <h1>Counter 1</h1>
-            {$counter1()}
-            <h1>Counter 2</h1>
-            {$counter2()}
-        </div>
-        HTML;
-    });
+### Path Parameters — auto-injected by name
+
+```php
+$app->page('/blog/{year}/{slug}', function (Context $c, string $year, string $slug): void {
+    // ...
 });
 ```
 
-## Architecture
+### Components — reusable sub-contexts with isolated state
 
-php-via fundamentally relies on:
+```php
+$a = $c->component($counterWidget, 'a');
+$b = $c->component($counterWidget, 'b');
+```
 
-1. **Long-lived event loop** - OpenSwoole provides coroutines and async I/O, similar to Go's goroutines
-2. **Reactive state on the server** - Signals track changes and sync with the browser
-3. **Server-side actions** - Client events trigger server-side PHP functions
-4. **UI defined on the server** - Views are rendered with PHP, not templates
-5. **Single SSE channel** - Efficient real-time communication via Server-Sent Events with **Brotli compression**
-   - Even large updates (e.g., 2500 divs in Game of Life) compress to ~0.1-0.2 KB per update
-   - Repetitive HTML structure compresses extremely well
+### Lifecycle Hooks
 
-### How it Works
+```php
+$c->onDisconnect(fn() => /* cleanup */);
+$c->setInterval(fn() => $c->sync(), 2000);  // auto-cleaned on disconnect
+$app->onClientConnect(fn(string $id) => /* ... */);
+```
 
-1. **Initial Page Load**: Server renders HTML and establishes an SSE connection
-2. **SSE Connection**: Browser maintains an open connection to receive live updates
-3. **User Interaction**: User clicks button → Browser sends signal values + action ID
-4. **Action Execution**: Server executes the action with current signal values
-5. **Sync Changes**: Server pushes HTML patches and signal updates via SSE
-6. **DOM Merge**: Datastar merges the patches into the DOM reactively
+### Broadcasting — push updates to other connected clients
 
-### Technology Stack
+```php
+$c->broadcast();                    // same scope
+$app->broadcast(Scope::GLOBAL);     // all contexts
+$app->broadcast('room:lobby');      // custom scope
+```
 
-- **OpenSwoole**: Provides async I/O, coroutines, and HTTP server
-- **Datastar**: The glue between server and client - handles SSE communication, DOM merging, and reactive data binding
-- **Twig**: Server-side templating with Datastar attributes
-- **Server-Sent Events**: Unidirectional stream from server to browser for real-time updates
+## How it Works
+
+```
+1. Browser requests page     →  Server renders HTML, opens SSE stream
+2. User clicks button        →  Datastar POSTs signal values + action ID
+3. Server executes action    →  Modifies signals / state
+4. Server pushes patches     →  HTML fragments + signal updates via SSE
+5. Datastar morphs DOM       →  UI updates without page reload
+```
 
 ## Examples
 
-**[🎮 Try Live Examples](https://via.zweiundeins.gmbh/examples)** — Interactive demos running inside the website
+**[Live Examples](https://via.zweiundeins.gmbh/examples)** — All run inside the website with source code
 
-All examples are consolidated into the website (`website/app.php`) and available at `/examples/{name}`:
-
-- Counter — Reactive signals with step control
-- Greeter — Form handling with multiple inputs
-- Todo — Multiplayer shared todo list (ROUTE scope)
-- Components — Reusable component patterns
-- Path Params — Dynamic path parameters with auto-injection
-- Stock Ticker — Real-time prices with ECharts (timer + custom scopes)
-- Chat Room — Multi-room chat with typing indicators (SESSION scope)
-- Client Monitor — Live client dashboard with render stats
-- Game of Life — Multiplayer Conway's Game of Life (timer + ROUTE scope)
-- Global Notifications — GLOBAL scope notification system
-- All Scopes — TAB, ROUTE, and GLOBAL scopes side by side
-- DOOM — Server-side DOOM streaming (requires system deps)
-
-Example handler classes live in `website/src/Examples/`, source display files in `website/examples-source/`.
-
-## Production Deployment
-
-This section covers running the php-via website (which includes all examples) behind a reverse proxy with systemd.
-
-### Overview
-
-The website is a single OpenSwoole HTTP server (`website/app.php`) running on port 3000. All examples are accessible at `/examples/{name}` routes.
-
-In production:
-
-- **systemd** manages the single server process with automatic restarts
-- **Caddy** terminates TLS and proxies to port 3000
-
-```
-Browser → Caddy (TLS) → OpenSwoole :3000 (website + all examples)
-```
-
-See `deploy/` for systemd service files and Caddy configurations.
-
-## Versioning
-
-php-via follows [Semantic Versioning 2.0.0](https://semver.org/). This means:
-
-- **Major version** (e.g., 2.0.0) - Breaking changes to the public API
-- **Minor version** (e.g., 1.1.0) - New features, backward compatible
-- **Patch version** (e.g., 1.0.1) - Bug fixes, backward compatible
-
-You can safely upgrade within the same major version without breaking your code.
-
-
-## Credits
-
-This library is inspired by and builds upon:
-
-- 🚀 [go-via/via](https://github.com/go-via/via) - The original Go implementation
-- 🌟 [Datastar](https://data-star.dev/) - The reactive hypermedia framework
-- 🐘 [OpenSwoole](https://www.swoole.co.uk/) - PHP async/coroutine framework
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit pull requests or open issues.
+| Example | Scope | Description |
+|---------|-------|-------------|
+| [Counter](https://via.zweiundeins.gmbh/examples/counter) | TAB | Reactive signals with configurable step and data-bind |
+| [Greeter](https://via.zweiundeins.gmbh/examples/greeter) | TAB | Form inputs and multiple actions |
+| [Todo](https://via.zweiundeins.gmbh/examples/todo) | ROUTE | Multiplayer shared todo list |
+| [Components](https://via.zweiundeins.gmbh/examples/components) | TAB | Three independent counters as isolated components |
+| [Path Params](https://via.zweiundeins.gmbh/examples/path-params) | TAB | Dynamic routing with auto-injected parameters |
+| [Stock Ticker](https://via.zweiundeins.gmbh/examples/stock-ticker) | Custom | Real-time prices with ECharts, timers, per-stock scopes |
+| [Chat Room](https://via.zweiundeins.gmbh/examples/chat-room) | Custom | Multi-room chat with typing indicators and session usernames |
+| [Client Monitor](https://via.zweiundeins.gmbh/examples/client-monitor) | ROUTE | Live dashboard of connected clients with identicons |
+| [Game of Life](https://via.zweiundeins.gmbh/examples/game-of-life) | ROUTE | Multiplayer Conway's Game of Life with colored cells |
+| [All Scopes](https://via.zweiundeins.gmbh/examples/all-scopes) | Mixed | TAB, ROUTE, and GLOBAL scopes side by side |
+| [DOOM](https://via.zweiundeins.gmbh/examples/doom) | TAB | Server-side DOOM streamed to browser via SSE |
 
 ## Development
 
-```bash
-# Clone the repository
+```
 git clone https://github.com/mbolli/php-via.git
-cd php-via
+cd php-via && composer install
 
-# Install dependencies
-composer install
+cd website && php app.php    # run website + examples on :3000
 
-# Run the website (includes all examples)
-cd website && php app.php
+vendor/bin/pest              # 85 tests, 240 assertions
+composer phpstan             # PHPStan level 6
+composer cs-fix              # code style
+```
 
-# Code quality tools
-composer phpstan        # Run static analysis
-composer cs-fix         # Fix code style
+## Deployment
+
+Single OpenSwoole process behind a reverse proxy. See [deploy/](deploy/) for systemd + Caddy configs.
+
+```
+Browser → Caddy (TLS + Brotli) → OpenSwoole :3000
 ```
 
 ## Roadmap
 
-- [x] Core Via class with routing
-- [x] Context management
-- [x] Reactive signals
-- [x] Action triggers
-- [x] SSE support
-- [x] Path parameters with auto-injection
-- [x] Automatic scope detection and caching
-- [x] Custom scopes (resource-specific state)
-- [x] Component system
-- [x] Testing suite (46+ comprehensive tests)
-- [x] HEAD method support
-- [ ] Session management
-- [ ] More examples and documentation
-- [ ] Documentation site
+- [x] Core — Via, Context, Signals, Actions, SSE, Twig
+- [x] Scopes — TAB, ROUTE, SESSION, GLOBAL + custom with wildcards
+- [x] Path parameters with reflection-based auto-injection
+- [x] Components with isolated sub-contexts
+- [x] View caching per scope
+- [x] Broadcasting with scope-based targeting
+- [x] Lifecycle hooks — `onDisconnect`, `onCleanup`, `setInterval`
+- [x] App hooks — `onClientConnect`, `onClientDisconnect`, `onStart`, `onShutdown`
+- [x] Global state, per-context shell/head/foot overrides
+- [x] 85 tests (Pest), PHPStan level 6, PHP-CS-Fixer
+- [x] 11 examples + docs website
+- [x] Production deployment (systemd + Caddy)
+- [ ] Session management (persistent across reconnects)
+- [ ] Middleware system
+- [ ] Route groups
+- [ ] Form validation helpers
 
-## Stay Reactive! ⚡
+## Credits
+
+- [Datastar](https://data-star.dev/) — SSE + DOM morphing
+- [OpenSwoole](https://openswoole.com/) — Async PHP
+- [Twig](https://twig.symfony.com/) — Templating
+- [go-via/via](https://github.com/go-via/via) — Original Go inspiration
+
+## License
+
+MIT
