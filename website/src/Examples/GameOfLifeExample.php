@@ -181,7 +181,7 @@ final class GameOfLifeExample
                     'resetUrl' => $reset->url(),
                     'tapUrl' => $tapCell->url(),
                 ]);
-            });
+            }, block: 'demo');
         });
     }
 

@@ -135,7 +135,7 @@ final class DoomExample
                 $c->syncSignals();
             });
 
-            $c->view(fn (bool $isUpdate = false): string => $c->render('examples/doom.html.twig', [
+            $c->view(fn (): string => $c->render('examples/doom.html.twig', [
                 'title' => '🎮 DOOM',
                 'description' => 'Server-side DOOM streaming via SSE. The game runs entirely on the server.',
                 'summary' => [
@@ -159,7 +159,7 @@ final class DoomExample
                 'stopGame' => $stopGame,
                 'keyDown' => $keyDown,
                 'keyUp' => $keyUp,
-            ], $isUpdate ? 'content' : null));
+            ]), block: 'content');
         });
     }
 }

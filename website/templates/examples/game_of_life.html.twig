@@ -2,21 +2,23 @@
 
 {% block demo %}
 {# via:cut #}
-<p class="gol-hint">
-    Click cells to draw patterns. Multiple users can draw simultaneously! 👥 {{ clientCount }} connected
-</p>
+<div id="game-grid">
+    <p class="gol-hint">
+        Click cells to draw patterns. Multiple users can draw simultaneously! 👥 {{ clientCount }} connected
+    </p>
 
-<p class="gol-generation">
-    Generation: {{ generation }}
-</p>
+    <p class="gol-generation">
+        Generation: {{ generation }}
+    </p>
 
-<div class="flex gap-1 mb-2">
-    <button data-on:click="@get('{{ toggleUrl }}')">{{ runningEmoji }} {{ runningText }}</button>
-    <button class="secondary" data-on:click="@get('{{ resetUrl }}')">🔄 Reset</button>
-</div>
+    <div class="flex gap-1 mb-2">
+        <button data-on:click="@get('{{ toggleUrl }}')">{{ runningEmoji }} {{ runningText }}</button>
+        <button class="secondary" data-on:click="@get('{{ resetUrl }}')">🔄 Reset</button>
+    </div>
 
-<div class="gol-board" data-on:pointerdown="@get('{{ tapUrl }}?id=' + event.target.dataset.id)">
-    {{ tiles | raw }}
+    <div class="gol-board" data-on:pointerdown="@get('{{ tapUrl }}?id=' + event.target.dataset.id)">
+        {{ tiles | raw }}
+    </div>
 </div>
 {# via:cut #}
 {% endblock %}

@@ -2,6 +2,7 @@
 
 {% block demo %}
 {# via:cut #}
+<div id="chat-room">
 <div class="card">
     <div class="chat-header">
         You are: <strong class="text-brand">{{ username }}</strong>
@@ -60,5 +61,6 @@ const observer = new MutationObserver(() => { messagesDiv.scrollTop = messagesDi
 observer.observe(messagesDiv, { childList: true, subtree: true });
 messagesDiv.scrollTop = messagesDiv.scrollHeight;
 </script>
+</div>
 {# via:cut #}
 {% endblock %}

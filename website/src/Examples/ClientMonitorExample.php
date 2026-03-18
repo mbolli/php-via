@@ -55,7 +55,7 @@ final class ClientMonitorExample
                     'clientCount' => $clientCount,
                     'clientsHtml' => $clientsHtml,
                 ]);
-            });
+            }, block: 'demo');
         });
     }
 

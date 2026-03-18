@@ -56,7 +56,7 @@ final class TodoExample
                 $app->broadcast(Scope::ROUTE);
             }, 'toggleTodo');
 
-            $c->view(fn (bool $isUpdate = false): string => $c->render('examples/todo.html.twig', [
+            $c->view(fn (): string => $c->render('examples/todo.html.twig', [
                 'title' => '✓ Todo List',
                 'description' => 'Multiplayer todo app. One shared list for all connected clients — ROUTE scope.',
                 'summary' => [
@@ -74,7 +74,7 @@ final class TodoExample
                 'addTodo' => $addTodo,
                 'deleteTodo' => $deleteTodo,
                 'toggleTodo' => $toggleTodo,
-            ], $isUpdate ? 'demo' : null), cacheUpdates: false);
+            ]), block: 'demo', cacheUpdates: false);
         });
     }
 }

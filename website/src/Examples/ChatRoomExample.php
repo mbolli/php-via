@@ -139,7 +139,7 @@ final class ChatRoomExample
                     'sendMessageUrl' => $sendMessage->url(),
                     'updateTypingUrl' => $updateTyping->url(),
                 ]);
-            });
+            }, block: 'demo');
 
             if ($wasNewUser) {
                 $app->broadcast($roomScope);
