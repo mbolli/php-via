@@ -67,13 +67,13 @@ $app->page('/', function (Context $c) use ($app): void {
         $app->broadcast(Scope::ROUTE);
     }, 'toggleTodo');
 
-    $c->view(fn (bool $isUpdate = false): string => $c->render('todo.html.twig', [
+    $c->view(fn (): string => $c->render('todo.html.twig', [
         'todos' => TodoState::$todos,
         'newTodo' => $newTodo,
         'addTodo' => $addTodo,
         'deleteTodo' => $deleteTodo,
         'toggleTodo' => $toggleTodo,
-    ], $isUpdate ? 'demo' : null), cacheUpdates: false);
+    ]), block: 'demo', cacheUpdates: false);
 });
 
 $app->start();
