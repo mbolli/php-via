@@ -13,6 +13,9 @@ parameters:
     # but the real OpenSwoole extension requires the timer ID argument.
     - message: '#Timer::clear\(\)#'
       identifier: arguments.count
+  excludePaths:
+    # DoomExample is work-in-progress and not registered in the website app.
+    - website/src/Examples/DoomExample.php
   editorUrl: 'phpstorm://open?file=%%file%%&line=%%line%%'
   editorUrlTitle: '%%file%%:%%line%%'
   type_perfect:
