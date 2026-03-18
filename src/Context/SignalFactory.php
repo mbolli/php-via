@@ -39,7 +39,7 @@ class SignalFactory {
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
      */
-    public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true): Signal {
+    public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, bool $clientWritable = false): Signal {
         $baseName = $name ?? 'signal';
 
         // If no explicit scope provided, inherit from context's primary scope
@@ -79,7 +79,7 @@ class SignalFactory {
             }
 
             // Create new scoped signal with Via reference for auto-broadcast
-            $signal = new Signal($signalId, $initialValue, $scope, $autoBroadcast, $this->app);
+            $signal = new Signal($signalId, $initialValue, $scope, $autoBroadcast, $clientWritable, $this->app);
 
             // Register in Via's scoped signals
             $this->app->registerScopedSignal($scope, $signal);
@@ -171,6 +171,11 @@ class SignalFactory {
     /**
      * Inject signals from the client.
      *
+     * TAB-scoped signals are always writable from the client.
+     * Scoped signals (ROUTE, SESSION, GLOBAL, custom) are server-authoritative
+     * by default — only signals created with clientWritable: true accept client
+     * values. This prevents arbitrary overwrite of shared state.
+     *
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
      */
     public function injectSignals(array $signalsData): void {
@@ -178,20 +183,20 @@ class SignalFactory {
         $flat = $this->nestedToFlat($signalsData);
 
         foreach ($flat as $signalId => $value) {
-            // First check TAB-scoped signals (context-specific)
+            // TAB-scoped signals: always accept client values
             if (isset($this->signals[$signalId])) {
                 $this->signals[$signalId]->setValue($value, false);
 
                 continue;
             }
 
-            // Then check scoped signals (shared across contexts in each scope)
+            // Scoped signals: only accept if explicitly marked clientWritable
             foreach ($this->context->getScopes() as $scope) {
-                $scopedSignals = $this->app->getScopedSignals($scope);
-                if (isset($scopedSignals[$signalId])) {
-                    $scopedSignals[$signalId]->setValue($value, false);
+                $signal = $this->app->getScopedSignal($scope, $signalId);
+                if ($signal !== null && $signal->isClientWritable()) {
+                    $signal->setValue($value, false);
 
-                    break; // Found and updated, stop searching
+                    break;
                 }
             }
         }

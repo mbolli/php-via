@@ -15,6 +15,7 @@ class Signal {
     private bool $changed = true;
     private ?string $scope = null;
     private bool $autoBroadcast = true;
+    private bool $clientWritable = false;
     private ?Via $app = null;
 
     public function __construct(
@@ -22,11 +23,13 @@ class Signal {
         mixed $initialValue,
         ?string $scope = null,
         bool $autoBroadcast = true,
+        bool $clientWritable = false,
         ?Via $app = null
     ) {
         $this->id = $id;
         $this->scope = $scope;
         $this->autoBroadcast = $autoBroadcast;
+        $this->clientWritable = $clientWritable;
         $this->app = $app;
         $this->setValue($initialValue, false); // Don't trigger broadcast on init
         $this->changed = true; // But mark as changed for initial sync
@@ -90,6 +93,15 @@ class Signal {
      */
     public function getScope(): ?string {
         return $this->scope;
+    }
+
+    /**
+     * Whether this signal accepts values from the client.
+     * TAB-scoped signals are always client-writable.
+     * Scoped signals default to server-authoritative; opt in with clientWritable: true.
+     */
+    public function isClientWritable(): bool {
+        return $this->clientWritable || !$this->isScoped();
     }
 
     /**

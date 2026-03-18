@@ -138,7 +138,7 @@ class PatchManager {
                     'selector' => '#' . $cssId,
                 ]);
             } else {
-                // For pages, update entire content
+                // For pages: Datastar matches by the root element's id in the fragment
                 $this->queuePatch([
                     'type' => 'elements',
                     'content' => $viewHtml,

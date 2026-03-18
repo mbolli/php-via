@@ -31,6 +31,12 @@ class Context {
     /** Whether to cache update renders (default true for performance) */
     private bool $cacheUpdates = true;
 
+    /** Twig block name to render on SSE updates instead of the full template */
+    private ?string $updateBlock = null;
+
+    /** Whether we are currently inside an SSE update render */
+    private bool $isUpdating = false;
+
     /** @var array<string> Explicit scopes for this context (can have multiple) */
     private array $scopes = [];
 
@@ -362,13 +368,15 @@ class Context {
      *
      * @param callable(bool, string): string|string $view         Function that returns HTML content (receives $isUpdate, $basePath), or Twig template name
      * @param array<string, mixed>                  $data         Optional data for Twig templates
-     * @param null|string                           $block        Optional block name to render only that block during updates
+     * @param null|string                           $block        Twig block name to render on SSE updates instead of the full template. On initial page load the full template is always rendered.
      * @param bool                                  $cacheUpdates Whether to cache update renders (default true). Set to false if view returns different content on updates (e.g., empty string).
      */
     public function view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void {
+        $this->updateBlock = $block;
+
         if (\is_string($view)) {
-            // Twig template name
-            $this->viewFn = fn () => $this->render($view, $data, $block);
+            // Twig template name — block is applied automatically by render() during updates
+            $this->viewFn = fn () => $this->render($view, $data);
         } elseif (\is_callable($view)) {
             // Callable function - don't wrap, let the callable handle its own structure
             $this->viewFn = $view;
@@ -398,13 +406,17 @@ class Context {
     /**
      * Render a Twig template with context data.
      *
+     * If a `block` was set via `view()` and this render is called during an SSE update
+     * without an explicit `$block` argument, the update block is applied automatically.
+     *
      * @param array<string, mixed> $data  Data to pass to the template
      * @param null|string          $block Optional block name to render only that block
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
+        $effectiveBlock = $block ?? ($this->isUpdating ? $this->updateBlock : null);
         $data += ['contextId' => $this->id, 'currentRoute' => $this->route];
 
-        return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
+        return $this->app->getViewRenderer()->renderTemplate($template, $data, $effectiveBlock);
     }
 
     /**
@@ -436,13 +448,19 @@ class Context {
             throw new \RuntimeException('View not defined');
         }
 
-        return $this->app->getViewRenderer()->renderView(
-            $this->viewFn,
-            $isUpdate,
-            $this->getPrimaryScope(),
-            $this,
-            $this->route
-        );
+        $this->isUpdating = $isUpdate;
+
+        try {
+            return $this->app->getViewRenderer()->renderView(
+                $this->viewFn,
+                $isUpdate,
+                $this->getPrimaryScope(),
+                $this,
+                $this->route
+            );
+        } finally {
+            $this->isUpdating = false;
+        }
     }
 
     /**
@@ -455,16 +473,17 @@ class Context {
      * Create a signal.
      *
      * @param mixed       $initialValue  The initial value of the signal
-     * @param null|string $name          Optional signal name (defaults to 'signal')
-     * @param null|string $scope         Optional scope for shared signal (null = TAB scope, no sharing)
-     * @param bool        $autoBroadcast Auto-broadcast changes for scoped signals (default: true)
+     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
+     * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
+     * @param bool        $clientWritable Whether clients can write to this scoped signal (default: false)
      *
      * TAB scope (scope=null): Signal is private to this context, not shared
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
      */
-    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true): Signal {
-        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast);
+    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, bool $clientWritable = false): Signal {
+        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
     }
 
     /**
