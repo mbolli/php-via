@@ -154,8 +154,8 @@ describe('Action URL Format', function (): void {
 
         $action = $context->action(function (): void {}, 'myAction');
 
-        // URL format is /_action/{actionId}
-        expect($action->url())->toMatch('#^/_action/[a-f0-9]+$#');
+        // URL format is /_action/{name}-{hexId} for TAB-scoped named actions
+        expect($action->url())->toMatch('#^/_action/myAction-[a-f0-9]+$#');
     });
 
     test('different actions have different URLs', function (): void {
