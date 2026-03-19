@@ -25,6 +25,7 @@
             title: '✓ Todo List',
             href: 'examples/todo',
             difficulty: 'Intermediate',
+            multiplayer: true,
             description: 'Multiplayer todo app. One shared list for all connected clients — ROUTE scope.',
         },
         {
@@ -34,33 +35,37 @@
             description: 'Three independent counters on one page. Each is an isolated component with its own signals.',
         },
         {
-            title: 'Path Parameters',
+            title: '🔀 Path Parameters',
             href: 'examples/path-params',
-            difficulty: 'Intermediate',
+            difficulty: 'Beginner',
             description: 'Dynamic routing with automatic type-cast parameter injection.',
         },
         {
             title: '👁️ Client Monitor',
             href: 'examples/client-monitor',
             difficulty: 'Intermediate',
+            multiplayer: true,
             description: 'Live dashboard of connected clients with identicons, IPs, and render statistics.',
         },
         {
             title: '📈 Stock Ticker',
             href: 'examples/stock-ticker',
             difficulty: 'Advanced',
+            multiplayer: true,
             description: 'Real-time stock prices with ECharts visualization. Timer-based route-scoped broadcasting.',
         },
         {
             title: '💬 Chat Room',
             href: 'examples/chat-room',
             difficulty: 'Advanced',
+            multiplayer: true,
             description: 'Multi-room chat with custom scopes, typing indicators, and session-based usernames.',
         },
         {
             title: '🎮 Game of Life',
             href: 'examples/game-of-life',
             difficulty: 'Advanced',
+            multiplayer: true,
             description: 'Multiplayer Conway\'s Game of Life. Everyone draws and evolves the same board.',
         },
         {
@@ -73,7 +78,8 @@
         {
             title: '🔭 All Scopes',
             href: 'examples/all-scopes',
-            difficulty: 'Advanced',
+            difficulty: 'Beginner',
+            multiplayer: true,
             description: 'See TAB, ROUTE, and GLOBAL scopes working together on one page.',
         },
     ] %}
@@ -85,6 +91,7 @@
             <div class="description">{{ example.description }}</div>
             <div class="meta">
                 <span class="badge badge-{{ example.difficulty | lower }}">{{ example.difficulty }}</span>
+                {% if example.multiplayer | default(false) %}<span class="badge badge-multiplayer">👥 Multiplayer</span>{% endif %}
             </div>
         </a>
         {% endfor %}

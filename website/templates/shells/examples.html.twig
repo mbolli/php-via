@@ -21,24 +21,25 @@
                 <ul role="list">
                     {{ m.navlink('examples/counter', '⚡ Counter', currentRoute, basePath) }}
                     {{ m.navlink('examples/greeter', '👋 Greeter', currentRoute, basePath) }}
+                    {{ m.navlink('examples/path-params', '🔀 Path Parameters', currentRoute, basePath) }}
+                    {{ m.navlink('examples/all-scopes', '🔭 All Scopes', currentRoute, basePath, '👥') }}
                 </ul>
             </section>
             <section class="sidebar-section">
                 <h3 class="sidebar-heading">Intermediate</h3>
                 <ul role="list">
-                    {{ m.navlink('examples/todo', '✓ Todo List', currentRoute, basePath) }}
+                    {{ m.navlink('examples/todo', '✓ Todo List', currentRoute, basePath, '👥') }}
                     {{ m.navlink('examples/components', '🧩 Components', currentRoute, basePath) }}
-                    {{ m.navlink('examples/path-params', 'Path Parameters', currentRoute, basePath) }}
-                    {{ m.navlink('examples/client-monitor', '👁️ Client Monitor', currentRoute, basePath) }}
+                    {{ m.navlink('examples/client-monitor', '👁️ Client Monitor', currentRoute, basePath, '👥') }}
                 </ul>
             </section>
             <section class="sidebar-section">
                 <h3 class="sidebar-heading">Advanced</h3>
                 <ul role="list">
-                    {{ m.navlink('examples/stock-ticker', '📈 Stock Ticker', currentRoute, basePath) }}
-                    {{ m.navlink('examples/chat-room', '💬 Chat Room', currentRoute, basePath) }}
-                    {{ m.navlink('examples/game-of-life', '🎮 Game of Life', currentRoute, basePath) }}
-                    {{ m.navlink('examples/all-scopes', '📊 All Scopes', currentRoute, basePath) }}
+                    {{ m.navlink('examples/stock-ticker', '📈 Stock Ticker', currentRoute, basePath, '👥') }}
+                    {{ m.navlink('examples/chat-room', '💬 Chat Room', currentRoute, basePath, '👥') }}
+                    {{ m.navlink('examples/game-of-life', '🎮 Game of Life', currentRoute, basePath, '👥') }}
+                    {{ m.navlink('examples/spreadsheet', '📊 Spreadsheet', currentRoute, basePath, '👥') }}
                 </ul>
             </section>
             <section class="sidebar-section">
@@ -58,9 +59,10 @@
                 <ul role="list">
                     {{ m.navlink('examples/counter', '⚡ Counter', currentRoute, basePath) }}
                     {{ m.navlink('examples/greeter', '👋 Greeter', currentRoute, basePath) }}
+                    {{ m.navlink('examples/path-params', '🔀 Path Parameters', currentRoute, basePath) }}
+                    {{ m.navlink('examples/all-scopes', '🔭 All Scopes', currentRoute, basePath) }}
                     {{ m.navlink('examples/todo', '✓ Todo List', currentRoute, basePath) }}
                     {{ m.navlink('examples/components', '🧩 Components', currentRoute, basePath) }}
-                    {{ m.navlink('examples/path-params', 'Path Parameters', currentRoute, basePath) }}
                     {{ m.navlink('examples/client-monitor', '👁️ Client Monitor', currentRoute, basePath) }}
                     {{ m.navlink('examples/stock-ticker', '📈 Stock Ticker', currentRoute, basePath) }}
                     {{ m.navlink('examples/chat-room', '💬 Chat Room', currentRoute, basePath) }}
