@@ -12,8 +12,6 @@ final class SpreadsheetExample {
     public const string SLUG = 'spreadsheet';
 
     private const string SCOPE = 'example:spreadsheet';
-    private const int VIEWPORT_ROWS = 20;
-    private const int VIEWPORT_COLS = 10;
 
     /** @var array<string, array{row: int, col: int, hue: int}> contextId => cursor */
     private static array $cursors = [];
@@ -63,6 +61,13 @@ final class SpreadsheetExample {
             $scrollDc = $c->signal(0, 'dc', Scope::TAB);
             $pasted = $c->signal('', 'pasted', Scope::TAB);
 
+            // Dynamic viewport dimensions (written by client ResizeObserver)
+            $viewportRows = $c->signal(20, 'vrows', Scope::TAB);
+            $viewportCols = $c->signal(10, 'vcols', Scope::TAB);
+
+            // Jump-to-coordinate input value
+            $jumpTarget = $c->signal('', 'jump', Scope::TAB);
+
             // Scope-level version counter: bumped on every cursor/edit change
             // so that broadcast() has a changed signal to deliver, triggering re-renders
             $version = $c->signal(0, 'v', self::SCOPE, autoBroadcast: false);
@@ -107,7 +112,7 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'focusCell');
 
-            $navigate = $c->action(function (Context $ctx) use ($app, $sessionId, $contextId, $viewRow, $viewCol, $focusRow, $focusCol, $editing, $editValue, $version, $key, $shift): void {
+            $navigate = $c->action(function (Context $ctx) use ($app, $sessionId, $contextId, $viewRow, $viewCol, $focusRow, $focusCol, $editing, $editValue, $version, $key, $shift, $viewportRows, $viewportCols): void {
                 $direction = $key->string();
                 $isShift = $shift->bool();
                 $fr = $focusRow->int();
@@ -134,8 +139,8 @@ final class SpreadsheetExample {
                     'ArrowRight' => ++$fc,
                     'Tab' => $isShift ? $fc = max(0, $fc - 1) : ++$fc,
                     'Enter' => $isShift ? $fr = max(0, $fr - 1) : ++$fr,
-                    'PageUp' => $fr = max(0, $fr - self::VIEWPORT_ROWS),
-                    'PageDown' => $fr += self::VIEWPORT_ROWS,
+                    'PageUp' => $fr = max(0, $fr - $viewportRows->int()),
+                    'PageDown' => $fr += $viewportRows->int(),
                     'Home' => [$fr, $fc] = [0, 0],
                     default => null,
                 };
@@ -160,13 +165,13 @@ final class SpreadsheetExample {
                 $vc = $viewCol->int();
                 if ($fr < $vr) {
                     $vr = $fr;
-                } elseif ($fr >= $vr + self::VIEWPORT_ROWS) {
-                    $vr = $fr - self::VIEWPORT_ROWS + 1;
+                } elseif ($fr >= $vr + $viewportRows->int()) {
+                    $vr = $fr - $viewportRows->int() + 1;
                 }
                 if ($fc < $vc) {
                     $vc = $fc;
-                } elseif ($fc >= $vc + self::VIEWPORT_COLS) {
-                    $vc = $fc - self::VIEWPORT_COLS + 1;
+                } elseif ($fc >= $vc + $viewportCols->int()) {
+                    $vc = $fc - $viewportCols->int() + 1;
                 }
                 $viewRow->setValue($vr, broadcast: false);
                 $viewCol->setValue($vc, broadcast: false);
@@ -254,6 +259,39 @@ final class SpreadsheetExample {
                 $ctx->execScript("navigator.clipboard.writeText({$tsvJson})");
             }, 'getCopyData');
 
+            $resize = $c->action(function (Context $ctx) use ($viewportRows, $viewportCols): void {
+                $viewportRows->setValue(max(3, min(100, $viewportRows->int())), broadcast: false);
+                $viewportCols->setValue(max(3, min(52, $viewportCols->int())), broadcast: false);
+                $ctx->sync();
+            }, 'resize');
+
+            $jumpTo = $c->action(function (Context $ctx) use ($app, $sessionId, $contextId, $viewRow, $viewCol, $focusRow, $focusCol, $jumpTarget, $version, $viewportRows, $viewportCols): void {
+                $target = trim($jumpTarget->string());
+                $jumpTarget->setValue('', broadcast: false);
+                if (!preg_match('/^([A-Za-z]+)(\d+)$/i', $target, $matches)) {
+                    $ctx->sync();
+
+                    return;
+                }
+                $col = self::colNameToIndex($matches[1]);
+                $row = max(0, (int) $matches[2] - 1);
+
+                $focusRow->setValue($row, broadcast: false);
+                $focusCol->setValue($col, broadcast: false);
+
+                $vr = max(0, $row - intdiv($viewportRows->int(), 2));
+                $vc = max(0, $col - intdiv($viewportCols->int(), 2));
+                $viewRow->setValue($vr, broadcast: false);
+                $viewCol->setValue($vc, broadcast: false);
+
+                self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
+                self::$selections[$contextId] = ['r1' => $row, 'c1' => $col, 'r2' => $row, 'c2' => $col];
+
+                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $ctx->sync();
+                $app->broadcast(self::SCOPE);
+            }, 'jumpTo');
+
             $clearCells = $c->action(function (Context $ctx) use ($app, $contextId, $focusRow, $focusCol, $editing, $version): void {
                 if ($editing->bool()) {
                     return;
@@ -301,6 +339,9 @@ final class SpreadsheetExample {
                 $scrollDr,
                 $scrollDc,
                 $pasted,
+                $viewportRows,
+                $viewportCols,
+                $jumpTarget,
                 $focusCell,
                 $navigate,
                 $startEdit,
@@ -309,6 +350,8 @@ final class SpreadsheetExample {
                 $paste,
                 $getCopyData,
                 $clearCells,
+                $resize,
+                $jumpTo,
                 $app,
             ): string {
                 $vr = $viewRow->int();
@@ -317,7 +360,10 @@ final class SpreadsheetExample {
                 $fc = $focusCol->int();
                 $isEditing = $editing->bool();
 
-                $cells = self::getCellRange($vr, $vc, self::VIEWPORT_ROWS, self::VIEWPORT_COLS);
+                $vpRows = $viewportRows->int();
+                $vpCols = $viewportCols->int();
+
+                $cells = self::getCellRange($vr, $vc, $vpRows, $vpCols);
 
                 // Build other cursors visible in viewport
                 $otherCursors = [];
@@ -327,8 +373,8 @@ final class SpreadsheetExample {
                     }
                     $cr = $cursor['row'];
                     $cc = $cursor['col'];
-                    if ($cr >= $vr && $cr < $vr + self::VIEWPORT_ROWS
-                        && $cc >= $vc && $cc < $vc + self::VIEWPORT_COLS) {
+                    if ($cr >= $vr && $cr < $vr + $vpRows
+                        && $cc >= $vc && $cc < $vc + $vpCols) {
                         $otherCursors[$cr . ':' . $cc] = $cursor['hue'];
                     }
                 }
@@ -371,8 +417,13 @@ final class SpreadsheetExample {
                     'cells' => $cells,
                     'otherCursors' => $otherCursors,
                     'selRange' => ['r1' => $sr1, 'c1' => $sc1, 'r2' => $sr2, 'c2' => $sc2],
-                    'viewportRows' => self::VIEWPORT_ROWS,
-                    'viewportCols' => self::VIEWPORT_COLS,
+                    'viewportRows' => $vpRows,
+                    'viewportCols' => $vpCols,
+                    'viewportRowsId' => $viewportRows->id(),
+                    'viewportColsId' => $viewportCols->id(),
+                    'resizeUrl' => $resize->url(),
+                    'jumpId' => $jumpTarget->id(),
+                    'jumpUrl' => $jumpTo->url(),
                     'focusCellUrl' => $focusCell->url(),
                     'navigateUrl' => $navigate->url(),
                     'startEditUrl' => $startEdit->url(),
@@ -381,7 +432,7 @@ final class SpreadsheetExample {
                     'pasteUrl' => $paste->url(),
                     'getCopyDataUrl' => $getCopyData->url(),
                     'clearCellsUrl' => $clearCells->url(),
-                    'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, self::VIEWPORT_COLS - 1)),
+                    'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
                     'clientCount' => \count($app->getClients()),
                 ]);
@@ -466,6 +517,17 @@ final class SpreadsheetExample {
             self::setCell($cell['row'], $cell['col'], $cell['value']);
         }
         self::db()->exec('COMMIT');
+    }
+
+    private static function colNameToIndex(string $col): int {
+        $col = strtoupper($col);
+        $result = 0;
+        $len = strlen($col);
+        for ($i = 0; $i < $len; ++$i) {
+            $result = $result * 26 + (ord($col[$i]) - 64);
+        }
+
+        return $result - 1; // 0-indexed
     }
 
     private static function colName(int $col): string {

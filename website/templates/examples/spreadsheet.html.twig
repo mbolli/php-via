@@ -4,7 +4,23 @@
 {# via:cut #}
 <div id="spreadsheet"
      tabindex="0"
+     data-init="
+        el.__lastRows = 0; el.__lastCols = 0;
+        new ResizeObserver(() => el.dispatchEvent(new CustomEvent('ss-resize'))).observe(el);
+     "
+     data-on:ss-resize__throttle.200ms="
+        const toolbarH = el.querySelector('.ss-toolbar')?.offsetHeight ?? 36;
+        const theadH = el.querySelector('.ss-grid thead')?.offsetHeight ?? 28;
+        const rows = Math.max(3, Math.min(100, Math.floor((el.clientHeight - toolbarH - theadH) / 28)));
+        const cols = Math.max(3, Math.min(52, Math.floor((el.clientWidth - 36) / 80)));
+        if (rows !== el.__lastRows || cols !== el.__lastCols) {
+            el.__lastRows = rows; el.__lastCols = cols;
+            ${{ viewportRowsId }} = rows; ${{ viewportColsId }} = cols;
+            @post('{{ resizeUrl }}');
+        }
+     "
      data-on:keydown__window="
+        if (evt.target.matches?.('.ss-jump-input')) return;
         ${{ keyId }} = evt.key; ${{ shiftId }} = evt.shiftKey;
         const k = evt.key, e = ${{ editingId }};
         if (e) {
@@ -40,6 +56,15 @@
         <div class="ss-cell-ref">
             {{ colNames[fc - vc] is defined ? colNames[fc - vc] : '' }}{{ fr + 1 }}
         </div>
+        <label class="ss-jump-label" for="ss-jump-input">Jump to</label>
+        <input type="text"
+               id="ss-jump-input"
+               class="ss-jump-input"
+               data-bind="{{ jumpId }}"
+               placeholder="B5"
+               data-on:keydown="if (evt.key === 'Enter') { evt.preventDefault(); @get('{{ jumpUrl }}') }"
+               data-on:blur="${{ jumpId }} !== '' && @get('{{ jumpUrl }}')"
+        >
         <div class="ss-users">
             👥 {{ clientCount }} connected
         </div>
@@ -106,6 +131,7 @@
         border: 1px solid var(--surface-3);
         border-radius: var(--radius-md) var(--radius-md) 0 0;
         font-size: var(--font-size-0);
+        flex-shrink: 0;
     }
     .ss-cell-ref {
         font-weight: 700;
@@ -115,13 +141,42 @@
         border: 1px solid var(--surface-3);
         border-radius: var(--radius-sm);
     }
+    .ss-jump-label {
+        font-size: var(--font-size-0);
+        color: var(--text-2);
+        white-space: nowrap;
+    }
+    #spreadsheet .ss-jump-input {
+        width: 10ch;
+        padding: var(--size-1) var(--size-2);
+        background: var(--surface-1);
+        border: 1px solid var(--surface-3);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-0);
+        font-family: inherit;
+        font-weight: 400;
+        color: inherit;
+        height: 100%;
+        box-sizing: border-box;
+        align-self: stretch;
+    }
+    #spreadsheet .ss-jump-input:focus {
+        outline: 2px solid var(--blue-5);
+        outline-offset: -1px;
+    }
     .ss-users { margin-inline-start: auto; color: var(--text-2); }
     .ss-pos { color: var(--text-3); font-size: 0.75rem; }
     .ss-grid-wrapper {
+        flex: 1;
+        min-height: 0;
         overflow: hidden;
         border: 1px solid var(--surface-3);
         border-top: 0;
         border-radius: 0 0 var(--radius-md) var(--radius-md);
+        background-image: repeating-linear-gradient(
+            to bottom, transparent 0, transparent 27px,
+            var(--surface-3) 27px, var(--surface-3) 28px
+        );
     }
     .ss-grid {
         border-collapse: collapse;
@@ -207,9 +262,29 @@
     #spreadsheet {
         outline: none;
         position: relative;
+        resize: both;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-width: 320px;
+        min-height: 160px;
+        max-width: 100%;
     }
     #spreadsheet:focus-visible {
         outline: none;
+    }
+    /* Override the shared side-by-side layout: source goes below the demo */
+    .example-split {
+        grid-template-columns: 1fr;
+    }
+    .example-source {
+        max-height: 60vh;
+    }
+    @starting-style {
+        tbody tr { opacity: 0; transform: translateY(-4px); }
+    }
+    tbody tr {
+        transition: opacity 150ms ease, transform 150ms ease;
     }
 </style>
 {% endblock %}
