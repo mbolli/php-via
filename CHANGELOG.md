@@ -2,6 +2,23 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.4.1] - 2026-03-19
+
+### Bug Fixes
+
+- **Timer leak via `Context::interval()`** — `interval()` called `Timer::tick()` directly, bypassing
+  `ContextLifecycle`. Timers were never recorded and therefore never cancelled on context cleanup.
+  After extended uptime, leaked timers accumulated
+  and eventually drove the process to 100% CPU. Fixed by delegating to `lifecycle->registerTimer()`
+  so every timer is tracked and cleared on cleanup, consistent with `setInterval()`.
+
+- **Callback accumulation in `scheduleContextCleanup()`** — the method was called on every SSE
+  disconnect, including reconnections, and each call unconditionally appended a new closure to
+  `ContextLifecycle::$cleanupCallbacks`. A tab reconnecting N times accumulated N closures, growing
+  without bound for the context's lifetime and contributing to memory pressure and GC load under
+  prolonged uptime. Fixed by tracking registration state in `$viaUnsetCallbackRegistered` and
+  skipping duplicate registrations.
+
 ## [0.4.0] - 2026-03-18
 
 ### Features

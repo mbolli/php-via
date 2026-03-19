@@ -34,7 +34,7 @@ use Twig\Environment;
  * Main application class that manages routing, contexts, and SSE connections.
  */
 class Via {
-    public const string VERSION = '0.2.0';
+    public const string VERSION = '0.4.1';
 
     // Legacy public properties for HTTP handlers (will be phased out)
     /** @var array<string, Context> */
