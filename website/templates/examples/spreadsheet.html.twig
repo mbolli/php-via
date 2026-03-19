@@ -1,0 +1,215 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div id="spreadsheet"
+     tabindex="0"
+     data-on:keydown__window="
+        ${{ keyId }} = evt.key; ${{ shiftId }} = evt.shiftKey;
+        const k = evt.key, e = ${{ editingId }};
+        if (e) {
+            if (['Tab','Enter','Escape'].includes(k)) {
+                @get('{{ navigateUrl }}'); evt.preventDefault();
+            }
+            return;
+        }
+        if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
+            @get('{{ navigateUrl }}'); evt.preventDefault();
+        } else if (['Tab','Enter','Escape','PageUp','PageDown','Home'].includes(k)) {
+            @get('{{ navigateUrl }}'); evt.preventDefault();
+        } else if (k === 'F2') {
+            @get('{{ startEditUrl }}'); evt.preventDefault();
+        } else if (k === 'c' && (evt.ctrlKey || evt.metaKey)) {
+            @get('{{ getCopyDataUrl }}');
+        } else if (k === 'Delete' || k === 'Backspace') {
+            @get('{{ clearCellsUrl }}'); evt.preventDefault();
+        } else if (k.length === 1 && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
+            @get('{{ startEditUrl }}'); evt.preventDefault();
+        }
+     "
+     data-on:keyup__window="${{ keyId }} = ''; ${{ shiftId }} = false"
+     data-on:paste__window="${{ pastedId }} = event.clipboardData.getData('text/plain'); ${{ pastedId }} && @post('{{ pasteUrl }}'); event.preventDefault();"
+     data-on:wheel__throttle.150ms="
+        ${{ drId }} = event.deltaY > 0 ? 4 : event.deltaY < 0 ? -4 : 0;
+        ${{ dcId }} = event.deltaX > 0 ? 4 : event.deltaX < 0 ? -4 : 0;
+        if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @get('{{ scrollUrl }}');
+     "
+     >
+
+    <div class="ss-toolbar">
+        <div class="ss-cell-ref">
+            {{ colNames[fc - vc] is defined ? colNames[fc - vc] : '' }}{{ fr + 1 }}
+        </div>
+        <div class="ss-users">
+            👥 {{ clientCount }} connected
+        </div>
+        <div class="ss-pos">
+            Row {{ fr + 1 }}, Col {{ colNames[fc - vc] is defined ? colNames[fc - vc] : (fc + 1) }}
+            · Viewing from {{ colNames[0] }}{{ vr + 1 }}
+        </div>
+    </div>
+
+    <div class="ss-grid-wrapper">
+        <table class="ss-grid">
+            <thead>
+                <tr>
+                    <th class="ss-row-header">&nbsp;</th>
+                    {% for colName in colNames %}
+                        <th class="ss-col-header{% if vc + loop.index0 >= selRange.c1 and vc + loop.index0 <= selRange.c2 and selRange.r1 >= 0 %} ss-sel-header{% endif %}">{{ colName }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for ri in 0..(viewportRows - 1) %}
+                    {% set absRow = vr + ri %}
+                    <tr>
+                        <th class="ss-row-header{% if absRow >= selRange.r1 and absRow <= selRange.r2 and selRange.c1 >= 0 %} ss-sel-header{% endif %}">{{ absRow + 1 }}</th>
+                        {% for ci in 0..(viewportCols - 1) %}
+                            {% set absCol = vc + ci %}
+                            {% set cellKey = absRow ~ ':' ~ absCol %}
+                            {% set isFocused = absRow == fr and absCol == fc %}
+                            {% set hasMultiSel = selRange.r1 >= 0 and (selRange.r1 != selRange.r2 or selRange.c1 != selRange.c2) %}
+                            {% set isSelected = hasMultiSel and absRow >= selRange.r1 and absRow <= selRange.r2 and absCol >= selRange.c1 and absCol <= selRange.c2 %}
+                            {% set otherHue = otherCursors[cellKey] is defined ? otherCursors[cellKey] : null %}
+                            <td class="ss-cell{% if isFocused %} ss-focused{% endif %}{% if isSelected %} ss-selected{% endif %}{% if otherHue is not null %} ss-other-cursor{% endif %}"
+                                {% if isFocused %}style="outline: 2px solid hsl({{ myHue }}, 70%, 50%); outline-offset: -1px;"{% endif %}
+                                {% if otherHue is not null and not isFocused %}style="box-shadow: inset 0 0 0 2px hsl({{ otherHue }}, 70%, 50%);"{% endif %}
+                                {% if not isFocused %}
+                                    data-on:click="${{ shiftId }} = evt.shiftKey; ${{ trId }} = {{ absRow }}; ${{ tcId }} = {{ absCol }}; @get('{{ focusCellUrl }}')"
+                                {% endif %}
+                                data-on:dblclick="@get('{{ startEditUrl }}')"
+                            >
+                                {% if isFocused and isEditing %}
+                                    <input type="text" data-init="el.focus()" id="ss-active-input" class="ss-edit-input" data-bind="{{ editValueId }}">
+                                {% else %}
+                                    <span class="ss-cell-text">{{ cells[cellKey] is defined ? cells[cellKey] : '' }}</span>
+                                {% endif %}
+                            </td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{# via:cut #}
+{% endblock %}
+
+{% block head %}
+<style>
+    .ss-toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--size-2);
+        padding: var(--size-1) var(--size-2);
+        background: var(--surface-2);
+        border: 1px solid var(--surface-3);
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+        font-size: var(--font-size-0);
+    }
+    .ss-cell-ref {
+        font-weight: 700;
+        min-width: 4ch;
+        padding: var(--size-1) var(--size-2);
+        background: var(--surface-1);
+        border: 1px solid var(--surface-3);
+        border-radius: var(--radius-sm);
+    }
+    .ss-users { margin-inline-start: auto; color: var(--text-2); }
+    .ss-pos { color: var(--text-3); font-size: 0.75rem; }
+    .ss-grid-wrapper {
+        overflow: hidden;
+        border: 1px solid var(--surface-3);
+        border-top: 0;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
+    }
+    .ss-grid {
+        border-collapse: collapse;
+        background: transparent;
+        width: 100%;
+        table-layout: fixed;
+        font-size: var(--font-size-0);
+        user-select: none;
+    }
+    .ss-grid th, .ss-grid td {
+        border: 1px solid var(--surface-3);
+        padding: 0;
+        height: 1.75rem;
+        text-align: left;
+        position: relative;
+    }
+    .ss-col-header, .ss-row-header {
+        background: var(--surface-2);
+        color: var(--text-2);
+        text-align: center !important;
+        font-weight: 500;
+        font-size: 0.7rem;
+        position: sticky;
+        z-index: 1;
+    }
+    .ss-col-header {
+        top: 0;
+        min-width: 80px;
+        width: 80px;
+    }
+    .ss-row-header {
+        left: 0;
+        width: 36px;
+        min-width: 36px;
+    }
+    .ss-sel-header {
+        background: var(--blue-2);
+        color: var(--blue-9);
+    }
+    .ss-cell {
+        cursor: cell;
+        background: transparent;
+        overflow: hidden;
+        white-space: nowrap;
+        max-width: 80px;
+    }
+    .ss-cell-text {
+        display: block;
+        padding: 0 var(--size-1);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.75rem;
+    }
+    .ss-focused {
+        z-index: 2;
+    }
+    .ss-selected {
+        background: var(--surface-1) !important;
+    }
+    .ss-other-cursor {
+        z-index: 1;
+    }
+    .ss-edit-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+        outline: none;
+        padding: 0 var(--size-1);
+        font-size: inherit;
+        font-family: inherit;
+        background: var(--surface-1);
+        z-index: 3;
+    }
+    .ss-paste-target {
+        position: absolute;
+        left: -9999px;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+    }
+    #spreadsheet {
+        outline: none;
+        position: relative;
+    }
+    #spreadsheet:focus-visible {
+        outline: none;
+    }
+</style>
+{% endblock %}
