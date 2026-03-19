@@ -525,9 +525,9 @@ final class SpreadsheetExample {
     private static function colNameToIndex(string $col): int {
         $col = strtoupper($col);
         $result = 0;
-        $len = strlen($col);
+        $len = \strlen($col);
         for ($i = 0; $i < $len; ++$i) {
-            $result = $result * 26 + (ord($col[$i]) - 64);
+            $result = $result * 26 + (\ord($col[$i]) - 64);
         }
 
         return $result - 1; // 0-indexed
