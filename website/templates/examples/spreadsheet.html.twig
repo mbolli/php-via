@@ -7,6 +7,7 @@
      data-init="
         el.__lastRows = 0; el.__lastCols = 0;
         new ResizeObserver(() => el.dispatchEvent(new CustomEvent('ss-resize'))).observe(el);
+        el.addEventListener('wheel', e => e.preventDefault(), { passive: false });
      "
      data-on:ss-resize__throttle.200ms="
         const toolbarH = el.querySelector('.ss-toolbar')?.offsetHeight ?? 36;
@@ -45,9 +46,9 @@
      "
      data-on:keyup__window="${{ keyId }} = ''; ${{ shiftId }} = false"
      data-on:paste__window="${{ pastedId }} = event.clipboardData.getData('text/plain'); ${{ pastedId }} && @post('{{ pasteUrl }}'); event.preventDefault();"
-     data-on:wheel__throttle.150ms="
-        ${{ drId }} = event.deltaY > 0 ? 4 : event.deltaY < 0 ? -4 : 0;
-        ${{ dcId }} = event.deltaX > 0 ? 4 : event.deltaX < 0 ? -4 : 0;
+     data-on:wheel__throttle.150ms__prevent="
+        ${{ drId }} = evt.deltaY > 0 ? 4 : evt.deltaY < 0 ? -4 : 0;
+        ${{ dcId }} = evt.deltaX > 0 ? 4 : evt.deltaX < 0 ? -4 : 0;
         if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @get('{{ scrollUrl }}');
      "
      >
@@ -242,6 +243,26 @@
         overflow: hidden;
         text-overflow: ellipsis;
         line-height: 1.75rem;
+        white-space: nowrap;
+    }
+    #spreadsheet .ss-cell:hover .ss-cell-text:not(:empty) {
+        position: absolute;
+        top: -1px;
+        left: -1px;
+        overflow: visible;
+        background: var(--surface-1);
+        border: 1px solid var(--blue-5);
+        border-radius: var(--radius-sm);
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+        z-index: 10;
+        width: max-content;
+        max-width: 400px;
+        padding-inline-end: var(--size-3);
+        line-height: 1.75rem;
+    }
+    #spreadsheet .ss-cell:hover:has(.ss-cell-text:not(:empty)) {
+        overflow: visible;
+        z-index: 10;
     }
     .ss-focused {
         z-index: 2;
