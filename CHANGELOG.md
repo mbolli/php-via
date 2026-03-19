@@ -2,6 +2,27 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.4.2] - 2026-03-19
+
+### Bug Fixes
+
+- **SSE reconnect race — UI hangs with HTTP 400 after a few minutes** — When a
+  client's SSE connection drops and immediately reconnects, two coroutines
+  briefly overlap. The old coroutine's exit path unconditionally called
+  `scheduleContextCleanup()`, firing a 5 s timer that destroyed the still-live
+  context. The new SSE loop then polled a closed channel indefinitely, and every
+  subsequent action returned 400. Fixed by tracking active SSE coroutine count
+  per context (`Via::$activeSseCount`) and only scheduling cleanup when the last
+  coroutine exits. A safety-valve reload is also sent if the context is found
+  destroyed mid-loop.
+
+### Improvements
+
+- **Debuggable TAB-scoped action IDs** — TAB-scoped actions now prefix their
+  random hex ID with the action name when one is provided (e.g.
+  `resize-3df6c542507ab8e1` instead of `3df6c542507ab8e1`), making request logs
+  readable without affecting uniqueness or security.
+
 ## [0.4.1] - 2026-03-19
 
 ### Bug Fixes
