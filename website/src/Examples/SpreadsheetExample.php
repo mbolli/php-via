@@ -239,7 +239,7 @@ final class SpreadsheetExample {
             }, 'paste');
 
             $getCopyData = $c->action(function (Context $ctx) use ($contextId): void {
-                $sel = self::$selections[$contextId];
+                $sel = self::$selections[$contextId] ?? ['r1' => 0, 'c1' => 0, 'r2' => 0, 'c2' => 0];
                 $r1 = min($sel['r1'], $sel['r2']);
                 $r2 = max($sel['r1'], $sel['r2']);
                 $c1 = min($sel['c1'], $sel['c2']);
@@ -296,7 +296,7 @@ final class SpreadsheetExample {
                 if ($editing->bool()) {
                     return;
                 }
-                $sel = self::$selections[$contextId];
+                $sel = self::$selections[$contextId] ?? ['r1' => $focusRow->int(), 'c1' => $focusCol->int(), 'r2' => $focusRow->int(), 'c2' => $focusCol->int()];
                 $r1 = min($sel['r1'], $sel['r2']);
                 $r2 = max($sel['r1'], $sel['r2']);
                 $c1 = min($sel['c1'], $sel['c2']);
@@ -380,7 +380,7 @@ final class SpreadsheetExample {
                 }
 
                 // Selection range (server-side, per context)
-                $sel = self::$selections[$contextId];
+                $sel = self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1];
                 $sr1 = min($sel['r1'], $sel['r2']);
                 $sr2 = max($sel['r1'], $sel['r2']);
                 $sc1 = min($sel['c1'], $sel['c2']);
@@ -418,6 +418,7 @@ final class SpreadsheetExample {
                     'pastedId' => $pasted->id(),
                     'cells' => $cells,
                     'otherCursors' => $otherCursors,
+                    'focusedCellValue' => $cells[$fr . ':' . $fc] ?? '',
                     'selRange' => ['r1' => $sr1, 'c1' => $sc1, 'r2' => $sr2, 'c2' => $sc2],
                     'viewportRows' => $vpRows,
                     'viewportCols' => $vpCols,

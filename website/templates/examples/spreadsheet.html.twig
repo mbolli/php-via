@@ -65,6 +65,7 @@
                data-on:keydown="if (evt.key === 'Enter') { evt.preventDefault(); @get('{{ jumpUrl }}') }"
                data-on:blur="${{ jumpId }} !== '' && @get('{{ jumpUrl }}')"
         >
+        <div class="ss-formula-bar">{{ focusedCellValue }}</div>
         <div class="ss-users">
             👥 {{ clientCount }} connected
         </div>
@@ -164,8 +165,24 @@
         outline: 2px solid var(--blue-5);
         outline-offset: -1px;
     }
-    .ss-users { margin-inline-start: auto; color: var(--text-2); }
+    .ss-users { color: var(--text-2); }
     .ss-pos { color: var(--text-3); font-size: 0.75rem; }
+    .ss-formula-bar {
+        flex: 1;
+        min-width: 0;
+        padding: 0 var(--size-2);
+        background: var(--surface-1);
+        border: 1px solid var(--surface-3);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-0);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-1);
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+    }
     .ss-grid-wrapper {
         flex: 1;
         min-height: 0;
@@ -173,10 +190,6 @@
         border: 1px solid var(--surface-3);
         border-top: 0;
         border-radius: 0 0 var(--radius-md) var(--radius-md);
-        background-image: repeating-linear-gradient(
-            to bottom, transparent 0, transparent 27px,
-            var(--surface-3) 27px, var(--surface-3) 28px
-        );
     }
     .ss-grid {
         border-collapse: collapse;
@@ -281,9 +294,9 @@
         max-height: 60vh;
     }
     @starting-style {
-        tbody tr { opacity: 0; transform: translateY(-4px); }
+        #spreadsheet tbody tr { opacity: 0; transform: translateY(-4px); }
     }
-    tbody tr {
+    #spreadsheet tbody tr {
         transition: opacity 150ms ease, transform 150ms ease;
     }
 </style>
