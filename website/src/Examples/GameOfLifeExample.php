@@ -9,8 +9,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
-final class GameOfLifeExample
-{
+final class GameOfLifeExample {
     public const string SLUG = 'game-of-life';
 
     private const int BOARD_SIZE = 50;
@@ -22,93 +21,13 @@ final class GameOfLifeExample
     private static bool $running = true;
     private static int $generation = 0;
     private static int $sessionCounter = 0;
+
     /** @var array<string, int> */
     private static array $sessionIds = [];
     private static bool $initialized = false;
     private static ?int $timerId = null;
 
-    private static function init(): void
-    {
-        if (self::$initialized) {
-            return;
-        }
-        self::$board = array_fill(0, self::BOARD_SIZE * self::BOARD_SIZE, 'dead');
-        self::$initialized = true;
-    }
-
-    private static function nextGeneration(): void
-    {
-        $size = self::BOARD_SIZE;
-        $total = $size * $size;
-        $next = [];
-
-        for ($idx = 0; $idx < $total; ++$idx) {
-            $row = intdiv($idx, $size);
-            $col = $idx % $size;
-            $cell = self::$board[$idx];
-
-            $living = [];
-            foreach (self::NEIGHBORS as [$dr, $dc]) {
-                $r = $row + $dr;
-                $c = $col + $dc;
-                if ($r >= 0 && $c >= 0 && $r < $size && $c < $size) {
-                    $n = self::$board[$c + $r * $size];
-                    if ($n !== 'dead') {
-                        $living[] = $n;
-                    }
-                }
-            }
-
-            $count = count($living);
-            $alive = $cell !== 'dead';
-
-            if (($alive && ($count === 2 || $count === 3)) || (!$alive && $count === 3)) {
-                $next[$idx] = $living[array_rand($living)];
-            } else {
-                $next[$idx] = 'dead';
-            }
-        }
-
-        self::$board = $next;
-        ++self::$generation;
-    }
-
-    private static function isAllDead(): bool
-    {
-        foreach (self::$board as $cell) {
-            if ($cell !== 'dead') {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static function renderBoard(): string
-    {
-        $tiles = '';
-        foreach (self::$board as $id => $colorClass) {
-            $tiles .= "<div class=\"gol-tile gol-{$colorClass}\" data-id=\"{$id}\"></div>";
-        }
-
-        return $tiles;
-    }
-
-    private static function fillCross(int $id, int $sessionId): void
-    {
-        $size = self::BOARD_SIZE;
-        $total = $size * $size;
-        $color = self::COLORS[$sessionId % count(self::COLORS)];
-
-        foreach ([$id - $size, $id - 1, $id, $id + 1, $id + $size] as $pos) {
-            if ($pos >= 0 && $pos < $total) {
-                self::$board[$pos] = $color;
-            }
-        }
-    }
-
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         self::init();
 
         $app->page('/examples/game-of-life', function (Context $c) use ($app): void {
@@ -150,7 +69,7 @@ final class GameOfLifeExample
                 $tiles = self::renderBoard();
                 $generation = self::$generation;
                 $running = self::$running;
-                $clientCount = count($app->getClients());
+                $clientCount = \count($app->getClients());
                 $runningText = $running ? 'Pause' : 'Resume';
                 $runningEmoji = $running ? '⏸️' : '▶️';
 
@@ -183,8 +102,7 @@ final class GameOfLifeExample
         });
     }
 
-    public static function startTimer(Via $app): void
-    {
+    public static function startTimer(Via $app): void {
         self::$timerId = Timer::tick(200, function () use ($app): void {
             if (!self::$running || $app->getContextsByScope(Scope::routeScope('/examples/game-of-life')) === []) {
                 return;
@@ -200,11 +118,85 @@ final class GameOfLifeExample
         });
     }
 
-    public static function stopTimer(): void
-    {
+    public static function stopTimer(): void {
         if (self::$timerId !== null) {
             Timer::clear(self::$timerId);
             self::$timerId = null;
+        }
+    }
+
+    private static function init(): void {
+        if (self::$initialized) {
+            return;
+        }
+        self::$board = array_fill(0, self::BOARD_SIZE * self::BOARD_SIZE, 'dead');
+        self::$initialized = true;
+    }
+
+    private static function nextGeneration(): void {
+        $size = self::BOARD_SIZE;
+        $total = $size * $size;
+        $next = [];
+
+        for ($idx = 0; $idx < $total; ++$idx) {
+            $row = intdiv($idx, $size);
+            $col = $idx % $size;
+            $cell = self::$board[$idx];
+
+            $living = [];
+            foreach (self::NEIGHBORS as [$dr, $dc]) {
+                $r = $row + $dr;
+                $c = $col + $dc;
+                if ($r >= 0 && $c >= 0 && $r < $size && $c < $size) {
+                    $n = self::$board[$c + $r * $size];
+                    if ($n !== 'dead') {
+                        $living[] = $n;
+                    }
+                }
+            }
+
+            $count = \count($living);
+            $alive = $cell !== 'dead';
+
+            if (($alive && ($count === 2 || $count === 3)) || (!$alive && $count === 3)) {
+                $next[$idx] = $living[array_rand($living)];
+            } else {
+                $next[$idx] = 'dead';
+            }
+        }
+
+        self::$board = $next;
+        ++self::$generation;
+    }
+
+    private static function isAllDead(): bool {
+        foreach (self::$board as $cell) {
+            if ($cell !== 'dead') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function renderBoard(): string {
+        $tiles = '';
+        foreach (self::$board as $id => $colorClass) {
+            $tiles .= "<div class=\"gol-tile gol-{$colorClass}\" data-id=\"{$id}\"></div>";
+        }
+
+        return $tiles;
+    }
+
+    private static function fillCross(int $id, int $sessionId): void {
+        $size = self::BOARD_SIZE;
+        $total = $size * $size;
+        $color = self::COLORS[$sessionId % \count(self::COLORS)];
+
+        foreach ([$id - $size, $id - 1, $id, $id + 1, $id + $size] as $pos) {
+            if ($pos >= 0 && $pos < $total) {
+                self::$board[$pos] = $color;
+            }
         }
     }
 }

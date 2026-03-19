@@ -94,7 +94,7 @@ class PatchManager {
      * Coroutine::sleep(), which is the only reliable way to yield a coroutine
      * in OpenSwoole regardless of channel state (closed, empty, etc.).
      *
-     * @return array<string, mixed>|null
+     * @return null|array<string, mixed>
      */
     public function getPatch(): ?array {
         if ($this->useArray) {

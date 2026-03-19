@@ -17,7 +17,6 @@ use Mbolli\PhpVia\Via;
  * Prerequisites:
  *   sudo apt install xvfb dsda-doom scrot xdotool imagemagick
  */
-
 $app = new Via(
     (new Config())
         ->withPort(3013)
@@ -37,6 +36,7 @@ $app->page('/doom', function (Context $c): void {
         if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame) {
             $gameStatus->setValue('running');
             $c->syncSignals();
+
             return;
         }
 
@@ -53,6 +53,7 @@ $app->page('/doom', function (Context $c): void {
             $errorMessage->setValue('Missing required tools: ' . implode(', ', $missing));
             $gameStatus->setValue('error');
             $c->syncSignals();
+
             return;
         }
 
@@ -96,10 +97,14 @@ $app->page('/doom', function (Context $c): void {
     // Stream frames at ~10 FPS
     $c->interval(100, function () use ($c, $gameStatus, $frameData, $fps, $frameCount, $frameSize, $cachedFrames): void {
         $game = $_SESSION['doom_game'] ?? null;
-        if (!$game instanceof DoomGame || $gameStatus->string() !== 'running') return;
+        if (!$game instanceof DoomGame || $gameStatus->string() !== 'running') {
+            return;
+        }
 
         $frame = $game->captureFrame();
-        if ($frame === null) return;
+        if ($frame === null) {
+            return;
+        }
 
         $frameData->setValue($frame['data']);
 
@@ -113,8 +118,9 @@ $app->page('/doom', function (Context $c): void {
         }
 
         // Calculate FPS from non-cached frames
-        /** @var float|null $lastFpsTime */
+        /** @var null|float $lastFpsTime */
         static $lastFpsTime = null;
+
         /** @var int $framesSinceLastFps */
         static $framesSinceLastFps = 0;
 

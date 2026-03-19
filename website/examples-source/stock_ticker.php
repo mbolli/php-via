@@ -19,14 +19,14 @@ $app = new Via(
 
 // In-memory stock data
 $stocks = [
-    'AAPL'  => ['name' => 'Apple Inc.',          'price' => 185.92, 'history' => [], 'color' => '#555555'],
-    'GOOGL' => ['name' => 'Alphabet Inc.',       'price' => 142.58, 'history' => [], 'color' => '#4285F4'],
-    'MSFT'  => ['name' => 'Microsoft Corp.',     'price' => 378.91, 'history' => [], 'color' => '#00A4EF'],
-    'AMZN'  => ['name' => 'Amazon.com Inc.',     'price' => 178.25, 'history' => [], 'color' => '#FF9900'],
-    'TSLA'  => ['name' => 'Tesla Inc.',          'price' => 243.84, 'history' => [], 'color' => '#E82127'],
-    'NVDA'  => ['name' => 'NVIDIA Corp.',        'price' => 495.22, 'history' => [], 'color' => '#76B900'],
-    'META'  => ['name' => 'Meta Platforms Inc.', 'price' => 474.99, 'history' => [], 'color' => '#0668E1'],
-    'NFLX'  => ['name' => 'Netflix Inc.',        'price' => 672.85, 'history' => [], 'color' => '#E50914'],
+    'AAPL' => ['name' => 'Apple Inc.', 'price' => 185.92, 'history' => [], 'color' => '#555555'],
+    'GOOGL' => ['name' => 'Alphabet Inc.', 'price' => 142.58, 'history' => [], 'color' => '#4285F4'],
+    'MSFT' => ['name' => 'Microsoft Corp.', 'price' => 378.91, 'history' => [], 'color' => '#00A4EF'],
+    'AMZN' => ['name' => 'Amazon.com Inc.', 'price' => 178.25, 'history' => [], 'color' => '#FF9900'],
+    'TSLA' => ['name' => 'Tesla Inc.', 'price' => 243.84, 'history' => [], 'color' => '#E82127'],
+    'NVDA' => ['name' => 'NVIDIA Corp.', 'price' => 495.22, 'history' => [], 'color' => '#76B900'],
+    'META' => ['name' => 'Meta Platforms Inc.', 'price' => 474.99, 'history' => [], 'color' => '#0668E1'],
+    'NFLX' => ['name' => 'Netflix Inc.', 'price' => 672.85, 'history' => [], 'color' => '#E50914'],
 ];
 
 // Seed 60 history points per stock
@@ -53,6 +53,7 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol) use (&$stock
 
     if (!$stock) {
         $c->view(fn () => '<p>Stock not found: ' . htmlspecialchars($symbol) . '</p>');
+
         return;
     }
 
@@ -60,8 +61,8 @@ $app->page('/stock/{symbol}', function (Context $c, string $symbol) use (&$stock
     $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
     $prices = array_map(fn (array $h) => $h['price'], $history);
 
-    $priceSignal  = $c->signal(number_format($stock['price'], 2), 'price');
-    $timesSignal  = $c->signal($times, 'times');
+    $priceSignal = $c->signal(number_format($stock['price'], 2), 'price');
+    $timesSignal = $c->signal($times, 'times');
     $pricesSignal = $c->signal($prices, 'prices');
 
     $c->view(function (bool $isUpdate, string $basePath) use ($c, $symbol, $stock, $stocks, $priceSignal, $timesSignal, $pricesSignal): string {
@@ -100,10 +101,13 @@ $app->onStart(function () use ($app, &$stocks, &$timerId): void {
             foreach (array_keys($stocks) as $sym) {
                 if ($app->getContextsByScope(Scope::build('stock', $sym)) !== []) {
                     $hasDetailViewers = true;
+
                     break;
                 }
             }
-            if (!$hasDetailViewers) return;
+            if (!$hasDetailViewers) {
+                return;
+            }
         }
 
         foreach ($stocks as $sym => &$s) {
@@ -119,7 +123,9 @@ $app->onStart(function () use ($app, &$stocks, &$timerId): void {
             $newPrice = min($newPrice, $s['price'] * 2);
             $s['price'] = $newPrice;
             $s['history'][] = ['time' => time(), 'price' => $newPrice];
-            if (count($s['history']) > 60) array_shift($s['history']);
+            if (count($s['history']) > 60) {
+                array_shift($s['history']);
+            }
 
             $app->broadcast(Scope::build('stock', $sym));
         }
@@ -129,7 +135,9 @@ $app->onStart(function () use ($app, &$stocks, &$timerId): void {
     });
 });
 $app->onShutdown(function () use (&$timerId): void {
-    if ($timerId) Timer::clear($timerId);
+    if ($timerId) {
+        Timer::clear($timerId);
+    }
 });
 
 $app->start();

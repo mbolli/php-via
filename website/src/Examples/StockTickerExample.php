@@ -9,8 +9,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
-final class StockTickerExample
-{
+final class StockTickerExample {
     public const string SLUG = 'stock-ticker';
 
     /** @var string[] */
@@ -38,37 +37,20 @@ final class StockTickerExample
     private static bool $initialized = false;
     private static ?int $timerId = null;
 
-    private static function init(): void
-    {
-        if (self::$initialized) {
-            return;
-        }
-        foreach (self::$stocks as &$stock) {
-            $time = time();
-            for ($i = 59; $i >= 0; --$i) {
-                $stock['history'][] = ['time' => $time - ($i * 2), 'price' => $stock['price']];
-            }
-        }
-        self::$initialized = true;
-    }
-
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         self::init();
 
         // Dashboard
         $app->page('/examples/stock-ticker', function (Context $c): void {
             $c->scope(Scope::ROUTE);
-            $c->view(function () use ($c): string {
-                return $c->render('examples/stock_dashboard.html.twig', [
-                    'title' => '📈 Stock Ticker',
-                    'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
-                    'summary' => self::SUMMARY,
-                    'sourceFile' => 'stock_ticker.php',
-                    'templateFiles' => ['stock_dashboard.html.twig', 'stock_detail.html.twig', 'stock_not_found.html.twig'],
-                    'stocks' => self::$stocks,
-                ]);
-            });
+            $c->view(fn (): string => $c->render('examples/stock_dashboard.html.twig', [
+                'title' => '📈 Stock Ticker',
+                'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
+                'summary' => self::SUMMARY,
+                'sourceFile' => 'stock_ticker.php',
+                'templateFiles' => ['stock_dashboard.html.twig', 'stock_detail.html.twig', 'stock_not_found.html.twig'],
+                'stocks' => self::$stocks,
+            ]));
         });
 
         // Individual stock page
@@ -129,8 +111,7 @@ final class StockTickerExample
         });
     }
 
-    public static function startTimer(Via $app): void
-    {
+    public static function startTimer(Via $app): void {
         self::$timerId = Timer::tick(2000, function () use ($app): void {
             // Skip if nobody is watching any stock ticker page
             if ($app->getContextsByScope(Scope::routeScope('/examples/stock-ticker')) === []) {
@@ -138,6 +119,7 @@ final class StockTickerExample
                 foreach (array_keys(self::$stocks) as $symbol) {
                     if ($app->getContextsByScope(Scope::build('example:stock', $symbol)) !== []) {
                         $hasDetailViewers = true;
+
                         break;
                     }
                 }
@@ -161,7 +143,7 @@ final class StockTickerExample
                 $stock['price'] = $newPrice;
                 $stock['history'][] = ['time' => time(), 'price' => $newPrice];
 
-                if (count($stock['history']) > 60) {
+                if (\count($stock['history']) > 60) {
                     array_shift($stock['history']);
                 }
 
@@ -187,11 +169,23 @@ final class StockTickerExample
         });
     }
 
-    public static function stopTimer(): void
-    {
+    public static function stopTimer(): void {
         if (self::$timerId !== null) {
             Timer::clear(self::$timerId);
             self::$timerId = null;
         }
+    }
+
+    private static function init(): void {
+        if (self::$initialized) {
+            return;
+        }
+        foreach (self::$stocks as &$stock) {
+            $time = time();
+            for ($i = 59; $i >= 0; --$i) {
+                $stock['history'][] = ['time' => $time - ($i * 2), 'price' => $stock['price']];
+            }
+        }
+        self::$initialized = true;
     }
 }

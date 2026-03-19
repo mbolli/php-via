@@ -16,6 +16,7 @@ use PhpVia\Website\Examples\CounterExample;
 use PhpVia\Website\Examples\GameOfLifeExample;
 use PhpVia\Website\Examples\GreeterExample;
 use PhpVia\Website\Examples\PathParamsExample;
+use PhpVia\Website\Examples\SpreadsheetExample;
 use PhpVia\Website\Examples\StockTickerExample;
 use PhpVia\Website\Examples\TodoExample;
 use PhpVia\Website\SyntaxHighlightExtension;
@@ -88,6 +89,7 @@ ClientMonitorExample::register($app);
 ClientMonitorExample::registerHooks($app);
 AllScopesExample::register($app);
 GameOfLifeExample::register($app);
+SpreadsheetExample::register($app);
 
 $app->onStart(function () use ($app): void {
     StockTickerExample::startTimer($app);

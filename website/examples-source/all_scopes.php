@@ -25,7 +25,7 @@ $counters = ['/' => 0, '/page-a' => 0, '/page-b' => 0];
 $pages = ['/' => 'Home', '/page-a' => 'Page A', '/page-b' => 'Page B'];
 
 foreach ($pages as $path => $label) {
-    $app->page($path, function (Context $c) use ($app, $label, $path, &$counters): void {
+    $app->page($path, function (Context $c) use ($app, $label, &$counters): void {
         // GLOBAL component — shared across ALL pages and users
         $globalBanner = $c->component(function (Context $c) use ($app): void {
             $c->scope(Scope::GLOBAL);
@@ -52,7 +52,7 @@ foreach ($pages as $path => $label) {
         }, 'global');
 
         // ROUTE component — shared by everyone on THIS page only
-        $routeCounter = $c->component(function (Context $c) use ($app, $path, &$counters): void {
+        $routeCounter = $c->component(function (Context $c) use ($app, &$counters): void {
             $route = $c->getRoute();
             $c->scope(Scope::ROUTE);
 

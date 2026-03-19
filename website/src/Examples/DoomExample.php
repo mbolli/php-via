@@ -16,12 +16,10 @@ use Mbolli\PhpVia\Via;
  * The DoomGame class manages a virtual framebuffer and captures frames as
  * base64 data URLs streamed to an <img> tag in the browser.
  */
-final class DoomExample
-{
+final class DoomExample {
     public const string SLUG = 'doom';
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/doom', function (Context $c): void {
             $frameData = $c->signal('', name: 'frameData');
             $fps = $c->signal(0, name: 'fps');
@@ -80,19 +78,19 @@ final class DoomExample
 
             $keyDown = $c->action(function (Context $c): void {
                 $key = $_GET['key'] ?? null;
-                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame && is_string($key)) {
+                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame && \is_string($key)) {
                     $_SESSION['doom_game']->sendKeyDown($key);
                 }
             }, 'keyDown');
 
             $keyUp = $c->action(function (Context $c): void {
                 $key = $_GET['key'] ?? null;
-                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame && is_string($key)) {
+                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame && \is_string($key)) {
                     $_SESSION['doom_game']->sendKeyUp($key);
                 }
             }, 'keyUp');
 
-            $c->interval(100, function () use ($c, $gameStatus, $frameData, $fps, $frameCount, $frameSize, $cachedFrames): void {
+            $c->setInterval(function () use ($c, $gameStatus, $frameData, $fps, $frameCount, $frameSize, $cachedFrames): void {
                 $game = $_SESSION['doom_game'] ?? null;
                 if (!$game instanceof DoomGame || $gameStatus->string() !== 'running') {
                     return;
@@ -114,8 +112,9 @@ final class DoomExample
                     $cachedFrames->setValue($cachedFrames->int() + 1);
                 }
 
-                /** @var float|null $lastFpsTime */
+                /** @var null|float $lastFpsTime */
                 static $lastFpsTime = null;
+
                 /** @var int $framesSinceLastFps */
                 static $framesSinceLastFps = 0;
 
@@ -133,7 +132,7 @@ final class DoomExample
                 }
 
                 $c->syncSignals();
-            });
+            }, 100);
 
             $c->view(fn (): string => $c->render('examples/doom.html.twig', [
                 'title' => '🎮 DOOM',
@@ -169,12 +168,11 @@ final class DoomExample
  *
  * @internal Used only by DoomExample
  */
-class DoomGame
-{
-    /** @var resource|null */
+class DoomGame {
+    /** @var null|resource */
     private mixed $process = null;
 
-    /** @var array<int, resource>|null */
+    /** @var null|array<int, resource> */
     private ?array $pipes = null;
 
     private int $display = 99;
@@ -196,23 +194,21 @@ class DoomGame
     ) {
         $this->frameDir = sys_get_temp_dir() . '/doom_frames_' . bin2hex(random_bytes(8));
         @mkdir($this->frameDir, 0755, true);
-        $this->useWebP = extension_loaded('gd') && function_exists('imagewebp');
+        $this->useWebP = \extension_loaded('gd') && \function_exists('imagewebp');
     }
 
-    public function __destruct()
-    {
+    public function __destruct() {
         $this->stop();
     }
 
-    public function start(): bool
-    {
+    public function start(): bool {
         if ($this->running) {
             return true;
         }
 
         $this->display = $this->findAvailableDisplay();
 
-        $xvfbCmd = sprintf(
+        $xvfbCmd = \sprintf(
             'Xvfb :%d -screen 0 %dx%dx24 > /dev/null 2>&1 & echo $!',
             $this->display,
             $this->width,
@@ -221,7 +217,7 @@ class DoomGame
         $xvfbPid = trim((string) shell_exec($xvfbCmd));
         sleep(1);
 
-        $wadPath = dirname(__DIR__, 3) . '/doom1.wad';
+        $wadPath = \dirname(__DIR__, 3) . '/doom1.wad';
         if (!file_exists($wadPath)) {
             $wadPath = '/usr/share/games/doom/doom1.wad';
             if (!file_exists($wadPath)) {
@@ -231,7 +227,7 @@ class DoomGame
             }
         }
 
-        $doomCmd = sprintf(
+        $doomCmd = \sprintf(
             'DISPLAY=:%d dsda-doom -iwad %s -window -width %d -height %d > /dev/null 2>&1 & echo $!',
             $this->display,
             escapeshellarg($wadPath),
@@ -248,10 +244,9 @@ class DoomGame
     }
 
     /**
-     * @return array{data: string, cached: bool, size?: int}|null
+     * @return null|array{data: string, cached: bool, size?: int}
      */
-    public function captureFrame(): ?array
-    {
+    public function captureFrame(): ?array {
         if (!$this->running) {
             return null;
         }
@@ -264,7 +259,7 @@ class DoomGame
 
         $framePath = $this->frameDir . '/frame_' . $this->currentFrame . '.png';
 
-        $captureCmd = sprintf(
+        $captureCmd = \sprintf(
             'DISPLAY=:%d scrot %s 2>/dev/null || DISPLAY=:%d import -window root %s 2>/dev/null',
             $this->display,
             escapeshellarg($framePath),
@@ -303,11 +298,10 @@ class DoomGame
         ++$this->currentFrame;
         @unlink($framePath);
 
-        return ['data' => $dataUrl, 'cached' => false, 'size' => strlen($base64)];
+        return ['data' => $dataUrl, 'cached' => false, 'size' => \strlen($base64)];
     }
 
-    public function sendKeyDown(string $key): void
-    {
+    public function sendKeyDown(string $key): void {
         if (!$this->running) {
             return;
         }
@@ -319,7 +313,7 @@ class DoomGame
 
         $this->activeKeys[$keyCode] = true;
         $escapedKey = escapeshellarg($keyCode);
-        $cmd = sprintf(
+        $cmd = \sprintf(
             'DISPLAY=:%d bash -c "WINDOW=\$(xdotool search --name dsda-doom 2>/dev/null | head -1); if [ -n \"\$WINDOW\" ]; then xdotool keydown --window \$WINDOW %s 2>&1; else xdotool keydown %s 2>&1; fi"',
             $this->display,
             $escapedKey,
@@ -328,8 +322,7 @@ class DoomGame
         shell_exec($cmd);
     }
 
-    public function sendKeyUp(string $key): void
-    {
+    public function sendKeyUp(string $key): void {
         if (!$this->running) {
             return;
         }
@@ -341,7 +334,7 @@ class DoomGame
 
         unset($this->activeKeys[$keyCode]);
         $escapedKey = escapeshellarg($keyCode);
-        $cmd = sprintf(
+        $cmd = \sprintf(
             'DISPLAY=:%d bash -c "WINDOW=\$(xdotool search --name dsda-doom 2>/dev/null | head -1); if [ -n \"\$WINDOW\" ]; then xdotool keyup --window \$WINDOW %s 2>&1; else xdotool keyup %s 2>&1; fi"',
             $this->display,
             $escapedKey,
@@ -350,14 +343,13 @@ class DoomGame
         shell_exec($cmd);
     }
 
-    public function stop(): void
-    {
+    public function stop(): void {
         if (!$this->running) {
             return;
         }
 
         foreach (array_keys($this->activeKeys) as $keyCode) {
-            exec(sprintf('DISPLAY=:%d xdotool keyup %s > /dev/null 2>&1 &', $this->display, escapeshellarg($keyCode)));
+            exec(\sprintf('DISPLAY=:%d xdotool keyup %s > /dev/null 2>&1 &', $this->display, escapeshellarg($keyCode)));
         }
         $this->activeKeys = [];
 
@@ -375,12 +367,11 @@ class DoomGame
         $this->running = false;
     }
 
-    private function optimizeFrame(string $inputPath): ?string
-    {
+    private function optimizeFrame(string $inputPath): ?string {
         $targetWidth = (int) ($this->width / 2);
         $targetHeight = (int) ($this->height / 2);
 
-        if ($this->useWebP && extension_loaded('gd')) {
+        if ($this->useWebP && \extension_loaded('gd')) {
             $image = @imagecreatefrompng($inputPath);
             if ($image === false) {
                 return null;
@@ -401,7 +392,7 @@ class DoomGame
         }
 
         $outputPath = $inputPath . '.jpg';
-        $cmd = sprintf(
+        $cmd = \sprintf(
             'convert %s -resize %dx%d -quality %d -sampling-factor 4:2:0 -strip %s 2>/dev/null',
             escapeshellarg($inputPath),
             $targetWidth,
@@ -421,8 +412,7 @@ class DoomGame
         return $imageData !== false ? $imageData : null;
     }
 
-    private function getKeyCode(string $key): ?string
-    {
+    private function getKeyCode(string $key): ?string {
         $keyMap = [
             'ArrowUp' => 'Up',
             'ArrowDown' => 'Down',
@@ -446,15 +436,14 @@ class DoomGame
             return $keyMap[$key];
         }
 
-        if (strlen($key) === 1) {
+        if (\strlen($key) === 1) {
             return strtolower($key);
         }
 
         return $key;
     }
 
-    private function findAvailableDisplay(): int
-    {
+    private function findAvailableDisplay(): int {
         for ($i = 99; $i < 200; ++$i) {
             if (!file_exists('/tmp/.X' . $i . '-lock')) {
                 return $i;

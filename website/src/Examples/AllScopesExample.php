@@ -8,8 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
-final class AllScopesExample
-{
+final class AllScopesExample {
     public const string SLUG = 'all-scopes';
 
     /** @var string[] */
@@ -28,8 +27,7 @@ final class AllScopesExample
         '/examples/all-scopes/page-b' => 0,
     ];
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->setGlobalState('example:allscopes:status', 'All systems operational');
         $app->setGlobalState('example:allscopes:visitors', 0);
 

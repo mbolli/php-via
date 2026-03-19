@@ -7,12 +7,10 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
-final class GreeterExample
-{
+final class GreeterExample {
     public const string SLUG = 'greeter';
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/greeter', function (Context $c): void {
             $greeting = $c->signal('Hello...', 'greeting');
 

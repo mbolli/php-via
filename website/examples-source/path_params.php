@@ -44,7 +44,8 @@ $app->page('/blog/{year}/{month}/{slug}', function (Context $c): void {
 });
 
 // Auto-injection: parameters in function signature
-$app->page('/articles/{year}/{month}/{slug}',
+$app->page(
+    '/articles/{year}/{month}/{slug}',
     function (Context $c, string $year, string $month, string $slug): void {
         $c->html("
             <div>

@@ -8,8 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
-final class ChatRoomExample
-{
+final class ChatRoomExample {
     public const string SLUG = 'chat-room';
 
     /** @var string[] */
@@ -34,8 +33,7 @@ final class ChatRoomExample
 
     private static ?Via $app = null;
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         self::$app = $app;
 
         // Room list
@@ -121,25 +119,23 @@ final class ChatRoomExample
                 }
             });
 
-            $c->view(function () use ($c, $room, $username, $contextId, $messageInput, $typingIndicator, $sendMessage, $updateTyping): string {
-                return $c->render('examples/chat_room.html.twig', [
-                    'title' => '💬 Chat Room',
-                    'description' => 'Chat: ' . self::$rooms[$room]['name'],
-                    'summary' => self::SUMMARY,
-                    'sourceFile' => 'chat_room.php',
-                    'templateFiles' => ['chat_room_list.html.twig', 'chat_room.html.twig'],
-                    'room' => $room,
-                    'roomName' => self::$rooms[$room]['name'],
-                    'username' => $username,
-                    'contextId' => $contextId,
-                    'messages' => self::$rooms[$room]['messages'],
-                    'messageInputId' => $messageInput->id(),
-                    'typingIndicatorId' => $typingIndicator->id(),
-                    'users' => array_values(self::$roomUsers[$room] ?? []),
-                    'sendMessageUrl' => $sendMessage->url(),
-                    'updateTypingUrl' => $updateTyping->url(),
-                ]);
-            }, block: 'demo');
+            $c->view(fn (): string => $c->render('examples/chat_room.html.twig', [
+                'title' => '💬 Chat Room',
+                'description' => 'Chat: ' . self::$rooms[$room]['name'],
+                'summary' => self::SUMMARY,
+                'sourceFile' => 'chat_room.php',
+                'templateFiles' => ['chat_room_list.html.twig', 'chat_room.html.twig'],
+                'room' => $room,
+                'roomName' => self::$rooms[$room]['name'],
+                'username' => $username,
+                'contextId' => $contextId,
+                'messages' => self::$rooms[$room]['messages'],
+                'messageInputId' => $messageInput->id(),
+                'typingIndicatorId' => $typingIndicator->id(),
+                'users' => array_values(self::$roomUsers[$room] ?? []),
+                'sendMessageUrl' => $sendMessage->url(),
+                'updateTypingUrl' => $updateTyping->url(),
+            ]), block: 'demo');
 
             if ($wasNewUser) {
                 $app->broadcast($roomScope);

@@ -61,8 +61,11 @@ function nextGeneration(array &$board, int $size, array $neighbors): void {
 
 function isAllDead(array $board): bool {
     foreach ($board as $cell) {
-        if ($cell !== 'dead') return false;
+        if ($cell !== 'dead') {
+            return false;
+        }
     }
+
     return true;
 }
 
@@ -113,7 +116,7 @@ $app->page('/', function (Context $c) use ($app, &$board, &$running, &$generatio
         }
     }, 'tapCell');
 
-    $c->view(function () use (&$board, &$running, &$generation, $boardSize, $toggleRunning, $reset, $tapCell, $app): string {
+    $c->view(function () use (&$board, &$running, &$generation, $toggleRunning, $reset, $app): string {
         $tiles = '';
         foreach ($board as $id => $colorClass) {
             $tiles .= "<div class=\"gol-tile gol-{$colorClass}\" data-id=\"{$id}\"></div>";
@@ -154,7 +157,9 @@ $app->onStart(function () use ($app, &$board, &$running, &$generation, $boardSiz
 });
 
 $app->onShutdown(function () use (&$timerId): void {
-    if ($timerId !== null) Timer::clear($timerId);
+    if ($timerId !== null) {
+        Timer::clear($timerId);
+    }
 });
 
 $app->start();

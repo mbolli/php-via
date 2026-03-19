@@ -8,8 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
-final class TodoExample
-{
+final class TodoExample {
     public const string SLUG = 'todo';
 
     /** @var array<int, array{id: int, text: string, completed: bool}> */
@@ -21,8 +20,7 @@ final class TodoExample
 
     private static int $nextId = 4;
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/todo', function (Context $c) use ($app): void {
             $c->scope(Scope::ROUTE);
 

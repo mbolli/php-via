@@ -7,8 +7,7 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
-final class PathParamsExample
-{
+final class PathParamsExample {
     public const string SLUG = 'path-params';
 
     /** @var string[] */
@@ -18,8 +17,7 @@ final class PathParamsExample
         '<strong>Reflection-based injection</strong> matches parameter names to route placeholders. Type-hint <code>int</code> and Via casts the value for you — no manual parsing required.',
     ];
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         // Home page
         $app->page('/examples/path-params', function (Context $c): void {
             $c->view('examples/path_params.html.twig', [

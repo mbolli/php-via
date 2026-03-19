@@ -7,12 +7,10 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
-final class CounterExample
-{
+final class CounterExample {
     public const string SLUG = 'counter';
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/counter', function (Context $c): void {
             $count = $c->signal(0, 'count');
             $step = $c->signal(1, 'step');

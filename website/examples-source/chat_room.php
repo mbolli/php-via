@@ -46,6 +46,7 @@ $app->page('/', function (Context $c) use (&$rooms): void {
 $app->page('/room/{room}', function (Context $c, string $room) use ($app, &$rooms, &$roomUsers): void {
     if (!isset($rooms[$room])) {
         $c->view(fn () => '<h1>Room not found</h1>');
+
         return;
     }
 
@@ -67,7 +68,9 @@ $app->page('/room/{room}', function (Context $c, string $room) use ($app, &$room
         $sessionId = $ctx->getSessionId();
         $user = $roomUsers[$room][$sessionId] ?? 'Unknown';
         $msg = trim($messageInput->getValue());
-        if ($msg === '') return;
+        if ($msg === '') {
+            return;
+        }
 
         $rooms[$room]['messages'][] = [
             'username' => $user,

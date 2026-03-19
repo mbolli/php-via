@@ -61,6 +61,7 @@ $app->page('/', function (Context $c) use ($app): void {
         foreach (TodoState::$todos as &$todo) {
             if ($todo['id'] === $id) {
                 $todo['completed'] = !$todo['completed'];
+
                 break;
             }
         }

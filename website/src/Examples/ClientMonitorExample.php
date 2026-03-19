@@ -8,21 +8,19 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
-final class ClientMonitorExample
-{
+final class ClientMonitorExample {
     public const string SLUG = 'client-monitor';
 
     private static string $routeScope = '';
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         self::$routeScope = Scope::routeScope('/examples/client-monitor');
 
         $app->page('/examples/client-monitor', function (Context $c) use ($app): void {
             $c->scope(Scope::ROUTE);
             $c->view(function () use ($app, $c): string {
                 $clients = $app->getClients();
-                $clientCount = count($clients);
+                $clientCount = \count($clients);
 
                 $clientsHtml = '';
                 foreach ($clients as $client) {
@@ -59,8 +57,7 @@ final class ClientMonitorExample
         });
     }
 
-    public static function registerHooks(Via $app): void
-    {
+    public static function registerHooks(Via $app): void {
         $app->onClientConnect(function () use ($app): void {
             if ($app->getContextsByScope(self::$routeScope) !== []) {
                 $app->broadcast(self::$routeScope);
