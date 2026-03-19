@@ -553,8 +553,8 @@ class Context {
 
             $this->app->registerScopedAction($actionScope, $actionId, $fn);
         } else {
-            // TAB scope: generate unique random ID
-            $actionId = $this->app->generateId();
+            // TAB scope: generate unique random ID, prefixed with name for debuggability
+            $actionId = $name !== null ? $name . '-' . $this->app->generateId() : $this->app->generateId();
             $this->actionRegistry[$actionId] = $fn;
         }
 
