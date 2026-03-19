@@ -48,6 +48,10 @@ class Via {
 
     /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
     public array $contextSessions = [];
+
+    /** @var array<string, true> Contexts that already have a Via::$contexts unset callback registered */
+    private array $viaUnsetCallbackRegistered = [];
+
     private ?Server $server = null;
 
     /** @var array<callable> Callbacks to run when server starts */
@@ -691,9 +695,12 @@ class Via {
         // Register a cleanup callback so Via::$contexts is also cleared when Application fires the cleanup.
         // Application::unregisterContext only removes from its own map; Via::$contexts is separate and must
         // be cleared here, otherwise zombie contexts (no viewFn) survive and break SSE reconnection.
-        if (isset($this->contexts[$contextId])) {
+        // Guard: register at most once per context — this method is called on every SSE disconnect, so
+        // repeated reconnections would otherwise accumulate unbounded closures in cleanupCallbacks.
+        if (isset($this->contexts[$contextId]) && !isset($this->viaUnsetCallbackRegistered[$contextId])) {
+            $this->viaUnsetCallbackRegistered[$contextId] = true;
             $this->contexts[$contextId]->onCleanup(function () use ($contextId): void {
-                unset($this->contexts[$contextId]);
+                unset($this->contexts[$contextId], $this->viaUnsetCallbackRegistered[$contextId]);
             });
         }
 

@@ -472,7 +472,7 @@ class Context {
     /**
      * Create a signal.
      *
-     * @param mixed       $initialValue  The initial value of the signal
+     * @param mixed       $initialValue   The initial value of the signal
      * @param null|string $name           Optional signal name (defaults to 'signal')
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
@@ -574,9 +574,7 @@ class Context {
      * @return int Timer ID that can be used to clear the timer
      */
     public function interval(int $milliseconds, callable $fn): int {
-        return Timer::tick($milliseconds, function () use ($fn): void {
-            $fn();
-        });
+        return $this->lifecycle->registerTimer($fn, $milliseconds);
     }
 
     /**
