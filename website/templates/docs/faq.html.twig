@@ -305,6 +305,35 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         <code>{{ via_ctx }}</code> which are the <code>HtmlBuilder</code> placeholders.</p>{% endverbatim %}
     </details>
 
+    <details>
+        <summary><strong>Action returns HTTP 400 "Bad Request"</strong></summary>
+        <p>
+            You click a button or trigger a keyboard shortcut and the action request returns
+            <code>400 Bad Request</code>. Nothing happens in the UI.
+        </p>
+        <p><strong>Why:</strong> Every action request includes a <code>via_ctx</code> signal that
+        identifies the server-side context. The server looks up this ID in its in-memory context
+        registry. A 400 means the ID is missing or doesn't match any active context. Common causes:</p>
+        <ul>
+            <li>The server was restarted — all contexts from the previous process are gone, but the
+                browser still has stale action URLs and signal values from the old session.</li>
+            <li>The SSE connection dropped and the context was cleaned up via <code>onDisconnect</code>,
+                but the UI wasn't refreshed.</li>
+            <li>The <code>via_ctx</code> signal was omitted from the request body or query params.</li>
+        </ul>
+        <p><strong>Fix:</strong></p>
+        <ul>
+            <li><strong>Stale context after restart or disconnect:</strong> Refresh the page. This creates
+                a new context with a fresh ID. If this happens frequently, check that your SSE connection
+                is stable — a flaky connection causes repeated context creation and teardown.</li>
+            <li><strong>Custom payload in e.g. <code>@post()</code>:</strong> If you pass a custom object to
+                actions like <code>@post('/action', {some: 'payload'})</code>, the custom
+                object <em>replaces</em> the signal store — <code>via_ctx</code> and all other signals
+                are no longer included. Either omit the second argument and let Datastar send the full
+                store, or include <code>via_ctx</code> explicitly in your custom payload.</li>
+        </ul>
+    </details>
+
     <h2 id="debugging-tips">Debugging tips</h2>
     <ul>
         <li>Add <code>&lt;pre data-json-signals&gt;&lt;/pre&gt;</code> to your template to see the live
