@@ -103,6 +103,11 @@ class SseHandler {
         // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
         $context->getPatchManager()->recreatePatchChannel();
 
+        // Track that this coroutine holds an active SSE connection for this context.
+        // Guards against a race where an older SSE coroutine exits *after* this one starts,
+        // scheduling a cleanup timer that would destroy the still-live context.
+        $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 0) + 1;
+
         // Send initial sync (view + signals) on connection/reconnection
         // Do this AFTER starting the loop to ensure patches are consumed
         $context->sync();
@@ -144,6 +149,19 @@ class SseHandler {
                 // usleep() is coroutine-safe because SWOOLE_HOOK_ALL is set on the server;
                 // the hook intercepts it and yields the current coroutine non-blocking.
                 usleep($this->via->getConfig()->getSsePollIntervalMs() * 1000);
+
+                // Safety valve: if context was destroyed externally (e.g. cleanup race),
+                // send a reload so the client reinitialises instead of hanging silently.
+                if (!isset($this->via->contexts[$contextId])) {
+                    $this->via->log('info', "Context destroyed while SSE active, sending reload: {$contextId}");
+
+                    try {
+                        $response->write($sse->executeScript('window.location.reload()'));
+                    } catch (\Throwable) {
+                    }
+
+                    break;
+                }
             }
 
             // Send keepalive comment every 30 seconds to prevent timeout
@@ -161,22 +179,35 @@ class SseHandler {
 
         $this->requestLogger?->logSseDisconnect($contextId);
 
-        // Unregister from all scopes immediately to stop receiving broadcasts
-        // This prevents wasting resources syncing a context with no active SSE connection
-        foreach ($context->getScopes() as $scope) {
-            $this->via->getScopeRegistry()->unregisterContext($context, $scope);
+        // Decrement active SSE counter. Only perform cleanup when this is the last
+        // active SSE coroutine for this context. If a newer SSE coroutine is already
+        // running (reconnect race), skip cleanup — the new coroutine owns the context.
+        $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 1) - 1;
+        $isLastSse = $this->via->activeSseCount[$contextId] <= 0;
+        if ($isLastSse) {
+            unset($this->via->activeSseCount[$contextId]);
         }
 
-        // Unregister client immediately so getClients() reflects the departure
-        // when onClientDisconnect callbacks fire (before the delayed context cleanup)
-        unset($this->via->clients[$contextId]);
-        $this->via->getApp()->unregisterClient($contextId);
+        if ($isLastSse) {
+            // Unregister from all scopes immediately to stop receiving broadcasts
+            // This prevents wasting resources syncing a context with no active SSE connection
+            foreach ($context->getScopes() as $scope) {
+                $this->via->getScopeRegistry()->unregisterContext($context, $scope);
+            }
 
-        // Notify app-level onClientDisconnect callbacks
-        $this->via->triggerClientDisconnect($context);
+            // Unregister client immediately so getClients() reflects the departure
+            // when onClientDisconnect callbacks fire (before the delayed context cleanup)
+            unset($this->via->clients[$contextId]);
+            $this->via->getApp()->unregisterClient($contextId);
 
-        // Schedule delayed cleanup
-        $this->via->scheduleContextCleanup($contextId);
+            // Notify app-level onClientDisconnect callbacks
+            $this->via->triggerClientDisconnect($context);
+
+            // Schedule delayed cleanup
+            $this->via->scheduleContextCleanup($contextId);
+        } else {
+            $this->via->log('debug', "Old SSE coroutine exited; {$this->via->activeSseCount[$contextId]} still active, skipping cleanup: {$contextId}", $context);
+        }
     }
 
     /**

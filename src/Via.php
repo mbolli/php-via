@@ -43,6 +43,9 @@ class Via {
     /** @var array<string, int> Cleanup timer IDs for contexts */
     public array $cleanupTimers = [];
 
+    /** @var array<string, int> Number of active SSE coroutines per context ID */
+    public array $activeSseCount = [];
+
     /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
     public array $clients = [];
 
