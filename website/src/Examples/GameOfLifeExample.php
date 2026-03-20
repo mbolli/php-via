@@ -87,8 +87,21 @@ final class GameOfLifeExample {
                         '<strong>CSS Grid rendering</strong> uses inline styles on a flat grid of divs. No canvas, no JavaScript drawing code — the server sends pre-colored HTML cells.',
                         '<strong>Collaborative drawing</strong> — every click is an action that mutates the shared board, then broadcasts the result. Multiple users can sculpt patterns together in real time.',
                     ],
-                    'sourceFile' => 'game_of_life.php',
-                    'templateFiles' => ['game_of_life.html.twig'],
+                    'anatomy' => [
+                        'signals' => [],
+                        'actions' => [
+                            ['name' => 'toggleRunning', 'desc' => 'Pauses or resumes the simulation timer.'],
+                            ['name' => 'reset', 'desc' => 'Clears the entire board and resets generation counter.'],
+                            ['name' => 'tapCell', 'desc' => 'Draws a cross pattern at the tapped cell in the session\'s color.'],
+                        ],
+                        'views' => [
+                            ['name' => 'game_of_life.html.twig', 'desc' => 'ROUTE-scoped. 2,500 divs in a CSS Grid, re-rendered every 200ms by server timer. No canvas, no JS drawing.'],
+                        ],
+                    ],
+                    'githubLinks' => [
+                        ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/GameOfLifeExample.php'],
+                        ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/game_of_life.html.twig'],
+                    ],
                     'tiles' => $tiles,
                     'generation' => $generation,
                     'clientCount' => $clientCount,

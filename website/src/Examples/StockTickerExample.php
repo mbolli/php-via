@@ -22,6 +22,28 @@ final class StockTickerExample {
         '<strong>Apache ECharts</strong> renders sparklines on the dashboard and the full chart on detail pages. The chart library receives updated data via Datastar signals — no manual JS refresh needed.',
     ];
 
+    /** @var array<string, list<array{name: string, desc?: string, type?: string, scope?: string, default?: string}>> */
+    private const array ANATOMY = [
+        'signals' => [
+            ['name' => 'price', 'type' => 'string', 'scope' => 'Custom', 'desc' => 'Current formatted price for a stock symbol. Custom scope per symbol.'],
+            ['name' => 'times', 'type' => 'array', 'scope' => 'Custom', 'desc' => 'Timestamp array for the price history chart.'],
+            ['name' => 'prices', 'type' => 'array', 'scope' => 'Custom', 'desc' => 'Price array for the chart. Updated every 2 seconds by the server timer.'],
+        ],
+        'actions' => [],
+        'views' => [
+            ['name' => 'stock_dashboard.html.twig', 'desc' => 'ROUTE-scoped dashboard with sparklines for all 8 stocks. Shared by all viewers.'],
+            ['name' => 'stock_detail.html.twig', 'desc' => 'Per-symbol detail page with full ECharts chart. Custom scope per stock symbol.'],
+            ['name' => 'stock_not_found.html.twig', 'desc' => 'Fallback for unknown stock symbols.'],
+        ],
+    ];
+
+    /** @var list<array{label: string, url: string}> */
+    private const array GITHUB_LINKS = [
+        ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/StockTickerExample.php'],
+        ['label' => 'View dashboard template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/stock_dashboard.html.twig'],
+        ['label' => 'View detail template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/stock_detail.html.twig'],
+    ];
+
     /** @var array<string, array{name: string, price: float, history: array<array{time: int, price: float}>, color: string}> */
     private static array $stocks = [
         'AAPL' => ['name' => 'Apple Inc.', 'price' => 185.92, 'history' => [], 'color' => '#555555'],
@@ -47,8 +69,8 @@ final class StockTickerExample {
                 'title' => '📈 Stock Ticker',
                 'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
                 'summary' => self::SUMMARY,
-                'sourceFile' => 'stock_ticker.php',
-                'templateFiles' => ['stock_dashboard.html.twig', 'stock_detail.html.twig', 'stock_not_found.html.twig'],
+                'anatomy' => self::ANATOMY,
+                'githubLinks' => self::GITHUB_LINKS,
                 'stocks' => self::$stocks,
             ]));
         });
@@ -65,8 +87,8 @@ final class StockTickerExample {
                         'title' => '📈 Stock Ticker',
                         'description' => 'Stock not found.',
                         'summary' => self::SUMMARY,
-                        'sourceFile' => 'stock_ticker.php',
-                        'templateFiles' => ['stock_dashboard.html.twig', 'stock_detail.html.twig', 'stock_not_found.html.twig'],
+                        'anatomy' => self::ANATOMY,
+                        'githubLinks' => self::GITHUB_LINKS,
                         'symbol' => $symbol,
                     ]);
                 }
@@ -97,8 +119,8 @@ final class StockTickerExample {
                     'title' => '📈 Stock Ticker',
                     'description' => $symbol . ' — ' . $stock['name'],
                     'summary' => self::SUMMARY,
-                    'sourceFile' => 'stock_ticker.php',
-                    'templateFiles' => ['stock_dashboard.html.twig', 'stock_detail.html.twig', 'stock_not_found.html.twig'],
+                    'anatomy' => self::ANATOMY,
+                    'githubLinks' => self::GITHUB_LINKS,
                     'symbol' => $symbol,
                     'name' => $stock['name'],
                     'color' => $stock['color'],

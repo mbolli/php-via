@@ -145,8 +145,29 @@ final class DoomExample {
                     '<strong>Signal-based telemetry</strong> shows live FPS, frame count, frame size, and cache hit rate. Each metric is a separate signal updated every frame capture cycle.',
                     '<strong>Latency-bound</strong> — frame data travels server → SSE → browser. On a local network this feels responsive; over the internet, expect 100–300ms of visual lag.',
                 ],
-                'sourceFile' => 'doom.php',
-                'templateFiles' => ['doom.html.twig'],
+                'anatomy' => [
+                    'signals' => [
+                        ['name' => 'frameData', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Base64-encoded WebP frame data URL pushed to an <img> tag.'],
+                        ['name' => 'fps', 'type' => 'float', 'scope' => 'TAB', 'desc' => 'Live frames-per-second counter.'],
+                        ['name' => 'frameCount', 'type' => 'int', 'scope' => 'TAB', 'desc' => 'Total frames captured since game start.'],
+                        ['name' => 'gameStatus', 'type' => 'string', 'scope' => 'TAB', 'default' => 'stopped', 'desc' => 'Current game lifecycle state: stopped, running, or error.'],
+                        ['name' => 'errorMessage', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Displays missing system dependency errors.'],
+                        ['name' => 'frameSize', 'type' => 'int', 'scope' => 'TAB', 'desc' => 'Size of the latest captured frame in bytes.'],
+                        ['name' => 'cachedFrames', 'type' => 'int', 'scope' => 'TAB', 'desc' => 'Number of duplicate frames skipped via caching.'],
+                    ],
+                    'actions' => [
+                        ['name' => 'startGame', 'desc' => 'Launches Xvfb + dsda-doom in a virtual framebuffer. Checks for required system tools first.'],
+                        ['name' => 'stopGame', 'desc' => 'Kills the DOOM process and cleans up the virtual display.'],
+                        ['name' => 'keyDown / keyUp', 'desc' => 'Forwards browser keyboard events to the DOOM window via xdotool.'],
+                    ],
+                    'views' => [
+                        ['name' => 'doom.html.twig', 'desc' => 'Streams base64 frames to an <img> tag via signal updates. Keyboard events captured and forwarded to server.'],
+                    ],
+                ],
+                'githubLinks' => [
+                    ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/DoomExample.php'],
+                    ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/doom.html.twig'],
+                ],
                 'errorMessage' => $errorMessage,
                 'gameStatus' => $gameStatus,
                 'frameData' => $frameData,

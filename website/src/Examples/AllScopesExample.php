@@ -139,8 +139,27 @@ final class AllScopesExample {
                         'title' => '📊 All Scopes',
                         'description' => 'Demonstrates GLOBAL, ROUTE, and TAB scopes side by side.',
                         'summary' => self::SUMMARY,
-                        'sourceFile' => 'all_scopes.php',
-                        'templateFiles' => ['all_scopes.html.twig'],
+                        'anatomy' => [
+                            'signals' => [
+                                ['name' => 'personalMessage', 'type' => 'string', 'scope' => 'TAB', 'default' => 'Hello...', 'desc' => 'Per-tab editable message. Private to each browser tab.'],
+                            ],
+                            'actions' => [
+                                ['name' => 'updateStatus', 'scope' => 'GLOBAL', 'desc' => 'Randomizes system status and increments global visitor count.'],
+                                ['name' => 'increment', 'scope' => 'ROUTE', 'desc' => 'Increments the page-specific shared counter.'],
+                                ['name' => 'reset', 'scope' => 'ROUTE', 'desc' => 'Resets the page-specific counter to 0.'],
+                                ['name' => 'updateMessage', 'scope' => 'TAB', 'desc' => 'Randomizes the personal tab message.'],
+                            ],
+                            'views' => [
+                                ['name' => 'all_scopes.html.twig', 'desc' => 'Page shell with navigation between sub-pages.'],
+                                ['name' => 'Global banner', 'desc' => 'GLOBAL-scoped component showing system status shared across all pages and users.'],
+                                ['name' => 'Route counter', 'desc' => 'ROUTE-scoped component with a counter shared between all tabs on the same page.'],
+                                ['name' => 'Tab message', 'desc' => 'TAB-scoped component with a private editable message per browser tab.'],
+                            ],
+                        ],
+                        'githubLinks' => [
+                            ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/AllScopesExample.php'],
+                            ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/all_scopes.html.twig'],
+                        ],
                         'pageTitle' => $pageTitle,
                         'content' => $content,
                         'globalBanner' => $global(),

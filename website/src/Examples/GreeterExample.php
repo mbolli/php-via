@@ -32,8 +32,22 @@ final class GreeterExample {
                     '<strong>Twig templates</strong> render the UI server-side. Signal values are interpolated into the template and pushed to the browser via SSE patches.',
                     '<strong>Zero JavaScript</strong> — every button click fires a server round-trip via Datastar. The response patches only the changed DOM fragment, not the whole page.',
                 ],
-                'sourceFile' => 'greeter.php',
-                'templateFiles' => ['greeter.html.twig'],
+                'anatomy' => [
+                    'signals' => [
+                        ['name' => 'greeting', 'type' => 'string', 'scope' => 'TAB', 'default' => 'Hello...', 'desc' => 'The displayed greeting message. Both actions write to this same signal.'],
+                    ],
+                    'actions' => [
+                        ['name' => 'greetBob', 'desc' => 'Sets the greeting signal to "Hello Bob!".'],
+                        ['name' => 'greetAlice', 'desc' => 'Sets the greeting signal to "Hello Alice!".'],
+                    ],
+                    'views' => [
+                        ['name' => 'greeter.html.twig', 'desc' => 'Buttons trigger server-side actions; the greeting text updates reactively via SSE patch.'],
+                    ],
+                ],
+                'githubLinks' => [
+                    ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/GreeterExample.php'],
+                    ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/greeter.html.twig'],
+                ],
                 'greeting' => $greeting,
                 'greet_bob' => $greetBob,
                 'greet_alice' => $greetAlice,

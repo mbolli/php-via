@@ -65,8 +65,23 @@ final class TodoExample {
                     '<strong>Partial rendering</strong> — on updates only the <code>#todo-list</code> fragment is sent, not the entire page shell. This keeps SSE payloads small and fast.',
                     '<strong>In-memory storage</strong> keeps it simple for a demo. In production you\'d swap the static array for a database query inside the view function.',
                 ],
-                'sourceFile' => 'todo.php',
-                'templateFiles' => ['todo.html.twig'],
+                'anatomy' => [
+                    'signals' => [
+                        ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Draft input text — private per tab so your typing doesn\'t leak to others.'],
+                    ],
+                    'actions' => [
+                        ['name' => 'addTodo', 'desc' => 'Appends the draft to the shared list and broadcasts to all viewers.'],
+                        ['name' => 'deleteTodo', 'desc' => 'Removes a todo by ID and broadcasts the updated list.'],
+                        ['name' => 'toggleTodo', 'desc' => 'Flips the completed state of a todo and broadcasts.'],
+                    ],
+                    'views' => [
+                        ['name' => 'todo.html.twig', 'desc' => 'ROUTE-scoped shared list with TAB-scoped input. Partial rendering sends only the #todo-list block on updates.'],
+                    ],
+                ],
+                'githubLinks' => [
+                    ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/TodoExample.php'],
+                    ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/todo.html.twig'],
+                ],
                 'todos' => self::$todos,
                 'newTodo' => $newTodo,
                 'addTodo' => $addTodo,

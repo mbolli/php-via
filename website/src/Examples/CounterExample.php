@@ -41,8 +41,24 @@ final class CounterExample {
                     '<strong>TAB scope</strong> (the default) means each browser tab has its own independent counter. Open two tabs — clicking in one will not affect the other.',
                     '<strong>syncSignals()</strong> flushes changed signal values down the SSE channel. It is called automatically after an action, so the UI always reflects the latest state.',
                 ],
-                'sourceFile' => 'counter.php',
-                'templateFiles' => ['counter.html.twig'],
+                'anatomy' => [
+                    'signals' => [
+                        ['name' => 'count', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Current counter value. Updated by increment, decrement, and reset actions.'],
+                        ['name' => 'step', 'type' => 'int', 'scope' => 'TAB', 'default' => '1', 'desc' => 'Increment/decrement step size. Two-way bound to the input via data-bind.'],
+                    ],
+                    'actions' => [
+                        ['name' => 'increment', 'desc' => 'Adds step to count, then syncs the new value to the browser.'],
+                        ['name' => 'decrement', 'desc' => 'Subtracts step from count.'],
+                        ['name' => 'reset', 'desc' => 'Resets count back to 0, ignoring the current step value.'],
+                    ],
+                    'views' => [
+                        ['name' => 'counter.html.twig', 'desc' => 'Uses data-text for reactive count display and data-bind for two-way step input.'],
+                    ],
+                ],
+                'githubLinks' => [
+                    ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/CounterExample.php'],
+                    ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/counter.html.twig'],
+                ],
                 'count' => $count,
                 'step' => $step,
                 'increment' => $increment,

@@ -17,6 +17,23 @@ final class PathParamsExample {
         '<strong>Reflection-based injection</strong> matches parameter names to route placeholders. Type-hint <code>int</code> and Via casts the value for you — no manual parsing required.',
     ];
 
+    /** @var array<string, list<array{name: string, desc: string}>> */
+    private const array ANATOMY = [
+        'signals' => [],
+        'actions' => [],
+        'views' => [
+            ['name' => 'path_params.html.twig', 'desc' => 'Landing page with links to both blog (manual) and article (auto-injection) routes.'],
+            ['name' => 'path_params_detail.html.twig', 'desc' => 'Detail page showing extracted year, month, and slug from the URL.'],
+        ],
+    ];
+
+    /** @var list<array{label: string, url: string}> */
+    private const array GITHUB_LINKS = [
+        ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/PathParamsExample.php'],
+        ['label' => 'View landing template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/path_params.html.twig'],
+        ['label' => 'View detail template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/path_params_detail.html.twig'],
+    ];
+
     public static function register(Via $app): void {
         // Home page
         $app->page('/examples/path-params', function (Context $c): void {
@@ -24,8 +41,8 @@ final class PathParamsExample {
                 'title' => 'Path Parameters',
                 'description' => 'Dynamic routing with automatic type-cast parameter injection.',
                 'summary' => self::SUMMARY,
-                'sourceFile' => 'path_params.php',
-                'templateFiles' => ['path_params.html.twig', 'path_params_detail.html.twig'],
+                'anatomy' => self::ANATOMY,
+                'githubLinks' => self::GITHUB_LINKS,
             ]);
         });
 
@@ -39,8 +56,8 @@ final class PathParamsExample {
                 'title' => 'Path Parameters',
                 'description' => 'Dynamic routing with automatic type-cast parameter injection.',
                 'summary' => self::SUMMARY,
-                'sourceFile' => 'path_params.php',
-                'templateFiles' => ['path_params.html.twig', 'path_params_detail.html.twig'],
+                'anatomy' => self::ANATOMY,
+                'githubLinks' => self::GITHUB_LINKS,
                 'pageTitle' => 'Blog Post (Manual Access)',
                 'method' => 'manual',
                 'year' => $year,
@@ -55,8 +72,8 @@ final class PathParamsExample {
                 'title' => 'Path Parameters',
                 'description' => 'Dynamic routing with automatic type-cast parameter injection.',
                 'summary' => self::SUMMARY,
-                'sourceFile' => 'path_params.php',
-                'templateFiles' => ['path_params.html.twig', 'path_params_detail.html.twig'],
+                'anatomy' => self::ANATOMY,
+                'githubLinks' => self::GITHUB_LINKS,
                 'pageTitle' => 'Article (Auto-Injection)',
                 'method' => 'auto',
                 'year' => $year,

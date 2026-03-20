@@ -15,36 +15,70 @@
     {% endif %}
 </div>
 
-<div class="example-split">
-    <div class="example-demo demo-box">
-        {% block demo %}{% endblock %}
-    </div>
+<div class="example-demo demo-box">
+    {% block demo %}{% endblock %}
+</div>
 
-    <div class="example-source">
-        {% set tplFiles = templateFiles is defined ? templateFiles : (templateFile is defined and templateFile ? [templateFile] : []) %}
-        {% if tplFiles|length > 0 %}
-        <input type="radio" name="src-tab" id="src-tab-0" class="tab-radio" checked>
-        {% for tplFile in tplFiles %}
-        <input type="radio" name="src-tab" id="src-tab-{{ loop.index }}" class="tab-radio">
+{% if anatomy is defined and anatomy %}
+<div class="example-anatomy">
+    {% if githubLinks is defined and githubLinks %}
+    <div class="anatomy-github">
+        <span class="anatomy-github-label">Source</span>
+        {% for link in githubLinks %}
+        <a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.label }} <span class="anatomy-github-ext">.{{ link.url|split('.')|last }}</span> →</a>
         {% endfor %}
-        <div class="example-source-tabs">
-            <label for="src-tab-0" class="code-tab-label">📄 {{ sourceFile }}</label>
-            {% for tplFile in tplFiles %}
-            <label for="src-tab-{{ loop.index }}" class="code-tab-label">🌐 {{ tplFile }}</label>
+    </div>
+    {% endif %}
+
+    <div class="anatomy-columns">
+        {% if anatomy.signals is defined and anatomy.signals|length > 0 %}
+        <div class="anatomy-section">
+            <h3 class="anatomy-heading">⚡ Signals</h3>
+            {% for signal in anatomy.signals %}
+            <div class="anatomy-item">
+                <div class="anatomy-item-header">
+                    <code class="anatomy-name">{{ signal.name }}</code>
+                    {% if signal.type is defined %}<span class="anatomy-badge anatomy-badge--type">{{ signal.type }}</span>{% endif %}
+                    {% if signal.scope is defined %}<span class="anatomy-badge anatomy-badge--{{ signal.scope|lower|replace({':': '-', ' ': '-'}) }}">{{ signal.scope }}</span>{% endif %}
+                    {% if signal.default is defined %}<span class="anatomy-badge anatomy-badge--default">{{ signal.default }}</span>{% endif %}
+                </div>
+                {% if signal.desc is defined %}<p class="anatomy-desc">{{ signal.desc }}</p>{% endif %}
+            </div>
             {% endfor %}
         </div>
-        <div class="tab-pane tab-pane-0">
-            {{ exampleSources[sourceFile] | raw }}
+        {% endif %}
+
+        {% if anatomy.actions is defined and anatomy.actions|length > 0 %}
+        <div class="anatomy-section">
+            <h3 class="anatomy-heading">🎯 Actions</h3>
+            {% for action in anatomy.actions %}
+            <div class="anatomy-item">
+                <div class="anatomy-item-header">
+                    <code class="anatomy-name">{{ action.name }}</code>
+                    {% if action.scope is defined %}<span class="anatomy-badge anatomy-badge--{{ action.scope|lower|replace({':': '-', ' ': '-'}) }}">{{ action.scope }}</span>{% endif %}
+                </div>
+                {% if action.desc is defined %}<p class="anatomy-desc">{{ action.desc }}</p>{% endif %}
+            </div>
+            {% endfor %}
         </div>
-        {% for tplFile in tplFiles %}
-        <div class="tab-pane tab-pane-{{ loop.index }}">
-            {{ templateSources[tplFile] | raw }}
+        {% endif %}
+
+        {% if anatomy.views is defined and anatomy.views|length > 0 %}
+        <div class="anatomy-section">
+            <h3 class="anatomy-heading">👁 Views</h3>
+            {% for view in anatomy.views %}
+            <div class="anatomy-item">
+                <div class="anatomy-item-header">
+                    <code class="anatomy-name">{{ view.name }}</code>
+                </div>
+                {% if view.desc is defined %}<p class="anatomy-desc">{{ view.desc }}</p>{% endif %}
+            </div>
+            {% endfor %}
         </div>
-        {% endfor %}
-        {% else %}
-        <div class="example-source-header">📄 {{ sourceFile }}</div>
-        {{ exampleSources[sourceFile] | raw }}
         {% endif %}
     </div>
 </div>
+{% endif %}
+
+{% block extra %}{% endblock %}
 {% endblock %}

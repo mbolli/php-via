@@ -48,8 +48,24 @@ final class ComponentsExample {
                     '<strong>Shared logic, separate state</strong>. All three counters use the exact same closure. The only difference is the component name passed at mount time.',
                     '<strong>Composable</strong> — components can nest other components. Build complex UIs from small, testable pieces without a custom component class hierarchy.',
                 ],
-                'sourceFile' => 'components.php',
-                'templateFiles' => ['components.html.twig', 'component_counter.html.twig'],
+                'anatomy' => [
+                    'signals' => [
+                        ['name' => 'count', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Each component instance has its own count signal, auto-namespaced to avoid collisions.'],
+                    ],
+                    'actions' => [
+                        ['name' => 'increment', 'desc' => 'Adds 1 to that component\'s count. Only re-renders the owning component.'],
+                        ['name' => 'decrement', 'desc' => 'Subtracts 1 from that component\'s count.'],
+                    ],
+                    'views' => [
+                        ['name' => 'components.html.twig', 'desc' => 'Page shell that mounts three independent counter components.'],
+                        ['name' => 'component_counter.html.twig', 'desc' => 'Reusable counter UI rendered per component instance.'],
+                    ],
+                ],
+                'githubLinks' => [
+                    ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/ComponentsExample.php'],
+                    ['label' => 'View page template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/components.html.twig'],
+                    ['label' => 'View component template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/component_counter.html.twig'],
+                ],
                 'counter1' => $counter1(),
                 'counter2' => $counter2(),
                 'counter3' => $counter3(),

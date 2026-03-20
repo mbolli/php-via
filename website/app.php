@@ -46,37 +46,7 @@ $cssPath = __DIR__ . '/public/css/site.css';
 $twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
 $twig->addGlobal('siteUrl', 'https://via.zweiundeins.gmbh/');
 
-// ─── Examples: pre-highlight source files + register routes ──────────────────
-
-$codeRuntime = new CodeRuntime();
-$sourceDir = __DIR__ . '/examples-source';
-$exampleSources = [];
-foreach (glob($sourceDir . '/*.php') ?: [] as $file) {
-    $name = basename($file, '.php');
-    $content = file_get_contents($file);
-    if ($content !== false) {
-        $exampleSources[$name . '.php'] = $codeRuntime->highlight($content, 'php');
-    }
-}
-$twig->addGlobal('exampleSources', $exampleSources);
-
-$templateDir = __DIR__ . '/templates/examples';
-$templateSources = [];
-foreach (glob($templateDir . '/*.html.twig') ?: [] as $file) {
-    $name = basename($file);
-    if ($name === '_wrapper.html.twig') {
-        continue;
-    }
-    $content = file_get_contents($file);
-    if ($content !== false) {
-        // Strip boilerplate outside {# via:cut #} markers
-        if (preg_match('/{# via:cut #}(.*){# via:cut #}/s', $content, $matches)) {
-            $content = trim($matches[1]);
-        }
-        $templateSources[$name] = $codeRuntime->highlight($content, 'twig');
-    }
-}
-$twig->addGlobal('templateSources', $templateSources);
+// ─── Examples: register routes ───────────────────────────────────────────────
 
 CounterExample::register($app);
 GreeterExample::register($app);

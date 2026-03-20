@@ -48,8 +48,17 @@ final class ClientMonitorExample {
                         '<strong>ROUTE scope</strong> means every viewer of this page shares the same rendered output. The hook broadcasts once and all clients receive the same HTML patch.',
                         '<strong>Zero idle cost</strong> — unlike a timer, hooks fire only in response to real events. No guard needed to check for active viewers.',
                     ],
-                    'sourceFile' => 'client_monitor.php',
-                    'templateFiles' => ['client_monitor.html.twig'],
+                    'anatomy' => [
+                        'signals' => [],
+                        'actions' => [],
+                        'views' => [
+                            ['name' => 'client_monitor.html.twig', 'desc' => 'Re-renders on connect/disconnect hooks via ROUTE broadcast. Shows identicons, IPs, and connection duration.'],
+                        ],
+                    ],
+                    'githubLinks' => [
+                        ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/ClientMonitorExample.php'],
+                        ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/client_monitor.html.twig'],
+                    ],
                     'clientCount' => $clientCount,
                     'clientsHtml' => $clientsHtml,
                 ]);
