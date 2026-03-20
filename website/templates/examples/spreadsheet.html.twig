@@ -14,6 +14,43 @@
         el.__lastRows = 0; el.__lastCols = 0;
         new ResizeObserver(() => el.dispatchEvent(new CustomEvent('ss-resize'))).observe(el);
         el.addEventListener('wheel', e => e.preventDefault(), { passive: false });
+        el.__sbDrag = (cx, cy) => {
+            if (!el.__drag) return;
+            const axis = el.__drag;
+            const track = axis === 'v' ? $ssTrackV : $ssTrackH;
+            const thumb = axis === 'v' ? $ssThumbV : $ssThumbH;
+            const rect = track.getBoundingClientRect();
+            const ratio = axis === 'v'
+                ? Math.max(0, Math.min(1, (cy - rect.top) / rect.height))
+                : Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+            const thumbPct = axis === 'v' ? {{ vThumbPct }} : {{ hThumbPct }};
+            thumb.style.transition = 'none';
+            if (axis === 'v') { thumb.style.top = (ratio * (100 - thumbPct)) + '%'; }
+            else { thumb.style.left = (ratio * (100 - thumbPct)) + '%'; }
+            const now = Date.now();
+            if (now - (el.__lastScroll || 0) < 100) return;
+            el.__lastScroll = now;
+            if (axis === 'v') { ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }}); }
+            else { ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }}); }
+            @get('{{ scrollToUrl }}');
+        };
+        el.__sbEnd = (cx, cy) => {
+            if (!el.__drag) return;
+            const axis = el.__drag;
+            const track = axis === 'v' ? $ssTrackV : $ssTrackH;
+            const thumb = axis === 'v' ? $ssThumbV : $ssThumbH;
+            thumb.style.transition = '';
+            if (cx != null) {
+                const rect = track.getBoundingClientRect();
+                const ratio = axis === 'v'
+                    ? Math.max(0, Math.min(1, (cy - rect.top) / rect.height))
+                    : Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+                if (axis === 'v') { ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }}); }
+                else { ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }}); }
+                @get('{{ scrollToUrl }}');
+            }
+            el.__drag = null; document.body.style.userSelect = '';
+        };
      "
      data-on:ss-resize__throttle.200ms="
         const toolbarH = $ssToolbar?.offsetHeight ?? 36;
@@ -59,49 +96,10 @@
         ${{ dcId }} = evt.deltaX > 0 ? 4 : evt.deltaX < 0 ? -4 : 0;
         if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @get('{{ scrollUrl }}');
      "
-     data-on:mousemove__window="
-        if (!el.__drag) return;
-        const axis = el.__drag;
-        const track = axis === 'v' ? $ssTrackV : $ssTrackH;
-        const thumb = axis === 'v' ? $ssThumbV : $ssThumbH;
-        const rect = track.getBoundingClientRect();
-        const ratio = axis === 'v'
-            ? Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height))
-            : Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
-        const thumbPct = axis === 'v' ? {{ vThumbPct }} : {{ hThumbPct }};
-        const pos = ratio * (100 - thumbPct);
-        thumb.style.transition = 'none';
-        if (axis === 'v') { thumb.style.top = pos + '%'; } else { thumb.style.left = pos + '%'; }
-        const now = Date.now();
-        if (now - (el.__lastScroll || 0) < 100) return;
-        el.__lastScroll = now;
-        if (axis === 'v') {
-            ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }});
-        } else {
-            ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }});
-        }
-        @get('{{ scrollToUrl }}')
-     "
-     data-on:mouseup__window="
-        if (el.__drag) {
-            const axis = el.__drag;
-            const track = axis === 'v' ? $ssTrackV : $ssTrackH;
-            const thumb = axis === 'v' ? $ssThumbV : $ssThumbH;
-            thumb.style.transition = '';
-            const rect = track.getBoundingClientRect();
-            const pos = axis === 'v' ? evt.clientY : evt.clientX;
-            const start = axis === 'v' ? rect.top : rect.left;
-            const size = axis === 'v' ? rect.height : rect.width;
-            const ratio = Math.max(0, Math.min(1, (pos - start) / size));
-            if (axis === 'v') {
-                ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }});
-            } else {
-                ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }});
-            }
-            @get('{{ scrollToUrl }}');
-            el.__drag = null; document.body.style.userSelect = '';
-        }
-     "
+     data-on:mousemove__window="el.__sbDrag(evt.clientX, evt.clientY)"
+     data-on:touchmove__window__prevent="if (el.__drag) { const t = evt.touches[0]; el.__sbDrag(t.clientX, t.clientY); }"
+     data-on:mouseup__window="el.__sbEnd(evt.clientX, evt.clientY)"
+     data-on:touchend__window="el.__sbEnd(null, null)"
      >
 
     <div class="ss-toolbar" data-ref="ssToolbar">
@@ -172,17 +170,23 @@
         </div>
 
         <div class="ss-scrollbar ss-scrollbar-v"
-             data-on:mousedown="
+             data-on:mousedown__prevent="
                 const rect = $ssTrackV.getBoundingClientRect();
                 if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {
-                    el.closest('#spreadsheet').__drag = 'v';
-                    document.body.style.userSelect = 'none';
+                    el.closest('#spreadsheet').__drag = 'v'; document.body.style.userSelect = 'none';
                 } else {
-                    const ratio = Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height));
-                    ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }});
+                    ${{ scrollToRowId }} = Math.round(Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height)) * {{ maxRow - viewportRows }});
                     @get('{{ scrollToUrl }}');
                 }
-                evt.preventDefault();
+             "
+             data-on:touchstart__prevent="
+                const rect = $ssTrackV.getBoundingClientRect(); const t = evt.touches[0];
+                if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {
+                    el.closest('#spreadsheet').__drag = 'v';
+                } else {
+                    ${{ scrollToRowId }} = Math.round(Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)) * {{ maxRow - viewportRows }});
+                    @get('{{ scrollToUrl }}');
+                }
              ">
             <div class="ss-scrollbar-track" data-ref="ssTrackV">
                 <div class="ss-scrollbar-thumb" data-ref="ssThumbV" style="top: {{ vPosPct }}%; height: {{ vThumbPct }}%"></div>
@@ -192,17 +196,23 @@
 
     <div class="ss-scrollbar-bottom">
         <div class="ss-scrollbar ss-scrollbar-h"
-             data-on:mousedown="
+             data-on:mousedown__prevent="
                 const rect = $ssTrackH.getBoundingClientRect();
                 if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {
-                    el.closest('#spreadsheet').__drag = 'h';
-                    document.body.style.userSelect = 'none';
+                    el.closest('#spreadsheet').__drag = 'h'; document.body.style.userSelect = 'none';
                 } else {
-                    const ratio = Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
-                    ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }});
+                    ${{ scrollToColId }} = Math.round(Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) * {{ maxCol - viewportCols }});
                     @get('{{ scrollToUrl }}');
                 }
-                evt.preventDefault();
+             "
+             data-on:touchstart__prevent="
+                const rect = $ssTrackH.getBoundingClientRect(); const t = evt.touches[0];
+                if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {
+                    el.closest('#spreadsheet').__drag = 'h';
+                } else {
+                    ${{ scrollToColId }} = Math.round(Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width)) * {{ maxCol - viewportCols }});
+                    @get('{{ scrollToUrl }}');
+                }
              ">
             <div class="ss-scrollbar-track" data-ref="ssTrackH">
                 <div class="ss-scrollbar-thumb" data-ref="ssThumbH" style="left: {{ hPosPct }}%; width: {{ hThumbPct }}%"></div>
@@ -226,6 +236,7 @@
         border-radius: var(--radius-md) var(--radius-md) 0 0;
         font-size: var(--font-size-0);
         flex-shrink: 0;
+        flex-wrap: wrap;
     }
     .ss-cell-ref {
         font-weight: 700;
@@ -258,11 +269,11 @@
         outline: 2px solid var(--blue-5);
         outline-offset: -1px;
     }
-    .ss-users { color: var(--text-2); }
-    .ss-pos { color: var(--text-3); font-size: 0.75rem; }
+    .ss-users { color: var(--text-2); white-space: nowrap; }
+    .ss-pos { color: var(--text-3); font-size: 0.75rem; white-space: nowrap; }
     .ss-formula-bar {
         flex: 1;
-        min-width: 0;
+        min-width: 6rem;
         padding: 0 var(--size-2);
         background: var(--surface-1);
         border: 1px solid var(--surface-3);
@@ -418,7 +429,7 @@
         box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
         z-index: 10;
         width: max-content;
-        max-width: 400px;
+        max-width: min(400px, 80vw);
         padding-inline-end: var(--size-3);
         white-space: normal;
         padding-top: var(--size-1);
@@ -472,12 +483,17 @@
     #spreadsheet:focus-visible {
         outline: none;
     }
-    /* Override the shared side-by-side layout: source goes below the demo */
-    .example-split {
-        grid-template-columns: 1fr;
+    .demo-box {
+        padding: 0;
+        border: none;
+        background: none;
+        border-radius: 0;
     }
-    .example-source {
-        max-height: 60vh;
+    @media (max-width: 520px) {
+        .ss-formula-bar { display: none; }
+        .ss-pos { display: none; }
+        .ss-jump-label { display: none; }
+        #spreadsheet { height: 70vh; }
     }
     @starting-style {
         #spreadsheet tbody tr { opacity: 0; transform: translateY(-4px); }
