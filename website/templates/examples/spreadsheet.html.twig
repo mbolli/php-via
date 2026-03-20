@@ -97,7 +97,7 @@
         if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @get('{{ scrollUrl }}');
      "
      data-on:mousemove__window="el.__sbDrag(evt.clientX, evt.clientY)"
-     data-on:touchmove__window__prevent="if (el.__drag) { const t = evt.touches[0]; el.__sbDrag(t.clientX, t.clientY); }"
+     data-on:touchmove__window="if (el.__drag) { evt.preventDefault(); const t = evt.touches[0]; el.__sbDrag(t.clientX, t.clientY); }"
      data-on:mouseup__window="el.__sbEnd(evt.clientX, evt.clientY)"
      data-on:touchend__window="el.__sbEnd(null, null)"
      >
