@@ -2,6 +2,12 @@
 
 {% block demo %}
 {# via:cut #}
+{% set vScrollRange = maxRow - viewportRows %}
+{% set hScrollRange = maxCol - viewportCols %}
+{% set vThumbPct = maxRow > 0 ? (viewportRows / maxRow * 100) : 100 %}
+{% set vPosPct = vScrollRange > 0 ? (vr / vScrollRange * (100 - vThumbPct)) : 0 %}
+{% set hThumbPct = maxCol > 0 ? (viewportCols / maxCol * 100) : 100 %}
+{% set hPosPct = hScrollRange > 0 ? (vc / hScrollRange * (100 - hThumbPct)) : 0 %}
 <div id="spreadsheet"
      tabindex="0"
      data-init="
@@ -10,10 +16,12 @@
         el.addEventListener('wheel', e => e.preventDefault(), { passive: false });
      "
      data-on:ss-resize__throttle.200ms="
-        const toolbarH = el.querySelector('.ss-toolbar')?.offsetHeight ?? 36;
-        const theadH = el.querySelector('.ss-grid thead')?.offsetHeight ?? 28;
-        const rows = Math.max(3, Math.min(100, Math.floor((el.clientHeight - toolbarH - theadH) / 28)));
-        const cols = Math.max(3, Math.min(52, Math.floor((el.clientWidth - 36) / 80)));
+        const toolbarH = $ssToolbar?.offsetHeight ?? 36;
+        const theadH = $ssThead?.offsetHeight ?? 28;
+        const sbH = 14;
+        const sbW = 14;
+        const rows = Math.max(3, Math.min(100, Math.floor((el.clientHeight - toolbarH - theadH - sbH) / 28)));
+        const cols = Math.max(3, Math.min(52, Math.floor((el.clientWidth - 36 - sbW) / 80)));
         if (rows !== el.__lastRows || cols !== el.__lastCols) {
             el.__lastRows = rows; el.__lastCols = cols;
             ${{ viewportRowsId }} = rows; ${{ viewportColsId }} = cols;
@@ -46,14 +54,57 @@
      "
      data-on:keyup__window="${{ keyId }} = ''; ${{ shiftId }} = false"
      data-on:paste__window="${{ pastedId }} = event.clipboardData.getData('text/plain'); ${{ pastedId }} && @post('{{ pasteUrl }}'); event.preventDefault();"
-     data-on:wheel__throttle.150ms__prevent="
+     data-on:wheel__throttle.100ms__prevent="
         ${{ drId }} = evt.deltaY > 0 ? 4 : evt.deltaY < 0 ? -4 : 0;
         ${{ dcId }} = evt.deltaX > 0 ? 4 : evt.deltaX < 0 ? -4 : 0;
         if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @get('{{ scrollUrl }}');
      "
+     data-on:mousemove__window="
+        if (!el.__drag) return;
+        const axis = el.__drag;
+        const track = axis === 'v' ? $ssTrackV : $ssTrackH;
+        const thumb = axis === 'v' ? $ssThumbV : $ssThumbH;
+        const rect = track.getBoundingClientRect();
+        const ratio = axis === 'v'
+            ? Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height))
+            : Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
+        const thumbPct = axis === 'v' ? {{ vThumbPct }} : {{ hThumbPct }};
+        const pos = ratio * (100 - thumbPct);
+        thumb.style.transition = 'none';
+        if (axis === 'v') { thumb.style.top = pos + '%'; } else { thumb.style.left = pos + '%'; }
+        const now = Date.now();
+        if (now - (el.__lastScroll || 0) < 100) return;
+        el.__lastScroll = now;
+        if (axis === 'v') {
+            ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }});
+        } else {
+            ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }});
+        }
+        @get('{{ scrollToUrl }}')
+     "
+     data-on:mouseup__window="
+        if (el.__drag) {
+            const axis = el.__drag;
+            const track = axis === 'v' ? $ssTrackV : $ssTrackH;
+            const thumb = axis === 'v' ? $ssThumbV : $ssThumbH;
+            thumb.style.transition = '';
+            const rect = track.getBoundingClientRect();
+            const pos = axis === 'v' ? evt.clientY : evt.clientX;
+            const start = axis === 'v' ? rect.top : rect.left;
+            const size = axis === 'v' ? rect.height : rect.width;
+            const ratio = Math.max(0, Math.min(1, (pos - start) / size));
+            if (axis === 'v') {
+                ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }});
+            } else {
+                ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }});
+            }
+            @get('{{ scrollToUrl }}');
+            el.__drag = null; document.body.style.userSelect = '';
+        }
+     "
      >
 
-    <div class="ss-toolbar">
+    <div class="ss-toolbar" data-ref="ssToolbar">
         <div class="ss-cell-ref">
             {{ colNames[fc - vc] is defined ? colNames[fc - vc] : '' }}{{ fr + 1 }}
         </div>
@@ -76,47 +127,88 @@
         </div>
     </div>
 
-    <div class="ss-grid-wrapper">
-        <table class="ss-grid">
-            <thead>
-                <tr>
-                    <th class="ss-row-header">&nbsp;</th>
-                    {% for colName in colNames %}
-                        <th class="ss-col-header{% if vc + loop.index0 >= selRange.c1 and vc + loop.index0 <= selRange.c2 and selRange.r1 >= 0 %} ss-sel-header{% endif %}">{{ colName }}</th>
-                    {% endfor %}
-                </tr>
-            </thead>
-            <tbody>
-                {% for ri in 0..(viewportRows - 1) %}
-                    {% set absRow = vr + ri %}
+    <div class="ss-body">
+        <div class="ss-grid-wrapper">
+            <table class="ss-grid">
+                <thead data-ref="ssThead">
                     <tr>
-                        <th class="ss-row-header{% if absRow >= selRange.r1 and absRow <= selRange.r2 and selRange.c1 >= 0 %} ss-sel-header{% endif %}">{{ absRow + 1 }}</th>
-                        {% for ci in 0..(viewportCols - 1) %}
-                            {% set absCol = vc + ci %}
-                            {% set cellKey = absRow ~ ':' ~ absCol %}
-                            {% set isFocused = absRow == fr and absCol == fc %}
-                            {% set hasMultiSel = selRange.r1 >= 0 and (selRange.r1 != selRange.r2 or selRange.c1 != selRange.c2) %}
-                            {% set isSelected = hasMultiSel and absRow >= selRange.r1 and absRow <= selRange.r2 and absCol >= selRange.c1 and absCol <= selRange.c2 %}
-                            {% set otherHue = otherCursors[cellKey] is defined ? otherCursors[cellKey] : null %}
-                            <td class="ss-cell{% if isFocused %} ss-focused{% endif %}{% if isSelected %} ss-selected{% endif %}{% if otherHue is not null %} ss-other-cursor{% endif %}"
-                                {% if isFocused %}style="outline: 2px solid hsl({{ myHue }}, 70%, 50%); outline-offset: -1px;"{% endif %}
-                                {% if otherHue is not null and not isFocused %}style="box-shadow: inset 0 0 0 2px hsl({{ otherHue }}, 70%, 50%);"{% endif %}
-                                {% if not isFocused %}
-                                    data-on:click="${{ shiftId }} = evt.shiftKey; ${{ trId }} = {{ absRow }}; ${{ tcId }} = {{ absCol }}; @get('{{ focusCellUrl }}')"
-                                {% endif %}
-                                data-on:dblclick="@get('{{ startEditUrl }}')"
-                            >
-                                {% if isFocused and isEditing %}
-                                    <input type="text" data-init="el.focus()" id="ss-active-input" class="ss-edit-input" data-bind="{{ editValueId }}">
-                                {% else %}
-                                    <span class="ss-cell-text">{{ cells[cellKey] is defined ? cells[cellKey] : '' }}</span>
-                                {% endif %}
-                            </td>
+                        <th class="ss-row-header">&nbsp;</th>
+                        {% for colName in colNames %}
+                            <th class="ss-col-header{% if vc + loop.index0 >= selRange.c1 and vc + loop.index0 <= selRange.c2 and selRange.r1 >= 0 %} ss-sel-header{% endif %}">{{ colName }}</th>
                         {% endfor %}
                     </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    {% for ri in 0..(viewportRows - 1) %}
+                        {% set absRow = vr + ri %}
+                        <tr>
+                            <th class="ss-row-header{% if absRow >= selRange.r1 and absRow <= selRange.r2 and selRange.c1 >= 0 %} ss-sel-header{% endif %}">{{ absRow + 1 }}</th>
+                            {% for ci in 0..(viewportCols - 1) %}
+                                {% set absCol = vc + ci %}
+                                {% set cellKey = absRow ~ ':' ~ absCol %}
+                                {% set isFocused = absRow == fr and absCol == fc %}
+                                {% set hasMultiSel = selRange.r1 >= 0 and (selRange.r1 != selRange.r2 or selRange.c1 != selRange.c2) %}
+                                {% set isSelected = hasMultiSel and absRow >= selRange.r1 and absRow <= selRange.r2 and absCol >= selRange.c1 and absCol <= selRange.c2 %}
+                                {% set otherHue = otherCursors[cellKey] is defined ? otherCursors[cellKey] : null %}
+                                <td class="ss-cell{% if isFocused %} ss-focused{% endif %}{% if isSelected %} ss-selected{% endif %}{% if otherHue is not null %} ss-other-cursor{% endif %}"
+                                    {% if isFocused %}style="outline: 2px solid hsl({{ myHue }}, 70%, 50%); outline-offset: -1px;"{% endif %}
+                                    {% if otherHue is not null and not isFocused %}style="box-shadow: inset 0 0 0 2px hsl({{ otherHue }}, 70%, 50%);"{% endif %}
+                                    {% if not isFocused %}
+                                        data-on:click="${{ shiftId }} = evt.shiftKey; ${{ trId }} = {{ absRow }}; ${{ tcId }} = {{ absCol }}; @get('{{ focusCellUrl }}')"
+                                    {% endif %}
+                                    data-on:dblclick="@get('{{ startEditUrl }}')"
+                                >
+                                    {% if isFocused and isEditing %}
+                                        <input type="text" data-init="el.focus()" id="ss-active-input" class="ss-edit-input" data-bind="{{ editValueId }}">
+                                    {% else %}
+                                        <span class="ss-cell-text">{{ cells[cellKey] is defined ? cells[cellKey] : '' }}</span>
+                                    {% endif %}
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="ss-scrollbar ss-scrollbar-v"
+             data-on:mousedown="
+                const rect = $ssTrackV.getBoundingClientRect();
+                if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {
+                    el.closest('#spreadsheet').__drag = 'v';
+                    document.body.style.userSelect = 'none';
+                } else {
+                    const ratio = Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height));
+                    ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }});
+                    @get('{{ scrollToUrl }}');
+                }
+                evt.preventDefault();
+             ">
+            <div class="ss-scrollbar-track" data-ref="ssTrackV">
+                <div class="ss-scrollbar-thumb" data-ref="ssThumbV" style="top: {{ vPosPct }}%; height: {{ vThumbPct }}%"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="ss-scrollbar-bottom">
+        <div class="ss-scrollbar ss-scrollbar-h"
+             data-on:mousedown="
+                const rect = $ssTrackH.getBoundingClientRect();
+                if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {
+                    el.closest('#spreadsheet').__drag = 'h';
+                    document.body.style.userSelect = 'none';
+                } else {
+                    const ratio = Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
+                    ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }});
+                    @get('{{ scrollToUrl }}');
+                }
+                evt.preventDefault();
+             ">
+            <div class="ss-scrollbar-track" data-ref="ssTrackH">
+                <div class="ss-scrollbar-thumb" data-ref="ssThumbH" style="left: {{ hPosPct }}%; width: {{ hThumbPct }}%"></div>
+            </div>
+        </div>
+        <div class="ss-scrollbar-corner"></div>
     </div>
 </div>
 {# via:cut #}
@@ -190,7 +282,75 @@
         overflow: hidden;
         border: 1px solid var(--surface-3);
         border-top: 0;
-        border-radius: 0 0 var(--radius-md) var(--radius-md);
+        border-radius: 0;
+    }
+    .ss-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+    }
+    .ss-body > .ss-grid-wrapper {
+        flex: 1;
+        min-width: 0;
+    }
+    /* ─── Scrollbars ──────────────────────── */
+    .ss-scrollbar {
+        background: var(--surface-2);
+        border: 1px solid var(--surface-3);
+        box-sizing: border-box;
+    }
+    .ss-scrollbar-v {
+        width: 14px;
+        border-top: 0;
+        border-left: 0;
+    }
+    .ss-scrollbar-h {
+        flex: 1;
+        height: 14px;
+        border-top: 0;
+        border-radius: 0 0 0 var(--radius-md);
+    }
+    .ss-scrollbar-track {
+        position: relative;
+        width: 100%;
+        height: 100%;
+    }
+    .ss-scrollbar-thumb {
+        position: absolute;
+        border-radius: 4px;
+        background: var(--text-3);
+        opacity: 0.45;
+        transition: opacity 120ms ease, top 180ms ease, left 180ms ease;
+        min-width: 16px;
+        min-height: 16px;
+    }
+    .ss-scrollbar-thumb:hover,
+    .ss-scrollbar-thumb:active {
+        opacity: 0.7;
+    }
+    .ss-scrollbar-v .ss-scrollbar-thumb {
+        left: 2px;
+        right: 2px;
+        width: auto;
+    }
+    .ss-scrollbar-h .ss-scrollbar-thumb {
+        top: 2px;
+        bottom: 2px;
+        height: auto;
+    }
+    .ss-scrollbar-bottom {
+        display: flex;
+        flex-shrink: 0;
+    }
+    .ss-scrollbar-corner {
+        width: 14px;
+        height: 14px;
+        background: var(--surface-2);
+        border: 1px solid var(--surface-3);
+        border-top: 0;
+        border-left: 0;
+        border-radius: 0 0 var(--radius-md) 0;
+        flex-shrink: 0;
     }
     .ss-grid {
         border-collapse: collapse;
@@ -220,11 +380,13 @@
         top: 0;
         min-width: 80px;
         width: 80px;
+        border-start-end-radius: 0;
     }
     .ss-row-header {
         left: 0;
         width: 36px;
         min-width: 36px;
+        border-start-start-radius: 0;
     }
     .ss-sel-header {
         background: var(--blue-2);

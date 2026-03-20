@@ -209,6 +209,16 @@ final class SpreadsheetExample {
                 $ctx->sync();
             }, 'scroll');
 
+            // Absolute-position scroll targets (written by scrollbar drag)
+            $scrollToRow = $c->signal(0, 'str', Scope::TAB);
+            $scrollToCol = $c->signal(0, 'stc', Scope::TAB);
+
+            $scrollTo = $c->action(function (Context $ctx) use ($viewRow, $viewCol, $scrollToRow, $scrollToCol): void {
+                $viewRow->setValue(max(0, $scrollToRow->int()), broadcast: false);
+                $viewCol->setValue(max(0, $scrollToCol->int()), broadcast: false);
+                $ctx->sync();
+            }, 'scrollTo');
+
             $paste = $c->action(function (Context $ctx) use ($app, $focusRow, $focusCol, $editing, $editValue, $pasted, $version): void {
                 $data = $pasted->string();
                 $pasted->setValue('', broadcast: false);
@@ -338,6 +348,8 @@ final class SpreadsheetExample {
                 $shift,
                 $scrollDr,
                 $scrollDc,
+                $scrollToRow,
+                $scrollToCol,
                 $pasted,
                 $viewportRows,
                 $viewportCols,
@@ -347,6 +359,7 @@ final class SpreadsheetExample {
                 $startEdit,
                 $commitEdit,
                 $scroll,
+                $scrollTo,
                 $paste,
                 $getCopyData,
                 $clearCells,
@@ -386,6 +399,8 @@ final class SpreadsheetExample {
                 $sc1 = min($sel['c1'], $sel['c2']);
                 $sc2 = max($sel['c1'], $sel['c2']);
 
+                $extent = self::getGridExtent($fr, $fc);
+
                 return $c->render('examples/spreadsheet.html.twig', [
                     'title' => '📊 Spreadsheet',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
@@ -415,6 +430,7 @@ final class SpreadsheetExample {
                             ['name' => 'startEdit', 'desc' => 'Enters edit mode on the focused cell. Prefills with typed character or current value.'],
                             ['name' => 'commitEdit', 'desc' => 'Writes the edit value to SQLite and broadcasts the change.'],
                             ['name' => 'scroll', 'desc' => 'Mouse wheel scrolling — moves viewport by delta rows/columns.'],
+                            ['name' => 'scrollTo', 'desc' => 'Absolute viewport positioning — used by scrollbar drag and track clicks.'],
                             ['name' => 'clearCells', 'desc' => 'Deletes the selected range of cells.'],
                             ['name' => 'paste', 'desc' => 'Pastes TSV clipboard data starting at the focused cell. Compatible with Excel/Sheets.'],
                             ['name' => 'jumpTo', 'desc' => 'Parses a cell reference like AB2000, centers viewport, and moves cursor.'],
@@ -458,6 +474,11 @@ final class SpreadsheetExample {
                     'startEditUrl' => $startEdit->url(),
                     'commitEditUrl' => $commitEdit->url(),
                     'scrollUrl' => $scroll->url(),
+                    'scrollToUrl' => $scrollTo->url(),
+                    'scrollToRowId' => $scrollToRow->id(),
+                    'scrollToColId' => $scrollToCol->id(),
+                    'maxRow' => $extent['maxRow'],
+                    'maxCol' => $extent['maxCol'],
                     'pasteUrl' => $paste->url(),
                     'getCopyDataUrl' => $getCopyData->url(),
                     'clearCellsUrl' => $clearCells->url(),
@@ -573,5 +594,21 @@ final class SpreadsheetExample {
 
     private static function hueForSession(string $sessionId): int {
         return hexdec(substr(md5($sessionId), 0, 4)) % 360;
+    }
+
+    /**
+     * @return array{maxRow: int, maxCol: int}
+     */
+    private static function getGridExtent(int $focusRow, int $focusCol): array {
+        $result = self::db()->querySingle(
+            'SELECT COALESCE(MAX(row), 0) AS maxRow, COALESCE(MAX(col), 0) AS maxCol FROM cells',
+            true
+        );
+        /** @var array{maxRow: int, maxCol: int} $result */
+
+        return [
+            'maxRow' => max((int) $result['maxRow'], $focusRow) + 50,
+            'maxCol' => max((int) $result['maxCol'], $focusCol) + 10,
+        ];
     }
 }
