@@ -1972,6 +1972,7 @@ main, .site-footer { position: relative; }
   padding: var(--size-3);
   flex: 1;
   min-height: 250px;
+  max-height: 420px;
   overflow-y: auto;
   margin-block-end: var(--size-3);
   background: var(--surface-2);
