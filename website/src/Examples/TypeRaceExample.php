@@ -9,8 +9,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
-final class TypeRaceExample
-{
+final class TypeRaceExample {
     public const string SLUG = 'type-race';
 
     /** @var string[] */
@@ -85,8 +84,8 @@ final class TypeRaceExample
      *   snippet: string,
      *   racers: array<string, array{name: string, progress: int, wpm: float, finished: bool, finishRank: int}>,
      *   countdownValue: int,
-     *   timerId: int|null,
-     *   startTime: int|null,
+     *   timerId: null|int,
+     *   startTime: null|int,
      *   finishCount: int,
      * }>
      */
@@ -99,8 +98,7 @@ final class TypeRaceExample
 
     // ── Registration ───────────────────────────────────────────────────────────
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/type-race', function (Context $c) use ($app): void {
             $contextId = $c->getId();
 
@@ -114,8 +112,8 @@ final class TypeRaceExample
 
             // Join an open race (or create one)
             $raceId = self::joinRace($contextId, $username);
-            $race   = &self::$races[$raceId];
-            $scope  = Scope::build('example:typerace', $raceId);
+            $race = &self::$races[$raceId];
+            $scope = Scope::build('example:typerace', $raceId);
             $c->addScope($scope);
 
             // Notify existing players in the lobby that someone just joined
@@ -130,7 +128,10 @@ final class TypeRaceExample
             // ── Actions ───────────────────────────────────────────────────────
 
             $updateProgress = $c->action(function (Context $ctx) use (
-                $raceId, $contextId, $typedText, $app,
+                $raceId,
+                $contextId,
+                $typedText,
+                $app,
             ): void {
                 $raceScope = Scope::build('example:typerace', $raceId);
                 $race = &self::$races[$raceId];
@@ -141,15 +142,15 @@ final class TypeRaceExample
                     return;
                 }
 
-                $text    = $typedText->getValue();
+                $text = $typedText->getValue();
                 $snippet = $race['snippet'];
-                $len     = \strlen($snippet);
+                $len = \strlen($snippet);
 
                 // Count leading correct characters
                 $correct = 0;
-                for ($i = 0; $i < min(\strlen($text), $len); $i++) {
+                for ($i = 0; $i < min(\strlen($text), $len); ++$i) {
                     if ($text[$i] === $snippet[$i]) {
-                        $correct++;
+                        ++$correct;
                     } else {
                         break;
                     }
@@ -159,17 +160,17 @@ final class TypeRaceExample
 
                 // WPM: words = chars / 5, time in minutes
                 $elapsed = time() - (int) $race['startTime'];
-                $wpm     = $elapsed > 0 ? round(($correct / 5) / ($elapsed / 60)) : 0;
+                $wpm = $elapsed > 0 ? round(($correct / 5) / ($elapsed / 60)) : 0;
 
                 $racer = &$race['racers'][$contextId];
                 $racer['progress'] = $progress;
-                $racer['wpm']      = (float) $wpm;
+                $racer['wpm'] = (float) $wpm;
 
                 if ($progress >= 100 && !$racer['finished']) {
-                    $racer['finished']    = true;
-                    $racer['wpm']         = (float) $wpm;
-                    $race['finishCount']++;
-                    $racer['finishRank']  = $race['finishCount'];
+                    $racer['finished'] = true;
+                    $racer['wpm'] = (float) $wpm;
+                    ++$race['finishCount'];
+                    $racer['finishRank'] = $race['finishCount'];
 
                     // End race when all racers finish
                     $allDone = array_reduce(
@@ -220,11 +221,11 @@ final class TypeRaceExample
                     $race['racers'][$id] = self::newRacer($race['racers'][$id]['name']);
                 }
                 // Reset race state with a new snippet
-                $race['status']         = 'waiting';
-                $race['snippet']        = self::SNIPPETS[array_rand(self::SNIPPETS)];
+                $race['status'] = 'waiting';
+                $race['snippet'] = self::SNIPPETS[array_rand(self::SNIPPETS)];
                 $race['countdownValue'] = self::COUNTDOWN_SECONDS;
-                $race['startTime']      = null;
-                $race['finishCount']    = 0;
+                $race['startTime'] = null;
+                $race['finishCount'] = 0;
                 unset($race);
 
                 // Absorb lone waiters from other races so nobody is stuck waiting alone.
@@ -274,39 +275,39 @@ final class TypeRaceExample
 
             $c->view(function () use ($c, $contextId, $username, $typedText, $updateProgress, $startRace, $newRace): string {
                 $raceId = self::$contextRace[$contextId] ?? '';
+
                 return $c->render('examples/type_race.html.twig', [
-                'title'           => '⌨️ Type Race',
-                'description'     => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer — no client logic.',
-                'summary'         => self::SUMMARY,
-                'anatomy'         => self::ANATOMY,
-                'githubLinks'     => self::GITHUB_LINKS,
-                'sourceFile'      => 'type_race.php',
-                'templateFiles'   => ['type_race.html.twig'],
-                'raceId'          => $raceId,
-                'snippet'         => self::$races[$raceId]['snippet'] ?? '',
-                'status'          => self::$races[$raceId]['status'] ?? 'waiting',
-                'countdownValue'  => self::$races[$raceId]['countdownValue'] ?? self::COUNTDOWN_SECONDS,
-                'racers'          => self::$races[$raceId]['racers'] ?? [],
-                'username'        => $username,
-                'contextId'       => $contextId,
-                'typedTextId'     => $typedText->id(),
-                'updateUrl'       => $updateProgress->url(),
-                'startRaceUrl'    => $startRace->url(),
-                'newRaceUrl'      => $newRace->url(),
-            ]);
+                    'title' => '⌨️ Type Race',
+                    'description' => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer — no client logic.',
+                    'summary' => self::SUMMARY,
+                    'anatomy' => self::ANATOMY,
+                    'githubLinks' => self::GITHUB_LINKS,
+                    'sourceFile' => 'type_race.php',
+                    'templateFiles' => ['type_race.html.twig'],
+                    'raceId' => $raceId,
+                    'snippet' => self::$races[$raceId]['snippet'] ?? '',
+                    'status' => self::$races[$raceId]['status'] ?? 'waiting',
+                    'countdownValue' => self::$races[$raceId]['countdownValue'] ?? self::COUNTDOWN_SECONDS,
+                    'racers' => self::$races[$raceId]['racers'] ?? [],
+                    'username' => $username,
+                    'contextId' => $contextId,
+                    'typedTextId' => $typedText->id(),
+                    'updateUrl' => $updateProgress->url(),
+                    'startRaceUrl' => $startRace->url(),
+                    'newRaceUrl' => $newRace->url(),
+                ]);
             }, block: 'demo', cacheUpdates: false);
         });
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private static function joinRace(string $contextId, string $username): string
-    {
+    private static function joinRace(string $contextId, string $username): string {
         // Find an open race with space
         foreach (self::$races as $raceId => $race) {
             if ($race['status'] === 'waiting' && \count($race['racers']) < self::MAX_RACERS_PER_RACE) {
                 self::$races[$raceId]['racers'][$contextId] = self::newRacer($username);
-                self::$contextRace[$contextId]              = $raceId;
+                self::$contextRace[$contextId] = $raceId;
 
                 return $raceId;
             }
@@ -315,13 +316,13 @@ final class TypeRaceExample
         // Create a new race
         $raceId = 'race-' . (++self::$raceCounter);
         self::$races[$raceId] = [
-            'status'         => 'waiting',
-            'snippet'        => self::SNIPPETS[array_rand(self::SNIPPETS)],
-            'racers'         => [$contextId => self::newRacer($username)],
+            'status' => 'waiting',
+            'snippet' => self::SNIPPETS[array_rand(self::SNIPPETS)],
+            'racers' => [$contextId => self::newRacer($username)],
             'countdownValue' => self::COUNTDOWN_SECONDS,
-            'timerId'        => null,
-            'startTime'      => null,
-            'finishCount'    => 0,
+            'timerId' => null,
+            'startTime' => null,
+            'finishCount' => 0,
         ];
         self::$contextRace[$contextId] = $raceId;
 
@@ -329,19 +330,17 @@ final class TypeRaceExample
     }
 
     /** @return array{name: string, progress: int, wpm: float, finished: bool, finishRank: int} */
-    private static function newRacer(string $username): array
-    {
+    private static function newRacer(string $username): array {
         return ['name' => $username, 'progress' => 0, 'wpm' => 0.0, 'finished' => false, 'finishRank' => 0];
     }
 
-    private static function beginCountdown(string $raceId, Via $app): void
-    {
+    private static function beginCountdown(string $raceId, Via $app): void {
         $race = &self::$races[$raceId];
         if ($race['status'] !== 'waiting') {
             return;
         }
 
-        $race['status']         = 'countdown';
+        $race['status'] = 'countdown';
         $race['countdownValue'] = self::COUNTDOWN_SECONDS;
 
         $scope = Scope::build('example:typerace', $raceId);
@@ -352,10 +351,10 @@ final class TypeRaceExample
             }
             $race = &self::$races[$raceId];
 
-            $race['countdownValue']--;
+            --$race['countdownValue'];
 
             if ($race['countdownValue'] <= 0) {
-                $race['status']    = 'racing';
+                $race['status'] = 'racing';
                 $race['startTime'] = time();
                 if ($race['timerId'] !== null) {
                     Timer::clear($race['timerId']);

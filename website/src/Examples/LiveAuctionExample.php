@@ -9,8 +9,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
-final class LiveAuctionExample
-{
+final class LiveAuctionExample {
     public const string SLUG = 'live-auction';
 
     private const string SCOPE = 'example:auction';
@@ -63,14 +62,13 @@ final class LiveAuctionExample
 
     // ── Registration ───────────────────────────────────────────────────────────
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/live-auction', function (Context $c) use ($app): void {
             // Session-scoped identity
             $usernameSignal = $c->signal('', 'username', Scope::SESSION);
             if ($usernameSignal->getValue() === '') {
                 $adjectives = ['Swift', 'Bold', 'Keen', 'Deft', 'Sage', 'Wily', 'Cool', 'Zeal'];
-                $animals    = ['Fox', 'Owl', 'Lynx', 'Wolf', 'Bear', 'Hawk', 'Deer', 'Hare'];
+                $animals = ['Fox', 'Owl', 'Lynx', 'Wolf', 'Bear', 'Hawk', 'Deer', 'Hare'];
                 $name = $adjectives[array_rand($adjectives)] . $animals[array_rand($animals)];
                 $usernameSignal->setValue($name);
             }
@@ -83,7 +81,9 @@ final class LiveAuctionExample
             // ── Actions ───────────────────────────────────────────────────────
 
             $placeBid = $c->action(function () use (
-                $bidInput, $usernameSignal, $app,
+                $bidInput,
+                $usernameSignal,
+                $app,
             ): void {
                 if (self::$status === 'sold') {
                     return;
@@ -94,12 +94,12 @@ final class LiveAuctionExample
                     return; // silently ignore invalid bids
                 }
 
-                self::$topBid    = $amount;
+                self::$topBid = $amount;
                 self::$topBidder = $usernameSignal->getValue();
                 self::$bidHistory[] = [
                     'bidder' => self::$topBidder,
                     'amount' => $amount,
-                    'time'   => date('H:i:s'),
+                    'time' => date('H:i:s'),
                 ];
                 // Keep last 15 entries only
                 if (\count(self::$bidHistory) > 15) {
@@ -115,10 +115,10 @@ final class LiveAuctionExample
             }, 'placeBid');
 
             $resetAuction = $c->action(function () use ($app): void {
-                self::$timeLeft   = self::AUCTION_DURATION;
-                self::$topBid     = 50;
-                self::$topBidder  = '';
-                self::$status     = 'active';
+                self::$timeLeft = self::AUCTION_DURATION;
+                self::$topBid = 50;
+                self::$topBidder = '';
+                self::$status = 'active';
                 self::$bidHistory = [];
                 $app->broadcast(self::SCOPE);
                 self::maybeStartTimer($app);
@@ -127,22 +127,22 @@ final class LiveAuctionExample
             // ── View ──────────────────────────────────────────────────────────
 
             $c->view(fn (): string => $c->render('examples/live_auction.html.twig', [
-                'title'       => '🔨 Live Auction',
+                'title' => '🔨 Live Auction',
                 'description' => 'A timed auction with anti-snipe protection. Place a bid — the server clock, bid history, and winner banner update for every viewer in real time.',
-                'summary'     => self::SUMMARY,
-                'anatomy'     => self::ANATOMY,
+                'summary' => self::SUMMARY,
+                'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
-                'sourceFile'  => 'live_auction.php',
+                'sourceFile' => 'live_auction.php',
                 'templateFiles' => ['live_auction.html.twig'],
-                'timeLeft'    => self::$timeLeft,
-                'topBid'      => self::$topBid,
-                'topBidder'   => self::$topBidder,
-                'status'      => self::$status,
-                'bidHistory'  => self::$bidHistory,
-                'bidInputId'  => $bidInput->id(),
-                'username'    => $usernameSignal->getValue(),
+                'timeLeft' => self::$timeLeft,
+                'topBid' => self::$topBid,
+                'topBidder' => self::$topBidder,
+                'status' => self::$status,
+                'bidHistory' => self::$bidHistory,
+                'bidInputId' => $bidInput->id(),
+                'username' => $usernameSignal->getValue(),
                 'placeBidUrl' => $placeBid->url(),
-                'resetUrl'    => $resetAuction->url(),
+                'resetUrl' => $resetAuction->url(),
             ]), block: 'demo', cacheUpdates: false);
 
             // Start timer lazily on first viewer
@@ -152,21 +152,18 @@ final class LiveAuctionExample
 
     // ── Timer ──────────────────────────────────────────────────────────────────
 
-    public static function startTimer(Via $app): void
-    {
+    public static function startTimer(Via $app): void {
         self::maybeStartTimer($app);
     }
 
-    public static function stopTimer(): void
-    {
+    public static function stopTimer(): void {
         if (self::$timerId !== null) {
             Timer::clear(self::$timerId);
             self::$timerId = null;
         }
     }
 
-    private static function maybeStartTimer(Via $app): void
-    {
+    private static function maybeStartTimer(Via $app): void {
         if (self::$timerId !== null || self::$status === 'sold') {
             return;
         }
@@ -182,11 +179,11 @@ final class LiveAuctionExample
                 return;
             }
 
-            self::$timeLeft--;
+            --self::$timeLeft;
 
             if (self::$timeLeft <= 0) {
                 self::$timeLeft = 0;
-                self::$status   = 'sold';
+                self::$status = 'sold';
                 self::stopTimer();
             }
 
