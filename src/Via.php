@@ -303,6 +303,15 @@ class Via {
     }
 
     /**
+     * Unregister a context from a specific scope.
+     *
+     * @internal Called by Context::removeScope()
+     */
+    public function unregisterContextInScope(Context $context, string $scope): void {
+        $this->scopeRegistry->unregisterContext($context, $scope);
+    }
+
+    /**
      * Get all contexts registered under a specific scope.
      *
      * @return array<Context>

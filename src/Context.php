@@ -328,6 +328,26 @@ class Context {
     }
 
     /**
+     * Remove a scope from this context.
+     *
+     * The context will no longer receive broadcasts targeted at this scope.
+     * TAB scope cannot be removed (it is always present for direct targeting).
+     *
+     * @param string $scope Scope to remove
+     */
+    public function removeScope(string $scope): void {
+        if ($scope === Scope::TAB) {
+            return; // TAB scope is permanent — it's the per-context identity scope
+        }
+        $key = array_search($scope, $this->scopes, true);
+        if ($key !== false) {
+            array_splice($this->scopes, (int) $key, 1);
+            $this->app->unregisterContextInScope($this, $scope);
+            $this->app->log('debug', "Removed scope: {$scope}", $this);
+        }
+    }
+
+    /**
      * Get all scopes for this context.
      *
      * @internal
