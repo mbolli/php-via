@@ -7,8 +7,7 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
-final class LiveSearchExample
-{
+final class LiveSearchExample {
     public const string SLUG = 'live-search';
 
     /** @var list<array{name: string, category: string, desc: string}> */
@@ -146,10 +145,9 @@ final class LiveSearchExample
     /** @var list<string> */
     private const array CATEGORIES = ['all', 'Array', 'String', 'Math', 'Date', 'Data', 'Misc'];
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/live-search', function (Context $c): void {
-            $query    = $c->signal('', 'query');
+            $query = $c->signal('', 'query');
             $category = $c->signal('all', 'category');
 
             $search = $c->action(function () use ($category, $c): void {
@@ -163,16 +161,16 @@ final class LiveSearchExample
             }, 'search');
 
             $c->view(fn (): string => $c->render('examples/live_search.html.twig', [
-                'title'       => '🔍 Live Search',
+                'title' => '🔍 Live Search',
                 'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip — and nobody shipped a line of search logic to the browser.',
-                'summary'     => [
+                'summary' => [
                     '<strong>data-on:input__throttle.100ms.trailing</strong> fires at most once every 100 ms while the user types, and always fires one final time at the end — so the last keystroke is never dropped. No setTimeout written by you.',
                     '<strong>Server-side filtering</strong> is intentional. The query parser, category filter, and result ranking all live in PHP. Swap the hardcoded array for a database query and nothing else changes.',
                     '<strong>$c->sync()</strong> re-renders the view for this tab only — no broadcast, no shared state. Other users\' searches are completely isolated.',
                     '<strong>Signals are injected</strong> into the context before the action closure runs. By the time the view callable executes, $query->string() already holds the current input value.',
                     '<strong>Callable views</strong> re-run on every sync, computing fresh results. The client receives rendered HTML via SSE — no JSON payload, no client-side fetch() logic.',
                 ],
-                'anatomy'     => [
+                'anatomy' => [
                     'signals' => [
                         ['name' => 'query', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Current text in the search box. Injected from the browser before the action closure runs.'],
                         ['name' => 'category', 'type' => 'string', 'scope' => 'TAB', 'default' => '"all"', 'desc' => 'Active category filter. Set via ?cat= query param when the user clicks a filter pill.'],
@@ -188,10 +186,10 @@ final class LiveSearchExample
                     ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/LiveSearchExample.php'],
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/live_search.html.twig'],
                 ],
-                'query'      => $query,
-                'category'   => $category,
-                'search'     => $search,
-                'results'    => self::filter($query->string(), $category->string()),
+                'query' => $query,
+                'category' => $category,
+                'search' => $search,
+                'results' => self::filter($query->string(), $category->string()),
                 'categories' => self::CATEGORIES,
             ]), block: 'results', cacheUpdates: false);
         });
@@ -200,9 +198,8 @@ final class LiveSearchExample
     /**
      * @return list<array{name: string, category: string, desc: string}>
      */
-    private static function filter(string $query, string $category): array
-    {
-        $q   = mb_strtolower(trim($query));
+    private static function filter(string $query, string $category): array {
+        $q = mb_strtolower(trim($query));
         $cat = trim($category);
 
         $results = self::FUNCTIONS;

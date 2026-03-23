@@ -7,8 +7,7 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
-final class WizardExample
-{
+final class WizardExample {
     public const string SLUG = 'wizard';
 
     /** @var list<string> */
@@ -19,38 +18,37 @@ final class WizardExample
 
     /** @var list<array{key: string, label: string}> */
     private const array STACK_OPTIONS = [
-        ['key' => 'php',    'label' => 'PHP'],
-        ['key' => 'ts',     'label' => 'TypeScript'],
+        ['key' => 'php', 'label' => 'PHP'],
+        ['key' => 'ts', 'label' => 'TypeScript'],
         ['key' => 'python', 'label' => 'Python'],
-        ['key' => 'go',     'label' => 'Go'],
-        ['key' => 'rust',   'label' => 'Rust'],
-        ['key' => 'java',   'label' => 'Java'],
-        ['key' => 'cs',     'label' => 'C#'],
-        ['key' => 'other',  'label' => 'Other'],
+        ['key' => 'go', 'label' => 'Go'],
+        ['key' => 'rust', 'label' => 'Rust'],
+        ['key' => 'java', 'label' => 'Java'],
+        ['key' => 'cs', 'label' => 'C#'],
+        ['key' => 'other', 'label' => 'Other'],
     ];
 
-    public static function register(Via $app): void
-    {
+    public static function register(Via $app): void {
         $app->page('/examples/wizard', function (Context $c): void {
             // Step state
-            $step  = $c->signal(1, 'step');
+            $step = $c->signal(1, 'step');
             $error = $c->signal('', 'error');
 
             // Step 1: Basics
-            $name  = $c->signal('', 'name');
-            $role  = $c->signal('Backend Dev', 'role');
+            $name = $c->signal('', 'name');
+            $role = $c->signal('Backend Dev', 'role');
             $years = $c->signal(3, 'years');
 
             // Step 2: Stack & editor
             $stack = [
-                'php'    => $c->signal(false, 'sphp'),
-                'ts'     => $c->signal(false, 'sts'),
+                'php' => $c->signal(false, 'sphp'),
+                'ts' => $c->signal(false, 'sts'),
                 'python' => $c->signal(false, 'spython'),
-                'go'     => $c->signal(false, 'sgo'),
-                'rust'   => $c->signal(false, 'srust'),
-                'java'   => $c->signal(false, 'sjava'),
-                'cs'     => $c->signal(false, 'scs'),
-                'other'  => $c->signal(false, 'sother'),
+                'go' => $c->signal(false, 'sgo'),
+                'rust' => $c->signal(false, 'srust'),
+                'java' => $c->signal(false, 'sjava'),
+                'cs' => $c->signal(false, 'scs'),
+                'other' => $c->signal(false, 'sother'),
             ];
             $editor = $c->signal('VS Code', 'editor');
 
@@ -101,16 +99,16 @@ final class WizardExample
             }, 'restart');
 
             $c->view(fn (): string => $c->render('examples/wizard.html.twig', [
-                'title'       => '🪄 Multi-step Form',
+                'title' => '🪄 Multi-step Form',
                 'description' => 'A 3-step dev identity card wizard. All form state lives on the server — no session cookies, no localStorage, no hydration.',
-                'summary'     => [
+                'summary' => [
                     '<strong>Server-owned form state</strong> — each step\'s inputs are signals held on the server for this tab. Going back returns the same values you entered. No client serialization needed.',
                     '<strong>data-bind</strong> creates two-way bindings between inputs and signals. When the user types, the signal updates client-side. When "Next" fires, the server reads the current signal values.',
                     '<strong>Step validation</strong> happens server-side in the next action. If validation fails, the error signal is set and $c->sync() re-renders the current step with the error message shown.',
                     '<strong>block: \'demo\'</strong> — only the wizard block is re-rendered on each step change. The page header and anatomy panel stay static in the DOM.',
                     '<strong>The generated card</strong> in step 3 is fully server-rendered from signal values. No client-side template, no JSON fetch — the complete card HTML is streamed via SSE.',
                 ],
-                'anatomy'     => [
+                'anatomy' => [
                     'signals' => [
                         ['name' => 'step', 'type' => 'int', 'scope' => 'TAB', 'default' => '1', 'desc' => 'Current wizard step (1–3). Controls which step UI is rendered.'],
                         ['name' => 'name', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Developer name, collected in step 1.'],
@@ -133,19 +131,19 @@ final class WizardExample
                     ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/WizardExample.php'],
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/wizard.html.twig'],
                 ],
-                'step'         => $step,
-                'error'        => $error,
-                'name'         => $name,
-                'role'         => $role,
-                'years'        => $years,
-                'stack'        => $stack,
+                'step' => $step,
+                'error' => $error,
+                'name' => $name,
+                'role' => $role,
+                'years' => $years,
+                'stack' => $stack,
                 'stackOptions' => self::STACK_OPTIONS,
-                'editor'       => $editor,
-                'roles'        => self::ROLES,
-                'editors'      => self::EDITORS,
-                'next'         => $next,
-                'back'         => $back,
-                'restart'      => $restart,
+                'editor' => $editor,
+                'roles' => self::ROLES,
+                'editors' => self::EDITORS,
+                'next' => $next,
+                'back' => $back,
+                'restart' => $restart,
                 'selectedStack' => array_values(array_filter(
                     array_map(
                         static fn (array $opt) => $stack[$opt['key']]->bool() ? $opt['label'] : null,

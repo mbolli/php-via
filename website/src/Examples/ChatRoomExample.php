@@ -203,8 +203,8 @@ final class ChatRoomExample {
         $rows = [];
         while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
             $rows[] = [
-                'username'  => (string) $row['username'],
-                'message'   => (string) $row['message'],
+                'username' => (string) $row['username'],
+                'message' => (string) $row['message'],
                 'timestamp' => (string) $row['timestamp'],
             ];
         }
