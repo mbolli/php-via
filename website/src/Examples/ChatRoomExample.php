@@ -17,7 +17,7 @@ final class ChatRoomExample {
         '<strong>Session-scoped usernames</strong> persist across tabs. Your username is stored in SESSION scope, so switching rooms or opening a new tab keeps the same identity.',
         '<strong>Presence + typing</strong> indicators update in real time. When a user disconnects, the <code>onDisconnect</code> hook removes them from the room\'s user list.',
         '<strong>addScope()</strong> lets a context join a broadcast channel mid-flight. The room page starts in TAB scope for private input, then adds the room scope for shared messages.',
-        '<strong>In-memory message store</strong> keeps this demo self-contained. Messages persist as long as the server runs — no database required for a working chat.',
+        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code> and the last 50 are loaded on connect — no in-memory state required.',
         '<strong>Multi-room architecture</strong> — open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
     ];
 
@@ -43,11 +43,11 @@ final class ChatRoomExample {
         ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/chat_room.html.twig'],
     ];
 
-    /** @var array<string, array{name: string, messages: array<array{username: string, message: string, timestamp: string}>}> */
+    /** @var array<string, array{name: string}> */
     private static array $rooms = [
-        'lobby' => ['name' => 'Lobby', 'messages' => []],
-        'general' => ['name' => 'General', 'messages' => []],
-        'random' => ['name' => 'Random', 'messages' => []],
+        'lobby' => ['name' => 'Lobby'],
+        'general' => ['name' => 'General'],
+        'random' => ['name' => 'Random'],
     ];
 
     /** @var array<string, array<string, string>> room => [sessionId => username] */
@@ -55,8 +55,11 @@ final class ChatRoomExample {
 
     private static ?Via $app = null;
 
+    private static ?\SQLite3 $db = null;
+
     public static function register(Via $app): void {
         self::$app = $app;
+        self::db(); // initialize DB on registration
 
         // Base URL defaults to lobby
         $app->page('/examples/chat-room', function (Context $c) use ($app): void {
@@ -102,11 +105,7 @@ final class ChatRoomExample {
                 return;
             }
 
-            self::$rooms[$room]['messages'][] = [
-                'username' => $username,
-                'message' => $message,
-                'timestamp' => date('H:i:s'),
-            ];
+            self::addMessage($room, $username, $message);
 
             $messageInput->setValue('');
             $typingIndicator->setValue('');
@@ -147,7 +146,7 @@ final class ChatRoomExample {
             'roomName' => self::$rooms[$room]['name'],
             'username' => $username,
             'contextId' => $contextId,
-            'messages' => self::$rooms[$room]['messages'],
+            'messages' => self::getMessages($room),
             'messageInputId' => $messageInput->id(),
             'typingIndicatorId' => $typingIndicator->id(),
             'users' => array_values(self::$roomUsers[$room] ?? []),
@@ -158,5 +157,58 @@ final class ChatRoomExample {
         if ($wasNewUser) {
             $app->broadcast($roomScope);
         }
+    }
+
+    private static function db(): \SQLite3 {
+        if (self::$db === null) {
+            self::$db = new \SQLite3(__DIR__ . '/../../chat.db');
+            self::$db->exec('PRAGMA journal_mode=WAL');
+            self::$db->exec('PRAGMA synchronous=NORMAL');
+            self::$db->exec(
+                'CREATE TABLE IF NOT EXISTS messages (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room      TEXT    NOT NULL,
+                    username  TEXT    NOT NULL,
+                    message   TEXT    NOT NULL,
+                    timestamp TEXT    NOT NULL
+                )'
+            );
+        }
+
+        return self::$db;
+    }
+
+    private static function addMessage(string $room, string $username, string $message): void {
+        $stmt = self::db()->prepare(
+            'INSERT INTO messages (room, username, message, timestamp) VALUES (:room, :username, :message, :timestamp)'
+        );
+        $stmt->bindValue(':room', $room, SQLITE3_TEXT);
+        $stmt->bindValue(':username', $username, SQLITE3_TEXT);
+        $stmt->bindValue(':message', $message, SQLITE3_TEXT);
+        $stmt->bindValue(':timestamp', date('H:i:s'), SQLITE3_TEXT);
+        $stmt->execute();
+    }
+
+    /**
+     * @return list<array{username: string, message: string, timestamp: string}>
+     */
+    private static function getMessages(string $room, int $limit = 50): array {
+        $stmt = self::db()->prepare(
+            'SELECT username, message, timestamp FROM messages WHERE room = :room ORDER BY id DESC LIMIT :limit'
+        );
+        $stmt->bindValue(':room', $room, SQLITE3_TEXT);
+        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+
+        $rows = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $rows[] = [
+                'username'  => (string) $row['username'],
+                'message'   => (string) $row['message'],
+                'timestamp' => (string) $row['timestamp'],
+            ];
+        }
+
+        return array_reverse($rows); // oldest first
     }
 }
