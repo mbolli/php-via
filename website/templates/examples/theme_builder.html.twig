@@ -1,0 +1,169 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div id="theme-builder">
+    <div class="tb-layout">
+        <div class="tb-controls">
+            {% for slot, label in slotLabels %}
+            <div class="tb-slot">
+                <div class="tb-slot-header">
+                    <span class="tb-slot-label">{{ label }}</span>
+                    <span class="tb-slot-swatch-current" style="background: {{ theme[slot] }}"></span>
+                    <code class="tb-slot-value">{{ theme[slot] }}</code>
+                </div>
+                <div class="tb-swatches">
+                    {% for color in swatches[slot] %}
+                    {% set fullColor = '#' ~ color %}
+                    <button class="tb-swatch{% if theme[slot] == fullColor %} active{% endif %}"
+                            style="background: {{ fullColor }}"
+                            title="{{ fullColor }}"
+                            data-on:click="@post('{{ setColor.url }}?slot={{ slot }}&color={{ color }}')"></button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="tb-preview-col">
+            <div class="tb-preview-card"
+                 style="background: {{ theme.bg }}; border-color: {{ theme.border }}; color: {{ theme.text }}">
+                <div class="tb-preview-header" style="background: {{ theme.primary }}">
+                    <span class="tb-preview-logo">◆</span>
+                    <strong style="color: #fff">My App</strong>
+                    <span class="tb-preview-nav" style="color: rgba(255,255,255,.7)">Docs · Blog · Login</span>
+                </div>
+                <div class="tb-preview-body">
+                    <p style="color: {{ theme.text }}">
+                        Welcome! This preview card reflects your current theme in real time —
+                        every color stored and rendered on the server.
+                    </p>
+                    <div class="tb-preview-actions" style="border-color: {{ theme.border }}">
+                        <button class="tb-preview-btn-primary" style="background: {{ theme.primary }}; color: #fff">
+                            Get started
+                        </button>
+                        <button class="tb-preview-btn-secondary"
+                                style="border-color: {{ theme.border }}; color: {{ theme.text }}">
+                            Learn more
+                        </button>
+                    </div>
+                    <div class="tb-preview-badge" style="color: {{ theme.accent }}">
+                        ★ Featured product of the week
+                    </div>
+                    <div class="tb-preview-input-row">
+                        <input class="tb-preview-input"
+                               style="border-color: {{ theme.border }}; color: {{ theme.text }}; background: {{ theme.bg }}"
+                               placeholder="Search…" readonly>
+                        <button class="tb-preview-btn-primary" style="background: {{ theme.primary }}; color: #fff">
+                            Go
+                        </button>
+                    </div>
+                </div>
+                <div class="tb-preview-footer" style="border-color: {{ theme.border }}; color: {{ theme.text }}; opacity: .6">
+                    © 2026 My App — All rights reserved
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tb-history-bar">
+        <button {% if not canUndo %}disabled{% endif %}
+                data-on:click="@post('{{ undo.url }}')">↩ Undo</button>
+        <button {% if not canRedo %}disabled{% endif %}
+                data-on:click="@post('{{ redo.url }}')">↪ Redo</button>
+        <span class="tb-history-status">Step {{ historyIdx + 1 }} / {{ historyCount }}</span>
+        <button class="secondary tb-reset-btn"
+                data-on:click="@post('{{ reset.url }}')">Reset</button>
+    </div>
+</div>
+{# via:cut #}
+{% endblock %}
+
+{% block extra %}
+<style>
+#theme-builder { display: flex; flex-direction: column; gap: 1rem; }
+.tb-layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 1.25rem;
+    align-items: start;
+}
+@media (max-width: 700px) { .tb-layout { grid-template-columns: 1fr; } }
+
+.tb-controls { display: flex; flex-direction: column; gap: .75rem; }
+.tb-slot { background: var(--surface-2, #f8fafc); border: 1px solid var(--border, #e2e8f0); border-radius: .5rem; padding: .65rem .75rem; }
+.tb-slot-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+.tb-slot-label  { font-weight: 600; font-size: .85rem; min-width: 80px; }
+.tb-slot-swatch-current { width: 1rem; height: 1rem; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); flex-shrink: 0; }
+.tb-slot-value  { font-size: .75rem; color: var(--text-muted, #64748b); }
+.tb-swatches    { display: flex; flex-wrap: wrap; gap: .3rem; }
+.tb-swatch {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: .25rem;
+    border: 2px solid transparent;
+    cursor: pointer;
+    padding: 0;
+    outline: 1px solid rgba(0,0,0,.12);
+    transition: transform .15s, outline .15s;
+}
+.tb-swatch:hover  { transform: scale(1.2); outline: 2px solid rgba(0,0,0,.3); }
+.tb-swatch.active { outline: 2px solid var(--brand, #6366f1); transform: scale(1.1); }
+
+/* Preview card */
+.tb-preview-col { position: sticky; top: 1rem; }
+.tb-preview-card {
+    border-radius: .5rem;
+    border: 1px solid;
+    overflow: hidden;
+    font-size: .85rem;
+    transition: background .3s, color .3s, border-color .3s;
+}
+.tb-preview-header {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .6rem .85rem;
+    transition: background .3s;
+}
+.tb-preview-logo { font-size: 1rem; color: #fff; }
+.tb-preview-nav  { margin-left: auto; font-size: .75rem; }
+.tb-preview-body { padding: .85rem; }
+.tb-preview-actions {
+    display: flex; gap: .5rem;
+    margin: .65rem 0;
+    padding-top: .65rem;
+    border-top: 1px solid;
+    transition: border-color .3s;
+}
+.tb-preview-btn-primary, .tb-preview-btn-secondary {
+    padding: .3rem .7rem;
+    border-radius: .3rem;
+    font-size: .8rem;
+    font-weight: 500;
+    cursor: default;
+    border: 1px solid transparent;
+    transition: background .3s, color .3s, border-color .3s;
+}
+.tb-preview-btn-secondary { background: transparent; }
+.tb-preview-badge { font-size: .8rem; font-weight: 600; margin-bottom: .65rem; transition: color .3s; }
+.tb-preview-input-row { display: flex; gap: .4rem; }
+.tb-preview-input {
+    flex: 1; padding: .3rem .5rem; border-radius: .3rem;
+    border: 1px solid; font-size: .8rem;
+    transition: border-color .3s, color .3s, background .3s;
+}
+.tb-preview-footer {
+    font-size: .7rem; text-align: center; padding: .4rem;
+    border-top: 1px solid;
+    transition: border-color .3s, color .3s;
+}
+
+/* History bar */
+.tb-history-bar {
+    display: flex; align-items: center; gap: .5rem;
+    padding-top: .5rem;
+    border-top: 1px solid var(--border, #e2e8f0);
+}
+.tb-history-status { font-size: .8rem; color: var(--text-muted, #64748b); margin: 0 auto; }
+.tb-reset-btn { font-size: .8rem; padding: .3rem .65rem; }
+</style>
+{% endblock %}
