@@ -1,0 +1,14 @@
+# Files and directories excluded from Composer dist (zip) packages.
+# Consumers installing via Packagist/GitHub releases won't receive these.
+# --prefer-source (git clone) installs are unaffected.
+
+/website            export-ignore
+/tests              export-ignore
+/public             export-ignore
+/.php-cs-fixer.php  export-ignore
+/.phpstan.neon      export-ignore
+/phpstan-bootstrap.php export-ignore
+/phpunit.xml        export-ignore
+/logo.png           export-ignore
+CHANGELOG.md        export-ignore
+README.md           export-ignore
