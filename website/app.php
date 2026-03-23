@@ -15,10 +15,14 @@ use PhpVia\Website\Examples\ComponentsExample;
 use PhpVia\Website\Examples\CounterExample;
 use PhpVia\Website\Examples\GameOfLifeExample;
 use PhpVia\Website\Examples\GreeterExample;
+use PhpVia\Website\Examples\LiveSearchExample;
 use PhpVia\Website\Examples\PathParamsExample;
+use PhpVia\Website\Examples\ShoppingCartExample;
 use PhpVia\Website\Examples\SpreadsheetExample;
 use PhpVia\Website\Examples\StockTickerExample;
+use PhpVia\Website\Examples\ThemeBuilderExample;
 use PhpVia\Website\Examples\TodoExample;
+use PhpVia\Website\Examples\WizardExample;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
 use Twig\RuntimeLoader\FactoryRuntimeLoader;
@@ -60,6 +64,10 @@ ClientMonitorExample::registerHooks($app);
 AllScopesExample::register($app);
 GameOfLifeExample::register($app);
 SpreadsheetExample::register($app);
+LiveSearchExample::register($app);
+ShoppingCartExample::register($app);
+ThemeBuilderExample::register($app);
+WizardExample::register($app);
 
 $app->onStart(function () use ($app): void {
     StockTickerExample::startTimer($app);
