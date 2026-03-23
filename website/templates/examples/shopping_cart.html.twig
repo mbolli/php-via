@@ -1,0 +1,186 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div class="cart-layout">
+    <div class="products-col">
+        <h3 class="products-heading">Products</h3>
+        <div class="products-grid">
+            {% for product in products %}
+            <div class="product-card">
+                <div class="product-emoji">{{ product.emoji }}</div>
+                <div class="product-name">{{ product.name }}</div>
+                <div class="product-price">
+                    {% if product.price == 0 %}
+                        <span class="price-free">Free!</span>
+                    {% else %}
+                        CHF {{ product.price|number_format(2) }}
+                    {% endif %}
+                </div>
+                <button class="add-to-cart-btn"
+                        data-on:click="@post('{{ addItem.url }}?id={{ product.id }}')">
+                    Add to cart
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% block cart %}
+    <div id="cart-col">
+        <h3 class="cart-heading">
+            🛒 Cart
+            {% if cart|length > 0 %}
+            <span class="cart-count-badge">{{ cart|length }}</span>
+            {% endif %}
+        </h3>
+
+        <div class="cart-box">
+        {% if cart is empty %}
+        <p class="cart-empty">Your cart is empty.<br><small>Add something — it persists across tabs.</small></p>
+        {% else %}
+        <div class="cart-items">
+            {% for item in cart %}
+            <div class="cart-item" id="cart-item-{{ item.id }}">
+                <span class="cart-item-emoji">{{ item.emoji }}</span>
+                <div class="cart-item-info">
+                    <span class="cart-item-name">{{ item.name }}</span>
+                    <span class="cart-item-sub">
+                        <span id="cart-qty-{{ item.id }}-{{ item.qty }}" class="cart-qty">{{ item.qty }}</span> × CHF {{ item.price|number_format(2) }}
+                    </span>
+                </div>
+                <div class="cart-item-right">
+                    <span class="cart-item-total">CHF {{ (item.price * item.qty)|number_format(2) }}</span>
+                    <button class="danger small cart-remove-btn"
+                            data-on:click="@delete('{{ removeItem.url }}?id={{ item.id }}')">✕</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="cart-footer">
+            <div class="cart-total">
+                Total: <strong>CHF {{ total|number_format(2) }}</strong>
+            </div>
+            <button class="secondary cart-clear-btn"
+                    data-on:click="@delete('{{ clearCart.url }}')">Clear cart</button>
+        </div>
+        {% endif %}
+
+        <p class="cart-hint">
+            <small>💡 Open a new tab and visit this page — your cart will already be here.</small>
+        </p>
+        </div>{# .cart-box #}
+    </div>{# #cart-col #}
+    {% endblock %}
+</div>
+{# via:cut #}
+{% endblock %}
+
+{% block extra %}
+<style>
+.cart-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1.5rem;
+    align-items: start;
+}
+@media (max-width: 700px) {
+    .cart-layout { grid-template-columns: 1fr; }
+}
+.products-heading, .cart-heading { margin: 0 0 .75rem; font-size: 1rem; font-weight: 600; }
+.products-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: .75rem;
+}
+.product-card {
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    padding: .75rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+}
+.product-emoji { font-size: 1.75rem; line-height: 1; }
+.product-name  { font-size: .8rem; font-weight: 500; line-height: 1.3; }
+.product-price { font-size: .85rem; color: var(--text-muted, #64748b); }
+.price-free    { color: #22c55e; font-weight: 600; }
+.add-to-cart-btn { margin-top: .25rem; font-size: .8rem; padding: .3rem .6rem; }
+
+#cart-col {
+    position: sticky;
+    top: 1rem;
+}
+.cart-box {
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    padding: 1rem;
+}
+.cart-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--brand, #6366f1);
+    color: #fff;
+    border-radius: 9999px;
+    font-size: .7rem;
+    font-weight: 700;
+    width: 1.25rem;
+    height: 1.25rem;
+    vertical-align: middle;
+    margin-left: .25rem;
+}
+.cart-empty { color: var(--text-2, #64748b); font-size: .9rem; text-align: center; padding: 1rem 0; }
+.cart-items { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .75rem; }
+.cart-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem;
+    background: var(--surface-1, #fff);
+    color: var(--text-1, #1e293b);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .375rem;
+    /* Entry animation: new items slide in from the right */
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity .35s ease, transform .35s ease;
+}
+@starting-style {
+    .cart-item {
+        opacity: 0;
+        transform: translateX(24px);
+    }
+}
+/* Qty bump: fires whenever the qty span gets a new id (i.e. qty changes) */
+.cart-qty {
+    display: inline-block;
+    font-weight: 700;
+    color: var(--brand, #6366f1);
+    transition:
+        transform .4s cubic-bezier(.34, 1.56, .64, 1),
+        color .4s ease;
+}
+@starting-style {
+    .cart-qty {
+        transform: scale(2.2);
+        color: var(--brand, #6366f1);
+    }
+}
+.cart-item-emoji { font-size: 1.25rem; flex-shrink: 0; }
+.cart-item-info  { flex: 1; min-width: 0; }
+.cart-item-name  { font-size: .8rem; font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cart-item-sub   { font-size: .75rem; color: var(--text-2, #64748b); }
+.cart-item-right { display: flex; align-items: center; gap: .35rem; flex-shrink: 0; }
+.cart-item-total { font-size: .8rem; font-weight: 600; white-space: nowrap; }
+.cart-remove-btn { padding: .15rem .35rem !important; font-size: .7rem !important; }
+.cart-footer { border-top: 1px solid var(--border, #e2e8f0); padding-top: .75rem; display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.cart-total { font-size: .95rem; }
+.cart-clear-btn { font-size: .8rem; padding: .3rem .65rem; }
+.cart-hint { margin-top: .75rem; color: var(--text-2, #64748b); }
+</style>
+{% endblock %}
