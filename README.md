@@ -74,7 +74,7 @@ $app->start();
 <div id="counter">
     <p>Count: <span data-text="${{ count.id }}">{{ count.int }}</span></p>
     <label>Step: <input type="number" data-bind="{{ step.id }}"></label>
-    <button data-on-click="@post('{{ increment.url }}')">Increment</button>
+    <button data-on:click="@post('{{ increment.url }}')">Increment</button>
 </div>
 ```
 
@@ -169,23 +169,6 @@ $app->broadcast('room:lobby');      // custom scope
 5. Datastar morphs DOM       →  UI updates without page reload
 ```
 
-## Examples
-
-**[Live Examples](https://via.zweiundeins.gmbh/examples)** — All run inside the website with source code
-
-| Example | Scope | Description |
-|---------|-------|-------------|
-| [Counter](https://via.zweiundeins.gmbh/examples/counter) | TAB | Reactive signals with configurable step and data-bind |
-| [Greeter](https://via.zweiundeins.gmbh/examples/greeter) | TAB | Form inputs and multiple actions |
-| [Todo](https://via.zweiundeins.gmbh/examples/todo) | ROUTE | Multiplayer shared todo list |
-| [Components](https://via.zweiundeins.gmbh/examples/components) | TAB | Three independent counters as isolated components |
-| [Path Params](https://via.zweiundeins.gmbh/examples/path-params) | TAB | Dynamic routing with auto-injected parameters |
-| [Stock Ticker](https://via.zweiundeins.gmbh/examples/stock-ticker) | Custom | Real-time prices with ECharts, timers, per-stock scopes |
-| [Chat Room](https://via.zweiundeins.gmbh/examples/chat-room) | Custom | Multi-room chat with typing indicators and session usernames |
-| [Client Monitor](https://via.zweiundeins.gmbh/examples/client-monitor) | ROUTE | Live dashboard of connected clients with identicons |
-| [Game of Life](https://via.zweiundeins.gmbh/examples/game-of-life) | ROUTE | Multiplayer Conway's Game of Life with colored cells |
-| [All Scopes](https://via.zweiundeins.gmbh/examples/all-scopes) | Mixed | TAB, ROUTE, and GLOBAL scopes side by side |
-
 ## Development
 
 ```
@@ -194,7 +177,7 @@ cd php-via && composer install
 
 cd website && php app.php    # run website + examples on :3000
 
-vendor/bin/pest              # 85 tests, 240 assertions
+vendor/bin/pest              # 101 tests, 258 assertions
 composer phpstan             # PHPStan level 6
 composer cs-fix              # code style
 ```
