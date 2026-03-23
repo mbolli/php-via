@@ -1,0 +1,111 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div class="live-search-container">
+    <div class="search-bar-row">
+        <input type="search"
+               class="search-input"
+               placeholder="Filter PHP stdlib functions…"
+               autocomplete="off"
+               spellcheck="false"
+               data-bind="{{ query.id }}"
+               data-on:input__throttle.100ms.trailing="@post('{{ search.url }}')">
+    </div>
+
+    {% block results %}
+    <div id="search-results">
+        <div class="search-filter-pills">
+            {% for cat in categories %}
+            <button class="badge badge-filter{% if category.string == cat %} active{% endif %}"
+                    data-on:click="@post('{{ search.url }}?cat={{ cat }}')">{{ cat }}</button>
+            {% endfor %}
+        </div>
+
+        <p class="results-meta">
+            {{ results|length }} function{{ results|length != 1 ? 's' : '' }}
+            {% if query.string != '' %}
+                matching &ldquo;<strong>{{ query.string|e }}</strong>&rdquo;
+            {% endif %}
+        </p>
+
+        <div class="results-table-wrap">
+            {% if results is empty %}
+            <p class="results-empty">No functions match. Try a broader query or select a different category.</p>
+            {% else %}
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th>Function</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for fn in results %}
+                    <tr id="fn-{{ fn.name }}">
+                        <td><code class="fn-name">{{ fn.name }}</code></td>
+                        <td><span class="fn-cat badge">{{ fn.category }}</span></td>
+                        <td class="fn-desc">{{ fn.desc }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+    {% endblock %}
+</div>
+{# via:cut #}
+{% endblock %}
+
+{% block extra %}
+<style>
+.search-bar-row { margin-bottom: .6rem; }
+.search-input   { width: 100%; }
+.search-filter-pills { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .5rem; }
+.badge-filter        { cursor: pointer; opacity: .7; }
+.badge-filter.active { opacity: 1; outline: 2px solid var(--brand, #6366f1); }
+.results-meta { font-size: .8rem; color: var(--text-2, #64748b); margin: 0 0 .4rem; }
+.results-empty { color: var(--text-2, #64748b); font-size: .9rem; padding: .75rem 0; }
+
+.results-table-wrap {
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .4rem;
+}
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .82rem;
+}
+.results-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-2, #f1f5f9);
+}
+.results-table th {
+    padding: .4rem .65rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-1, #1e293b);
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    background: var(--surface-2, #f1f5f9);
+}
+.results-table td {
+    padding: .35rem .65rem;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    vertical-align: middle;
+    color: var(--text-1, #1e293b);
+    background: var(--surface-1, #fff);
+    max-width: none;
+}
+.results-table tbody tr:last-child td { border-bottom: none; }
+.results-table tbody tr:hover td { background: var(--surface-2, #f1f5f9); }
+.fn-name { font-size: .82rem; white-space: nowrap; }
+.fn-cat  { white-space: nowrap; }
+.fn-desc { color: var(--text-2, #64748b); }
+</style>
+{% endblock %}
