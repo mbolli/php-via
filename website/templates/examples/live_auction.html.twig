@@ -1,0 +1,197 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div id="auction-root" class="auction-layout">
+
+    {# ── Item card ───────────────────────────────────────────────────────── #}
+    <div class="auction-item card">
+        <div class="auction-item-emoji">🏺</div>
+        <h2 class="auction-item-name">Ancient Roman Amphora</h2>
+        <p class="auction-item-desc">
+            A remarkably preserved 1st-century terracotta storage jar,
+            excavated near Pompeii. Museum provenance, authenticated.
+        </p>
+        <div class="auction-item-estimate">Estimate: $75 – $200</div>
+    </div>
+
+    {# ── Main auction panel ──────────────────────────────────────────────── #}
+    <div id="auction-panel">
+        {% block demo_inner %}
+
+        {% if status == 'sold' %}
+        {# ── SOLD banner ─────────────────────────────────────────────────── #}
+        <div class="auction-sold-banner">
+            <div class="auction-sold-gavel">🔨</div>
+            <h2 class="auction-sold-title">SOLD!</h2>
+            {% if topBidder != '' %}
+            <p class="auction-sold-winner">
+                Won by <strong>{{ topBidder }}</strong> for <strong>${{ topBid }}</strong>
+            </p>
+            {% else %}
+            <p class="auction-sold-winner">No bids placed — item passed.</p>
+            {% endif %}
+            <button class="auction-reset-btn" data-on:click="@post('{{ resetUrl }}')">
+                🔄 Start New Auction
+            </button>
+        </div>
+
+        {% else %}
+        {# ── Live auction UI ──────────────────────────────────────────────── #}
+
+        {# Clock #}
+        {% set urgent = timeLeft <= 10 %}
+        {% set warning = timeLeft > 10 and timeLeft <= 30 %}
+        <div class="auction-clock {% if urgent %}is-urgent{% elseif warning %}is-warning{% endif %}">
+            ⏱ {{ timeLeft }}s remaining
+        </div>
+
+        {# Top bid #}
+        <div class="auction-top-bid">
+            <span class="auction-top-bid-label">Current bid</span>
+            <span class="auction-top-bid-amount">${{ topBid }}</span>
+            <span class="auction-top-bid-by">
+                {% if topBidder != '' %}by {{ topBidder }}{% else %}No bids yet{% endif %}
+            </span>
+        </div>
+
+        {# Bid form #}
+        <div class="auction-bid-form">
+            <label class="auction-bid-label">Your bid (USD)</label>
+            <div class="auction-bid-row">
+                <span class="auction-bid-currency">$</span>
+                <input type="number"
+                       class="auction-bid-input"
+                       min="{{ topBid + 1 }}"
+                       step="5"
+                       data-bind="{{ bidInputId }}"
+                       data-on:keydown="evt.key === 'Enter' && @post('{{ placeBidUrl }}')"
+                       placeholder="{{ topBid + 10 }}">
+                <button class="auction-bid-btn"
+                        data-on:click="@post('{{ placeBidUrl }}')">
+                    Place Bid
+                </button>
+            </div>
+            <div class="auction-bidder-tag">Bidding as <strong>{{ username }}</strong></div>
+        </div>
+
+        {% endif %}{# end status check #}
+
+        {# ── Bid history ──────────────────────────────────────────────────── #}
+        {% if bidHistory is not empty %}
+        <div class="auction-history">
+            <h4 class="auction-history-title">Bid history</h4>
+            <ul class="auction-history-list">
+                {% for bid in bidHistory|reverse %}
+                <li class="auction-history-item">
+                    <span class="auction-history-bidder">{{ bid.bidder }}</span>
+                    <span class="auction-history-amount">${{ bid.amount }}</span>
+                    <span class="auction-history-time">{{ bid.time }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% endblock demo_inner %}
+    </div>
+
+</div>
+{# via:cut #}
+{% endblock %}
+
+{% block extra %}
+<style>
+.auction-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    align-items: start;
+}
+@media (max-width: 640px) {
+    .auction-layout { grid-template-columns: 1fr; }
+}
+
+/* Item card */
+.auction-item {
+    text-align: center;
+    padding: 1.5rem 1rem;
+}
+.auction-item-emoji { font-size: 4rem; line-height: 1; margin-bottom: .5rem; }
+.auction-item-name  { font-size: 1.1rem; font-weight: 700; margin: 0 0 .5rem; color: var(--text-1); max-inline-size: none; }
+.auction-item-desc  { font-size: .82rem; color: var(--text-2); margin: 0 0 .75rem; max-inline-size: none; }
+.auction-item-estimate { font-size: .78rem; color: var(--text-2); font-style: italic; }
+
+/* Clock */
+.auction-clock {
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-align: center;
+    padding: .6rem 1rem;
+    border-radius: var(--radius-md, .5rem);
+    background: var(--surface-2);
+    color: var(--text-1);
+    margin-bottom: 1rem;
+    transition: background .4s, color .4s;
+}
+.auction-clock.is-warning { background: color-mix(in srgb, #f59e0b 20%, var(--surface-2)); color: #d97706; }
+.auction-clock.is-urgent  { background: color-mix(in srgb, #ef4444 20%, var(--surface-2)); color: #dc2626; animation: pulse-urgent 1s ease-in-out infinite; }
+@keyframes pulse-urgent { 0%,100% { opacity:1; } 50% { opacity:.65; } }
+
+/* Top bid */
+.auction-top-bid {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .2rem;
+    margin-bottom: 1rem;
+}
+.auction-top-bid-label  { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.auction-top-bid-amount { font-size: 2.5rem; font-weight: 800; color: var(--brand, #6366f1); line-height: 1; }
+.auction-top-bid-by     { font-size: .85rem; color: var(--text-2); }
+
+/* Bid form */
+.auction-bid-label { display: block; font-size: .8rem; color: var(--text-2); margin-bottom: .35rem; }
+.auction-bid-row   { display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem; }
+.auction-bid-currency { font-size: 1.1rem; font-weight: 600; color: var(--text-1); }
+.auction-bid-input { flex: 1; font-size: 1rem; }
+.auction-bid-btn   { white-space: nowrap; }
+.auction-bidder-tag { font-size: .75rem; color: var(--text-2); }
+
+/* Sold banner */
+.auction-sold-banner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .5rem;
+    padding: 1.5rem 1rem;
+    background: color-mix(in srgb, var(--brand, #6366f1) 10%, var(--surface-1));
+    border: 2px solid var(--brand, #6366f1);
+    border-radius: var(--radius-md, .5rem);
+    margin-bottom: 1rem;
+    animation: sold-in .4s ease;
+}
+@keyframes sold-in { from { transform: scale(.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.auction-sold-gavel { font-size: 3rem; }
+.auction-sold-title { font-size: 2rem; font-weight: 800; color: var(--brand, #6366f1); margin: 0; }
+.auction-sold-winner { color: var(--text-1); font-size: .95rem; margin: 0; }
+.auction-reset-btn { margin-top: .5rem; }
+
+/* Bid history */
+.auction-history { margin-top: 1rem; }
+.auction-history-title { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); margin: 0 0 .4rem; }
+.auction-history-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .25rem; }
+.auction-history-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .8rem;
+    padding: .25rem .5rem;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm, .25rem);
+}
+.auction-history-bidder { font-weight: 600; color: var(--text-1); flex: 1; }
+.auction-history-amount { color: var(--brand, #6366f1); font-weight: 700; }
+.auction-history-time   { color: var(--text-2); font-size: .72rem; }
+</style>
+{% endblock %}
