@@ -2,6 +2,23 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.4.3] - 2026-03-23
+
+### New Features
+
+- **`Context::removeScope(string $scope)`** — Remove a scope from a live context so it no longer receives broadcasts targeting that scope. TAB scope is protected. Backed by new `Via::unregisterContextInScope()`.
+- **Live Search example** — Instant client-side filtering with debounced signal updates. Demonstrates TAB-scoped input signals and conditional rendering.
+- **Shopping Cart example** — Multi-item cart with quantity controls, subtotals, and a running total. Demonstrates multiple TAB-scoped signals and computed view state.
+- **Theme Builder example** — Live colour/font customiser with full undo/redo history. Demonstrates TAB-scoped signal stacks and action composition.
+- **Multi-step Wizard example** — Guided form with step validation, progress indicator, and review step. Demonstrates TAB-scoped step state and conditional block rendering.
+- **Live Auction example** — Real-time shared auction with countdown clock, anti-snipe bid extension, bid history, and sold state. Demonstrates ROUTE scope + timer broadcasting with `cacheUpdates: false`.
+- **Type Race example** — Multiplayer typing race with custom per-room scope, live progress bars, WPM tracking, 3-second countdown, and "Race Again" that resets in-place and absorbs lone waiters from other rooms via live scope migration (`removeScope` / `addScope`).
+
+### Improvements
+
+- Gallery cards sorted by difficulty (Beginner → Intermediate → Advanced).
+- Chat Room messages persisted to SQLite (last 50 per room).
+
 ## [0.4.2] - 2026-03-19
 
 ### Bug Fixes
