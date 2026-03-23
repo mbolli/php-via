@@ -282,8 +282,6 @@ final class TypeRaceExample {
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,
-                    'sourceFile' => 'type_race.php',
-                    'templateFiles' => ['type_race.html.twig'],
                     'raceId' => $raceId,
                     'snippet' => self::$races[$raceId]['snippet'] ?? '',
                     'status' => self::$races[$raceId]['status'] ?? 'waiting',

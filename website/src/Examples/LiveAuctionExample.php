@@ -132,8 +132,6 @@ final class LiveAuctionExample {
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
-                'sourceFile' => 'live_auction.php',
-                'templateFiles' => ['live_auction.html.twig'],
                 'timeLeft' => self::$timeLeft,
                 'topBid' => self::$topBid,
                 'topBidder' => self::$topBidder,
