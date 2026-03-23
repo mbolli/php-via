@@ -1,0 +1,261 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+{# via:cut #}
+<div id="race-root">
+{% block demo_inner %}
+
+{# ── WAITING lobby ──────────────────────────────────────────────────────────── #}
+{% if status == 'waiting' %}
+<div class="race-lobby">
+    <div class="race-lobby-icon">⌨️</div>
+    <h2 class="race-lobby-title">Waiting for racers…</h2>
+    <p class="race-lobby-hint">Click <strong>Start Race</strong> when everyone's ready. Open this page in another tab to race yourself!</p>
+    <div class="race-lobby-players">
+        {% for id, racer in racers %}
+        <div class="race-player-chip {% if id == contextId %}is-you{% endif %}">
+            {{ racer.name }}{% if id == contextId %} <em>(you)</em>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    <button class="race-start-btn" data-on:click="@post('{{ startRaceUrl }}')">🏁 Start Race</button>
+</div>
+
+{# ── COUNTDOWN ──────────────────────────────────────────────────────────────── #}
+{% elseif status == 'countdown' %}
+<div class="race-countdown-wrap">
+    <div class="race-countdown-overlay">
+        <div class="race-countdown-label">Get ready…</div>
+        <div class="race-countdown-number">{{ countdownValue }}</div>
+    </div>
+    <pre class="race-snippet race-snippet-blur">{{ snippet|e('html')|replace({' ': '<span class="ws-space">·</span>', "	": '<span class="ws-tab">⇥</span>'})|raw }}</pre>
+</div>
+
+{# ── RACING ─────────────────────────────────────────────────────────────────── #}
+{% elseif status == 'racing' %}
+<div class="race-racing">
+    {# Progress bars for all racers #}
+    <div class="race-progress-list">
+        {% for id, racer in racers %}
+        <div class="race-progress-row{% if id == contextId %} is-you{% endif %}">
+            <span class="race-progress-name">{{ racer.name }}{% if id == contextId %} <em>(you)</em>{% endif %}</span>
+            <div class="race-progress-bar-wrap">
+                <div class="race-progress-bar" style="width: {{ racer.progress }}%"></div>
+            </div>
+            <span class="race-progress-pct">{{ racer.progress }}%</span>
+            <span class="race-progress-wpm">{{ racer.wpm > 0 ? racer.wpm ~ ' WPM' : '' }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# Snippet + typing area #}
+    <div class="race-typing-area">
+        <pre class="race-snippet">{{ snippet|e('html')|replace({' ': '<span class="ws-space">·</span>', "	": '<span class="ws-tab">⇥</span>'})|raw }}</pre>
+        {% if not racers[contextId].finished|default(false) %}
+        <textarea
+            class="race-textarea"
+            autofocus
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            placeholder="Start typing here…"
+            data-bind="{{ typedTextId }}"
+            data-on:input__debounce.50ms="@post('{{ updateUrl }}')"
+            data-on:paste="evt.preventDefault()"
+            data-on:keydown="if(evt.key==='Tab'){evt.preventDefault();const s=evt.target;const v=s.value;const p=s.selectionStart;s.value=v.slice(0,p)+'\t'+v.slice(s.selectionEnd);s.selectionStart=s.selectionEnd=p+1;}"></textarea>
+        {% else %}
+        <div class="race-finished-msg">✅ Finished! Waiting for others…</div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── DONE / results ──────────────────────────────────────────────────────────── #}
+{% elseif status == 'done' %}
+<div class="race-results">
+    <h2 class="race-results-title">🏁 Race Complete!</h2>
+
+    {% set medals = ['🥇', '🥈', '🥉', '4️⃣'] %}
+    {% set sorted = racers|sort((a,b) => a.finishRank <=> b.finishRank) %}
+    <ol class="race-podium">
+        {% for id, racer in sorted %}
+        {% if racer.finishRank > 0 %}
+        <li class="race-podium-item rank-{{ racer.finishRank }}{% if id == contextId %} is-you{% endif %}">
+            <span class="race-podium-medal">{{ medals[racer.finishRank - 1]|default('🏅') }}</span>
+            <span class="race-podium-name">{{ racer.name }}{% if id == contextId %} <em>(you)</em>{% endif %}</span>
+            <span class="race-podium-wpm">{{ racer.wpm }} WPM</span>
+        </li>
+        {% endif %}
+        {% endfor %}
+    </ol>
+
+    <button class="race-again-btn" data-on:click="@post('{{ newRaceUrl }}')">
+        🔄 Race Again
+    </button>
+</div>
+{% endif %}
+
+{% endblock demo_inner %}
+</div>
+{# via:cut #}
+{% endblock %}
+
+{% block extra %}
+<style>
+/* Lobby */
+.race-lobby {
+    text-align: center;
+    padding: 2rem 1rem;
+}
+.race-lobby-icon  { font-size: 3.5rem; line-height: 1; margin-bottom: .5rem; }
+.race-lobby-title { font-size: 1.4rem; font-weight: 700; margin: 0 0 .5rem; color: var(--text-1); max-inline-size: none; }
+.race-lobby-hint  { color: var(--text-2); font-size: .88rem; margin: 0 0 1rem; max-inline-size: none; }
+.race-lobby-players { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
+.race-player-chip {
+    padding: .3rem .9rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: .85rem;
+    color: var(--text-1);
+}
+.race-player-chip.is-you {
+    background: color-mix(in srgb, var(--brand, #6366f1) 15%, var(--surface-2));
+    border-color: var(--brand, #6366f1);
+    font-weight: 600;
+}
+
+/* Countdown */
+.race-countdown-wrap { position: relative; }
+.race-countdown-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+    border-radius: var(--radius-md, .5rem);
+    z-index: 1;
+    gap: .25rem;
+}
+.race-countdown-label  { font-size: .9rem; color: var(--text-2); }
+.race-countdown-number {
+    font-size: 5rem;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--brand, #6366f1);
+    animation: count-pop .8s ease;
+}
+@keyframes count-pop { 0% { transform: scale(1.5); opacity: 0; } 100% { transform:scale(1); opacity:1; } }
+.race-snippet-blur { filter: blur(4px); pointer-events: none; user-select: none; }
+
+/* Progress bars */
+.race-progress-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+.race-progress-row {
+    display: grid;
+    grid-template-columns: 8rem 1fr 3.5rem 4.5rem;
+    align-items: center;
+    gap: .5rem;
+    font-size: .82rem;
+}
+@media (max-width: 500px) {
+    .race-progress-row { grid-template-columns: 6rem 1fr 2.5rem 3.5rem; }
+}
+.race-progress-name { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.race-progress-row.is-you .race-progress-name { font-weight: 700; color: var(--brand, #6366f1); }
+.race-progress-bar-wrap {
+    height: 12px;
+    background: var(--surface-2);
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+.race-progress-bar {
+    height: 100%;
+    background: var(--brand, #6366f1);
+    border-radius: 999px;
+    transition: width .15s ease;
+}
+.race-progress-row.is-you .race-progress-bar { background: var(--brand, #6366f1); }
+.race-progress-pct { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.race-progress-wpm { text-align: right; color: var(--text-2); font-size: .75rem; }
+
+/* Snippet + textarea */
+.race-typing-area { display: flex; flex-direction: column; gap: .5rem; }
+.race-snippet {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, .5rem);
+    padding: .75rem 1rem;
+    font-family: var(--font-mono, monospace);
+    font-size: .82rem;
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--text-1);
+    margin: 0;
+    tab-size: 4;
+}
+.ws-space { color: color-mix(in srgb, var(--text-2) 50%, transparent); font-style: normal; }
+.ws-tab   { color: color-mix(in srgb, var(--text-2) 50%, transparent); font-style: normal; letter-spacing: .05em; }
+.race-textarea {
+    width: 100%;
+    min-height: 140px;
+    font-family: var(--font-mono, monospace);
+    font-size: .82rem;
+    line-height: 1.6;
+    resize: vertical;
+    border: 2px solid var(--brand, #6366f1);
+    border-radius: var(--radius-md, .5rem);
+    padding: .6rem .75rem;
+    background: var(--surface-1);
+    color: var(--text-1);
+}
+.race-finished-msg {
+    text-align: center;
+    color: var(--text-2);
+    padding: .75rem;
+    background: var(--surface-2);
+    border-radius: var(--radius-md, .5rem);
+    font-size: .9rem;
+}
+
+/* Results */
+.race-results { text-align: center; }
+.race-results-title { font-size: 1.5rem; font-weight: 800; margin: 0 0 1rem; color: var(--text-1); max-inline-size: none; }
+.race-podium { list-style: none; padding: 0; margin: 0 auto 1.25rem; display: flex; flex-direction: column; gap: .5rem; max-width: 32rem; }
+.race-podium-item {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .5rem .75rem;
+    border-radius: var(--radius-md, .5rem);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: .9rem;
+}
+.race-podium-item.rank-1 {
+    background: color-mix(in srgb, #f59e0b 15%, var(--surface-2));
+    border-color: #f59e0b;
+    font-weight: 700;
+}
+.race-podium-item.is-you .race-podium-name { color: var(--brand, #6366f1); }
+.race-podium-medal { font-size: 1.4rem; }
+.race-podium-name  { flex: 1; text-align: left; color: var(--text-1); }
+.race-podium-wpm   { color: var(--text-2); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.race-again-btn    { font-size: 1rem; }
+.race-start-btn {
+    margin-top: 1rem;
+    font-size: 1rem;
+    padding: .55rem 1.5rem;
+    background: var(--brand, #6366f1);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md, .5rem);
+    cursor: pointer;
+    font-weight: 600;
+}
+.race-start-btn:hover { filter: brightness(1.1); }
+</style>
+{% endblock %}
