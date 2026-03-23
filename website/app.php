@@ -15,6 +15,7 @@ use PhpVia\Website\Examples\ComponentsExample;
 use PhpVia\Website\Examples\CounterExample;
 use PhpVia\Website\Examples\GameOfLifeExample;
 use PhpVia\Website\Examples\GreeterExample;
+use PhpVia\Website\Examples\LiveAuctionExample;
 use PhpVia\Website\Examples\LiveSearchExample;
 use PhpVia\Website\Examples\PathParamsExample;
 use PhpVia\Website\Examples\ShoppingCartExample;
@@ -22,6 +23,7 @@ use PhpVia\Website\Examples\SpreadsheetExample;
 use PhpVia\Website\Examples\StockTickerExample;
 use PhpVia\Website\Examples\ThemeBuilderExample;
 use PhpVia\Website\Examples\TodoExample;
+use PhpVia\Website\Examples\TypeRaceExample;
 use PhpVia\Website\Examples\WizardExample;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
@@ -68,15 +70,19 @@ LiveSearchExample::register($app);
 ShoppingCartExample::register($app);
 ThemeBuilderExample::register($app);
 WizardExample::register($app);
+LiveAuctionExample::register($app);
+TypeRaceExample::register($app);
 
 $app->onStart(function () use ($app): void {
     StockTickerExample::startTimer($app);
     GameOfLifeExample::startTimer($app);
+    LiveAuctionExample::startTimer($app);
 });
 
 $app->onShutdown(function (): void {
     StockTickerExample::stopTimer();
     GameOfLifeExample::stopTimer();
+    LiveAuctionExample::stopTimer();
 });
 
 // ─── Shared state ────────────────────────────────────────────────────────────
