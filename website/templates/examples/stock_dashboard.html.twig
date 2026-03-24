@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <div class="stock-grid">
     {% for symbol, stock in stocks %}
     <a href="{{ basePath }}examples/stock-ticker/stock/{{ symbol }}" class="card stock-card">
@@ -18,5 +17,4 @@
     </a>
     {% endfor %}
 </div>
-{# via:cut #}
 {% endblock %}

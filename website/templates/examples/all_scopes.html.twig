@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <nav class="scope-nav">
     <a href="{{ basePath }}examples/all-scopes" class="scope-nav-link">Home</a>
     <a href="{{ basePath }}examples/all-scopes/page-a" class="scope-nav-link">Page A</a>
@@ -16,5 +15,4 @@
     <h3>{{ pageTitle }}</h3>
     {{ content | raw }}
 </div>
-{# via:cut #}
 {% endblock %}

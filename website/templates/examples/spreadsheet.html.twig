@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 {% set vScrollRange = maxRow - viewportRows %}
 {% set hScrollRange = maxCol - viewportCols %}
 {% set vThumbPct = maxRow > 0 ? (viewportRows / maxRow * 100) : 100 %}
@@ -221,7 +220,6 @@
         <div class="ss-scrollbar-corner"></div>
     </div>
 </div>
-{# via:cut #}
 {% endblock %}
 
 {% block head %}

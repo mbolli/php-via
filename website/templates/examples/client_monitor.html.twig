@@ -1,12 +1,10 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <div id="client-monitor">
     <h3>Connected Clients ({{ clientCount }})</h3>
     <div class="client-grid">
         {{ clientsHtml | raw }}
     </div>
 </div>
-{# via:cut #}
 {% endblock %}

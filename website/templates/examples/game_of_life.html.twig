@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <div id="game-grid">
     <p class="gol-hint">
         Click cells to draw patterns. Multiple users can draw simultaneously! 👥 {{ clientCount }} connected
@@ -20,5 +19,4 @@
         {{ tiles | raw }}
     </div>
 </div>
-{# via:cut #}
 {% endblock %}

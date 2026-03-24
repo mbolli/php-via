@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <p class="counter-display">
     Count: <span data-text="${{ count.id }}">{{ count.int }}</span>
 </p>
@@ -15,5 +14,4 @@
     <button class="secondary" data-on:click="@post('{{ decrement.url }}')">− Decrement</button>
     <button class="danger" data-on:click="@post('{{ reset.url }}')">Reset</button>
 </div>
-{# via:cut #}
 {% endblock %}

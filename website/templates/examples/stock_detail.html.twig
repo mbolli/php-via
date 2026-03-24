@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <div id="stockDetail">
     <a href="{{ basePath }}examples/stock-ticker" class="font-semibold mb-2 inline-block">← Back to Dashboard</a>
 
@@ -103,5 +102,4 @@ class StockChart extends HTMLElement {
 }
 if (!customElements.get('stock-chart')) customElements.define('stock-chart', StockChart);
 </script>
-{# via:cut #}
 {% endblock %}

@@ -1,7 +1,6 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <div id="wizard">
     <div class="wizard-progress-bar-wrap">
         <div class="wizard-progress-bar" style="width: {{ (step.int / 3 * 100)|round }}%"></div>
@@ -123,7 +122,6 @@
         {% endif %}
     </div>
 </div>
-{# via:cut #}
 {% endblock %}
 
 {% block extra %}
