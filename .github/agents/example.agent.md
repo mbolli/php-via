@@ -79,18 +79,14 @@ Rules:
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-{# via:cut #}
 <!-- Your reactive HTML here. Use data-text, data-bind, data-on:click etc. -->
 <!-- Signal value: {{ signal.int }} -->
 <!-- Signal binding: data-text="${{ signal.id }}" -->
 <!-- Action URL: data-on:click="@post('{{ action.url }}')" -->
-{# via:cut #}
 {% endblock %}
 ```
 
 Rules:
-- The `{# via:cut #}` markers are required — content between them is extracted and
-  displayed in the source tab. Everything outside the markers is stripped.
 - Never put the title, description, or summary in this file — they come from the wrapper.
 - Use Datastar attributes (`data-text`, `data-bind`, `data-on:click`, `data-show`, etc.)
   for all reactivity.
@@ -136,7 +132,7 @@ In `website/templates/pages/examples-index.html.twig`, add to the `examples` arr
 ## Checklist before finishing
 
 - [ ] `{Name}Example.php` created with correct namespace, SLUG, and `register()`
-- [ ] `{slug}.html.twig` extends `_wrapper.html.twig` with `{# via:cut #}` markers
+- [ ] `{slug}.html.twig` extends `_wrapper.html.twig` and fills `{% block demo %}`
 - [ ] `{Name}Example::register($app)` added to `website/app.php`
 - [ ] Card added to `examples-index.html.twig` with correct difficulty
 - [ ] Tests still pass (`vendor/bin/pest`)

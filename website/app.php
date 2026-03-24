@@ -23,6 +23,7 @@ use PhpVia\Website\Examples\SpreadsheetExample;
 use PhpVia\Website\Examples\StockTickerExample;
 use PhpVia\Website\Examples\ThemeBuilderExample;
 use PhpVia\Website\Examples\TodoExample;
+use PhpVia\Website\Examples\MissionControlExample;
 use PhpVia\Website\Examples\TypeRaceExample;
 use PhpVia\Website\Examples\WizardExample;
 use PhpVia\Website\SyntaxHighlightExtension;
@@ -72,6 +73,7 @@ ThemeBuilderExample::register($app);
 WizardExample::register($app);
 LiveAuctionExample::register($app);
 TypeRaceExample::register($app);
+MissionControlExample::register($app);
 
 $app->onStart(function () use ($app): void {
     StockTickerExample::startTimer($app);
