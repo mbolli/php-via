@@ -295,7 +295,7 @@ class RequestHandler {
                 private Response $swooleResponse,
                 private string $route,
                 /** @var callable */
-                private $pageHandler,
+                private mixed $pageHandler,
                 private array $params,
                 private string $method,
                 private string $path,

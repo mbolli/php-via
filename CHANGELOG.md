@@ -2,7 +2,7 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-03-25
 
 ### New Features
 
@@ -30,7 +30,6 @@ All notable changes to php-via will be documented in this file.
 
 ### Improvements
 
-- **Chat Room** — Messages persisted to SQLite (last 50 per room).
 - **Shopping Cart** — Migrated cart storage to `sessionData` API.
 - **Wizard example** — Wizard state persists across page refreshes via `sessionData`.
 - Updated API docs with middleware, sessionData, input(), and security Config options.
@@ -40,6 +39,11 @@ All notable changes to php-via will be documented in this file.
 
 - Added `psr/http-server-middleware` ^1.0 and `nyholm/psr7` ^1.8
 - Added `tuupola/cors-middleware` ^1.5 (website project)
+
+### Chore
+
+- Added `.gitattributes` to exclude dev directories from Composer distribution.
+- Removed legacy `examples-source/` folder and stale `via:cut` template markers.
 
 ## [0.4.3] - 2026-03-23
 
