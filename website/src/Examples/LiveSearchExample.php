@@ -151,7 +151,7 @@ final class LiveSearchExample {
             $category = $c->signal('all', 'category');
 
             $search = $c->action(function () use ($category, $c): void {
-                $cat = $_GET['cat'] ?? null;
+                $cat = $c->input('cat');
 
                 if ($cat !== null && \in_array($cat, self::CATEGORIES, strict: true)) {
                     $category->setValue($cat, broadcast: false);

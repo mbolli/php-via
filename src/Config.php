@@ -41,6 +41,22 @@ class Config {
     private ?array $trustedOrigins = null;
 
     /**
+     * Whether to trust reverse-proxy headers (X-Base-Path, X-Forwarded-*).
+     * Disabled by default — only enable behind a trusted proxy (Caddy, Nginx, etc.).
+     */
+    private bool $trustProxy = false;
+
+    /**
+     * Maximum action requests per IP per window (0 = unlimited).
+     */
+    private int $actionRateLimit = 0;
+
+    /**
+     * Rate-limit window in seconds.
+     */
+    private int $actionRateWindow = 60;
+
+    /**
      * Set basePath from reverse proxy header.
      * Called on first request with X-Base-Path header from Caddy.
      */
@@ -203,5 +219,41 @@ class Config {
      */
     public function getTrustedOrigins(): ?array {
         return $this->trustedOrigins;
+    }
+
+    /**
+     * Trust reverse-proxy headers like X-Base-Path.
+     * Only enable this when running behind a trusted reverse proxy (Caddy, Nginx, etc.).
+     * Without this, clients cannot inject arbitrary base paths.
+     */
+    public function withTrustProxy(bool $trust = true): self {
+        $this->trustProxy = $trust;
+
+        return $this;
+    }
+
+    public function getTrustProxy(): bool {
+        return $this->trustProxy;
+    }
+
+    /**
+     * Rate-limit action requests per IP.
+     *
+     * @param int $maxRequests   Maximum requests per window (0 = no limit)
+     * @param int $windowSeconds Window size in seconds (default 60)
+     */
+    public function withActionRateLimit(int $maxRequests, int $windowSeconds = 60): self {
+        $this->actionRateLimit = max(0, $maxRequests);
+        $this->actionRateWindow = max(1, $windowSeconds);
+
+        return $this;
+    }
+
+    public function getActionRateLimit(): int {
+        return $this->actionRateLimit;
+    }
+
+    public function getActionRateWindow(): int {
+        return $this->actionRateWindow;
     }
 }

@@ -57,8 +57,8 @@ final class ThemeBuilderExample {
             });
 
             $setColor = $c->action(function () use ($contextId, $c): void {
-                $slot = $_GET['slot'] ?? '';
-                $color = ltrim($_GET['color'] ?? '', '#');
+                $slot = $c->input('slot', '');
+                $color = ltrim($c->input('color', ''), '#');
 
                 // Only accept known slots and pre-approved swatch colors
                 $allowedColors = self::SWATCHES[$slot] ?? [];

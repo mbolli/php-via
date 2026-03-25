@@ -29,7 +29,7 @@ final class ShoppingCartExample {
             $c->addScope($cartScope);
 
             $addItem = $c->action(function () use ($c, $cartScope, $app): void {
-                $id = (int) ($_GET['id'] ?? 0);
+                $id = (int) $c->input('id', 0);
                 $product = self::findProduct($id);
 
                 if ($product === null) {
@@ -50,7 +50,7 @@ final class ShoppingCartExample {
             }, 'addItem');
 
             $removeItem = $c->action(function () use ($c, $cartScope, $app): void {
-                $id = (int) ($_GET['id'] ?? 0);
+                $id = (int) $c->input('id', 0);
 
                 /** @var array<int, mixed> $cart */
                 $cart = $c->sessionData('cart', []);

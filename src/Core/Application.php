@@ -372,7 +372,7 @@ class Application {
         $this->twig->addFunction(
             new TwigFunction(
                 'dump',
-                fn (mixed ...$vars): string => '<pre>' . print_r($vars, true) . '</pre>',
+                fn (mixed ...$vars): string => '<pre>' . htmlspecialchars(print_r($vars, true), ENT_QUOTES, 'UTF-8') . '</pre>',
                 ['is_safe' => ['html']]
             ),
         );

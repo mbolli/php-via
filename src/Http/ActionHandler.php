@@ -16,6 +16,12 @@ class ActionHandler {
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
+    /** @var array<string, list<float>> Per-IP request timestamps for rate limiting */
+    private array $rateLimitBuckets = [];
+
+    /** Unix timestamp of last rate-limit bucket cleanup */
+    private int $lastRateLimitCleanup = 0;
+
     public function __construct(Via $via) {
         $this->via = $via;
     }
@@ -40,6 +46,16 @@ class ActionHandler {
             return;
         }
 
+        // Rate limiting: reject if IP exceeds configured action rate limit.
+        $ip = $request->server['remote_addr'] ?? 'unknown';
+        if (!$this->checkRateLimit($ip)) {
+            $response->status(429);
+            $response->header('Retry-After', (string) $this->via->getConfig()->getActionRateWindow());
+            $response->end('Too Many Requests');
+
+            return;
+        }
+
         // Read signals from request
         $signals = Via::readSignals($request);
 
@@ -55,6 +71,9 @@ class ActionHandler {
         $context = $this->via->contexts[$contextId];
 
         try {
+            // Inject HTTP request params so action callbacks can use $c->input()
+            $context->setRequestInput($request->get ?? [], $request->post ?? []);
+
             // Inject signals into context
             $context->injectSignals($signals);
 
@@ -88,6 +107,56 @@ class ActionHandler {
      * Returns false (block the request) when an Origin header is present but
      * does not match any trusted origin.
      */
+    /**
+     * Check if the IP is within the configured rate limit.
+     *
+     * Uses a sliding-window counter: timestamps older than the window are pruned,
+     * then the current count is compared against the limit. Returns true if allowed.
+     */
+    private function checkRateLimit(string $ip): bool {
+        $limit = $this->via->getConfig()->getActionRateLimit();
+        if ($limit <= 0) {
+            return true; // Rate limiting disabled
+        }
+
+        $window = $this->via->getConfig()->getActionRateWindow();
+        $now = microtime(true);
+        $cutoff = $now - $window;
+
+        // Prune expired entries for this IP
+        if (isset($this->rateLimitBuckets[$ip])) {
+            $this->rateLimitBuckets[$ip] = array_values(
+                array_filter($this->rateLimitBuckets[$ip], fn (float $ts) => $ts > $cutoff)
+            );
+        } else {
+            $this->rateLimitBuckets[$ip] = [];
+        }
+
+        // Check limit
+        if (\count($this->rateLimitBuckets[$ip]) >= $limit) {
+            return false;
+        }
+
+        // Record this request
+        $this->rateLimitBuckets[$ip][] = $now;
+
+        // Periodic cleanup: every 60 seconds, remove IPs with no recent requests
+        // to prevent unbounded memory growth from many distinct IPs.
+        if ((int) $now - $this->lastRateLimitCleanup > 60) {
+            $this->lastRateLimitCleanup = (int) $now;
+            foreach ($this->rateLimitBuckets as $bucketIp => $timestamps) {
+                $this->rateLimitBuckets[$bucketIp] = array_values(
+                    array_filter($timestamps, fn (float $ts) => $ts > $cutoff)
+                );
+                if ($this->rateLimitBuckets[$bucketIp] === []) {
+                    unset($this->rateLimitBuckets[$bucketIp]);
+                }
+            }
+        }
+
+        return true;
+    }
+
     private function isOriginAllowed(?string $origin): bool {
         $trustedOrigins = $this->via->getConfig()->getTrustedOrigins();
 

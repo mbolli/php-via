@@ -54,7 +54,7 @@ final class GameOfLifeExample {
             }, 'reset');
 
             $tapCell = $c->action(function (Context $ctx) use ($app): void {
-                $id = $_GET['id'] ?? null;
+                $id = $ctx->input('id');
                 $sessionId = self::$sessionIds[$ctx->getId()] ?? 0;
                 if ($id !== null) {
                     self::fillCross((int) $id, $sessionId);

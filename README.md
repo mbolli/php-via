@@ -192,8 +192,6 @@ Browser → Caddy (TLS + Brotli) → OpenSwoole :3000
 
 ## Roadmap
 
-- [ ] Session management (persistent across reconnects)
-- [ ] Middleware system
 - [ ] Route groups (`$app->group('/prefix', fn)`)
 - [ ] `initAtBoot()` — explicit hook for boot-time shared state initialisation
 - [ ] Global intervals (`$app->setInterval()` — one shared timer per server process)

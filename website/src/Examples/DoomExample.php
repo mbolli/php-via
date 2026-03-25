@@ -30,7 +30,7 @@ final class DoomExample {
             $cachedFrames = $c->signal(0, name: 'cachedFrames');
 
             $startGame = $c->action(function (Context $c) use ($gameStatus, $errorMessage): void {
-                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame) {
+                if ($c->sessionData('doom_game') instanceof DoomGame) {
                     $gameStatus->setValue('running');
                     $c->syncSignals();
 
@@ -56,7 +56,7 @@ final class DoomExample {
 
                 $game = new DoomGame(640, 480);
                 if ($game->start()) {
-                    $_SESSION['doom_game'] = $game;
+                    $c->setSessionData('doom_game', $game);
                     $gameStatus->setValue('running');
                     $errorMessage->setValue('');
                 } else {
@@ -67,9 +67,10 @@ final class DoomExample {
             }, 'startGame');
 
             $stopGame = $c->action(function (Context $c) use ($gameStatus, $frameData): void {
-                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame) {
-                    $_SESSION['doom_game']->stop();
-                    $_SESSION['doom_game'] = null;
+                $game = $c->sessionData('doom_game');
+                if ($game instanceof DoomGame) {
+                    $game->stop();
+                    $c->clearSessionData('doom_game');
                     $gameStatus->setValue('stopped');
                     $frameData->setValue('');
                 }
@@ -77,21 +78,23 @@ final class DoomExample {
             }, 'stopGame');
 
             $keyDown = $c->action(function (Context $c): void {
-                $key = $_GET['key'] ?? null;
-                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame && \is_string($key)) {
-                    $_SESSION['doom_game']->sendKeyDown($key);
+                $key = $c->input('key');
+                $game = $c->sessionData('doom_game');
+                if ($game instanceof DoomGame && \is_string($key)) {
+                    $game->sendKeyDown($key);
                 }
             }, 'keyDown');
 
             $keyUp = $c->action(function (Context $c): void {
-                $key = $_GET['key'] ?? null;
-                if (isset($_SESSION['doom_game']) && $_SESSION['doom_game'] instanceof DoomGame && \is_string($key)) {
-                    $_SESSION['doom_game']->sendKeyUp($key);
+                $key = $c->input('key');
+                $game = $c->sessionData('doom_game');
+                if ($game instanceof DoomGame && \is_string($key)) {
+                    $game->sendKeyUp($key);
                 }
             }, 'keyUp');
 
             $c->setInterval(function () use ($c, $gameStatus, $frameData, $fps, $frameCount, $frameSize, $cachedFrames): void {
-                $game = $_SESSION['doom_game'] ?? null;
+                $game = $c->sessionData('doom_game');
                 if (!$game instanceof DoomGame || $gameStatus->string() !== 'running') {
                     return;
                 }

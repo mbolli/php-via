@@ -37,13 +37,13 @@ final class TodoExample {
             }, 'addTodo');
 
             $deleteTodo = $c->action(function (Context $ctx) use ($app): void {
-                $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
+                $id = (int) $ctx->input('id', 0);
                 self::$todos = array_values(array_filter(self::$todos, fn (array $todo) => $todo['id'] !== $id));
                 $app->broadcast(Scope::ROUTE);
             }, 'deleteTodo');
 
             $toggleTodo = $c->action(function (Context $ctx) use ($app): void {
-                $id = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
+                $id = (int) $ctx->input('id', 0);
                 foreach (self::$todos as $key => $todo) {
                     if ($todo['id'] === $id) {
                         self::$todos[$key]['completed'] = !self::$todos[$key]['completed'];
