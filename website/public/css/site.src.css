@@ -314,10 +314,17 @@ main, .site-footer { position: relative; }
 
 .hero h1 em {
   font-style: normal;
-  background: linear-gradient(135deg, var(--brand), var(--brand-secondary));
+  background: linear-gradient(90deg, var(--brand), var(--brand-secondary), var(--brand));
+  background-size: 200% 100%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  animation: hero-shimmer 4s ease-in-out infinite;
+}
+
+@keyframes hero-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
 .hero-tagline {
