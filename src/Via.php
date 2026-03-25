@@ -190,6 +190,37 @@ class Via {
     }
 
     /**
+     * Get a per-session data value.
+     *
+     * Session data persists for the server process lifetime and is shared across
+     * all browser tabs belonging to the same session.
+     *
+     * @param string $sessionId Session ID from $c->getSessionId()
+     * @param string $key       Data key
+     * @param mixed  $default   Value returned if key is not set
+     */
+    public function getSessionData(string $sessionId, string $key, mixed $default = null): mixed {
+        return $this->app->getSessionData($sessionId, $key, $default);
+    }
+
+    /**
+     * Set a per-session data value.
+     */
+    public function setSessionData(string $sessionId, string $key, mixed $value): void {
+        $this->app->setSessionData($sessionId, $key, $value);
+    }
+
+    /**
+     * Clear one key or all data for a session.
+     *
+     * @param string      $sessionId Session ID from $c->getSessionId()
+     * @param null|string $key       Key to remove, or null to clear all session data
+     */
+    public function clearSessionData(string $sessionId, ?string $key = null): void {
+        $this->app->clearSessionData($sessionId, $key);
+    }
+
+    /**
      * Get the global view cache.
      *
      * @internal Used by Context for global scope caching

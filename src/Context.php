@@ -85,6 +85,50 @@ class Context {
     }
 
     /**
+     * Get a per-session data value for this context's session.
+     *
+     * Session data persists for the server process lifetime and is shared across
+     * all browser tabs belonging to the same session. Returns $default if this
+     * context has no session or the key is not set.
+     *
+     * @param string $key     Data key
+     * @param mixed  $default Value returned if key is not set
+     */
+    public function sessionData(string $key, mixed $default = null): mixed {
+        if ($this->sessionId === null) {
+            return $default;
+        }
+
+        return $this->app->getSessionData($this->sessionId, $key, $default);
+    }
+
+    /**
+     * Set a per-session data value.
+     *
+     * No-op if this context has no session.
+     */
+    public function setSessionData(string $key, mixed $value): void {
+        if ($this->sessionId === null) {
+            return;
+        }
+
+        $this->app->setSessionData($this->sessionId, $key, $value);
+    }
+
+    /**
+     * Clear one key or all data from this context's session.
+     *
+     * @param null|string $key Key to remove, or null to clear all session data
+     */
+    public function clearSessionData(?string $key = null): void {
+        if ($this->sessionId === null) {
+            return;
+        }
+
+        $this->app->clearSessionData($this->sessionId, $key);
+    }
+
+    /**
      * Get context ID.
      */
     public function getId(): string {

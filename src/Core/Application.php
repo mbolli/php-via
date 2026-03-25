@@ -30,6 +30,12 @@ use Twig\TwigFunction;
  * - Context lifecycle (cleanup, timers)
  */
 class Application {
+    /**
+     * Maximum number of distinct session buckets kept in memory.
+     * When this limit is reached the least-recently-used sessions are evicted.
+     */
+    private const int MAX_SESSIONS = 10_000;
+
     /** @var array<string, Context> */
     private array $contexts = [];
 
@@ -41,6 +47,12 @@ class Application {
 
     /** @var array<string, mixed> Global state shared across all routes and clients */
     private array $globalState = [];
+
+    /** @var array<string, array<string, mixed>> Per-session key-value storage (sessionId => key => value) */
+    private array $sessionData = [];
+
+    /** @var array<string, int> Last-access Unix timestamp per session (used for LRU eviction) */
+    private array $sessionLastAccess = [];
 
     /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
     private array $contextSessions = [];
@@ -224,6 +236,45 @@ class Application {
     }
 
     /**
+     * Get a per-session data value.
+     *
+     * Session data persists for the server process lifetime (not cleared on disconnect).
+     * It is shared across all browser tabs that belong to the same session.
+     *
+     * @param string $sessionId Session cookie ID
+     * @param string $key       Data key
+     * @param mixed  $default   Value returned if key is not set
+     */
+    public function getSessionData(string $sessionId, string $key, mixed $default = null): mixed {
+        $this->sessionLastAccess[$sessionId] = time();
+
+        return $this->sessionData[$sessionId][$key] ?? $default;
+    }
+
+    /**
+     * Set a per-session data value.
+     */
+    public function setSessionData(string $sessionId, string $key, mixed $value): void {
+        $this->sessionLastAccess[$sessionId] = time();
+        $this->sessionData[$sessionId][$key] = $value;
+        $this->evictOldestSessionsIfNeeded();
+    }
+
+    /**
+     * Clear one key or all data for a session.
+     *
+     * @param string      $sessionId Session cookie ID
+     * @param null|string $key       Key to remove, or null to clear the entire session bucket
+     */
+    public function clearSessionData(string $sessionId, ?string $key = null): void {
+        if ($key === null) {
+            unset($this->sessionData[$sessionId], $this->sessionLastAccess[$sessionId]);
+        } else {
+            unset($this->sessionData[$sessionId][$key]);
+        }
+    }
+
+    /**
      * Schedule context cleanup after a delay.
      * Allows time for reconnection or navigation between pages.
      */
@@ -262,6 +313,28 @@ class Application {
      */
     public function getLogger(): Logger {
         return $this->logger;
+    }
+
+    /**
+     * Evict the least-recently-used session buckets when MAX_SESSIONS is exceeded.
+     *
+     * Called only from setSessionData, so the overhead is paid only on writes.
+     * Evicts 1% of the cap (minimum 1) per call to avoid repeated single evictions.
+     */
+    private function evictOldestSessionsIfNeeded(): void {
+        if (\count($this->sessionData) <= self::MAX_SESSIONS) {
+            return;
+        }
+
+        asort($this->sessionLastAccess);
+        $evictCount = max(1, (int) (self::MAX_SESSIONS * 0.01));
+        $toEvict = \array_slice(array_keys($this->sessionLastAccess), 0, $evictCount);
+
+        foreach ($toEvict as $sid) {
+            unset($this->sessionData[$sid], $this->sessionLastAccess[$sid]);
+        }
+
+        $this->logger->log('warning', "Session data LRU eviction: removed {$evictCount} inactive sessions (cap: " . self::MAX_SESSIONS . ')');
     }
 
     /**
