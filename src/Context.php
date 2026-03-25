@@ -55,6 +55,12 @@ class Context {
     /** @var array<string> Per-context additions before </body> */
     private array $contextFootIncludes = [];
 
+    /** @var array<string, mixed> PSR-7 request attributes set by middleware */
+    private array $requestAttributes = [];
+
+    /** @var array<string, mixed> HTTP query/post params for the current request */
+    private array $requestInput = [];
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -198,6 +204,62 @@ class Context {
      */
     public function injectRouteParams(array $params): void {
         $this->routeParams = $params;
+    }
+
+    /**
+     * Set PSR-7 request attributes from middleware.
+     *
+     * @internal called by RequestHandler after middleware pipeline runs
+     *
+     * @param array<string, mixed> $attributes
+     */
+    public function setRequestAttributes(array $attributes): void {
+        $this->requestAttributes = $attributes;
+    }
+
+    /**
+     * Get a request attribute set by middleware.
+     *
+     * Middleware can store data (e.g. authenticated user, locale) as PSR-7
+     * request attributes via $request->withAttribute(). These are bridged
+     * into the Context so page handlers can access them.
+     */
+    public function getRequestAttribute(string $name, mixed $default = null): mixed {
+        return $this->requestAttributes[$name] ?? $default;
+    }
+
+    /**
+     * Get all request attributes set by middleware.
+     *
+     * @return array<string, mixed>
+     */
+    public function getRequestAttributes(): array {
+        return $this->requestAttributes;
+    }
+
+    /**
+     * Set HTTP request input (query + post params) for the current action request.
+     *
+     * @internal called by ActionHandler before executing an action
+     *
+     * @param array<string, mixed> $query GET query parameters
+     * @param array<string, mixed> $post  POST body parameters
+     */
+    public function setRequestInput(array $query, array $post): void {
+        $this->requestInput = array_merge($query, $post);
+    }
+
+    /**
+     * Get an HTTP request parameter from the current action request.
+     *
+     * Reads from merged GET + POST parameters. Use this instead of \$_GET/\$_POST
+     * superglobals, which are not safe in OpenSwoole's coroutine model.
+     *
+     * @param string $name    Parameter name
+     * @param mixed  $default Value returned if parameter is not set
+     */
+    public function input(string $name, mixed $default = null): mixed {
+        return $this->requestInput[$name] ?? $default;
     }
 
     /**

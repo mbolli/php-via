@@ -5,11 +5,20 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
+use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
+use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
+use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
+use Nyholm\Psr7\Response as Psr7Response;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * Handles incoming HTTP requests and routes them appropriately.
@@ -22,11 +31,15 @@ class RequestHandler {
     private SseHandler $sseHandler;
     private ActionHandler $actionHandler;
     private ?RequestLogger $requestLogger = null;
+    private PsrRequestFactory $psrRequestFactory;
+    private PsrResponseEmitter $psrResponseEmitter;
 
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
         $this->actionHandler = $actionHandler;
+        $this->psrRequestFactory = new PsrRequestFactory();
+        $this->psrResponseEmitter = new PsrResponseEmitter();
     }
 
     public function setRequestLogger(RequestLogger $logger): void {
@@ -48,15 +61,18 @@ class RequestHandler {
         $method = $request->server['request_method'];
         $requestStart = hrtime(true);
 
-        // Detect basePath from X-Base-Path header (set by reverse proxy like Caddy)
-        $basePathHeader = $request->header['x-base-path'] ?? null;
-        $this->via->getApp()->getConfig()->detectBasePathFromRequest($basePathHeader);
+        // Detect basePath from X-Base-Path header (set by reverse proxy like Caddy).
+        // Only trusted when Config::withTrustProxy(true) is set — otherwise clients
+        // could inject arbitrary base paths.
+        if ($this->via->getConfig()->getTrustProxy()) {
+            $basePathHeader = $request->header['x-base-path'] ?? null;
+            $this->via->getApp()->getConfig()->detectBasePathFromRequest($basePathHeader);
+        }
         $this->via->getApp()->getTwig()->addGlobal('basePath', $this->via->getApp()->getConfig()->getBasePath());
 
-        // Populate superglobals for compatibility
-        $_GET = $request->get ?? [];
-        $_POST = $request->post ?? [];
-        $_FILES = $request->files ?? [];
+        // Note: $_GET/$_POST/$_FILES are intentionally NOT set here.
+        // Superglobals are shared across coroutines in OpenSwoole and cause
+        // race conditions. Use $c->input() in actions or $request->get in handlers.
 
         // Handle HEAD requests without logging or rendering
         if ($method === 'HEAD') {
@@ -102,14 +118,14 @@ class RequestHandler {
 
         // Handle SSE connection (logged separately by SseHandler)
         if ($path === '/_sse') {
-            $this->sseHandler->handleSSE($request, $response);
+            $this->handleSseWithMiddleware($request, $response);
 
             return;
         }
 
         // Handle action triggers (logged separately by ActionHandler)
         if (preg_match('#^/_action/(.+)$#', $path, $matches)) {
-            $this->actionHandler->handleAction($request, $response, $matches[1]);
+            $this->handleActionWithMiddleware($request, $response, $matches[1]);
 
             return;
         }
@@ -122,8 +138,15 @@ class RequestHandler {
             return;
         }
 
-        // Handle stats endpoint
+        // Handle stats endpoint (devMode only — exposes client IPs and memory usage)
         if ($path === '/_stats' && $method === 'GET') {
+            if (!$this->via->getConfig()->getDevMode()) {
+                $response->status(404);
+                $response->end('Not Found');
+
+                return;
+            }
+
             $this->handleStats($request, $response);
 
             return;
@@ -136,7 +159,7 @@ class RequestHandler {
             // Extract route pattern from matched route
             foreach ($this->routes as $route => $h) {
                 if ($h === $handler) {
-                    $this->handlePage($request, $response, $route, $handler, $params, $method, $path, $requestStart);
+                    $this->handlePageWithMiddleware($request, $response, $route, $handler, $params, $method, $path, $requestStart);
 
                     return;
                 }
@@ -149,35 +172,15 @@ class RequestHandler {
         $response->end('Not Found');
     }
 
-    private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {
-        $durationUs = (hrtime(true) - $hrtimeStart) / 1000;
-        $this->requestLogger?->logRequest($method, $path, $statusCode, $durationUs);
-    }
-
-    /**
-     * Handle HEAD requests for route checking.
-     */
-    private function handleHeadRequest(string $path, Response $response): void {
-        $params = [];
-        $handler = $this->via->getRouter()->matchRoute($path, $params);
-        if ($handler !== null) {
-            $response->status(200);
-            $response->header('Content-Type', 'text/html; charset=utf-8');
-            $response->end();
-
-            return;
-        }
-        // Route not found
-        $response->status(404);
-        $response->end();
-    }
-
     /**
      * Handle page rendering.
      *
-     * @param array<string, string> $params Route parameters
+     * @internal called by middleware pipeline core handler
+     *
+     * @param array<string, string> $params            Route parameters
+     * @param array<string, mixed>  $requestAttributes PSR-7 request attributes from middleware
      */
-    private function handlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart): void {
+    public function handlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart, array $requestAttributes = []): void {
         // Get or create session ID
         $sessionId = $this->via->getSessionId($request);
 
@@ -193,7 +196,11 @@ class RequestHandler {
         // Inject route parameters
         $context->injectRouteParams($params);
 
-        // Execute the page handler with automatic parameter injection
+        // Bridge PSR-7 request attributes from middleware into Context
+        if ($requestAttributes !== []) {
+            $context->setRequestAttributes($requestAttributes);
+        }
+
         try {
             $this->via->invokeHandlerWithParams($handler, $context, $params);
         } catch (\Throwable $e) {
@@ -227,6 +234,201 @@ class RequestHandler {
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
         $response->end($html);
+    }
+
+    private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {
+        $durationUs = (hrtime(true) - $hrtimeStart) / 1000;
+        $this->requestLogger?->logRequest($method, $path, $statusCode, $durationUs);
+    }
+
+    /**
+     * Handle HEAD requests for route checking.
+     */
+    private function handleHeadRequest(string $path, Response $response): void {
+        $params = [];
+        $handler = $this->via->getRouter()->matchRoute($path, $params);
+        if ($handler !== null) {
+            $response->status(200);
+            $response->header('Content-Type', 'text/html; charset=utf-8');
+            $response->end();
+
+            return;
+        }
+        // Route not found
+        $response->status(404);
+        $response->end();
+    }
+
+    /**
+     * Handle page rendering.
+     *
+     * @param array<string, string> $params Route parameters
+     */
+    private function handlePageWithMiddleware(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart): void {
+        $globalMiddleware = $this->via->getGlobalMiddleware();
+        $routeMiddleware = $this->via->getRouteMiddleware($route);
+        $stack = array_merge($globalMiddleware, $routeMiddleware);
+
+        // Fast path: no middleware registered, skip PSR-7 conversion entirely
+        if ($stack === []) {
+            $this->handlePage($request, $response, $route, $handler, $params, $method, $path, $requestStart);
+
+            return;
+        }
+
+        // Build PSR-7 request and wrap the page handler as the core handler
+        $psrRequest = $this->psrRequestFactory->create($request, 'page');
+
+        // Capture variables needed by the core handler closure
+        $via = $this->via;
+        $self = $this;
+        $coreHandler = new class($self, $request, $response, $route, $handler, $params, $method, $path, $requestStart) implements RequestHandlerInterface {
+            private bool $handled = false;
+
+            /**
+             * @param array<string, string> $params
+             * @param mixed                 $pageHandler
+             */
+            public function __construct(
+                private RequestHandler $requestHandler,
+                private Request $swooleRequest,
+                private Response $swooleResponse,
+                private string $route,
+                /** @var callable */
+                private $pageHandler,
+                private array $params,
+                private string $method,
+                private string $path,
+                private int $requestStart,
+            ) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $this->handled = true;
+                // Pass PSR-7 attributes into the regular page handler
+                $this->requestHandler->handlePage(
+                    $this->swooleRequest,
+                    $this->swooleResponse,
+                    $this->route,
+                    $this->pageHandler,
+                    $this->params,
+                    $this->method,
+                    $this->path,
+                    $this->requestStart,
+                    $request->getAttributes(),
+                );
+
+                // Return a dummy response — the real response was already sent via OpenSwoole
+                return new Psr7Response(200);
+            }
+
+            public function wasHandled(): bool {
+                return $this->handled;
+            }
+        };
+
+        $dispatcher = new MiddlewareDispatcher($stack, $coreHandler);
+        $psrResponse = $dispatcher->handle($psrRequest);
+
+        // If middleware short-circuited (core handler was never called), emit the PSR-7 response
+        if (!$coreHandler->wasHandled()) {
+            $this->psrResponseEmitter->emit($psrResponse, $response);
+            $this->logRequest($method, $path, $psrResponse->getStatusCode(), $requestStart);
+        }
+    }
+
+    /**
+     * Run global middleware around action handling.
+     */
+    private function handleActionWithMiddleware(Request $request, Response $response, string $actionId): void {
+        $globalMiddleware = $this->via->getGlobalMiddleware();
+
+        // Fast path: no middleware, forward directly
+        if ($globalMiddleware === []) {
+            $this->actionHandler->handleAction($request, $response, $actionId);
+
+            return;
+        }
+
+        $psrRequest = $this->psrRequestFactory->create($request, 'action');
+
+        $actionHandler = $this->actionHandler;
+        $coreHandler = new class($actionHandler, $request, $response, $actionId) implements RequestHandlerInterface {
+            private bool $handled = false;
+
+            public function __construct(
+                private ActionHandler $actionHandler,
+                private Request $swooleRequest,
+                private Response $swooleResponse,
+                private string $actionId,
+            ) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $this->handled = true;
+                $this->actionHandler->handleAction($this->swooleRequest, $this->swooleResponse, $this->actionId);
+
+                return new Psr7Response(200);
+            }
+
+            public function wasHandled(): bool {
+                return $this->handled;
+            }
+        };
+
+        $dispatcher = new MiddlewareDispatcher($globalMiddleware, $coreHandler);
+        $psrResponse = $dispatcher->handle($psrRequest);
+
+        if (!$coreHandler->wasHandled()) {
+            $this->psrResponseEmitter->emit($psrResponse, $response);
+        }
+    }
+
+    /**
+     * Run SSE-aware middleware around SSE handshake.
+     */
+    private function handleSseWithMiddleware(Request $request, Response $response): void {
+        // Filter global middleware: only SseAwareMiddleware runs on SSE
+        $sseMiddleware = array_values(array_filter(
+            $this->via->getGlobalMiddleware(),
+            fn (MiddlewareInterface $mw): bool => $mw instanceof SseAwareMiddleware,
+        ));
+
+        // Fast path: no SSE middleware, forward directly
+        if ($sseMiddleware === []) {
+            $this->sseHandler->handleSSE($request, $response);
+
+            return;
+        }
+
+        $psrRequest = $this->psrRequestFactory->create($request, 'sse');
+
+        $sseHandler = $this->sseHandler;
+        $coreHandler = new class($sseHandler, $request, $response) implements RequestHandlerInterface {
+            private bool $handled = false;
+
+            public function __construct(
+                private SseHandler $sseHandler,
+                private Request $swooleRequest,
+                private Response $swooleResponse,
+            ) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $this->handled = true;
+                $this->sseHandler->handleSSE($this->swooleRequest, $this->swooleResponse);
+
+                return new Psr7Response(200);
+            }
+
+            public function wasHandled(): bool {
+                return $this->handled;
+            }
+        };
+
+        $dispatcher = new MiddlewareDispatcher($sseMiddleware, $coreHandler);
+        $psrResponse = $dispatcher->handle($psrRequest);
+
+        if (!$coreHandler->wasHandled()) {
+            $this->psrResponseEmitter->emit($psrResponse, $response);
+        }
     }
 
     /**

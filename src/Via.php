@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
+use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Rendering\ViewCache;
@@ -26,6 +27,7 @@ use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
+use Psr\Http\Server\MiddlewareInterface;
 use Twig\Environment;
 
 /**
@@ -85,6 +87,12 @@ class Via {
     private ScopeRegistry $scopeRegistry;
     private SignalManager $signalManager;
     private ActionRegistry $actionRegistry;
+
+    /** @var list<MiddlewareInterface> Global middleware applied to all page/action requests */
+    private array $globalMiddleware = [];
+
+    /** @var array<string, RouteDefinition> Route definitions indexed by route pattern */
+    private array $routeDefinitions = [];
 
     public function __construct(private Config $config) {
         // Initialize support classes
@@ -244,13 +252,64 @@ class Via {
     }
 
     /**
+     * Register global middleware applied to all page and action requests.
+     *
+     * Middleware implementing SseAwareMiddleware will additionally run on SSE
+     * handshake requests.
+     *
+     * WARNING: Middleware instances are long-lived in Swoole — they persist across
+     * all requests in the worker process. Do NOT store per-request state on
+     * middleware properties. Use $request->withAttribute() to pass data downstream.
+     */
+    public function middleware(MiddlewareInterface ...$middleware): void {
+        foreach ($middleware as $mw) {
+            $this->globalMiddleware[] = $mw;
+        }
+    }
+
+    /**
+     * Get all registered global middleware.
+     *
+     * @internal used by HTTP handlers to build the middleware pipeline
+     *
+     * @return list<MiddlewareInterface>
+     */
+    public function getGlobalMiddleware(): array {
+        return $this->globalMiddleware;
+    }
+
+    /**
+     * Get route-specific middleware for a given route pattern.
+     *
+     * @internal used by RequestHandler to build per-route middleware pipeline
+     *
+     * @return list<MiddlewareInterface>
+     */
+    public function getRouteMiddleware(string $route): array {
+        if (!isset($this->routeDefinitions[$route])) {
+            return [];
+        }
+
+        return $this->routeDefinitions[$route]->getMiddleware();
+    }
+
+    /**
      * Register a page route with its handler.
+     *
+     * Returns a RouteDefinition for optional fluent middleware registration:
+     * ```php
+     * $app->page('/admin', fn(Context $c) => ...)->middleware(new AuthMiddleware());
+     * ```
      *
      * @param string   $route   The route pattern (e.g., '/')
      * @param callable $handler Function that receives a Context instance
      */
-    public function page(string $route, callable $handler): void {
+    public function page(string $route, callable $handler): RouteDefinition {
+        $definition = new RouteDefinition($route, $handler);
+        $this->routeDefinitions[$route] = $definition;
         $this->router->registerRoute($route, $handler);
+
+        return $definition;
     }
 
     /**
@@ -686,7 +745,7 @@ class Via {
      * @internal Used by HTTP handlers
      */
     public function getSessionId(Request $request): string {
-        return $this->sessionManager->getOrCreateSessionId($request);
+        return $this->sessionManager->getOrCreateSessionId($request, $this->config->getSecureCookie());
     }
 
     /**
