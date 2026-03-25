@@ -475,8 +475,7 @@ final class MissionControlExample {
             $active = array_keys(array_filter(
                 self::$serviceState,
                 // Guaranteed services always publish (consumer paused ≠ service down)
-                static fn(array $state, string $key): bool =>
-                    !$state['killed'] || \in_array($key, self::GUARANTEED_SERVICES, true),
+                static fn (array $state, string $key): bool => !$state['killed'] || \in_array($key, self::GUARANTEED_SERVICES, true),
                 ARRAY_FILTER_USE_BOTH,
             ));
 
