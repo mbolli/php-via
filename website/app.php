@@ -29,20 +29,60 @@ use PhpVia\Website\Examples\TypeRaceExample;
 use PhpVia\Website\Examples\WizardExample;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
+use Psr\Log\AbstractLogger;
+use Tuupola\Middleware\CorsMiddleware;
 use Twig\RuntimeLoader\FactoryRuntimeLoader;
 
 // ─── Configuration ──────────────────────────────────────────────────────────
+
+$corsOrigin = getenv('CORS_ORIGIN') ?: '*';
 
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort(3000)
     ->withDevMode(true)
+    ->withTrustProxy(true)
     ->withTemplateDir(__DIR__ . '/templates')
     ->withStaticDir(__DIR__ . '/public')
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
 ;
 
 $app = new Via($config);
+
+// ─── Middleware ──────────────────────────────────────────────────────────────
+
+$corsLogger = $config->getDevMode()
+    ? new class extends AbstractLogger {
+        public function log($level, string|Stringable $message, array $context = []): void {
+            echo '[DEBUG] [CORS] ' . $message . "\n";
+        }
+    }
+: null;
+
+$app->middleware(new CorsMiddleware([
+    'origin' => [$corsOrigin],
+    'methods' => ['GET', 'POST'],
+    'headers.allow' => ['Content-Type', 'Authorization'],
+    'credentials' => true,
+    'cache' => 3600,
+    'origin.server' => !str_contains($corsOrigin, '*') ? $corsOrigin : null,
+    'logger' => $corsLogger,
+    'error' => function ($request, $response, $arguments) {
+        $body = json_encode([
+            'error' => 'CORS',
+            'message' => $arguments['message'],
+        ], JSON_UNESCAPED_SLASHES);
+
+        $response = $response
+            ->withStatus(403)
+            ->withHeader('Content-Type', 'application/json')
+        ;
+
+        $response->getBody()->write($body);
+
+        return $response;
+    },
+]));
 $app->getTwig()->addExtension(new SyntaxHighlightExtension());
 $app->getTwig()->addRuntimeLoader(new FactoryRuntimeLoader([
     CodeRuntime::class => fn () => new CodeRuntime(),
@@ -235,7 +275,7 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
     }
 
     $vote = $c->action(function (Context $c) use ($app): void {
-        $raw = $_POST['option'] ?? ($_GET['option'] ?? null);
+        $raw = $c->input('option');
         if (!in_array($raw, ['tab', 'route', 'session', 'global'], true)) {
             return;
         }
@@ -371,6 +411,12 @@ $app->page('/docs/broadcasting', function (Context $c): void {
 $app->page('/docs/lifecycle', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/lifecycle'));
     $c->view('docs/lifecycle.html.twig');
+});
+
+// Middleware & Security
+$app->page('/docs/middleware', function (Context $c): void {
+    $c->scope(Scope::routeScope('/docs/middleware'));
+    $c->view('docs/middleware.html.twig');
 });
 
 // Twig templates

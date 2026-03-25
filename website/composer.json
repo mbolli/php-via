@@ -6,7 +6,8 @@
         "php": "^8.4",
         "mbolli/php-via": "*",
         "mbolli/tempest-highlight-datastar": "^1.0.0",
-        "tempest/highlight": "^2.17"
+        "tempest/highlight": "^2.17",
+        "tuupola/cors-middleware": "^1.5"
     },
     "license": "MIT",
     "autoload": {
