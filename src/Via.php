@@ -695,7 +695,7 @@ class Via {
      * @internal Used by HTTP handlers
      */
     public function setSessionCookie(Response $response, string $sessionId): void {
-        $this->sessionManager->setSessionCookie($response, $sessionId);
+        $this->sessionManager->setSessionCookie($response, $sessionId, $this->app->getConfig()->getSecureCookie());
     }
 
     /**

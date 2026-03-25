@@ -41,7 +41,7 @@ class SessionManager {
     /**
      * Set session cookie in response.
      */
-    public function setSessionCookie(Response $response, string $sessionId): void {
+    public function setSessionCookie(Response $response, string $sessionId, bool $secure = false): void {
         // Set cookie with 30 day expiration
         $expires = time() + (30 * 24 * 60 * 60);
         $result = $response->cookie(
@@ -50,8 +50,9 @@ class SessionManager {
             $expires,
             '/',
             '',
-            false, // secure (set to true for HTTPS)
-            true   // httponly
+            $secure,  // Secure — set via Config::withSecureCookie(true) for HTTPS deployments
+            true,     // HttpOnly
+            'Lax',    // SameSite — blocks cross-site POST requests carrying the session cookie
         );
         $this->logger->log('debug', "Set session cookie: {$sessionId}, result: " . ($result ? 'success' : 'failed'));
     }

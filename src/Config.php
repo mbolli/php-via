@@ -25,6 +25,22 @@ class Config {
     private int $ssePollIntervalMs = 100;
 
     /**
+     * Whether to set the Secure flag on the session cookie (required for HTTPS).
+     * Defaults to false so local HTTP dev works out of the box.
+     * Set to true in production behind HTTPS.
+     */
+    private bool $secureCookie = false;
+
+    /**
+     * Allowed origins for action requests.
+     * Null means no Origin restriction (dev default).
+     * Set to a list of allowed origins in production, e.g. ['https://example.com'].
+     *
+     * @var null|list<string>
+     */
+    private ?array $trustedOrigins = null;
+
+    /**
      * Set basePath from reverse proxy header.
      * Called on first request with X-Base-Path header from Caddy.
      */
@@ -152,5 +168,40 @@ class Config {
      */
     public function getSwooleSettings(): array {
         return $this->openSwooleSettings;
+    }
+
+    /**
+     * Require the Secure cookie attribute.
+     * Enable this for any deployment served over HTTPS.
+     */
+    public function withSecureCookie(bool $secure = true): self {
+        $this->secureCookie = $secure;
+
+        return $this;
+    }
+
+    public function getSecureCookie(): bool {
+        return $this->secureCookie;
+    }
+
+    /**
+     * Restrict action POST requests to the given list of Origin header values.
+     *
+     * Each entry should be a full origin without trailing slash, e.g. 'https://example.com'.
+     * Pass null (the default) to disable Origin checking — suitable for local dev.
+     *
+     * @param null|list<string> $origins
+     */
+    public function withTrustedOrigins(?array $origins): self {
+        $this->trustedOrigins = $origins;
+
+        return $this;
+    }
+
+    /**
+     * @return null|list<string>
+     */
+    public function getTrustedOrigins(): ?array {
+        return $this->trustedOrigins;
     }
 }
