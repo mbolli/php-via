@@ -2,6 +2,45 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **PSR-15 Middleware** — Full middleware support with global and per-route registration. Global middleware runs on all page/action requests via `$app->middleware()`. Per-route middleware via `$app->page('/admin', ...)->middleware(new AuthMiddleware())`. Implements the onion model with zero overhead when no middleware is registered. OpenSwoole requests are converted to PSR-7 at the boundary and back.
+  - `SseAwareMiddleware` marker interface for middleware that should also run on SSE handshake requests
+  - `MiddlewareDispatcher` — onion-style PSR-15 pipeline executor
+  - `PsrRequestFactory` / `PsrResponseEmitter` — OpenSwoole ↔ PSR-7 adapters
+  - `RouteDefinition` — fluent API for route + handler + middleware
+  - Middleware attributes bridged to `Context::getRequestAttribute()` / `Context::getRequestAttributes()`
+- **Per-session data storage** — `Context::sessionData()`, `setSessionData()`, `clearSessionData()` for server-side per-session state keyed on session cookie. Survives page refreshes and context destruction (unlike signals).
+- **`Context::input(string $name, mixed $default)`** — Safe replacement for `$_GET`/`$_POST` access. Checks POST first, then query string. Coroutine-safe in OpenSwoole (superglobals are not).
+- **CSRF protection** — `ActionHandler` validates the `Origin` header against a configurable allowlist (`Config::withTrustedOrigins()`). `null` = no restriction (dev), `[]` = block all, `['https://...']` = strict allowlist.
+- **Secure session cookies** — `Config::withSecureCookie(true)` enables `__Host-` cookie prefix (enforces HTTPS, `Path=/`, no `Domain`), `SameSite=Lax`.
+- **Action rate limiting** — `Config::withActionRateLimit(int $max, int $window)` enables per-IP sliding-window rate limiting on action endpoints (returns 429 + `Retry-After`).
+- **Proxy trust** — `Config::withTrustProxy(bool)` gates `X-Base-Path` header processing behind an explicit opt-in.
+- **NATS Visualizer example** — JetStream, durable consumers, KV heartbeats with OpenSwoole-native NatsClient.
+- **Login Flow example** — Now demonstrates PSR-15 `AuthMiddleware` with a public login form and a middleware-protected dashboard route. Auth data flows via request attributes.
+- **Middleware docs page** — Full documentation covering global/per-route middleware, writing middleware, SSE-aware middleware, request attributes, and built-in security features.
+
+### Security
+
+- **Superglobal elimination** — Removed all `$_GET`/`$_POST`/`$_FILES`/`$_SESSION` writes from `RequestHandler`. Migrated 7 example files (12 call sites) from superglobals to `Context::input()` / `Context::sessionData()`.
+- **XSS fix** — `dump()` Twig function output is now HTML-escaped (`htmlspecialchars`). Previously marked `is_safe => ['html']` without escaping.
+- **`/_stats` endpoint** — Now gated behind `devMode`. Previously exposed client IPs and memory usage to unauthenticated requests.
+
+### Improvements
+
+- **Chat Room** — Messages persisted to SQLite (last 50 per room).
+- **Shopping Cart** — Migrated cart storage to `sessionData` API.
+- **Wizard example** — Wizard state persists across page refreshes via `sessionData`.
+- Updated API docs with middleware, sessionData, input(), and security Config options.
+- Updated comparisons table: Auth/middleware marked as ✓ (was "coming soon").
+
+### Dependencies
+
+- Added `psr/http-server-middleware` ^1.0 and `nyholm/psr7` ^1.8
+- Added `tuupola/cors-middleware` ^1.5 (website project)
+
 ## [0.4.3] - 2026-03-23
 
 ### New Features

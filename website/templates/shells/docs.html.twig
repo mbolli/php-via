@@ -34,6 +34,7 @@
             <section class="sidebar-section">
                 <h3 class="sidebar-heading">Guides</h3>
                 <ul role="list">
+                    {{ m.navlink('docs/middleware', 'Middleware', currentRoute, basePath) }}
                     {{ m.navlink('docs/twig', 'Templates', currentRoute, basePath) }}
                     {{ m.navlink('docs/deployment', 'Deployment', currentRoute, basePath) }}
                 </ul>
@@ -69,6 +70,7 @@
                     {{ m.navlink('docs/components', 'Components', currentRoute, basePath) }}
                     {{ m.navlink('docs/broadcasting', 'Broadcasting', currentRoute, basePath) }}
                     {{ m.navlink('docs/lifecycle', 'Lifecycle', currentRoute, basePath) }}
+                    {{ m.navlink('docs/middleware', 'Middleware', currentRoute, basePath) }}
                     {{ m.navlink('docs/twig', 'Templates', currentRoute, basePath) }}
                     {{ m.navlink('docs/deployment', 'Deployment', currentRoute, basePath) }}
                     {{ m.navlink('docs/design', 'Design decisions', currentRoute, basePath) }}

@@ -17,14 +17,24 @@ $app = new Via(
 );
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-page"><code>page(string $route, callable $handler): void</code></h3>
-    <p>Register a page route. Path params use <code>{name}</code> syntax and are injected as typed arguments.</p>
+    <h3 id="via-page"><code>page(string $route, callable $handler): RouteDefinition</code></h3>
+    <p>Register a page route. Path params use <code>{name}</code> syntax and are injected as typed arguments. Returns a <code>RouteDefinition</code> for fluent middleware registration.</p>
     {% code 'php' %}{% verbatim %}
 $app->page('/', fn(Context $c) => $c->view('home.html.twig'));
 
 $app->page('/users/{id}', function (Context $c, int $id): void {
     $c->view('user.html.twig', ['id' => $id]);
 });
+
+// With per-route middleware:
+$app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'))
+    ->middleware(new AuthMiddleware());
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="via-middleware"><code>middleware(MiddlewareInterface ...$middleware): void</code></h3>
+    <p>Register global PSR-15 middleware that runs on every page and action request. See <a href="/docs/middleware">Middleware</a>.</p>
+    {% code 'php' %}{% verbatim %}
+$app->middleware(new CorsMiddleware([...]));
     {% endverbatim %}{% endcode %}
 
     <h3 id="via-broadcast"><code>broadcast(string $scope): void</code></h3>
@@ -201,6 +211,32 @@ $c->getPathParam('id');   // path parameter by name
 $c->getNamespace();       // component namespace, or null
     {% endverbatim %}{% endcode %}
 
+    <h3 id="context-session-data"><code>sessionData(string $key, mixed $default = null): mixed</code></h3>
+    <h3 id="context-set-session-data"><code>setSessionData(string $key, mixed $value): void</code></h3>
+    <h3 id="context-clear-session-data"><code>clearSessionData(?string $key = null): void</code></h3>
+    <p>Per-session server-side storage, keyed on the session cookie. Survives page refreshes and context destruction — unlike signals, which reset on refresh.</p>
+    {% code 'php' %}{% verbatim %}
+$c->setSessionData('auth', ['user' => 'ada', 'role' => 'Engineer']);
+
+$auth = $c->sessionData('auth');       // returns the array or null
+
+$c->clearSessionData('auth');          // clear one key
+$c->clearSessionData();                // clear entire session bucket
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="context-input"><code>input(string $name, mixed $default = null): mixed</code></h3>
+    <p>Read a query or POST parameter safely. Checks POST first, then query string. Replaces direct <code>$_GET</code>/<code>$_POST</code> access (which is coroutine-unsafe in OpenSwoole).</p>
+    {% code 'php' %}{% verbatim %}
+$id = $c->input('id');                  // POST['id'] ?? GET['id'] ?? null
+$cat = $c->input('cat', 'all');         // with default
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="context-request-attributes"><code>getRequestAttribute(string $name, mixed $default = null): mixed</code></h3>
+    <p>Read a request attribute set by PSR-15 middleware. See <a href="/docs/middleware">Middleware</a>.</p>
+    {% code 'php' %}{% verbatim %}
+$user = $c->getRequestAttribute('user');  // set by AuthMiddleware
+    {% endverbatim %}{% endcode %}
+
     ---
 
     <h2 id="signal">Signal</h2>
@@ -256,6 +292,11 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withBasePath('/')             // URL base path prefix
     ->withSsePollIntervalMs(50)     // SSE poll interval in ms
     ->withSwooleSettings([...])     // raw OpenSwoole server settings
+    // Security
+    ->withSecureCookie(true)        // __Host- prefix, Secure flag
+    ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
+    ->withTrustProxy(true)          // honour X-Base-Path from proxy
+    ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP
     {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>

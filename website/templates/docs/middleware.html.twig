@@ -1,0 +1,194 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Middleware — php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Middleware</h1>
+    <p>
+        php-via supports <strong>PSR-15 middleware</strong> for cross-cutting concerns like authentication,
+        CORS, logging, and rate limiting. Middleware runs on page and action requests by default;
+        implement <code>SseAwareMiddleware</code> to also run on SSE handshakes.
+    </p>
+
+    <h2 id="how-it-works">How it works</h2>
+    <p>
+        Middleware follows the standard <a href="https://www.php-fig.org/psr/psr-15/" target="_blank" rel="noopener">PSR-15</a>
+        onion model. Each middleware receives a PSR-7 <code>ServerRequestInterface</code> and can either
+        short-circuit (return a response directly) or delegate to the next handler. php-via converts the
+        OpenSwoole request to PSR-7 at the boundary and converts any PSR-7 response back, so the
+        middleware layer is zero-overhead when no middleware is registered.
+    </p>
+
+    <h2 id="global-middleware">Global middleware</h2>
+    <p>
+        Global middleware runs on <em>every</em> page and action request. Register it with
+        <code>$app-&gt;middleware()</code> before <code>$app-&gt;start()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Tuupola\Middleware\CorsMiddleware;
+
+$app->middleware(new CorsMiddleware([
+    'origin' => ['https://example.com'],
+    'methods' => ['GET', 'POST'],
+    'headers.allow' => ['Content-Type', 'Authorization'],
+    'credentials' => true,
+]));
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="route-middleware">Per-route middleware</h2>
+    <p>
+        Attach middleware to specific routes using the fluent API returned by <code>$app-&gt;page()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'))
+    ->middleware(new AuthMiddleware());
+
+$app->page('/api/data', fn(Context $c) => $c->view('data.html.twig'))
+    ->middleware(new AuthMiddleware(), new RateLimitMiddleware());
+    {% endverbatim %}{% endcode %}
+    <p>
+        Per-route middleware runs <em>after</em> global middleware. The full pipeline is:
+        global → route-specific → page handler.
+    </p>
+
+    <h2 id="writing-middleware">Writing middleware</h2>
+    <p>
+        Implement <code>Psr\Http\Server\MiddlewareInterface</code>. Use
+        <code>$request-&gt;withAttribute()</code> to pass data downstream — the attributes are
+        automatically bridged to <code>$context-&gt;getRequestAttribute()</code> in your page handler.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+use Nyholm\Psr7\Response;
+
+class AuthMiddleware implements MiddlewareInterface
+{
+    public function process(
+        ServerRequestInterface $request,
+        RequestHandlerInterface $handler
+    ): ResponseInterface {
+        $sessionId = $this->extractSessionId($request);
+
+        if (!$this->isAuthenticated($sessionId)) {
+            // Short-circuit: return 302 redirect to login
+            return new Response(302, ['Location' => '/login']);
+        }
+
+        // Pass user info downstream → available via $c->getRequestAttribute('user')
+        return $handler->handle(
+            $request->withAttribute('user', $this->getUser($sessionId))
+        );
+    }
+}
+    {% endverbatim %}{% endcode %}
+
+    <div class="callout callout-warning">
+        <strong>Swoole warning:</strong> Middleware instances are long-lived — they persist across all
+        requests in the worker process. Do <strong>not</strong> store per-request state on middleware
+        properties. Use <code>$request-&gt;withAttribute()</code> to pass data downstream.
+    </div>
+
+    <h2 id="sse-middleware">SSE-aware middleware</h2>
+    <p>
+        By default, middleware only runs on page and action requests — not on the SSE handshake.
+        If you need middleware to also guard the SSE connection (e.g. auth), implement the
+        <code>SseAwareMiddleware</code> marker interface:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
+
+class AuthMiddleware implements SseAwareMiddleware
+{
+    // This now runs on page, action, AND SSE requests
+    public function process(
+        ServerRequestInterface $request,
+        RequestHandlerInterface $handler
+    ): ResponseInterface {
+        // ...
+    }
+}
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="request-attributes">Accessing middleware data in handlers</h2>
+    <p>
+        Middleware attributes set via <code>$request-&gt;withAttribute()</code> are automatically
+        bridged to the <code>Context</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->page('/dashboard', function (Context $c): void {
+    $user = $c->getRequestAttribute('user');
+
+    $c->view('dashboard.html.twig', [
+        'name' => $user['name'],
+    ]);
+})->middleware(new AuthMiddleware());
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="example">Live example: Auth middleware</h2>
+    <p>
+        The <a href="/examples/login">Login Flow example</a> demonstrates a working
+        <code>AuthMiddleware</code> that protects the <code>/examples/login/dashboard</code> route.
+        Unauthenticated users are redirected to the login form. Authenticated users see a personalised
+        dashboard with their session data.
+    </p>
+
+    <h2 id="security">Built-in security</h2>
+    <p>
+        php-via includes several security features out of the box, independent of middleware:
+    </p>
+
+    <h3 id="csrf">CSRF protection</h3>
+    <p>
+        Actions validate the <code>Origin</code> header against a configurable allowlist.
+        Configure with <code>withTrustedOrigins()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withTrustedOrigins(['https://myapp.com', 'https://staging.myapp.com']);
+    {% endverbatim %}{% endcode %}
+    <ul>
+        <li><code>null</code> (default) — no restriction; all origins pass (development-friendly)</li>
+        <li><code>[]</code> — block all browser-origin requests</li>
+        <li><code>['https://example.com']</code> — strict allowlist</li>
+    </ul>
+
+    <h3 id="session-cookies">Secure session cookies</h3>
+    <p>
+        Enable <code>withSecureCookie()</code> in production to set the <code>__Host-</code> cookie prefix,
+        which enforces HTTPS, <code>Path=/</code>, and no <code>Domain</code> attribute:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withSecureCookie(true);       // __Host-via_session_id; Secure; SameSite=Lax
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="rate-limiting">Action rate limiting</h3>
+    <p>
+        Built-in per-IP sliding-window rate limiter for action endpoints:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withActionRateLimit(100, 60);  // max 100 actions per 60 seconds per IP
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="trust-proxy">Proxy trust</h3>
+    <p>
+        If your app runs behind a reverse proxy (Caddy, nginx), enable proxy trust so <code>X-Base-Path</code>
+        headers are honoured:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withTrustProxy(true);
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, intervals, cleanup</li>
+        <li><a href="/docs/deployment">Deployment</a> — production configuration</li>
+    </ul>
+</article>
+
+{% endblock %}
