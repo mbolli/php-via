@@ -5,7 +5,7 @@
 {% block content %}
 <div class="example-page-header">
     <h1>{{ title }}</h1>
-    <p>{{ description }}</p>
+    <p>{{ description|raw }}</p>
     {% if summary is defined and summary %}
     <div class="example-summary">
         {% for paragraph in summary %}
@@ -72,6 +72,20 @@
                     <code class="anatomy-name">{{ view.name }}</code>
                 </div>
                 {% if view.desc is defined %}<p class="anatomy-desc">{{ view.desc }}</p>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if anatomy.middleware is defined and anatomy.middleware|length > 0 %}
+        <div class="anatomy-section">
+            <h3 class="anatomy-heading">🛡️ Middleware</h3>
+            {% for mw in anatomy.middleware %}
+            <div class="anatomy-item">
+                <div class="anatomy-item-header">
+                    <code class="anatomy-name">{{ mw.name }}</code>
+                </div>
+                {% if mw.desc is defined %}<p class="anatomy-desc">{{ mw.desc }}</p>{% endif %}
             </div>
             {% endfor %}
         </div>

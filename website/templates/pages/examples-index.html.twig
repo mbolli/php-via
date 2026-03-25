@@ -76,7 +76,7 @@
             title: '🔐 Login Flow',
             href: 'examples/login',
             difficulty: 'Intermediate',
-            description: 'Persistent login state across page refreshes using sessionData. Refresh while logged in — you stay logged in. A signal can\'t do that.',
+            description: 'PSR-15 AuthMiddleware protects the dashboard route. Login sets sessionData; the middleware reads the session cookie and either redirects or injects auth via request attributes.',
         },
         {
             title: '📈 Stock Ticker',

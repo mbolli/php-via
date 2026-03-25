@@ -3,26 +3,6 @@
 {% block demo %}
 <div id="login-demo">
 
-{% if auth %}
-{# ── Logged-in state ─────────────────────────────────────────────────────── #}
-<div class="login-card">
-    <div class="login-avatar">{{ auth.name|slice(0,1)|upper }}</div>
-    <div class="login-info">
-        <div class="login-name">{{ auth.name|e }}</div>
-        <div class="login-role">{{ auth.role|e }}</div>
-        <div class="login-since">Session started {{ auth.at|date('H:i:s') }}</div>
-    </div>
-</div>
-
-<p class="login-refresh-hint">
-    💡 <strong>Refresh the page</strong> — you will still be logged in.
-    That's sessionData: the auth record lives on the server, keyed on your session cookie, not inside a signal.
-</p>
-
-<button class="danger login-logout-btn" data-on:click="@post('{{ logout.url }}')">Log out</button>
-
-{% else %}
-{# ── Logged-out state ────────────────────────────────────────────────────── #}
 {% if errorMsg.string != '' %}
 <div class="login-error">✕ {{ errorMsg.string|e }}</div>
 {% endif %}
@@ -66,7 +46,12 @@
         </tbody>
     </table>
 </div>
-{% endif %}
+
+<div class="login-middleware-note">
+    <p>💡 <strong>Try visiting <a href="/examples/login/dashboard">/examples/login/dashboard</a> directly</strong> —
+    the <code>AuthMiddleware</code> will redirect you back here because you're not logged in yet.
+    After logging in, you'll be sent to the protected dashboard automatically.</p>
+</div>
 
 </div>
 {% endblock %}
@@ -77,49 +62,6 @@
     max-width: 480px;
     margin: 0 auto;
 }
-
-/* ── Logged-in card ── */
-.login-card {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    background: var(--surface-2, #f8fafc);
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: .75rem;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.25rem;
-}
-
-.login-avatar {
-    width: 3rem;
-    height: 3rem;
-    border-radius: 50%;
-    background: #6366f1;
-    color: #fff;
-    font-size: 1.4rem;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.login-name { font-weight: 600; font-size: 1.05rem; }
-.login-role { color: var(--text-muted, #64748b); font-size: .875rem; }
-.login-since { color: var(--text-muted, #94a3b8); font-size: .8rem; margin-top: .2rem; }
-
-.login-refresh-hint {
-    font-size: .875rem;
-    color: var(--text-muted, #64748b);
-    background: var(--surface-2, #f8fafc);
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: .5rem;
-    padding: .75rem 1rem;
-    margin-bottom: 1rem;
-    max-inline-size: unset;
-}
-
-.login-logout-btn { width: 100%; }
 
 /* ── Login form ── */
 .login-error {
@@ -192,5 +134,18 @@
     color: var(--text-muted, #64748b);
     background: var(--surface-2, #f8fafc);
 }
+
+/* ── Middleware note ── */
+.login-middleware-note {
+    font-size: .875rem;
+    color: var(--text-muted, #64748b);
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    padding: .75rem 1rem;
+    margin-top: 1rem;
+    max-inline-size: unset;
+}
+.login-middleware-note p { margin: 0; }
 </style>
 {% endblock %}

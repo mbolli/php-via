@@ -1,0 +1,92 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+<div id="login-demo">
+
+<div class="login-card">
+    <div class="login-avatar">{{ auth.name|slice(0,1)|upper }}</div>
+    <div class="login-info">
+        <div class="login-name">{{ auth.name|e }}</div>
+        <div class="login-role">{{ auth.role|e }}</div>
+        <div class="login-since">Session started {{ auth.at|date('H:i:s') }}</div>
+    </div>
+</div>
+
+<div class="login-middleware-note">
+    <p>🛡️ <strong>This page is protected by <code>AuthMiddleware</code></strong> — a PSR-15 middleware
+    attached via <code>->middleware(new AuthMiddleware(...))</code>. The auth record was injected as a
+    request attribute and read via <code>$c->getRequestAttribute('auth')</code>.</p>
+</div>
+
+<p class="login-refresh-hint">
+    💡 <strong>Refresh the page</strong> — you will still be logged in.
+    The middleware reads <code>sessionData('auth')</code> from the session cookie on every request.
+</p>
+
+<button class="danger login-logout-btn" data-on:click="@post('{{ logout.url }}')">Log out</button>
+
+</div>
+{% endblock %}
+
+{% block extra %}
+<style>
+#login-demo {
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.login-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .75rem;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.login-avatar {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: #6366f1;
+    color: #fff;
+    font-size: 1.4rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.login-name { font-weight: 600; font-size: 1.05rem; }
+.login-role { color: var(--text-muted, #64748b); font-size: .875rem; }
+.login-since { color: var(--text-muted, #94a3b8); font-size: .8rem; margin-top: .2rem; }
+
+.login-refresh-hint {
+    font-size: .875rem;
+    color: var(--text-muted, #64748b);
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    padding: .75rem 1rem;
+    margin-bottom: 1rem;
+    max-inline-size: unset;
+}
+
+.login-logout-btn { width: 100%; }
+
+.login-middleware-note {
+    font-size: .875rem;
+    color: var(--text-muted, #64748b);
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    padding: .75rem 1rem;
+    margin-bottom: 1rem;
+    max-inline-size: unset;
+}
+.login-middleware-note p { margin: 0; }
+</style>
+{% endblock %}
