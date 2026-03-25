@@ -23,25 +23,12 @@ final class ShoppingCartExample {
         ['id' => 8, 'name' => 'Zero-Day Vulnerability Insurance (Annual)', 'price' => 999.99, 'emoji' => '🛡️'],
     ];
 
-    /** @var array<string, array<int, array{id: int, name: string, price: float, emoji: string, qty: int}>> sessionId => items */
-    private static array $carts = [];
-
     public static function register(Via $app): void {
         $app->page('/examples/shopping-cart', function (Context $c) use ($app): void {
-            $sessionId = $c->getSessionId() ?? $c->getId();
-            $cartScope = Scope::build('cart', $sessionId);
+            $cartScope = Scope::build('cart', $c->getSessionId() ?? $c->getId());
             $c->addScope($cartScope);
 
-            self::$carts[$sessionId] ??= [];
-
-            $c->onDisconnect(function () use ($sessionId, $cartScope, $app): void {
-                // Clean up cart memory only when the last tab from this session disconnects
-                if ($app->getContextsByScope($cartScope) === []) {
-                    unset(self::$carts[$sessionId]);
-                }
-            });
-
-            $addItem = $c->action(function () use ($sessionId, $cartScope, $app): void {
+            $addItem = $c->action(function () use ($c, $cartScope, $app): void {
                 $id = (int) ($_GET['id'] ?? 0);
                 $product = self::findProduct($id);
 
@@ -49,43 +36,50 @@ final class ShoppingCartExample {
                     return;
                 }
 
-                if (isset(self::$carts[$sessionId][$id])) {
-                    ++self::$carts[$sessionId][$id]['qty'];
+                /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> $cart */
+                $cart = $c->sessionData('cart', []);
+
+                if (isset($cart[$id])) {
+                    ++$cart[$id]['qty'];
                 } else {
-                    self::$carts[$sessionId][$id] = [...$product, 'qty' => 1];
+                    $cart[$id] = [...$product, 'qty' => 1];
                 }
 
+                $c->setSessionData('cart', $cart);
                 $app->broadcast($cartScope);
             }, 'addItem');
 
-            $removeItem = $c->action(function () use ($sessionId, $cartScope, $app): void {
+            $removeItem = $c->action(function () use ($c, $cartScope, $app): void {
                 $id = (int) ($_GET['id'] ?? 0);
-                unset(self::$carts[$sessionId][$id]);
+
+                /** @var array<int, mixed> $cart */
+                $cart = $c->sessionData('cart', []);
+                unset($cart[$id]);
+                $c->setSessionData('cart', $cart);
                 $app->broadcast($cartScope);
             }, 'removeItem');
 
-            $clearCart = $c->action(function () use ($sessionId, $cartScope, $app): void {
-                self::$carts[$sessionId] = [];
+            $clearCart = $c->action(function () use ($c, $cartScope, $app): void {
+                $c->clearSessionData('cart');
                 $app->broadcast($cartScope);
             }, 'clearCart');
 
             $c->view(fn (): string => $c->render('examples/shopping_cart.html.twig', [
                 'title' => '🛒 Shopping Cart',
-                'description' => 'Add items across browser tabs — SESSION scope persists the cart for every tab in your browser without cookies, localStorage, or Redux.',
+                'description' => 'Add items across browser tabs — the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
                 'summary' => [
-                    '<strong>SESSION scope</strong> (via a custom <code>cart:{sessionId}</code> scope) means the cart is shared across every tab in your browser. Open a new tab — the cart is already populated.',
+                    '<strong>SESSION-scoped cart</strong> via a custom <code>cart:{sessionId}</code> scope means the cart is shared across every tab in your browser. Open a new tab — the cart is already populated.',
                     '<strong>$app->broadcast($cartScope)</strong> pushes the updated cart to all connected tabs of that session simultaneously. No polling, no cache invalidation, no client state sync.',
-                    '<strong>Server-side cart storage</strong> eliminates the client-storage problem entirely. No localStorage. No cookie serialization. The server is the single source of truth.',
+                    '<strong>$c->sessionData() / setSessionData()</strong> stores the cart in the framework\'s per-session bucket. No static class, no manual cleanup — and the cart survives a full page reload.',
                     '<strong>CSS @starting-style</strong> animates newly inserted cart rows without a single line of JavaScript. When Datastar morphs in the new item, the browser\'s entry transition fires automatically.',
                     '<strong>Block partial rendering</strong> — on updates only the #cart-panel fragment is sent, not the product grid. The products are rendered once on initial load and stay static in the DOM.',
-                    '<strong>Disconnect cleanup</strong> — onDisconnect removes the cart from memory only when the last tab from the session disconnects, preserving the cart while at least one tab is open.',
                 ],
                 'anatomy' => [
                     'signals' => [],
                     'actions' => [
                         ['name' => 'addItem', 'desc' => 'Appends a product (by ?id= param) to the session cart and broadcasts to all session tabs.'],
                         ['name' => 'removeItem', 'desc' => 'Removes a product by ?id= param and broadcasts the updated cart.'],
-                        ['name' => 'clearCart', 'desc' => 'Empties the entire cart and broadcasts the empty state.'],
+                        ['name' => 'clearCart', 'desc' => 'Clears the session data key and broadcasts the empty state.'],
                     ],
                     'views' => [
                         ['name' => 'shopping_cart.html.twig', 'desc' => 'Product grid rendered once on initial load (static). Cart panel re-renders on every broadcast via block: \'cart\'.'],
@@ -96,8 +90,12 @@ final class ShoppingCartExample {
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/shopping_cart.html.twig'],
                 ],
                 'products' => self::PRODUCTS,
-                'cart' => array_values(self::$carts[$sessionId] ?? []),
-                'total' => self::getTotal($sessionId),
+                /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> */
+                'cart' => array_values($c->sessionData('cart', [])),
+                'total' => (float) array_sum(array_map(
+                    static fn (array $item): float => (float) $item['price'] * (int) $item['qty'],
+                    $c->sessionData('cart', [])
+                )),
                 'addItem' => $addItem,
                 'removeItem' => $removeItem,
                 'clearCart' => $clearCart,
@@ -116,15 +114,5 @@ final class ShoppingCartExample {
         }
 
         return null;
-    }
-
-    private static function getTotal(string $sessionId): float {
-        $total = 0.0;
-
-        foreach (self::$carts[$sessionId] ?? [] as $item) {
-            $total += $item['price'] * $item['qty'];
-        }
-
-        return $total;
     }
 }
