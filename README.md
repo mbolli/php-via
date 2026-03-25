@@ -109,7 +109,7 @@ $save = $c->action(function () use ($c): void {
 ```
 
 ```twig
-<button data-on-click="@post('{{ save.url }}')">Save</button>
+<button data-on:click="@post('{{ save.url }}')">Save</button>
 ```
 
 ### Scopes — control who shares state and receives broadcasts
@@ -192,22 +192,11 @@ Browser → Caddy (TLS + Brotli) → OpenSwoole :3000
 
 ## Roadmap
 
-- [x] Core — Via, Context, Signals, Actions, SSE, Twig
-- [x] Scopes — TAB, ROUTE, SESSION, GLOBAL + custom with wildcards
-- [x] Path parameters with reflection-based auto-injection
-- [x] Components with isolated sub-contexts
-- [x] View caching per scope
-- [x] Broadcasting with scope-based targeting
-- [x] Lifecycle hooks — `onDisconnect`, `onCleanup`, `setInterval`
-- [x] App hooks — `onClientConnect`, `onClientDisconnect`, `onStart`, `onShutdown`
-- [x] Global state, per-context shell/head/foot overrides
-- [x] 85 tests (Pest), PHPStan level 6, PHP-CS-Fixer
-- [x] 11 examples + docs website
-- [x] Production deployment (systemd + Caddy)
 - [ ] Session management (persistent across reconnects)
 - [ ] Middleware system
-- [ ] Route groups
-- [ ] Form validation helpers
+- [ ] Route groups (`$app->group('/prefix', fn)`)
+- [ ] `initAtBoot()` — explicit hook for boot-time shared state initialisation
+- [ ] Global intervals (`$app->setInterval()` — one shared timer per server process)
 
 ## Credits
 

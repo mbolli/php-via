@@ -16,7 +16,6 @@ All notable changes to php-via will be documented in this file.
 
 ### Improvements
 
-- Gallery cards sorted by difficulty (Beginner → Intermediate → Advanced).
 - Chat Room messages persisted to SQLite (last 50 per room).
 
 ## [0.4.2] - 2026-03-19
