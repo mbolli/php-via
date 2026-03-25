@@ -1,0 +1,196 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+<div id="login-demo">
+
+{% if auth %}
+{# ── Logged-in state ─────────────────────────────────────────────────────── #}
+<div class="login-card">
+    <div class="login-avatar">{{ auth.name|slice(0,1)|upper }}</div>
+    <div class="login-info">
+        <div class="login-name">{{ auth.name|e }}</div>
+        <div class="login-role">{{ auth.role|e }}</div>
+        <div class="login-since">Session started {{ auth.at|date('H:i:s') }}</div>
+    </div>
+</div>
+
+<p class="login-refresh-hint">
+    💡 <strong>Refresh the page</strong> — you will still be logged in.
+    That's sessionData: the auth record lives on the server, keyed on your session cookie, not inside a signal.
+</p>
+
+<button class="danger login-logout-btn" data-on:click="@post('{{ logout.url }}')">Log out</button>
+
+{% else %}
+{# ── Logged-out state ────────────────────────────────────────────────────── #}
+{% if errorMsg.string != '' %}
+<div class="login-error">✕ {{ errorMsg.string|e }}</div>
+{% endif %}
+
+<form class="login-form" onsubmit="return false">
+    <h3 class="login-form-title">Sign in</h3>
+
+    <div class="login-field">
+        <label for="login-username">Username</label>
+        <input id="login-username"
+               type="text"
+               autocomplete="username"
+               placeholder="ada"
+               data-bind="{{ usernameInput.id }}">
+    </div>
+
+    <div class="login-field">
+        <label for="login-password">Password</label>
+        <input id="login-password"
+               type="password"
+               autocomplete="current-password"
+               placeholder="········"
+               data-bind="{{ passwordInput.id }}">
+    </div>
+
+    <button class="login-submit-btn" data-on:click="@post('{{ login.url }}')">Log in</button>
+</form>
+
+<div class="login-credentials">
+    <p class="login-credentials-label">Demo credentials</p>
+    <table class="login-creds-table">
+        <thead><tr><th>Username</th><th>Password</th><th>Role</th></tr></thead>
+        <tbody>
+        {% for u in users %}
+        <tr>
+            <td><code>{{ u.username }}</code></td>
+            <td><code>{{ u.password }}</code></td>
+            <td>{{ u.role }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra %}
+<style>
+#login-demo {
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+/* ── Logged-in card ── */
+.login-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .75rem;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.login-avatar {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: #6366f1;
+    color: #fff;
+    font-size: 1.4rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.login-name { font-weight: 600; font-size: 1.05rem; }
+.login-role { color: var(--text-muted, #64748b); font-size: .875rem; }
+.login-since { color: var(--text-muted, #94a3b8); font-size: .8rem; margin-top: .2rem; }
+
+.login-refresh-hint {
+    font-size: .875rem;
+    color: var(--text-muted, #64748b);
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    padding: .75rem 1rem;
+    margin-bottom: 1rem;
+    max-inline-size: unset;
+}
+
+.login-logout-btn { width: 100%; }
+
+/* ── Login form ── */
+.login-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: .5rem;
+    padding: .65rem .9rem;
+    font-weight: 500;
+    font-size: .9rem;
+    margin-bottom: 1rem;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: .9rem;
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .75rem;
+    padding: 1.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.login-form-title { margin: 0 0 .25rem; font-size: 1rem; font-weight: 600; }
+
+.login-field {
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+}
+
+.login-field label {
+    font-size: .875rem;
+    font-weight: 500;
+    color: var(--text-muted, #64748b);
+}
+
+.login-field input { width: 100%; box-sizing: border-box; }
+
+.login-submit-btn { width: 100%; margin-top: .25rem; }
+
+/* ── Demo credentials table ── */
+.login-credentials { margin-top: .5rem; }
+
+.login-credentials-label {
+    font-size: .8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-muted, #94a3b8);
+    margin: 0 0 .4rem;
+}
+
+.login-creds-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .875rem;
+}
+
+.login-creds-table th,
+.login-creds-table td {
+    padding: .35rem .6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.login-creds-table th {
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+    background: var(--surface-2, #f8fafc);
+}
+</style>
+{% endblock %}
