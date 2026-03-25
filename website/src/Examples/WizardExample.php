@@ -30,29 +30,47 @@ final class WizardExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/wizard', function (Context $c): void {
+            // Resume from session if the user navigated away and returned
+            /** @var array<string, mixed> $saved */
+            $saved = $c->sessionData('wizard', []);
+
             // Step state
-            $step = $c->signal(1, 'step');
+            $step = $c->signal((int) ($saved['step'] ?? 1), 'step');
             $error = $c->signal('', 'error');
 
             // Step 1: Basics
-            $name = $c->signal('', 'name');
-            $role = $c->signal('Backend Dev', 'role');
-            $years = $c->signal(3, 'years');
+            $name = $c->signal((string) ($saved['name'] ?? ''), 'name');
+            $role = $c->signal((string) ($saved['role'] ?? 'Backend Dev'), 'role');
+            $years = $c->signal((int) ($saved['years'] ?? 3), 'years');
 
             // Step 2: Stack & editor
+            /** @var array<string, bool> $savedStack */
+            $savedStack = $saved['stack'] ?? [];
             $stack = [
-                'php' => $c->signal(false, 'sphp'),
-                'ts' => $c->signal(false, 'sts'),
-                'python' => $c->signal(false, 'spython'),
-                'go' => $c->signal(false, 'sgo'),
-                'rust' => $c->signal(false, 'srust'),
-                'java' => $c->signal(false, 'sjava'),
-                'cs' => $c->signal(false, 'scs'),
-                'other' => $c->signal(false, 'sother'),
+                'php' => $c->signal($savedStack['php'] ?? false, 'sphp'),
+                'ts' => $c->signal($savedStack['ts'] ?? false, 'sts'),
+                'python' => $c->signal($savedStack['python'] ?? false, 'spython'),
+                'go' => $c->signal($savedStack['go'] ?? false, 'sgo'),
+                'rust' => $c->signal($savedStack['rust'] ?? false, 'srust'),
+                'java' => $c->signal($savedStack['java'] ?? false, 'sjava'),
+                'cs' => $c->signal($savedStack['cs'] ?? false, 'scs'),
+                'other' => $c->signal($savedStack['other'] ?? false, 'sother'),
             ];
-            $editor = $c->signal('VS Code', 'editor');
+            $editor = $c->signal((string) ($saved['editor'] ?? 'VS Code'), 'editor');
 
-            $next = $c->action(function () use ($step, $name, $error, $c): void {
+            // Persist current form state to session so it survives page navigations
+            $saveState = function () use ($c, $step, $name, $role, $years, $editor, $stack): void {
+                $c->setSessionData('wizard', [
+                    'step' => $step->int(),
+                    'name' => $name->string(),
+                    'role' => $role->string(),
+                    'years' => $years->int(),
+                    'editor' => $editor->string(),
+                    'stack' => array_map(static fn ($s) => $s->bool(), $stack),
+                ]);
+            };
+
+            $next = $c->action(function () use ($step, $name, $error, $c, $saveState): void {
                 $s = $step->int();
 
                 if ($s === 1) {
@@ -70,16 +88,18 @@ final class WizardExample {
                     $step->setValue($s + 1);
                 }
 
+                $saveState();
                 $c->sync();
             }, 'next');
 
-            $back = $c->action(function () use ($step, $error, $c): void {
+            $back = $c->action(function () use ($step, $error, $c, $saveState): void {
                 $error->setValue('');
 
                 if ($step->int() > 1) {
                     $step->setValue($step->int() - 1);
                 }
 
+                $saveState();
                 $c->sync();
             }, 'back');
 
@@ -95,14 +115,16 @@ final class WizardExample {
                     $sig->setValue(false);
                 }
 
+                $c->clearSessionData('wizard');
                 $c->sync();
             }, 'restart');
 
             $c->view(fn (): string => $c->render('examples/wizard.html.twig', [
                 'title' => '🪄 Multi-step Form',
-                'description' => 'A 3-step dev identity card wizard. All form state lives on the server — no session cookies, no localStorage, no hydration.',
+                'description' => 'A 3-step dev identity card wizard. All form state lives on the server and persists across page refreshes — no client serialization, no session cookies, no localStorage.',
                 'summary' => [
-                    '<strong>Server-owned form state</strong> — each step\'s inputs are signals held on the server for this tab. Going back returns the same values you entered. No client serialization needed.',
+                    '<strong>Session persistence</strong> — wizard state is saved to <code>$c->setSessionData(\'wizard\', [...])</code> on every Next/Back action. Refreshing the page resumes exactly where you left off.',
+                    '<strong>Server-owned form state</strong> — each step\'s inputs are signals held on the server. Going back returns the same values you entered. No client serialization needed.',
                     '<strong>data-bind</strong> creates two-way bindings between inputs and signals. When the user types, the signal updates client-side. When "Next" fires, the server reads the current signal values.',
                     '<strong>Step validation</strong> happens server-side in the next action. If validation fails, the error signal is set and $c->sync() re-renders the current step with the error message shown.',
                     '<strong>block: \'demo\'</strong> — only the wizard block is re-rendered on each step change. The page header and anatomy panel stay static in the DOM.',
