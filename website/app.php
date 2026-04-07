@@ -37,6 +37,9 @@ use Twig\RuntimeLoader\FactoryRuntimeLoader;
 
 $corsOrigin = getenv('CORS_ORIGIN') ?: '*';
 
+$certFile = __DIR__ . '/../certs/dev.crt';
+$keyFile  = __DIR__ . '/../certs/dev.key';
+
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort(3000)
@@ -46,6 +49,10 @@ $config = (new Config())
     ->withStaticDir(__DIR__ . '/public')
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
 ;
+
+if (file_exists($certFile) && file_exists($keyFile)) {
+    $config->withCertificate($certFile, $keyFile)->withBrotli(true, 6, 11);
+}
 
 $app = new Via($config);
 
