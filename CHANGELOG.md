@@ -2,6 +2,25 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.6.0] - 2026-04-07
+
+### New Features
+
+- **Brotli compression** — Native PHP brotli compression via `ext-brotli`, served over HTTPS/HTTP2 from OpenSwoole directly (no proxy required). Requires either `withCertificate()` or `withH2c()`.
+  - `Config::withBrotli(bool $enabled, int $dynamicLevel = 4, int $staticLevel = 11)` — enable brotli with configurable levels. Dynamic level (4) is used for pages and SSE streams (hot path, low CPU). Static level (11 = max ratio) is used for static assets, lazy-compressed once and cached in memory per process.
+  - `Config::withCertificate(string $certFile, string $keyFile)` — direct TLS termination in OpenSwoole. Enables HTTP/2 automatically.
+  - `Config::withH2c(string $enabled)` — h2c (cleartext HTTP/2) for proxy scenarios where Caddy/Nginx handles TLS and proxies to OpenSwoole via h2c. Satisfies the brotli HTTPS requirement without needing a cert on the PHP side.
+  - `BrotliMiddleware` — PSR-15 setWriter-style middleware. Attaches `brotli_write` and `brotli_finish` callables as PSR-7 request attributes before delegating. Implements `SseAwareMiddleware` so it also runs on SSE handshake requests. Auto-registered as the outermost global middleware when brotli is enabled.
+  - Hard error at `start()` if ext-brotli is missing or HTTPS/h2c is not configured.
+
+### Improvements
+
+- **SSE**: removed unnecessary 30-second keepalive comment (not needed with HTTP/2 or Caddy; was corrupting brotli streams).
+
+### Bug Fixes
+
+- Fixed `SWOOLE_SOCK_SSL` undefined constant — correct OpenSwoole constant is `SWOOLE_SSL`, combined as `SWOOLE_SOCK_TCP | SWOOLE_SSL`.
+
 ## [0.5.0] - 2026-03-25
 
 ### New Features

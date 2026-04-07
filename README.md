@@ -28,6 +28,7 @@ Real-time reactive web framework for PHP. Server-side reactive UIs with zero Jav
 - PHP 8.4+
 - OpenSwoole extension
 - Composer
+- `ext-brotli` *(optional)* — required for `Config::withBrotli()`
 
 ## Installation
 
@@ -177,7 +178,7 @@ cd php-via && composer install
 
 cd website && php app.php    # run website + examples on :3000
 
-vendor/bin/pest              # 101 tests, 258 assertions
+vendor/bin/pest              # 147 tests, 323 assertions
 composer phpstan             # PHPStan level 6
 composer cs-fix              # code style
 ```
@@ -187,8 +188,14 @@ composer cs-fix              # code style
 Single OpenSwoole process behind a reverse proxy. See [deploy/](deploy/) for systemd + Caddy configs.
 
 ```
-Browser → Caddy (TLS + Brotli) → OpenSwoole :3000
+# Direct TLS — php-via handles Brotli natively
+Browser → OpenSwoole :3000 (HTTPS/HTTP2 + Brotli)
+
+# Proxy — Caddy terminates TLS, php-via compresses via h2c
+Browser → Caddy (TLS) → OpenSwoole :3000 (h2c + Brotli)
 ```
+
+See the [Deployment docs](https://via.zweiundeins.gmbh/docs/deployment) for setup guides for both scenarios.
 
 ## Roadmap
 

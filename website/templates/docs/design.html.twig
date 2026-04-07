@@ -20,8 +20,8 @@
         php-via opens a <strong>single SSE connection per client and keeps it open for the entire page session</strong>.
         <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a>, a small JS runtime,
         receives incremental DOM patches down that stream and morphs the page — not full re-renders,
-        not JSON state trees, just the exact changed fragment. When a reverse proxy like Caddy applies
-        Brotli compression to the SSE stream, the compressor operates on a sliding window over the
+        not JSON state trees, just the exact changed fragment. php-via applies
+        Brotli compression to the SSE stream natively (via <code>Config::withBrotli()</code>); the compressor operates on a sliding window over the
         entire connection. Its dictionary grows richer over time: after a warm-up period, repeated
         patterns (HTML structure, signal names, attribute values) are already in the dictionary.
     </p>
@@ -115,7 +115,7 @@ $c->scope('room:lobby');     // a custom group you define
         <li><a href="/docs/scopes">Scopes</a> — the full scope API and custom scope patterns</li>
         <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to groups of clients</li>
         <li><a href="/docs/comparisons">Comparisons</a> — how php-via positions against Livewire, htmx, Inertia, LiveView</li>
-        <li><a href="/docs/deployment">Deployment</a> — running OpenSwoole behind Caddy with Brotli enabled</li>
+        <li><a href="/docs/deployment">Deployment</a> — running OpenSwoole with native Brotli or behind a Caddy proxy</li>
     </ul>
 </article>
 

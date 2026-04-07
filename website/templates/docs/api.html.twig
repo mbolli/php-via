@@ -297,7 +297,18 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
     ->withTrustProxy(true)          // honour X-Base-Path from proxy
     ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP
+    // HTTPS / HTTP2 / Brotli compression (requires ext-brotli)
+    ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
+    ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
+    ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
     {% endverbatim %}{% endcode %}
+
+    <p>
+        <code>withBrotli()</code> requires either <code>withCertificate()</code> (direct HTTPS) or <code>withH2c()</code>
+        (proxy with Caddy/Nginx handling TLS). A hard error is thrown at <code>start()</code> if <code>ext-brotli</code>
+        is missing or neither HTTPS mode is configured.
+        See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
