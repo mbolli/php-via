@@ -17,10 +17,6 @@ All notable changes to php-via will be documented in this file.
 
 - **SSE**: removed unnecessary 30-second keepalive comment (not needed with HTTP/2 or Caddy; was corrupting brotli streams).
 
-### Bug Fixes
-
-- Fixed `SWOOLE_SOCK_SSL` undefined constant — correct OpenSwoole constant is `SWOOLE_SSL`, combined as `SWOOLE_SOCK_TCP | SWOOLE_SSL`.
-
 ## [0.5.0] - 2026-03-25
 
 ### New Features

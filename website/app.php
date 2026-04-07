@@ -35,23 +35,29 @@ use Twig\RuntimeLoader\FactoryRuntimeLoader;
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
+$isDev = getenv('APP_ENV') === 'dev';
 $corsOrigin = getenv('CORS_ORIGIN') ?: '*';
-
-$certFile = __DIR__ . '/../certs/dev.crt';
-$keyFile  = __DIR__ . '/../certs/dev.key';
 
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort(3000)
-    ->withDevMode(true)
+    ->withDevMode($isDev)
     ->withTrustProxy(true)
     ->withTemplateDir(__DIR__ . '/templates')
     ->withStaticDir(__DIR__ . '/public')
-    ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
+    ->withLogLevel($isDev ? 'debug' : 'info')
 ;
 
-if (file_exists($certFile) && file_exists($keyFile)) {
-    $config->withCertificate($certFile, $keyFile)->withBrotli(true, 6, 11);
+if ($isDev) {
+    // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed)
+    $certFile = __DIR__ . '/../certs/dev.crt';
+    $keyFile  = __DIR__ . '/../certs/dev.key';
+    if (file_exists($certFile) && file_exists($keyFile)) {
+        $config->withCertificate($certFile, $keyFile)->withBrotli();
+    }
+} else {
+    // Prod: Caddy terminates TLS, php-via speaks h2c and handles Brotli
+    $config->withH2c()->withBrotli();
 }
 
 $app = new Via($config);
