@@ -784,26 +784,57 @@ class Via {
     /**
      * Read Datastar signals from an OpenSwoole HTTP request.
      *
-     * This is a replacement for ServerSentEventGenerator::readSignals() which only checks
-     * $_GET['datastar'] and php://input, but doesn't handle $_POST.
-     * In OpenSwoole, POST requests need special handling since we use $request->post instead of $_POST.
+     * Delegates to parseSignals() with the request's raw parts.
      *
      * @internal Used by HTTP handlers
      *
      * @return array<string, mixed> The decoded signals array
      */
     public static function readSignals(Request $request): array {
-        // Check GET parameters first
-        if (isset($request->get['datastar'])) {
-            $signals = json_decode($request->get['datastar'], true);
+        return self::parseSignals(
+            $request->get ?? [],
+            $request->post ?? [],
+            $request->getContent(),
+        );
+    }
+
+    /**
+     * Parse Datastar signals from raw request parts.
+     *
+     * Signal source priority:
+     *  1. GET  ?datastar=<json>          — Datastar GET actions
+     *  2. Raw JSON body                  — Datastar POST/PATCH actions (application/json)
+     *  3. POST datastar=<json> field     — Datastar POST via multipart/form-data or
+     *                                      application/x-www-form-urlencoded
+     *
+     * Exposed as a public static method so it can be tested without an OpenSwoole
+     * Request instance (which is a final extension class).
+     *
+     * @param array<string, mixed>  $get  Parsed GET parameters
+     * @param array<string, mixed>  $post Parsed POST parameters
+     * @param string|false          $body Raw request body
+     *
+     * @return array<string, mixed> The decoded signals array
+     */
+    public static function parseSignals(array $get, array $post, string|false $body): array {
+        // 1. GET ?datastar=<json>
+        if (isset($get['datastar'])) {
+            $signals = json_decode((string) $get['datastar'], true);
 
             return \is_array($signals) ? $signals : [];
         }
 
-        // Fall back to raw request body
-        $rawContent = $request->getContent();
-        if ($rawContent) {
-            $signals = json_decode($rawContent, true);
+        // 2. Raw JSON body (standard Datastar POST/PATCH action)
+        if ($body) {
+            $signals = json_decode($body, true);
+            if (\is_array($signals)) {
+                return $signals;
+            }
+        }
+
+        // 3. POST field datastar=<json> (multipart/form-data or urlencoded form submission)
+        if (isset($post['datastar'])) {
+            $signals = json_decode((string) $post['datastar'], true);
 
             return \is_array($signals) ? $signals : [];
         }

@@ -59,7 +59,9 @@ class ActionHandler {
         // Read signals from request
         $signals = Via::readSignals($request);
 
-        $contextId = $signals['via_ctx'] ?? null;
+        // For multipart/form-data (Datastar contentType:'form'), signals are not included in the
+        // request — only raw FormData fields are sent. Fall back to $request->post for via_ctx.
+        $contextId = $signals['via_ctx'] ?? $request->post['via_ctx'] ?? null;
 
         if (!$contextId || !isset($this->via->contexts[$contextId])) {
             $response->status(400);
@@ -71,8 +73,8 @@ class ActionHandler {
         $context = $this->via->contexts[$contextId];
 
         try {
-            // Inject HTTP request params so action callbacks can use $c->input()
-            $context->setRequestInput($request->get ?? [], $request->post ?? []);
+            // Inject HTTP request params so action callbacks can use $c->input() / $c->file()
+            $context->setRequestInput($request->get ?? [], $request->post ?? [], $request->files ?? []);
 
             // Inject signals into context
             $context->injectSignals($signals);

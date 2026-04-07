@@ -61,6 +61,9 @@ class Context {
     /** @var array<string, mixed> HTTP query/post params for the current request */
     private array $requestInput = [];
 
+    /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
+    private array $requestFiles = [];
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -238,15 +241,17 @@ class Context {
     }
 
     /**
-     * Set HTTP request input (query + post params) for the current action request.
+     * Set HTTP request input (query + post params + files) for the current action request.
      *
      * @internal called by ActionHandler before executing an action
      *
-     * @param array<string, mixed> $query GET query parameters
-     * @param array<string, mixed> $post  POST body parameters
+     * @param array<string, mixed>                                                                   $query GET query parameters
+     * @param array<string, mixed>                                                                   $post  POST body parameters
+     * @param array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> $files Uploaded files (from multipart/form-data)
      */
-    public function setRequestInput(array $query, array $post): void {
+    public function setRequestInput(array $query, array $post, array $files = []): void {
         $this->requestInput = array_merge($query, $post);
+        $this->requestFiles = $files;
     }
 
     /**
@@ -260,6 +265,29 @@ class Context {
      */
     public function input(string $name, mixed $default = null): mixed {
         return $this->requestInput[$name] ?? $default;
+    }
+
+    /**
+     * Get an uploaded file from the current action request.
+     *
+     * Returns the parsed file array for the named field when a file was
+     * successfully uploaded via a multipart/form-data form. Returns null if
+     * no file was sent, the field is missing, or the upload failed.
+     *
+     * Use this in action callbacks instead of \$_FILES, which is not safe in
+     * OpenSwoole's coroutine model.
+     *
+     * @param string $name The file input field name
+     *
+     * @return null|array{name: string, type: string, tmp_name: string, error: int, size: int}
+     */
+    public function file(string $name): ?array {
+        $f = $this->requestFiles[$name] ?? null;
+        if (!is_array($f) || $f['error'] !== \UPLOAD_ERR_OK) {
+            return null;
+        }
+
+        return $f;
     }
 
     /**
