@@ -40,12 +40,8 @@ class BrotliMiddleware implements SseAwareMiddleware {
 
         return $handler->handle(
             $request
-                ->withAttribute('brotli_write', static function (string $chunk) use ($ctx): string|false {
-                    return brotli_compress_add($ctx, $chunk, BROTLI_FLUSH);
-                })
-                ->withAttribute('brotli_finish', static function () use ($ctx): string|false {
-                    return brotli_compress_add($ctx, '', BROTLI_FINISH);
-                })
+                ->withAttribute('brotli_write', static fn (string $chunk): false|string => brotli_compress_add($ctx, $chunk, BROTLI_FLUSH))
+                ->withAttribute('brotli_finish', static fn (): false|string => brotli_compress_add($ctx, '', BROTLI_FINISH))
         );
     }
 }

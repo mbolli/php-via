@@ -28,8 +28,8 @@ class SseHandler {
     /**
      * Handle SSE connection for real-time updates.
      *
-     * @param callable|null $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
-     * @param callable|null $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
+     * @param null|callable $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
+     * @param null|callable $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
      */
     public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null): void {
         // Get context ID from signals
@@ -178,7 +178,6 @@ class SseHandler {
                     break;
                 }
             }
-
         }
 
         // Flush the final brotli block so the decompressor sees a complete stream

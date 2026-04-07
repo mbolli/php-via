@@ -318,7 +318,7 @@ class Config {
      * Requires withCertificate() (direct HTTPS) or withH2c() (proxy h2c), and ext-brotli.
      * A hard error is thrown at start() if either requirement is not met.
      *
-     * @param bool $enabled      Enable or disable Brotli compression.
+     * @param bool $enabled      enable or disable Brotli compression
      * @param int  $dynamicLevel Compression level for pages and SSE (0–11). Default 4 — fast,
      *                           low CPU overhead on the hot path.
      * @param int  $staticLevel  Compression level for static assets (0–11). Default 11 — maximum

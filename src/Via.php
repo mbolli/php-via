@@ -500,15 +500,15 @@ class Via {
         if ($this->server === null) {
             // Validate Brotli requirements before binding any socket
             if ($this->config->getBrotli()) {
-                if (!function_exists('brotli_compress_init')) {
+                if (!\function_exists('brotli_compress_init')) {
                     throw new \RuntimeException(
                         'withBrotli() requires the ext-brotli PHP extension. Install it with: pecl install brotli'
                     );
                 }
                 if (!$this->config->isHttps() && !$this->config->isH2c()) {
                     throw new \RuntimeException(
-                        'withBrotli() requires HTTP/2. Call withCertificate($certFile, $keyFile) for direct HTTPS, ' .
-                        'or withH2c() when behind a TLS-terminating reverse proxy (Caddy, Nginx).'
+                        'withBrotli() requires HTTP/2. Call withCertificate($certFile, $keyFile) for direct HTTPS, '
+                        . 'or withH2c() when behind a TLS-terminating reverse proxy (Caddy, Nginx).'
                     );
                 }
                 // Auto-register BrotliMiddleware as the outermost global middleware
@@ -516,8 +516,8 @@ class Via {
             }
 
             $socketType = $this->config->isHttps()
-                ? (\SWOOLE_SOCK_TCP | \SWOOLE_SSL)
-                : \SWOOLE_SOCK_TCP;
+                ? (SWOOLE_SOCK_TCP | SWOOLE_SSL)
+                : SWOOLE_SOCK_TCP;
             $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::SIMPLE_MODE, $socketType);
 
             // Configure OpenSwoole for SSE streaming
@@ -532,7 +532,7 @@ class Via {
                 'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
                 'reload_async' => true,  // Enable async reload
                 'enable_reuse_port' => true,  // Allow immediate rebind on restart
-                'hook_flags' => \SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
+                'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
                 'log_level' => 4,  // SWOOLE_LOG_WARNING — suppress NOTICE about sending to closed connections
             ];
             $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings(), array_filter([

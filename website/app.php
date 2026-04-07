@@ -51,7 +51,7 @@ $config = (new Config())
 if ($isDev) {
     // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed)
     $certFile = __DIR__ . '/../certs/dev.crt';
-    $keyFile  = __DIR__ . '/../certs/dev.key';
+    $keyFile = __DIR__ . '/../certs/dev.key';
     if (file_exists($certFile) && file_exists($keyFile)) {
         $config->withCertificate($certFile, $keyFile)->withBrotli();
     }

@@ -295,7 +295,6 @@ class RequestHandler {
 
             /**
              * @param array<string, string> $params
-             * @param mixed                 $pageHandler
              */
             public function __construct(
                 private RequestHandler $requestHandler,
@@ -421,9 +420,11 @@ class RequestHandler {
 
             public function handle(ServerRequestInterface $request): ResponseInterface {
                 $this->handled = true;
-                /** @var (callable(string): string|false)|null $brotliWrite */
+
+                /** @var null|(callable(string): string|false) $brotliWrite */
                 $brotliWrite = $request->getAttribute('brotli_write');
-                /** @var (callable(): string|false)|null $brotliFinish */
+
+                /** @var null|(callable(): string|false) $brotliFinish */
                 $brotliFinish = $request->getAttribute('brotli_finish');
                 $this->sseHandler->handleSSE($this->swooleRequest, $this->swooleResponse, $brotliWrite, $brotliFinish);
 
@@ -600,9 +601,10 @@ class RequestHandler {
      * @param array<string, mixed> $requestAttributes PSR-7 attributes forwarded from the middleware coreHandler
      */
     private function sendCompressedPage(array $requestAttributes, Response $response, string $html): void {
-        /** @var (callable(string): string|false)|null $write */
+        /** @var null|(callable(string): string|false) $write */
         $write = $requestAttributes['brotli_write'] ?? null;
-        /** @var (callable(): string|false)|null $finish */
+
+        /** @var null|(callable(): string|false) $finish */
         $finish = $requestAttributes['brotli_finish'] ?? null;
 
         if ($write !== null && $finish !== null) {
