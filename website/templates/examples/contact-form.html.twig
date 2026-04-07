@@ -1,0 +1,252 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+<div id="contact-form-demo">
+
+{# ── Success panel ────────────────────────────────────────────────────── #}
+{% if submitted %}
+<div class="cf-success">
+    <div class="cf-success-icon">✓</div>
+    <h3 class="cf-success-title">Message sent!</h3>
+    <p class="cf-success-body">
+        Thanks for reaching out. We've received your message{% if submittedFile != '' %} along with your file <strong>{{ submittedFile|e }}</strong>{% if submittedFileInfo != '' %} <span class="cf-file-meta">({{ submittedFileInfo|e }})</span>{% endif %}{% endif %}.
+    </p>
+    <button class="cf-btn" onclick="window.location.reload()">Send another</button>
+</div>
+{% else %}
+
+{# ── Contact form ─────────────────────────────────────────────────────── #}
+<form id="contact-form"
+      class="cf-form"
+      enctype="multipart/form-data"
+      novalidate
+      data-on:submit__prevent="@post('{{ submit.url }}', {contentType: 'form'})">
+    {# Datastar form mode sends raw FormData — signals are not included.
+       via_ctx must be a hidden field so the server can route this request to the right context. #}
+    <input type="hidden" name="via_ctx" value="{{ ctxId }}">
+    {# ── Name ─────────────────────────────────────────────────────── #}
+    <div class="cf-field">
+        <label for="cf-name">Full name <span class="cf-required">*</span></label>
+        <input id="cf-name"
+               type="text"
+               name="name"
+               placeholder="Ada Lovelace"
+               required
+               minlength="2"
+               autocomplete="name">
+        {% if nameError != '' %}<span class="cf-field-error">{{ nameError|e }}</span>{% endif %}
+    </div>
+
+    {# ── Email ────────────────────────────────────────────────────── #}
+    <div class="cf-field">
+        <label for="cf-email">Email <span class="cf-required">*</span></label>
+        <input id="cf-email"
+               type="email"
+               name="email"
+               placeholder="ada@babbage.co.uk"
+               required
+               autocomplete="email">
+        {% if emailError != '' %}<span class="cf-field-error">{{ emailError|e }}</span>{% endif %}
+    </div>
+
+    {# ── Message ──────────────────────────────────────────────────── #}
+    <div class="cf-field">
+        <label for="cf-message">Message <span class="cf-required">*</span></label>
+        <textarea id="cf-message"
+                  name="message"
+                  placeholder="Write at least 10 characters…"
+                  required
+                  minlength="10"
+                  rows="4"></textarea>
+        {% if messageError != '' %}<span class="cf-field-error">{{ messageError|e }}</span>{% endif %}
+    </div>
+
+    {# ── File attachment (optional) ────────────────────────────────── #}
+    <div class="cf-field">
+        <label for="cf-attachment">Attachment <span class="cf-optional">(optional · JPEG, PNG, GIF, PDF, TXT · max 2 MB)</span></label>
+        <input id="cf-attachment"
+               type="file"
+               name="attachment"
+               accept=".jpg,.jpeg,.png,.gif,.pdf,.txt"
+               data-on:change="
+                 const f = $event.target.files[0];
+                 const err = document.getElementById('cf-file-size-error');
+                 if (f && f.size > 2097152) {
+                   err.textContent = 'File is too large. Maximum size is 2 MB.';
+                   err.style.display = '';
+                   $event.target.value = '';
+                 } else {
+                   err.textContent = '';
+                   err.style.display = 'none';
+                 }
+               ">
+        <span id="cf-file-size-error" class="cf-field-error" style="display:none"></span>
+        {% if fileError != '' %}<span class="cf-field-error">{{ fileError|e }}</span>{% endif %}
+    </div>
+
+    <button type="submit" class="cf-btn cf-btn-primary">Send message →</button>
+</form>
+{% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra %}
+<style>
+#contact-form-demo {
+    max-width: 520px;
+    margin: 0 auto;
+}
+
+/* ── Form layout ── */
+.cf-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .75rem;
+    padding: 1.5rem;
+}
+
+.cf-field {
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+}
+
+.cf-field label {
+    font-size: .875rem;
+    font-weight: 600;
+    color: var(--text-1, #0f172a);
+}
+
+.cf-field input:not([type="file"]),
+.cf-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: .9rem;
+}
+
+.cf-field input:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--surface-1, #fff) inset;
+}
+
+/* ── File input ── */
+.cf-field input[type="file"] {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: .875rem;
+    padding: .4rem .5rem;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: var(--radius-2, .375rem);
+    background: var(--surface-1, #fff);
+    color: var(--text-1, #0f172a);
+    cursor: pointer;
+}
+
+.cf-field textarea {
+    resize: vertical;
+    min-height: 6rem;
+}
+
+.cf-required {
+    color: #ef4444;
+    margin-left: .1em;
+}
+
+.cf-optional {
+    font-weight: 400;
+    color: var(--text-muted, #94a3b8);
+    font-size: .8rem;
+}
+
+/* ── Inline error messages ── */
+.cf-field-error {
+    font-size: .825rem;
+    font-weight: 500;
+    color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: .375rem;
+    padding: .3rem .6rem;
+}
+
+/* ── Buttons ── */
+.cf-btn {
+    align-self: flex-start;
+    padding: .55rem 1.35rem;
+    border-radius: .5rem;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--surface-1, #fff);
+    color: var(--text-1, #0f172a);
+    transition: background .15s, border-color .15s;
+}
+
+.cf-btn:hover { background: var(--surface-3, #f1f5f9); }
+
+.cf-btn-primary {
+    background: #6366f1;
+    border-color: #6366f1;
+    color: #fff;
+    width: 100%;
+    text-align: center;
+    margin-top: .25rem;
+}
+
+.cf-btn-primary:hover { background: #4f46e5; border-color: #4f46e5; }
+
+/* ── Success panel ── */
+.cf-success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: .75rem;
+    padding: 2.5rem 1.5rem;
+    background: var(--surface-2, #f8fafc);
+    border: 1px solid #bbf7d0;
+    border-radius: .75rem;
+}
+
+.cf-success-icon {
+    font-size: 2.5rem;
+    line-height: 1;
+    width: 3.5rem;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    background: #dcfce7;
+    color: #16a34a;
+    border-radius: 50%;
+    font-weight: 700;
+}
+
+.cf-success-title {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #15803d;
+    max-inline-size: unset;
+}
+
+.cf-success-body {
+    margin: 0;
+    color: var(--text-muted, #334155);
+    font-size: .95rem;
+}
+
+.cf-file-meta {
+    font-size: .8rem;
+    color: var(--text-muted, #64748b);
+    white-space: nowrap;
+}
+</style>
+{% endblock %}
