@@ -2128,6 +2128,8 @@ main, .site-footer { position: relative; }
 
 .example-demo input[type="text"],
 .example-demo input[type="number"],
+.example-demo input[type="email"],
+.example-demo input[type="file"],
 .example-demo textarea,
 .example-demo select {
   padding: var(--size-2) var(--size-3);
