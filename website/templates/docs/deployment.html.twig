@@ -67,6 +67,62 @@ myapp.example.com {
 }
     {% endverbatim %}{% endcode %}
 
+    <h2 id="brotli">Brotli compression</h2>
+    <p>
+        php-via can compress pages, static assets, and live SSE streams with Brotli.
+        It requires the <a href="https://github.com/kjdev/php-ext-brotli" target="_blank" rel="noopener">ext-brotli</a>
+        PHP extension and HTTP/2 (needed for streaming compression to work in browsers).
+        A hard error is thrown at startup if either requirement is missing.
+    </p>
+    {% code 'bash' %}{% verbatim %}
+pecl install brotli
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="brotli-dev">Dev mode — self-signed cert, no proxy</h3>
+    <p>Generate a self-signed certificate once:</p>
+    {% code 'bash' %}{% verbatim %}
+openssl req -x509 -newkey rsa:2048 -keyout dev.key -out dev.crt \
+    -days 3650 -nodes -subj "/CN=localhost"
+    {% endverbatim %}{% endcode %}
+    <p>Then configure php-via to terminate TLS directly:</p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withCertificate(__DIR__ . '/dev.crt', __DIR__ . '/dev.key')
+    ->withBrotli();
+// Access via https://localhost:3000 (browser will warn about self-signed cert — accept once)
+// curl needs --insecure / -k
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="brotli-prod">Prod mode — Caddy holds certs, php-via compresses</h3>
+    <p>
+        Use <code>withH2c()</code> so OpenSwoole speaks HTTP/2 cleartext (h2c) on the internal port
+        while Caddy terminates TLS externally. You must disable Caddy's own <code>encode</code>
+        directive — otherwise Caddy would double-compress what php-via already compressed.
+    </p>
+    {% code 'caddy' %}{% verbatim %}
+myapp.example.com {
+    reverse_proxy h2c://localhost:3000 {
+        flush_interval -1
+        header_up X-Real-IP {remote_host}
+    }
+    # No `encode` directive — php-via handles Brotli
+}
+    {% endverbatim %}{% endcode %}
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withH2c()     // enables open_http2_protocol, satisfies withBrotli() — no certs needed here
+    ->withBrotli()
+    ->withHost('127.0.0.1')
+    ->withPort(3000);
+// Caddy handles TLS; OpenSwoole speaks h2c on the internal port only
+    {% endverbatim %}{% endcode %}
+
+    <p>Compression levels:</p>
+    <ul>
+        <li><strong>Pages and SSE</strong> — level 4 (fast; runs in the hot path)</li>
+        <li><strong>Static assets</strong> — level 11 (max ratio; compressed once and cached for the worker lifetime)</li>
+    </ul>
+
     <h2 id="production-config">Production config</h2>
     <p>Tune php-via for production in your <code>app.php</code>:</p>
     {% code 'php' %}{% verbatim %}
@@ -119,7 +175,7 @@ $config->withStaticDir(__DIR__ . '/public');
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
-        <li><a href="/docs/api">API Reference</a> — Config class options</li>
+        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>)</li>
     </ul>
 </article>
 
