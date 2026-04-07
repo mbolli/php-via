@@ -34,6 +34,14 @@ class RequestHandler {
     private PsrRequestFactory $psrRequestFactory;
     private PsrResponseEmitter $psrResponseEmitter;
 
+    /**
+     * Lazy brotli-compressed cache for static assets.
+     * Keyed by file path; populated on first request and reused for worker lifetime.
+     *
+     * @var array<string, string>
+     */
+    private array $brotliCache = [];
+
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
@@ -83,7 +91,7 @@ class RequestHandler {
 
         // Serve Datastar.js
         if ($path === '/datastar.js') {
-            $this->serveDatastarJs($response);
+            $this->serveDatastarJs($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
 
             return;
@@ -91,7 +99,7 @@ class RequestHandler {
 
         // Serve Via CSS
         if ($path === '/via.css') {
-            $this->serveViaCss($response);
+            $this->serveViaCss($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
 
             return;
@@ -109,7 +117,7 @@ class RequestHandler {
             if ($realBase !== false && $realFile !== false
                 && str_starts_with($realFile, $realBase . '/')
                 && is_file($realFile)) {
-                $this->serveStaticFile($realFile, $response);
+                $this->serveStaticFile($realFile, $request, $response);
                 $this->logRequest($method, $path, 200, $requestStart);
 
                 return;
@@ -233,7 +241,7 @@ class RequestHandler {
         $this->logRequest($method, $path, 200, $requestStart);
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
-        $response->end($html);
+        $this->sendCompressedPage($requestAttributes, $response, $html);
     }
 
     private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {
@@ -413,7 +421,11 @@ class RequestHandler {
 
             public function handle(ServerRequestInterface $request): ResponseInterface {
                 $this->handled = true;
-                $this->sseHandler->handleSSE($this->swooleRequest, $this->swooleResponse);
+                /** @var (callable(string): string|false)|null $brotliWrite */
+                $brotliWrite = $request->getAttribute('brotli_write');
+                /** @var (callable(): string|false)|null $brotliFinish */
+                $brotliFinish = $request->getAttribute('brotli_finish');
+                $this->sseHandler->handleSSE($this->swooleRequest, $this->swooleResponse, $brotliWrite, $brotliFinish);
 
                 return new Psr7Response(200);
             }
@@ -465,24 +477,42 @@ class RequestHandler {
             'uptime' => time() - ($_SERVER['REQUEST_TIME'] ?? time()),
         ];
 
+        $json = json_encode($stats, JSON_PRETTY_PRINT);
         $response->header('Content-Type', 'application/json');
-        $response->end(json_encode($stats, JSON_PRETTY_PRINT));
+
+        // handleStats() is directly routed, not inside a middleware coreHandler,
+        // so no PSR-7 attributes are available. Use brotli_compress() inline.
+        if ($this->via->getConfig()->getBrotli() && str_contains($request->header['accept-encoding'] ?? '', 'br')) {
+            $compressed = brotli_compress($json, $this->via->getConfig()->getBrotliDynamicLevel(), BROTLI_TEXT);
+            if ($compressed !== false) {
+                $response->header('Content-Encoding', 'br');
+                $response->header('Vary', 'Accept-Encoding');
+                $response->end($compressed);
+
+                return;
+            }
+        }
+
+        if ($this->via->getConfig()->getBrotli()) {
+            $response->header('Vary', 'Accept-Encoding');
+        }
+        $response->end($json);
     }
 
     /**
      * Serve Datastar JavaScript file.
      */
-    private function serveDatastarJs(Response $response): void {
+    private function serveDatastarJs(Request $request, Response $response): void {
         $datastarJs = file_get_contents(__DIR__ . '/../../public/datastar.js');
 
         $response->header('Content-Type', 'application/javascript');
-        $response->end($datastarJs);
+        $this->sendCompressedStatic($request, $response, $datastarJs, 'datastar.js', true);
     }
 
     /**
      * Serve a static file with correct Content-Type.
      */
-    private function serveStaticFile(string $filePath, Response $response): void {
+    private function serveStaticFile(string $filePath, Request $request, Response $response): void {
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
         $contentType = match ($ext) {
             'css' => 'text/css; charset=utf-8',
@@ -497,19 +527,101 @@ class RequestHandler {
             default => 'application/octet-stream',
         };
 
+        $compressible = match ($ext) {
+            'css', 'js', 'svg', 'json', 'txt', 'html', 'xml' => true,
+            default => false,
+        };
+
         $response->header('Content-Type', $contentType);
         // 1 hour cache for static assets
         $response->header('Cache-Control', 'public, max-age=3600');
-        $response->end(file_get_contents($filePath));
+
+        $body = file_get_contents($filePath);
+        if ($compressible) {
+            $this->sendCompressedStatic($request, $response, $body, $filePath, true);
+        } else {
+            $response->end($body);
+        }
     }
 
     /**
      * Serve Via CSS file.
      */
-    private function serveViaCss(Response $response): void {
+    private function serveViaCss(Request $request, Response $response): void {
         $viaCss = file_get_contents(__DIR__ . '/../../public/via.css');
 
         $response->header('Content-Type', 'text/css; charset=utf-8');
-        $response->end($viaCss);
+        $this->sendCompressedStatic($request, $response, $viaCss, 'via.css', true);
+    }
+
+    /**
+     * Send a static asset body, applying Brotli compression from the lazy cache.
+     *
+     * Compresses at level BROTLI_COMPRESS_LEVEL_MAX on first request per file, then
+     * serves from the in-memory cache on all subsequent requests at zero CPU cost.
+     *
+     * @param string $cacheKey Unique key for the brotli cache (file path or logical name)
+     * @param bool   $text     Use BROTLI_TEXT mode (UTF-8 text) vs BROTLI_GENERIC (binary)
+     */
+    private function sendCompressedStatic(Request $request, Response $response, string $body, string $cacheKey, bool $text): void {
+        if (!$this->via->getConfig()->getBrotli()) {
+            $response->end($body);
+
+            return;
+        }
+
+        $response->header('Vary', 'Accept-Encoding');
+
+        if (!str_contains($request->header['accept-encoding'] ?? '', 'br')) {
+            $response->end($body);
+
+            return;
+        }
+
+        if (!isset($this->brotliCache[$cacheKey])) {
+            $mode = $text ? BROTLI_TEXT : BROTLI_GENERIC;
+            $compressed = brotli_compress($body, $this->via->getConfig()->getBrotliStaticLevel(), $mode);
+            if ($compressed === false) {
+                $response->end($body);
+
+                return;
+            }
+            $this->brotliCache[$cacheKey] = $compressed;
+        }
+
+        $response->header('Content-Encoding', 'br');
+        $response->end($this->brotliCache[$cacheKey]);
+    }
+
+    /**
+     * Send a page HTML response, applying Brotli compression from PSR-7 request attributes
+     * set by BrotliMiddleware (if present).
+     *
+     * @param array<string, mixed> $requestAttributes PSR-7 attributes forwarded from the middleware coreHandler
+     */
+    private function sendCompressedPage(array $requestAttributes, Response $response, string $html): void {
+        /** @var (callable(string): string|false)|null $write */
+        $write = $requestAttributes['brotli_write'] ?? null;
+        /** @var (callable(): string|false)|null $finish */
+        $finish = $requestAttributes['brotli_finish'] ?? null;
+
+        if ($write !== null && $finish !== null) {
+            $chunk = $write($html);
+            $last = $finish();
+            $compressed = ($chunk ?: '') . ($last ?: '');
+
+            if ($compressed !== '') {
+                $response->header('Content-Encoding', 'br');
+                $response->header('Vary', 'Accept-Encoding');
+                $response->end($compressed);
+
+                return;
+            }
+        }
+
+        if ($this->via->getConfig()->getBrotli()) {
+            $response->header('Vary', 'Accept-Encoding');
+        }
+        $response->end($html);
     }
 }

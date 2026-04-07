@@ -46,6 +46,33 @@ class Config {
      */
     private bool $trustProxy = false;
 
+    /** Path to SSL certificate file (PEM). Required for HTTPS/HTTP2. */
+    private ?string $sslCertFile = null;
+
+    /** Path to SSL private key file (PEM). Required for HTTPS/HTTP2. */
+    private ?string $sslKeyFile = null;
+
+    /**
+     * Whether to run HTTP/2 cleartext (h2c) without TLS.
+     * Use this when a reverse proxy (Caddy, Nginx) terminates TLS and proxies
+     * to this server via h2c. Allows withBrotli() without withCertificate().
+     * Only enable when the server is truly behind a trusted TLS-terminating proxy.
+     */
+    private bool $h2c = false;
+
+    /**
+     * Whether to enable Brotli compression for HTTP responses.
+     * Requires either withCertificate() (direct HTTPS) or withH2c() (proxy h2c),
+     * and the ext-brotli PHP extension. Hard error at start() if either is missing.
+     */
+    private bool $brotli = false;
+
+    /** Brotli level for dynamic responses (pages, SSE). 0–11; default 4. */
+    private int $brotliDynamicLevel = 4;
+
+    /** Brotli level for static assets. 0–11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
+    private int $brotliStaticLevel = 11;
+
     /**
      * Maximum action requests per IP per window (0 = unlimited).
      */
@@ -255,5 +282,84 @@ class Config {
 
     public function getActionRateWindow(): int {
         return $this->actionRateWindow;
+    }
+
+    /**
+     * Enable HTTPS by providing paths to the SSL certificate and private key files.
+     * Also enables HTTP/2 automatically (open_http2_protocol).
+     *
+     * @param string $certFile Path to PEM certificate file
+     * @param string $keyFile  Path to PEM private key file
+     */
+    public function withCertificate(string $certFile, string $keyFile): self {
+        $this->sslCertFile = $certFile;
+        $this->sslKeyFile = $keyFile;
+
+        return $this;
+    }
+
+    public function getSslCertFile(): ?string {
+        return $this->sslCertFile;
+    }
+
+    public function getSslKeyFile(): ?string {
+        return $this->sslKeyFile;
+    }
+
+    /**
+     * Returns true if SSL certificate and key have been configured.
+     */
+    public function isHttps(): bool {
+        return $this->sslCertFile !== null && $this->sslKeyFile !== null;
+    }
+
+    /**
+     * Enable Brotli compression for HTTP responses (pages, static assets, SSE streams).
+     * Requires withCertificate() (direct HTTPS) or withH2c() (proxy h2c), and ext-brotli.
+     * A hard error is thrown at start() if either requirement is not met.
+     *
+     * @param bool $enabled      Enable or disable Brotli compression.
+     * @param int  $dynamicLevel Compression level for pages and SSE (0–11). Default 4 — fast,
+     *                           low CPU overhead on the hot path.
+     * @param int  $staticLevel  Compression level for static assets (0–11). Default 11 — maximum
+     *                           ratio; paid once per file then served from an in-memory cache.
+     */
+    public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, int $staticLevel = 11): self {
+        $this->brotli = $enabled;
+        $this->brotliDynamicLevel = max(0, min(11, $dynamicLevel));
+        $this->brotliStaticLevel = max(0, min(11, $staticLevel));
+
+        return $this;
+    }
+
+    public function getBrotli(): bool {
+        return $this->brotli;
+    }
+
+    public function getBrotliDynamicLevel(): int {
+        return $this->brotliDynamicLevel;
+    }
+
+    public function getBrotliStaticLevel(): int {
+        return $this->brotliStaticLevel;
+    }
+
+    /**
+     * Enable HTTP/2 cleartext (h2c) mode for use behind a TLS-terminating reverse proxy.
+     *
+     * Use this when Caddy or Nginx handles TLS certs and proxies to OpenSwoole via h2c
+     * (e.g. `reverse_proxy h2c://localhost:3000` in Caddy). Satisfies the withBrotli()
+     * HTTPS requirement without needing withCertificate().
+     *
+     * Do NOT enable on a server exposed directly to untrusted traffic.
+     */
+    public function withH2c(bool $enabled = true): self {
+        $this->h2c = $enabled;
+
+        return $this;
+    }
+
+    public function isH2c(): bool {
+        return $this->h2c;
     }
 }

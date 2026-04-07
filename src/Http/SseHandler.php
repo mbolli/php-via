@@ -27,8 +27,11 @@ class SseHandler {
 
     /**
      * Handle SSE connection for real-time updates.
+     *
+     * @param callable|null $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
+     * @param callable|null $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
      */
-    public function handleSSE(Request $request, Response $response): void {
+    public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null): void {
         // Get context ID from signals
         $signals = Via::readSignals($request);
         $contextId = $signals['via_ctx'] ?? null;
@@ -44,6 +47,11 @@ class SseHandler {
         // Set SSE headers using Datastar SDK
         foreach (SwooleSSEGenerator::headers() as $name => $value) {
             $response->header($name, $value);
+        }
+
+        if ($brotliWrite !== null) {
+            $response->header('Content-Encoding', 'br');
+            $response->header('Vary', 'Accept-Encoding');
         }
 
         // If context doesn't exist, it was cleaned up
@@ -116,8 +124,6 @@ class SseHandler {
         $this->via->triggerClientConnect($context);
 
         // Keep connection alive and listen for patches
-        $lastKeepalive = time();
-
         while (true) {
             // Exit immediately if server is shutting down
             if ($this->via->isShuttingDown()) {
@@ -136,7 +142,16 @@ class SseHandler {
                 try {
                     $output = $this->sendSSEPatch($sse, $patch);
 
-                    if (!$response->write($output)) {
+                    if ($brotliWrite !== null) {
+                        $compressed = $brotliWrite($output);
+                        if ($compressed === false) {
+                            // Compression failed — fall back to raw output for this chunk
+                            $compressed = $output;
+                        }
+                        if (!$response->write($compressed)) {
+                            break;
+                        }
+                    } elseif (!$response->write($output)) {
                         break;
                     }
                 } catch (\Throwable $e) {
@@ -164,15 +179,16 @@ class SseHandler {
                 }
             }
 
-            // Send keepalive comment every 30 seconds to prevent timeout
-            if (time() - $lastKeepalive >= 30) {
+        }
+
+        // Flush the final brotli block so the decompressor sees a complete stream
+        if ($brotliFinish !== null && $response->isWritable()) {
+            $last = $brotliFinish();
+            if ($last !== false && $last !== '') {
                 try {
-                    if (!$response->write(": keepalive\n\n")) {
-                        break;
-                    }
-                    $lastKeepalive = time();
-                } catch (\Throwable $e) {
-                    break;
+                    $response->write($last);
+                } catch (\Throwable) {
+                    // Client already gone — ignore
                 }
             }
         }
