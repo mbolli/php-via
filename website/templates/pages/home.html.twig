@@ -340,7 +340,7 @@ $app->start();
                 </tr>
                 <tr>
                     <td>File uploads</td>
-                    <td><span class="cross">✗</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-uploads"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-uploads">Via multipart/form-data form submission using Datastar's contentType: 'form' modifier. Files arrive in $c->file().</span></span></td>
                     <td><span class="check">✓</span></td>
                     <td><span class="check">✓</span></td>
                     <td><span class="check">✓</span></td>
@@ -348,7 +348,7 @@ $app->start();
                 </tr>
                 <tr>
                     <td>Form validation</td>
-                    <td><span class="cross">✗</span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-validation"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-validation">HTML5 client-side (Datastar calls reportValidity() before sending) plus full server-side validation with per-field error signals pushed back via SSE.</span></span></td>
                     <td><span class="check">✓</span></td>
                     <td><span class="has-tooltip" style="anchor-name:--tip-6"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-6">HTML5 constraint API only; no built-in server-side validation.</span></span></td>
                     <td><span class="check">✓</span></td>
