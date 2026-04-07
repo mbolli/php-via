@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "..",
-                "reference": "494cdca7c335dbb069ccaa0c1a1033de580c9f9c"
+                "reference": "07526c0e98db516260fcc10a66f3ebd24f51967f"
             },
             "require": {
                 "ext-openswoole": "*",
@@ -31,6 +31,9 @@
                 "phpstan/phpstan-deprecation-rules": "^2.0",
                 "rector/type-perfect": "^2.1",
                 "tomasvotruba/type-coverage": "^2.0"
+            },
+            "suggest": {
+                "ext-brotli": "Required for Config::withBrotli(): Native Brotli compression for pages, static assets, and SSE streams"
             },
             "type": "library",
             "autoload": {
@@ -805,16 +808,16 @@
         },
         {
             "name": "tempest/highlight",
-            "version": "2.17.2",
+            "version": "2.21.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/tempestphp/highlight.git",
-                "reference": "8e4a11a0cfb09a55fba8f02f9425941580cbb9ef"
+                "reference": "d499fe38255ff37622fe3b5954591d82265b0210"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/tempestphp/highlight/zipball/8e4a11a0cfb09a55fba8f02f9425941580cbb9ef",
-                "reference": "8e4a11a0cfb09a55fba8f02f9425941580cbb9ef",
+                "url": "https://api.github.com/repos/tempestphp/highlight/zipball/d499fe38255ff37622fe3b5954591d82265b0210",
+                "reference": "d499fe38255ff37622fe3b5954591d82265b0210",
                 "shasum": ""
             },
             "require": {
@@ -852,7 +855,7 @@
             "description": "Fast, extensible, server-side code highlighting",
             "support": {
                 "issues": "https://github.com/tempestphp/highlight/issues",
-                "source": "https://github.com/tempestphp/highlight/tree/2.17.2"
+                "source": "https://github.com/tempestphp/highlight/tree/2.21.0"
             },
             "funding": [
                 {
@@ -860,7 +863,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-03-10T07:05:58+00:00"
+            "time": "2026-04-07T09:43:06+00:00"
         },
         {
             "name": "tuupola/callable-handler",
