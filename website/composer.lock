@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "..",
-                "reference": "3f7f442090c640bc0abe2658dd40af0168d8273a"
+                "reference": "494cdca7c335dbb069ccaa0c1a1033de580c9f9c"
             },
             "require": {
                 "ext-openswoole": "*",
