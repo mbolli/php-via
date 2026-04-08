@@ -4,7 +4,35 @@ All notable changes to php-via will be documented in this file.
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-04-08
+### New Features
+
+- **MessageBroker interface for multi-node broadcasting** — Pluggable broker layer so `broadcast()` propagates scope invalidations across multiple workers, servers, or containers without callers changing their code.
+  - `MessageBroker` interface — `connect()`, `publish(string $scope)`, `subscribe(callable)`, `disconnect()`
+  - `InMemoryBroker` — no-op default; correct for single-node/single-worker deployments
+  - `RedisBroker` — Redis pub/sub; two coroutine connections (publish + subscribe loop). Works with `ext-redis` + `SWOOLE_HOOK_ALL`. Auto-reconnects on drop.
+  - `NatsBroker` — NATS pub/sub via raw OpenSwoole coroutine socket; lightweight for containerised deployments
+  - `Config::withBroker(MessageBroker)` / `Config::getBroker()` — fluent configuration
+  - `Via::broadcast()` now calls `Via::syncLocally()` (local work) then `broker->publish()` (cross-node); TAB scope skips publish (no cross-node recipients possible)
+  - `Via::syncLocally()` extracted as a public method; used as the broker subscription callback so incoming remote events apply with identical logic
+  - Broker lifecycle: `connect()` in `workerStart`, `subscribe(syncLocally)` in `workerStart`, `disconnect()` in shutdown
+
+### Bug Fixes
+
+- **`Application::scheduleContextCleanup()`** — Accepts an optional `$isActiveCheck` callable. When it returns true (active SSE count > 0), the timer reschedules itself instead of destroying the context, preventing a race where the cleanup timer fires while a new SSE connection is mid-handshake.
+- **`Via::scheduleContextCleanup()`** — Passes `fn(): bool => ($this->activeSseCount[$contextId] ?? 0) > 0` as the guard, wiring the cleanup timer to the live SSE connection counter.
+- **`Via` default server settings** — Added `'max_conn' => 10000` and `'backlog' => 4096` to prevent TCP accept-queue saturation under burst SSE load. Previously the OS default (~128–512) was exhausted at ~200 concurrent connections; tested clean to 2,000 after this change.
+- **`SseHandler` brotli header ordering** — `Content-Encoding: br` header was set before the expired-context and `hasView()` early-return paths, corrupting raw SSE payloads written before `end()`. Headers are now set only after both early returns are cleared.
+- **`SseHandler` expired-context reload deduplication** — A backgrounded tab that cannot execute `window.location.reload()` would reconnect indefinitely, generating log noise and redundant SSE writes. First reconnect from a dead context sends the reload; subsequent reconnects receive an immediate `response->end()`. Entries evicted after 5 minutes.
+- **`SseHandler` `hasView()` race path** — The post-cleanup race reload event now routes through `$brotliWrite` when brotli is active, so the frame is properly encoded rather than written raw after the brotli header is set.
+- **`SseHandler` `isWritable()` guard** — Added `$response->isWritable()` check before `response->write()` in the SSE keep-alive loop's context-destroyed path, preventing writes to already-closed connections.
+
+### Website
+
+- **Presence component** — Debounced `onClientConnect`/`onClientDisconnect` broadcasts: rapid bursts (e.g. load tests) collapse into a single `Timer::after(200ms)` broadcast, preventing O(N²) render cascades. Scope widened to `Scope::GLOBAL` so the count reflects all connected users across all routes.
+- **GameOfLifeExample** — `clientCount` now uses `getContextsByScope(Scope::routeScope('/examples/game-of-life'))` instead of global `getClients()`.
+- **SpreadsheetExample** — `clientCount` now uses `getContextsByScope(self::SCOPE)` (`'example:spreadsheet'`) instead of global `getClients()`.
+
+
 
 ### New Features
 
