@@ -277,8 +277,12 @@ class Application {
     /**
      * Schedule context cleanup after a delay.
      * Allows time for reconnection or navigation between pages.
+     *
+     * @param null|callable(): bool $isActiveCheck If provided, called when the timer fires.
+     *                                             Returns true if an SSE connection is active —
+     *                                             the timer reschedules itself instead of destroying.
      */
-    public function scheduleContextCleanup(string $contextId, int $delayMs = 5000): void {
+    public function scheduleContextCleanup(string $contextId, int $delayMs = 5000, ?callable $isActiveCheck = null): void {
         // Cancel any existing cleanup timer
         if (isset($this->cleanupTimers[$contextId])) {
             Timer::clear($this->cleanupTimers[$contextId]);
@@ -286,7 +290,14 @@ class Application {
         }
 
         // Schedule cleanup after delay
-        $timerId = Timer::after($delayMs, function () use ($contextId): void {
+        $timerId = Timer::after($delayMs, function () use ($contextId, $delayMs, $isActiveCheck): void {
+            if ($isActiveCheck !== null && $isActiveCheck()) {
+                // SSE still connected — reschedule instead of destroying.
+                $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
+                $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
+                return;
+            }
+
             if (isset($this->contexts[$contextId])) {
                 $this->logger->log('debug', "Cleaning up inactive context: {$contextId}");
                 $context = $this->contexts[$contextId];
