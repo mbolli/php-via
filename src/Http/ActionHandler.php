@@ -73,8 +73,9 @@ class ActionHandler {
         $context = $this->via->contexts[$contextId];
 
         try {
-            // Inject HTTP request params so action callbacks can use $c->input() / $c->file()
+            // Inject HTTP request params so action callbacks can use $c->input() / $c->file() / $c->cookie()
             $context->setRequestInput($request->get ?? [], $request->post ?? [], $request->files ?? []);
+            $context->setRequestCookies($request->cookie ?? []);
 
             // Inject signals into context
             $context->injectSignals($signals);
@@ -84,6 +85,20 @@ class ActionHandler {
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, true);
+
+            // Apply any cookies queued by the action callback
+            foreach ($context->flushPendingCookies() as $cookie) {
+                $response->cookie(
+                    $cookie['name'],
+                    $cookie['value'],
+                    $cookie['expires'],
+                    $cookie['path'],
+                    $cookie['domain'],
+                    $cookie['secure'],
+                    $cookie['httpOnly'],
+                    $cookie['sameSite'],
+                );
+            }
 
             $response->status(200);
             $response->end();

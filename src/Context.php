@@ -64,6 +64,12 @@ class Context {
     /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
     private array $requestFiles = [];
 
+    /** @var array<string, string> Cookies from the current request */
+    private array $requestCookies = [];
+
+    /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued to be sent with the next response */
+    private array $pendingCookies = [];
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -288,6 +294,85 @@ class Context {
         }
 
         return $f;
+    }
+
+    /**
+     * Set cookies from the current request.
+     *
+     * @internal called by RequestHandler and ActionHandler before executing the handler/action
+     *
+     * @param array<string, string> $cookies Raw cookie array from the OpenSwoole request
+     */
+    public function setRequestCookies(array $cookies): void {
+        $this->requestCookies = $cookies;
+    }
+
+    /**
+     * Get a cookie value from the current request.
+     *
+     * Returns null if the cookie is not present. Use this instead of $_COOKIE,
+     * which is not safe in OpenSwoole's coroutine model.
+     *
+     * @param string $name Cookie name
+     */
+    public function cookie(string $name): ?string {
+        $value = $this->requestCookies[$name] ?? null;
+
+        return $value !== null ? (string) $value : null;
+    }
+
+    /**
+     * Queue a cookie to be sent with the next response.
+     *
+     * The cookie is applied to the HTTP response by RequestHandler (page load) or
+     * ActionHandler (action response). It cannot be sent mid-SSE-stream.
+     *
+     * @param string $name     Cookie name
+     * @param string $value    Cookie value
+     * @param int    $expires  Unix timestamp when the cookie expires; 0 = session cookie
+     * @param string $path     Cookie path; defaults to '/'
+     * @param string $domain   Cookie domain; defaults to current host (empty string)
+     * @param bool   $secure   Restrict to HTTPS; defaults to true
+     * @param bool   $httpOnly Prevent JS access; defaults to true
+     * @param string $sameSite SameSite policy ('Lax', 'Strict', 'None'); defaults to 'Lax'
+     */
+    public function setCookie(
+        string $name,
+        string $value,
+        int $expires = 0,
+        string $path = '/',
+        string $domain = '',
+        bool $secure = true,
+        bool $httpOnly = true,
+        string $sameSite = 'Lax',
+    ): void {
+        $this->pendingCookies[] = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
+    }
+
+    /**
+     * Queue a cookie deletion to be sent with the next response.
+     *
+     * Sets the cookie value to an empty string with an expiry in the past,
+     * causing the browser to remove it.
+     *
+     * @param string $path Cookie path — must match the path the cookie was set with
+     */
+    public function deleteCookie(string $name, string $path = '/'): void {
+        $this->setCookie($name, '', expires: 1, path: $path);
+    }
+
+    /**
+     * Return all pending cookies and clear the queue.
+     *
+     * @internal called by RequestHandler and ActionHandler to apply queued cookies
+     *
+     * @return list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}>
+     */
+    public function flushPendingCookies(): array {
+        $cookies = $this->pendingCookies;
+        $this->pendingCookies = [];
+
+        return $cookies;
     }
 
     /**

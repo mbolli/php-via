@@ -204,6 +204,9 @@ class RequestHandler {
         // Inject route parameters
         $context->injectRouteParams($params);
 
+        // Make request cookies available to the page handler via $c->cookie()
+        $context->setRequestCookies($request->cookie ?? []);
+
         // Bridge PSR-7 request attributes from middleware into Context
         if ($requestAttributes !== []) {
             $context->setRequestAttributes($requestAttributes);
@@ -238,7 +241,19 @@ class RequestHandler {
         // Set session cookie
         $this->via->setSessionCookie($response, $sessionId);
 
-        $this->logRequest($method, $path, 200, $requestStart);
+        // Apply any cookies queued by the page handler
+        foreach ($context->flushPendingCookies() as $cookie) {
+            $response->cookie(
+                $cookie['name'],
+                $cookie['value'],
+                $cookie['expires'],
+                $cookie['path'],
+                $cookie['domain'],
+                $cookie['secure'],
+                $cookie['httpOnly'],
+                $cookie['sameSite'],
+            );
+        }
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
         $this->sendCompressedPage($requestAttributes, $response, $html);
