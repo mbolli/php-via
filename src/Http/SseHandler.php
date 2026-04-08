@@ -17,6 +17,17 @@ class SseHandler {
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
+    /**
+     * Context IDs that have already been sent a reload instruction.
+     * Subsequent reconnects from the same dead context (e.g. backgrounded tab
+     * that can't execute JS) are closed silently instead of spamming the log
+     * and re-sending a reload that will never execute.
+     * Entries are evicted after 5 minutes via a timer set on first insert.
+     *
+     * @var array<string, true>
+     */
+    private array $reloadedContextIds = [];
+
     public function __construct(Via $via) {
         $this->via = $via;
     }
@@ -49,20 +60,35 @@ class SseHandler {
             $response->header($name, $value);
         }
 
-        if ($brotliWrite !== null) {
-            $response->header('Content-Encoding', 'br');
-            $response->header('Vary', 'Accept-Encoding');
-        }
-
-        // If context doesn't exist, it was cleaned up
+        // If context doesn't exist, it was cleaned up.
+        // Send a reload on the FIRST reconnect from this dead context so active tabs
+        // recover. Subsequent reconnects (backgrounded/throttled tabs that can't execute
+        // the JS) are closed silently — no log noise, no retransmitting a useless event.
+        // NOTE: brotli headers are intentionally NOT set here — we write raw SSE and close
+        // immediately, so compression is pointless and would corrupt the payload.
         if (!isset($this->via->contexts[$contextId])) {
+            if (isset($this->reloadedContextIds[$contextId])) {
+                // Already told this context to reload; just close cleanly.
+                $response->end();
+                return;
+            }
+
+            $this->reloadedContextIds[$contextId] = true;
+            // Evict after 5 minutes so the set doesn't grow unbounded.
+            \OpenSwoole\Timer::after(300_000, function () use ($contextId): void {
+                unset($this->reloadedContextIds[$contextId]);
+            });
+
             $this->via->log('info', "Context expired, sending reload: {$contextId}");
-            // Use Datastar's executeScript to reload
-            $output = $sse->executeScript('window.location.reload()');
-            $response->write($output);
+            $response->write($sse->executeScript('window.location.reload()'));
             $response->end();
 
             return;
+        }
+
+        if ($brotliWrite !== null) {
+            $response->header('Content-Encoding', 'br');
+            $response->header('Vary', 'Accept-Encoding');
         }
 
         $context = $this->via->contexts[$contextId];
@@ -72,8 +98,17 @@ class SseHandler {
         if (!$context->hasView()) {
             $this->via->log('info', "Context has no view (post-cleanup race), sending reload: {$contextId}");
             unset($this->via->contexts[$contextId]);
+            // Brotli headers are already set above if brotli is active — use brotliWrite to send
+            // the event through the proper encoder, otherwise write raw.
             $output = $sse->executeScript('window.location.reload()');
-            $response->write($output);
+            if ($brotliWrite !== null) {
+                $encoded = $brotliWrite($output);
+                if ($encoded !== false && $encoded !== '') {
+                    $response->write($encoded);
+                }
+            } else {
+                $response->write($output);
+            }
             $response->end();
 
             return;
