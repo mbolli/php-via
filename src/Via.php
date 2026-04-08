@@ -894,7 +894,14 @@ class Via {
             });
         }
 
-        $this->app->scheduleContextCleanup($contextId, $delayMs);
+        // Pass an active-SSE guard so the timer won't destroy a context that has
+        // a live SSE connection (can happen under load when the cleanup timer fires
+        // before the next SSE reconnection completes its handshake).
+        $this->app->scheduleContextCleanup(
+            $contextId,
+            $delayMs,
+            fn(): bool => ($this->activeSseCount[$contextId] ?? 0) > 0,
+        );
     }
 
     /**
