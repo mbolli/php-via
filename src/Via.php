@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
@@ -88,6 +89,7 @@ class Via {
     private ScopeRegistry $scopeRegistry;
     private SignalManager $signalManager;
     private ActionRegistry $actionRegistry;
+    private MessageBroker $broker;
 
     /** @var list<MiddlewareInterface> Global middleware applied to all page/action requests */
     private array $globalMiddleware = [];
@@ -132,7 +134,8 @@ class Via {
         // Initialize ViewRenderer with Twig from Application
         $this->viewRenderer = new ViewRenderer($this->app->getTwig(), $this->viewCache, $this->stats, $this->logger);
 
-        // Note: OpenSwoole server is created lazily in start() to allow testing without binding to a port
+        // Broker: default to no-op InMemoryBroker; replaced via Config::withBroker()
+        $this->broker = $this->config->getBroker();
     }
 
     /**
@@ -326,6 +329,23 @@ class Via {
      * @param string $scope Scope to broadcast to
      */
     public function broadcast(string $scope): void {
+        $this->syncLocally($scope);
+
+        // TAB scope is per-connection — no cross-node recipients exist.
+        if ($scope !== Scope::TAB) {
+            $this->broker->publish($scope);
+        }
+    }
+
+    /**
+     * Sync all local contexts matching the given scope and invalidate view cache.
+     *
+     * This is the receive-side handler used both by broadcast() (local work)
+     * and by the broker subscription callback (foreign node invalidations).
+     *
+     * @internal Also called by the broker subscription handler
+     */
+    public function syncLocally(string $scope): void {
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
             $this->invalidateViewCache($scope);
@@ -574,6 +594,14 @@ class Via {
                 foreach ($this->startCallbacks as $callback) {
                     $callback();
                 }
+
+                // Connect broker and subscribe to foreign invalidations.
+                // Must run inside workerStart (coroutine context) so that async
+                // brokers (Redis, NATS) can spawn their receive-loop coroutines.
+                $this->broker->connect();
+                $this->broker->subscribe(function (string $scope): void {
+                    $this->syncLocally($scope);
+                });
             });
 
             // Fires when a worker process exits abnormally (crash, OOM kill, fatal).
@@ -975,6 +1003,7 @@ class Via {
                 $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
             }
         }
+        $this->broker->disconnect();
     }
 
     /**

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use Mbolli\PhpVia\Broker\InMemoryBroker;
+use Mbolli\PhpVia\Broker\MessageBroker;
+
 /**
  * Configuration class with fluent API.
  */
@@ -72,6 +75,9 @@ class Config {
 
     /** Brotli level for static assets. 0–11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
     private int $brotliStaticLevel = 11;
+
+    private ?MessageBroker $broker = null;
+
 
     /**
      * Maximum action requests per IP per window (0 = unlimited).
@@ -361,5 +367,30 @@ class Config {
 
     public function isH2c(): bool {
         return $this->h2c;
+    }
+
+    /**
+     * Set the message broker for multi-node broadcasting.
+     *
+     * A broker enables broadcast() to reach contexts on other nodes (workers,
+     * servers, containers). The default InMemoryBroker is a no-op suitable for
+     * single-node deployments.
+     *
+     * Example:
+     * ```php
+     * (new Config())->withBroker(new RedisBroker('127.0.0.1', 6379))
+     * ```
+     */
+    public function withBroker(MessageBroker $broker): self {
+        $this->broker = $broker;
+
+        return $this;
+    }
+
+    /**
+     * Return the configured broker, or a no-op InMemoryBroker if none was set.
+     */
+    public function getBroker(): MessageBroker {
+        return $this->broker ?? new InMemoryBroker();
     }
 }
