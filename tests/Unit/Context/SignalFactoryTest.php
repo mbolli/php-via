@@ -31,10 +31,13 @@ test('signal updates value when called multiple times with same name in scoped c
     $signal1 = $context->signal(100.0, 'price');
     expect($signal1->getValue())->toBe(100.0);
 
+    // Scoped signals are NOT overwritten by re-registration — the initial value
+    // is only used on first creation. This prevents re-renders on one context
+    // from resetting live shared state (e.g. a game board) to the initial value.
     $signal2 = $context->signal(200.0, 'price');
-    expect($signal2->getValue())->toBe(200.0);
-    expect($signal1->getValue())->toBe(200.0); // Same signal instance should update
-    expect($signal1->id())->toBe($signal2->id());
+    expect($signal2->getValue())->toBe(100.0); // unchanged — returns existing signal as-is
+    expect($signal1->getValue())->toBe(100.0);
+    expect($signal1->id())->toBe($signal2->id()); // same instance
 });
 
 test('scoped signals are shared across contexts and update consistently', function (): void {
@@ -48,14 +51,17 @@ test('scoped signals are shared across contexts and update consistently', functi
     $signal1 = $context1->signal(100.0, 'price');
     expect($signal1->getValue())->toBe(100.0);
 
-    // Access from second context
+    // Second context joins the scope — gets the existing signal, initial value ignored
     $signal2 = $context2->signal(150.0, 'price');
-    expect($signal2->getValue())->toBe(150.0);
+    expect($signal2->getValue())->toBe(100.0); // not 150 — live value preserved
 
-    // Both should be the same signal and have updated value
+    // Both reference the exact same signal instance
     expect($signal1->id())->toBe($signal2->id());
-    expect($signal1->getValue())->toBe(150.0);
-    expect($signal2->getValue())->toBe(150.0);
+
+    // Explicit setValue() is the correct way to mutate a scoped signal
+    $signal1->setValue(200.0);
+    expect($signal1->getValue())->toBe(200.0);
+    expect($signal2->getValue())->toBe(200.0); // same instance, reflects the update
 });
 
 test('signal updates with complex values like arrays', function (): void {
@@ -63,10 +69,16 @@ test('signal updates with complex values like arrays', function (): void {
     $context->scope(Scope::build('stock', 'AAPL'));
 
     $signal1 = $context->signal(['a', 'b'], 'data');
-    // Signal stores complex values as JSON, so we compare the JSON representation
+    // Signal stores complex values as JSON
     expect(json_decode($signal1->getValue(), true))->toEqual(['a', 'b']);
 
+    // Re-registration returns same signal, initial value ignored
     $signal2 = $context->signal(['c', 'd', 'e'], 'data');
-    expect(json_decode($signal2->getValue(), true))->toEqual(['c', 'd', 'e']);
+    expect($signal1->id())->toBe($signal2->id());
+    expect(json_decode($signal1->getValue(), true))->toEqual(['a', 'b']); // unchanged
+
+    // Explicit update works correctly
+    $signal1->setValue(['c', 'd', 'e']);
     expect(json_decode($signal1->getValue(), true))->toEqual(['c', 'd', 'e']);
+    expect(json_decode($signal2->getValue(), true))->toEqual(['c', 'd', 'e']);
 });

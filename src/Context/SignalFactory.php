@@ -71,10 +71,11 @@ class SignalFactory {
             // Check if signal already exists in this scope
             $existingSignal = $this->app->getScopedSignal($scope, $signalId);
             if ($existingSignal !== null) {
-                // Signal already exists in this scope - return it without modification
-                // This ensures all contexts viewing the same scope see the same signal state
-                // and prevents race conditions where each context overwrites the shared signal
-                // with potentially stale or inconsistent data during re-renders.
+                // Signal already exists in this scope — return it without modification.
+                // The initial value is only used on first creation; subsequent calls
+                // (e.g. when a second context joins the scope, or on view re-render)
+                // must not overwrite the live value with a potentially stale initialValue.
+                // To mutate a scoped signal, call $signal->setValue() explicitly.
                 return $existingSignal;
             }
 
