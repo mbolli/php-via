@@ -484,7 +484,7 @@ final class SpreadsheetExample {
                     'clearCellsUrl' => $clearCells->url(),
                     'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
-                    'clientCount' => \count($app->getClients()),
+                    'clientCount' => \count($app->getContextsByScope(self::SCOPE)),
                 ]);
             }, block: 'demo', cacheUpdates: false);
         });

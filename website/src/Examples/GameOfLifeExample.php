@@ -69,7 +69,7 @@ final class GameOfLifeExample {
                 $tiles = self::renderBoard();
                 $generation = self::$generation;
                 $running = self::$running;
-                $clientCount = \count($app->getClients());
+                $clientCount = \count($app->getContextsByScope(Scope::routeScope('/examples/game-of-life')));
                 $runningText = $running ? 'Pause' : 'Resume';
                 $runningEmoji = $running ? '⏸️' : '▶️';
 
