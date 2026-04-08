@@ -205,9 +205,11 @@ class SseHandler {
                 if (!isset($this->via->contexts[$contextId])) {
                     $this->via->log('info', "Context destroyed while SSE active, sending reload: {$contextId}");
 
-                    try {
-                        $response->write($sse->executeScript('window.location.reload()'));
-                    } catch (\Throwable) {
+                    if ($response->isWritable()) {
+                        try {
+                            $response->write($sse->executeScript('window.location.reload()'));
+                        } catch (\Throwable) {
+                        }
                     }
 
                     break;
