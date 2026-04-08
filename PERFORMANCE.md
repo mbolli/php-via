@@ -130,6 +130,83 @@ OS client-side limit.
 
 ---
 
+## Multi-worker Comparison (16 workers + RedisBroker, localhost Redis)
+
+To test the multi-worker path, the website was configured with:
+
+```php
+(new Config())
+    ->withBroker(new RedisBroker())          // localhost Redis, pub/sub channel
+    ->withSwooleSettings(['worker_num' => \OpenSwoole\Util::getCpuNum()])  // 16 workers
+```
+
+Redis was already running locally (`redis-server`, default port 6379).
+`\OpenSwoole\Util::getCpuNum()` returns 16 on this machine.
+
+### action_hammer results
+
+| Metric | 1 worker (baseline) | 16 workers + Redis |
+|--------|---------------------|-------------------|
+| HTTP OK (concurrency=200) | 1998 (99.9%) | 1794 (89.7%) |
+| Net increment (concurrency=200) | 2000 (100%) | 1992 (99.6%) |
+| Patches delivered (concurrency=200) | 99,492 (99.6%) | 100,308 (111.8%) |
+| Throughput (concurrency=200) | ~46 req/s | ~50 req/s |
+| HTTP OK (concurrency=500) | 357 (17.8%) | 134 (6.7%) |
+| Net increment (concurrency=500) | 716 | 585 |
+
+### SSE connection scaling results
+
+| Milestone | 1 worker | 16 workers + Redis |
+|-----------|----------|--------------------|
+| 50 | 50/50 (0% fail) | 50/50 (0% fail) |
+| 200 | 200/200 (0% fail) | 200/200 (0% fail) |
+| 500 | 500/500 (0% fail) | 500/500 (0% fail) |
+| 1,000 | 1,000/1,000 (0% fail) | 1,000/1,000 (0% fail) |
+| 2,000 | 2,000/2,000 (0% fail) | 1,563/2,000 (22% fail) |
+| Patch latency @ peak | 1,188 ms | 760 ms |
+
+### Analysis
+
+**Action throughput regressed at high concurrency.** At concurrency=200, HTTP OK
+dropped from 99.9% to 89.7%. At concurrency=500, from 17.8% to 6.7%. The degradation
+comes from Redis pub/sub overhead: every action now makes two Redis round-trips (publish
++ receive-loop). At high concurrency, these add latency that pushes responses past
+client timeout windows.
+
+**Net state remains correct.** Despite HTTP timeouts, net increment was 1992/2000 (99.6%)
+at concurrency=200 — nearly identical to single-worker. The broker correctly propagated
+mutations across workers.
+
+**Patch delivery exceeded 100% (111.8%).** With 16 workers sharing 50 observer SSE
+connections, a single Redis broadcast triggers all 16 workers to sync their local
+contexts. Observers distributed across multiple workers each receive the patch from
+their own worker's sync, while the "expected" count was calculated assuming 1:1
+(HTTP OK × observers). This is correct behaviour — the broker fan-out amplifies
+patch delivery.
+
+**SSE connection ceiling dropped at 2,000** (78% vs 100%). With 16 workers sharing
+`enable_reuse_port`, the OS distributes incoming connections across all workers. Each
+worker's per-connection backlog queue fills faster at burst ramp rates, causing some
+connections to be refused before the queue drains.
+
+**Latency improved significantly: 760ms vs 1,188ms.** With 16 workers, each event loop
+is less saturated. The SSE push from the action handler to the observer happens on a
+different worker's loop — still fast because Redis pub/sub is sub-millisecond on localhost.
+
+### When multi-worker helps (and when it doesn't)
+
+At 1–2k SSE connections on a single machine with a localhost Redis broker,
+**single-worker is faster and more reliable**. The coroutine scheduler handles thousands
+of concurrent SSE connections without process-switch overhead.
+
+Multi-worker with a broker starts winning when:
+- CPU-bound work (rendering, computation) saturates a single worker's event loop
+- Connections are distributed across machines (where cross-machine Redis adds the same
+  latency whether using 1 or 16 workers per machine)
+- You need fault isolation (one worker crash doesn't take down all connections)
+
+---
+
 ## What This Means for Real Applications
 
 ### The bottleneck is TCP accept, not the application
