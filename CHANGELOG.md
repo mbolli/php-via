@@ -2,9 +2,21 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [0.6.0] - 2026-04-07
+## [Unreleased]
+
+## [0.6.0] - 2026-04-08
 
 ### New Features
+
+- **Cookie helpers** — Safe, coroutine-friendly cookie access on `Context`:
+  - `$c->cookie(string $name): ?string` — read a request cookie (replaces `$_COOKIE`, which is unsafe in OpenSwoole)
+  - `$c->setCookie(string $name, string $value, ...)` — queue a cookie for the response; safe defaults: `secure: true`, `httpOnly: true`, `sameSite: 'Lax'`
+  - `$c->deleteCookie(string $name, string $path = '/')` — expire a cookie (sets `expires=1`, empty value)
+  - Queued cookies are flushed to the HTTP response by `RequestHandler` (page load) and `ActionHandler` (action). SSE streams seal their headers after the first write, so cookies must be set before or via an action response.
+
+- **File upload support** — `$c->file(string $name): ?array` returns the upload array (`name`, `type`, `tmp_name`, `size`) for multipart form submissions, or `null` if missing or errored. Use Datastar's `contentType: 'form'` modifier to submit a `<form enctype="multipart/form-data">` as a real multipart POST.
+
+- **Multipart signal parsing** — `Via::parseSignals()` (public static) handles three signal sources: GET `?datastar=<json>`, JSON body (standard actions), and `$post['datastar']` field (urlencoded forms). The existing `readSignals()` is now a thin wrapper. `via_ctx` fallback extracted from `$request->post` for multipart actions where Datastar sends no signals.
 
 - **Brotli compression** — Native PHP brotli compression via `ext-brotli`, served over HTTPS/HTTP2 from OpenSwoole directly (no proxy required). Requires either `withCertificate()` or `withH2c()`.
   - `Config::withBrotli(bool $enabled, int $dynamicLevel = 4, int $staticLevel = 11)` — enable brotli with configurable levels. Dynamic level (4) is used for pages and SSE streams (hot path, low CPU). Static level (11 = max ratio) is used for static assets, lazy-compressed once and cached in memory per process.
@@ -16,6 +28,12 @@ All notable changes to php-via will be documented in this file.
 ### Improvements
 
 - **SSE**: removed unnecessary 30-second keepalive comment (not needed with HTTP/2 or Caddy; was corrupting brotli streams).
+- **Contact Form example** — Demonstrates multipart file upload, server-side per-field validation, and block re-rendering via SSE. State shared through PHP reference captures (no client-reactive signals needed).
+
+### Tests
+
+- **Unit tests now run by default** — `phpunit.xml` updated to include `tests/Unit/` in the default test suite. `vendor/bin/pest` now runs all 236 tests (Feature + Unit).
+- **SignalFactory test semantics corrected** — Scoped signals intentionally do NOT update their value on re-registration (only the first registration uses `$initialValue`). This prevents a re-render or a second joining context from overwriting live shared state with a stale initial value. Test expectations updated to match; `setValue()` is the documented mutation path.
 
 ## [0.5.0] - 2026-03-25
 
