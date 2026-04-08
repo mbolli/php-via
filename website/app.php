@@ -148,14 +148,31 @@ $app->onShutdown(function (): void {
 
 // (Scoped signals handle shared counter state — no globalState needed)
 
-// ─── Presence: broadcast to route on connect/disconnect ─────────────────────
+// ─── Presence: broadcast globally on connect/disconnect ──────────────────────
+//
+// Debounced: rapid connect/disconnect bursts (e.g. load tests) collapse into a
+// single broadcast. Without this, N connections joining simultaneously triggers
+// N broadcasts × N contexts = O(N²) renders that saturate the server.
+// Timer fires 200ms after the last event.
+/** @var int|null $presenceTimer */
+$presenceTimer = null;
 
-$app->onClientConnect(function (Context $c) use ($app): void {
-    $app->broadcast(Scope::routeScope($c->getRoute()));
+$broadcastPresence = function () use ($app, &$presenceTimer): void {
+    if ($presenceTimer !== null) {
+        \OpenSwoole\Timer::clear($presenceTimer);
+    }
+    $presenceTimer = \OpenSwoole\Timer::after(200, function () use ($app, &$presenceTimer): void {
+        $presenceTimer = null;
+        $app->broadcast(Scope::GLOBAL);
+    });
+};
+
+$app->onClientConnect(function (Context $c) use ($broadcastPresence): void {
+    $broadcastPresence();
 });
 
-$app->onClientDisconnect(function (Context $c) use ($app): void {
-    $app->broadcast(Scope::routeScope($c->getRoute()));
+$app->onClientDisconnect(function (Context $c) use ($broadcastPresence): void {
+    $broadcastPresence();
 });
 
 // ─── Demo components ─────────────────────────────────────────────────────────
@@ -165,8 +182,8 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
  * Route-scoped so it shows the client count for the current page.
  */
 $presenceDemo = function (Context $c) use ($app, $twig): void {
-    $c->scope(Scope::ROUTE);
-    $c->view(function () use ($app, $twig) {
+    $c->scope(Scope::GLOBAL);
+    $c->view(function () use ($app, $twig): string {
         $count = count($app->getClients());
 
         return $twig->render('components/presence.html.twig', [
