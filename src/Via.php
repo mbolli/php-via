@@ -554,6 +554,11 @@ class Via {
                 'enable_reuse_port' => true,  // Allow immediate rebind on restart
                 'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
                 'log_level' => 4,  // SWOOLE_LOG_WARNING — suppress NOTICE about sending to closed connections
+                // Connection limits: prevent a burst of SSE connections from exhausting the
+                // accept queue and making the server unresponsive. Callers can override via
+                // Config::withSwooleSettings(). 10k connections is generous for single-worker.
+                'max_conn' => 10000,
+                'backlog' => 4096,  // OS accept queue depth (needs net.core.somaxconn ≥ this)
             ];
             $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings(), array_filter([
                 'ssl_cert_file' => $this->config->getSslCertFile(),
