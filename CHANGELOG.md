@@ -6,7 +6,7 @@ All notable changes to php-via will be documented in this file.
 
 ### New Features
 
-- **MessageBroker interface for multi-node broadcasting** — Pluggable broker layer so `broadcast()` propagates scope invalidations across multiple workers, servers, or containers without callers changing their code.
+- **MessageBroker interface for multi-node broadcasting — Redis and NATS built-in** — Pluggable broker layer so `broadcast()` propagates scope invalidations across multiple workers, servers, or containers without callers changing their code.
   - `MessageBroker` interface — `connect()`, `publish(string $scope)`, `subscribe(callable)`, `disconnect()`
   - `InMemoryBroker` — no-op default; correct for single-node/single-worker deployments
   - `RedisBroker` — Redis pub/sub; two coroutine connections (publish + subscribe loop). Works with `ext-redis` + `SWOOLE_HOOK_ALL`. Auto-reconnects on drop.
