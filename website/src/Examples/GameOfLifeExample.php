@@ -7,7 +7,6 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use OpenSwoole\Timer;
 
 final class GameOfLifeExample {
     public const string SLUG = 'game-of-life';
@@ -25,7 +24,6 @@ final class GameOfLifeExample {
     /** @var array<string, int> */
     private static array $sessionIds = [];
     private static bool $initialized = false;
-    private static ?int $timerId = null;
 
     public static function register(Via $app): void {
         self::init();
@@ -113,29 +111,22 @@ final class GameOfLifeExample {
                 ]);
             }, block: 'demo');
         });
+
+        $app->setInterval(fn () => self::tick($app), 200);
     }
 
-    public static function startTimer(Via $app): void {
-        self::$timerId = Timer::tick(200, function () use ($app): void {
-            if (!self::$running || $app->getContextsByScope(Scope::routeScope('/examples/game-of-life')) === []) {
-                return;
-            }
-
-            self::nextGeneration();
-
-            if (self::isAllDead()) {
-                self::$running = false;
-            }
-
-            $app->broadcast(Scope::routeScope('/examples/game-of-life'));
-        });
-    }
-
-    public static function stopTimer(): void {
-        if (self::$timerId !== null) {
-            Timer::clear(self::$timerId);
-            self::$timerId = null;
+    private static function tick(Via $app): void {
+        if (!self::$running || $app->getContextsByScope(Scope::routeScope('/examples/game-of-life')) === []) {
+            return;
         }
+
+        self::nextGeneration();
+
+        if (self::isAllDead()) {
+            self::$running = false;
+        }
+
+        $app->broadcast(Scope::routeScope('/examples/game-of-life'));
     }
 
     private static function init(): void {

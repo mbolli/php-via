@@ -12,19 +12,29 @@
     </div>
 </div>
 
-<div class="login-middleware-note">
-    <p>🛡️ <strong>This page is protected by <code>AuthMiddleware</code></strong> — attached via
-    <code>Via::group()->middleware(new AuthMiddleware(...))</code> alongside the profile page.
-    The auth record was injected as a request attribute and read via <code>$c->getRequestAttribute('auth')</code>.</p>
+<div class="login-profile-fields">
+    <div class="login-profile-row">
+        <span class="login-profile-label">Username</span>
+        <span class="login-profile-value">{{ auth.user|e }}</span>
+    </div>
+    <div class="login-profile-row">
+        <span class="login-profile-label">Role</span>
+        <span class="login-profile-value">{{ auth.role|e }}</span>
+    </div>
+    <div class="login-profile-row">
+        <span class="login-profile-label">Logged in</span>
+        <span class="login-profile-value">{{ auth.at|date('Y-m-d H:i:s') }}</span>
+    </div>
 </div>
 
-<p class="login-refresh-hint">
-    💡 <strong>Refresh the page</strong> — you will still be logged in.
-    The middleware reads <code>sessionData('auth')</code> from the session cookie on every request.
-</p>
+<div class="login-middleware-note">
+    <p>🛡️ <strong>Protected by the same <code>AuthMiddleware</code> as the dashboard</strong> —
+    both routes sit inside a <code>Via::group()</code>, so a single <code>->middleware(new AuthMiddleware(...))</code>
+    call covers both. No duplication.</p>
+</div>
 
 <div class="login-nav">
-    <a href="/examples/login/profile" class="btn">View Profile →</a>
+    <a href="/examples/login/dashboard" class="btn">← Dashboard</a>
     <button class="danger login-logout-btn" data-on:click="@post('{{ logout.url }}')">Log out</button>
 </div>
 
@@ -67,7 +77,27 @@
 .login-role { color: var(--text-muted, #64748b); font-size: .875rem; }
 .login-since { color: var(--text-muted, #94a3b8); font-size: .8rem; margin-top: .2rem; }
 
-.login-refresh-hint {
+.login-profile-fields {
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: .5rem;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+.login-profile-row {
+    display: flex;
+    justify-content: space-between;
+    padding: .6rem 1rem;
+    font-size: .875rem;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.login-profile-row:last-child { border-bottom: none; }
+
+.login-profile-label { color: var(--text-muted, #64748b); }
+.login-profile-value { font-weight: 500; }
+
+.login-middleware-note {
     font-size: .875rem;
     color: var(--text-muted, #64748b);
     background: var(--surface-2, #f8fafc);
@@ -77,6 +107,7 @@
     margin-bottom: 1rem;
     max-inline-size: unset;
 }
+.login-middleware-note p { margin: 0; }
 
 .login-nav {
     display: flex;
@@ -97,17 +128,5 @@
 }
 
 .login-logout-btn { flex: 1; }
-
-.login-middleware-note {
-    font-size: .875rem;
-    color: var(--text-muted, #64748b);
-    background: var(--surface-2, #f8fafc);
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: .5rem;
-    padding: .75rem 1rem;
-    margin-bottom: 1rem;
-    max-inline-size: unset;
-}
-.login-middleware-note p { margin: 0; }
 </style>
 {% endblock %}

@@ -7,7 +7,6 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use OpenSwoole\Timer;
 
 final class StockTickerExample {
     public const string SLUG = 'stock-ticker';
@@ -57,7 +56,6 @@ final class StockTickerExample {
     ];
 
     private static bool $initialized = false;
-    private static ?int $timerId = null;
 
     public static function register(Via $app): void {
         self::init();
@@ -131,71 +129,64 @@ final class StockTickerExample {
                 ]);
             }, cacheUpdates: false);
         });
+
+        $app->setInterval(fn () => self::tick($app), 2000);
     }
 
-    public static function startTimer(Via $app): void {
-        self::$timerId = Timer::tick(2000, function () use ($app): void {
-            // Skip if nobody is watching any stock ticker page
-            if ($app->getContextsByScope(Scope::routeScope('/examples/stock-ticker')) === []) {
-                $hasDetailViewers = false;
-                foreach (array_keys(self::$stocks) as $symbol) {
-                    if ($app->getContextsByScope(Scope::build('example:stock', $symbol)) !== []) {
-                        $hasDetailViewers = true;
+    private static function tick(Via $app): void {
+        // Skip if nobody is watching any stock ticker page
+        if ($app->getContextsByScope(Scope::routeScope('/examples/stock-ticker')) === []) {
+            $hasDetailViewers = false;
+            foreach (array_keys(self::$stocks) as $symbol) {
+                if ($app->getContextsByScope(Scope::build('example:stock', $symbol)) !== []) {
+                    $hasDetailViewers = true;
 
-                        break;
-                    }
-                }
-                if (!$hasDetailViewers) {
-                    return;
+                    break;
                 }
             }
-
-            foreach (self::$stocks as $symbol => &$stock) {
-                $volatility = match ($symbol) {
-                    'TSLA', 'NFLX' => 0.015,
-                    'NVDA', 'AMZN' => 0.012,
-                    'AAPL', 'MSFT', 'GOOGL' => 0.008,
-                    default => 0.01,
-                };
-
-                $changePercent = (random_int(-1000, 1000) / 1000) * $volatility;
-                $newPrice = $stock['price'] * (1 + $changePercent);
-                $newPrice = max($newPrice, $stock['price'] * 0.5);
-                $newPrice = min($newPrice, $stock['price'] * 2);
-                $stock['price'] = $newPrice;
-                $stock['history'][] = ['time' => time(), 'price' => $newPrice];
-
-                if (\count($stock['history']) > 60) {
-                    array_shift($stock['history']);
-                }
-
-                $scope = Scope::build('example:stock', $symbol);
-                $history = $stock['history'];
-                $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
-                $prices = array_map(fn (array $h) => $h['price'], $history);
-
-                $priceSignal = $app->getScopedSignal($scope, 'example_stock_' . $symbol . '_price');
-                $priceSignal?->setValue(number_format($newPrice, 2), markChanged: true, broadcast: false);
-
-                $timesSignal = $app->getScopedSignal($scope, 'example_stock_' . $symbol . '_times');
-                $timesSignal?->setValue($times, markChanged: true, broadcast: false);
-
-                $pricesSignal = $app->getScopedSignal($scope, 'example_stock_' . $symbol . '_prices');
-                $pricesSignal?->setValue($prices, markChanged: true, broadcast: false);
-
-                $app->broadcast(Scope::build('example:stock', $symbol));
+            if (!$hasDetailViewers) {
+                return;
             }
-            unset($stock);
-
-            $app->broadcast(Scope::routeScope('/examples/stock-ticker'));
-        });
-    }
-
-    public static function stopTimer(): void {
-        if (self::$timerId !== null) {
-            Timer::clear(self::$timerId);
-            self::$timerId = null;
         }
+
+        foreach (self::$stocks as $symbol => &$stock) {
+            $volatility = match ($symbol) {
+                'TSLA', 'NFLX' => 0.015,
+                'NVDA', 'AMZN' => 0.012,
+                'AAPL', 'MSFT', 'GOOGL' => 0.008,
+                default => 0.01,
+            };
+
+            $changePercent = (random_int(-1000, 1000) / 1000) * $volatility;
+            $newPrice = $stock['price'] * (1 + $changePercent);
+            $newPrice = max($newPrice, $stock['price'] * 0.5);
+            $newPrice = min($newPrice, $stock['price'] * 2);
+            $stock['price'] = $newPrice;
+            $stock['history'][] = ['time' => time(), 'price' => $newPrice];
+
+            if (\count($stock['history']) > 60) {
+                array_shift($stock['history']);
+            }
+
+            $scope = Scope::build('example:stock', $symbol);
+            $history = $stock['history'];
+            $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
+            $prices = array_map(fn (array $h) => $h['price'], $history);
+
+            $priceSignal = $app->getScopedSignal($scope, 'example_stock_' . $symbol . '_price');
+            $priceSignal?->setValue(number_format($newPrice, 2), markChanged: true, broadcast: false);
+
+            $timesSignal = $app->getScopedSignal($scope, 'example_stock_' . $symbol . '_times');
+            $timesSignal?->setValue($times, markChanged: true, broadcast: false);
+
+            $pricesSignal = $app->getScopedSignal($scope, 'example_stock_' . $symbol . '_prices');
+            $pricesSignal?->setValue($prices, markChanged: true, broadcast: false);
+
+            $app->broadcast(Scope::build('example:stock', $symbol));
+        }
+        unset($stock);
+
+        $app->broadcast(Scope::routeScope('/examples/stock-ticker'));
     }
 
     private static function init(): void {

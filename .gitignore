@@ -3,3 +3,6 @@
 *.cache
 /website/node_modules/
 /website/vendor/
+website/*.db
+website/*.db-shm
+website/*.db-wal
