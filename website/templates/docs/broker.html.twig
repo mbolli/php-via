@@ -120,8 +120,6 @@ new RedisBroker(
         extension required beyond OpenSwoole itself. Good choice for containerised deployments where
         NATS already runs for other services.
     </p>
-    <p>See <a href="https://github.com/mbolli/php-via/blob/master/NATS_INSTALL.md" target="_blank" rel="noopener">NATS_INSTALL.md ↗</a> for server setup, TLS configuration, and token auth examples.</p>
-
     <h3 id="nats-basic">Basic setup</h3>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Broker\NatsBroker;
@@ -242,7 +240,6 @@ reverse_proxy node1:3000 node2:3000 {
         <li><a href="/docs/broadcasting">Broadcasting</a> — the broadcast() API and scope targets</li>
         <li><a href="/docs/scopes">Scopes</a> — which scopes cross node boundaries</li>
         <li><a href="/docs/deployment">Deployment</a> — systemd, Caddy, TLS setup</li>
-        <li><a href="https://github.com/mbolli/php-via/blob/master/NATS_INSTALL.md" target="_blank" rel="noopener">NATS_INSTALL.md ↗</a> — server install, TLS, and token auth</li>
     </ul>
 </article>
 {% endblock %}
