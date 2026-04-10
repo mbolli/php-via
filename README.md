@@ -160,6 +160,50 @@ $app->broadcast(Scope::GLOBAL);     // all contexts
 $app->broadcast('room:lobby');      // custom scope
 ```
 
+### Multi-node broadcasting — Redis and NATS brokers
+
+By default php-via uses an `InMemoryBroker` that is correct for single-process deployments.
+To fan out `broadcast()` calls across multiple servers or containers, swap in `RedisBroker` or
+`NatsBroker`:
+
+```php
+use Mbolli\PhpVia\Broker\RedisBroker;
+use Mbolli\PhpVia\Broker\NatsBroker;
+
+// Redis (requires ext-redis + SWOOLE_HOOK_ALL)
+$config->withBroker(new RedisBroker('127.0.0.1', 6379));
+
+// Redis with auth and TLS
+$config->withBroker(new RedisBroker(
+    host: 'redis.internal',
+    password: $_ENV['REDIS_PASSWORD'],
+    tls: true,
+));
+
+// NATS (raw OpenSwoole socket — no extra extension)
+$config->withBroker(new NatsBroker('127.0.0.1', 4222));
+
+// NATS with token auth and TLS
+$config->withBroker(new NatsBroker(
+    host: 'nats.internal',
+    authToken: $_ENV['NATS_TOKEN'],
+    tls: true,
+));
+
+// Error observability — called on every connection drop
+$config->onBrokerError(fn(\Throwable $e) => error_log('Broker: ' . $e->getMessage()));
+```
+
+Both brokers reconnect automatically with exponential backoff (1 s → 30 s cap).
+
+A `GET /_health` endpoint is available on every php-via server — no configuration needed:
+
+```json
+{"status":"ok","version":"0.7.0","broker":{"driver":"RedisBroker","connected":true},"connections":{"contexts":42,"sse":38}}
+```
+
+Returns HTTP 503 when the broker is in the reconnect backoff window.
+
 ## How it Works
 
 ```

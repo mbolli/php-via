@@ -440,6 +440,12 @@ $app->page('/docs/broadcasting', function (Context $c): void {
     $c->view('docs/broadcasting.html.twig');
 });
 
+// Multi-node Broker
+$app->page('/docs/broker', function (Context $c): void {
+    $c->scope(Scope::routeScope('/docs/broker'));
+    $c->view('docs/broker.html.twig');
+});
+
 // Lifecycle
 $app->page('/docs/lifecycle', function (Context $c): void {
     $c->scope(Scope::routeScope('/docs/lifecycle'));

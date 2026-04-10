@@ -7,13 +7,41 @@ All notable changes to php-via will be documented in this file.
 ### New Features
 
 - **MessageBroker interface for multi-node broadcasting — Redis and NATS built-in** — Pluggable broker layer so `broadcast()` propagates scope invalidations across multiple workers, servers, or containers without callers changing their code.
-  - `MessageBroker` interface — `connect()`, `publish(string $scope)`, `subscribe(callable)`, `disconnect()`
+  - `MessageBroker` interface — `connect()`, `publish(string $scope)`, `subscribe(callable)`, `disconnect()`, `isConnected(): bool`
   - `InMemoryBroker` — no-op default; correct for single-node/single-worker deployments
   - `RedisBroker` — Redis pub/sub; two coroutine connections (publish + subscribe loop). Works with `ext-redis` + `SWOOLE_HOOK_ALL`. Reconnects with exponential backoff on drop.
   - `NatsBroker` — NATS pub/sub via raw OpenSwoole coroutine socket; lightweight for containerised deployments. Reconnects with exponential backoff on drop.
   - `Config::withBroker(MessageBroker)` / `Config::getBroker()` — fluent configuration
+  - `Config::onBrokerError(callable(\Throwable): void)` — register an error handler invoked on each connection drop/reconnect attempt; useful for metrics and alerting
   - `Via::broadcast()` now calls local sync first then `broker->publish()` (cross-node); TAB scope skips publish (no cross-node recipients possible)
   - Broker lifecycle: `connect()` in `workerStart`, subscription wired automatically, `disconnect()` on shutdown
+
+- **RedisBroker — authentication and TLS**
+  - `$password` and `$username` constructor params for Redis ACL (`requirepass` / `ACL SETUSER`); `$password` is annotated `#[\SensitiveParameter]`
+  - `$tls` and `$tlsCaFile` params: uses `tls://` socket prefix with `stream_context_create` (`verify_peer`, `cafile`) when enabled
+  - `$channel` param (default `'via:broadcast'`) — isolates pub/sub traffic when multiple apps share the same Redis instance
+  - Connect timeout set to 3.0 s (was effectively 0 = infinite)
+
+- **NatsBroker — authentication and TLS**
+  - `$authToken` constructor param; included in `CONNECT` payload as `auth_token`; annotated `#[\SensitiveParameter]`
+  - `$tls` and `$tlsCaFile` params: uses `SWOOLE_SOCK_TCP | SWOOLE_SSL` with `ssl_verify_peer`, `ssl_host_name`, and optional `ssl_cafile`
+  - `$subject` param (default `'via.broadcast'`) — isolates pub/sub traffic on a shared NATS server
+  - `doConnect()` private helper extracts handshake + SUB logic so initial connect and retry loop are identical
+
+- **Exponential-backoff reconnect (RedisBroker and NatsBroker)**
+  - `startReadLoop()` retries with 1 s base delay, doubling each attempt, capped at 30 s
+  - `$connected` bool tracks live state; set to `false` during the backoff window
+  - `Via::workerStart` wraps `broker->connect()` in try/catch — logs error and continues without multi-node broadcast rather than crashing the worker
+  - `Via::workerStart` logs broker class + worker ID on successful connect (InMemoryBroker suppressed)
+
+- **`GET /_health` endpoint** — always available, no devMode gate, no sensitive data
+  - Returns JSON: `{"status":"ok"|"degraded","version":"…","broker":{"driver":"…","connected":true|false},"connections":{"contexts":N,"sse":N}}`
+  - HTTP 200 when broker is connected (including InMemoryBroker after `connect()`), 503 when in reconnect backoff
+  - `Via::getBroker(): MessageBroker` added (`@internal`) for RequestHandler access
+
+- **Scope injection protection**
+  - `Scope::isValidWireScope(string $scope): bool` — validates scope strings received from the broker wire; accepts built-ins, route-qualified, and custom colon-delimited scopes (max 256 chars); rejects NUL bytes and shell metacharacters
+  - Via broker callback calls `isValidWireScope()` before `syncLocally()`; invalid scopes are logged as warnings and silently dropped
 
 ## [0.6.0] - 2026-04-08
 
