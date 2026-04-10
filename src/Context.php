@@ -251,8 +251,8 @@ class Context {
      *
      * @internal called by ActionHandler before executing an action
      *
-     * @param array<string, mixed>                                                                   $query GET query parameters
-     * @param array<string, mixed>                                                                   $post  POST body parameters
+     * @param array<string, mixed>                                                                      $query GET query parameters
+     * @param array<string, mixed>                                                                      $post  POST body parameters
      * @param array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> $files Uploaded files (from multipart/form-data)
      */
     public function setRequestInput(array $query, array $post, array $files = []): void {
@@ -289,7 +289,7 @@ class Context {
      */
     public function file(string $name): ?array {
         $f = $this->requestFiles[$name] ?? null;
-        if (!is_array($f) || $f['error'] !== \UPLOAD_ERR_OK) {
+        if (!\is_array($f) || $f['error'] !== UPLOAD_ERR_OK) {
             return null;
         }
 

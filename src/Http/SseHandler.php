@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
+use OpenSwoole\Timer;
 use starfederation\datastar\enums\ElementPatchMode;
 
 /**
@@ -70,12 +71,13 @@ class SseHandler {
             if (isset($this->reloadedContextIds[$contextId])) {
                 // Already told this context to reload; just close cleanly.
                 $response->end();
+
                 return;
             }
 
             $this->reloadedContextIds[$contextId] = true;
             // Evict after 5 minutes so the set doesn't grow unbounded.
-            \OpenSwoole\Timer::after(300_000, function () use ($contextId): void {
+            Timer::after(300_000, function () use ($contextId): void {
                 unset($this->reloadedContextIds[$contextId]);
             });
 

@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Via;
 
-/**
+/*
  * Via::parseSignals() tests.
  *
  * Covers all three signal source paths without requiring an OpenSwoole Request
  * instance (which is a final extension class and cannot be mocked).
  */
 describe('Via::parseSignals()', function (): void {
-
     // ── 1. GET ?datastar=<json> ──────────────────────────────────────────────
 
     it('reads signals from GET datastar param', function (): void {

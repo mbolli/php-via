@@ -160,6 +160,14 @@ class RequestHandler {
             return;
         }
 
+        // Health endpoint — always available, no sensitive data
+        if ($path === '/_health' && $method === 'GET') {
+            $this->handleHealth($response);
+            $this->logRequest($method, $path, 200, $requestStart);
+
+            return;
+        }
+
         // Handle page routes
         $params = [];
         $handler = $this->via->getRouter()->matchRoute($path, $params);
@@ -513,6 +521,40 @@ class RequestHandler {
             $response->header('Vary', 'Accept-Encoding');
         }
         $response->end($json);
+    }
+
+    /**
+     * Handle health endpoint.
+     *
+     * Returns 200 with status "ok" when all systems are nominal, or 503 with
+     * status "degraded" when the broker has lost its backend connection.
+     * No sensitive data (no IPs, no credentials, no per-user information).
+     */
+    private function handleHealth(Response $response): void {
+        $broker = $this->via->getBroker();
+        $brokerConnected = $broker->isConnected();
+        $brokerDriver = (new \ReflectionClass($broker))->getShortName();
+
+        $sseCount = array_sum($this->via->activeSseCount);
+
+        $payload = [
+            'status' => $brokerConnected ? 'ok' : 'degraded',
+            'version' => Via::VERSION,
+            'broker' => [
+                'driver' => $brokerDriver,
+                'connected' => $brokerConnected,
+            ],
+            'connections' => [
+                'contexts' => \count($this->via->contexts),
+                'sse' => $sseCount,
+            ],
+        ];
+
+        $httpStatus = $brokerConnected ? 200 : 503;
+        $response->status($httpStatus);
+        $response->header('Content-Type', 'application/json');
+        $response->header('Cache-Control', 'no-store');
+        $response->end(json_encode($payload));
     }
 
     /**

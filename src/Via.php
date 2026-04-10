@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
@@ -38,7 +39,7 @@ use Twig\Environment;
  * Main application class that manages routing, contexts, and SSE connections.
  */
 class Via {
-    public const string VERSION = '0.4.2';
+    public const string VERSION = '0.7.0';
 
     // Legacy public properties for HTTP handlers (will be phased out)
     /** @var array<string, Context> */
@@ -134,8 +135,25 @@ class Via {
         // Initialize ViewRenderer with Twig from Application
         $this->viewRenderer = new ViewRenderer($this->app->getTwig(), $this->viewCache, $this->stats, $this->logger);
 
-        // Broker: default to no-op InMemoryBroker; replaced via Config::withBroker()
+        // Broker: default to no-op InMemoryBroker; replaced via Config::withBroker().
+        // Subscribe immediately so the handler is wired before connect() spawns the read loop.
         $this->broker = $this->config->getBroker();
+        $this->broker->subscribe(function (string $scope): void {
+            if (!Scope::isValidWireScope($scope)) {
+                $this->log('warning', "Broker: rejected invalid scope \"{$scope}\" from wire");
+
+                return;
+            }
+
+            $this->syncLocally($scope);
+        });
+
+        // Wire optional error handler (supported by RedisBroker and NatsBroker).
+        $brokerErrorHandler = $this->config->getBrokerErrorHandler();
+
+        if ($brokerErrorHandler !== null && method_exists($this->broker, 'setErrorHandler')) {
+            $this->broker->setErrorHandler($brokerErrorHandler);
+        }
     }
 
     /**
@@ -152,6 +170,15 @@ class Via {
      */
     public function config(): Config {
         return $this->config;
+    }
+
+    /**
+     * Get the active broker instance.
+     *
+     * @internal Used by /_health endpoint
+     */
+    public function getBroker(): MessageBroker {
+        return $this->broker;
     }
 
     /**
@@ -335,73 +362,6 @@ class Via {
         if ($scope !== Scope::TAB) {
             $this->broker->publish($scope);
         }
-    }
-
-    /**
-     * Sync all local contexts matching the given scope and invalidate view cache.
-     *
-     * This is the receive-side handler used both by broadcast() (local work)
-     * and by the broker subscription callback (foreign node invalidations).
-     *
-     * @internal Also called by the broker subscription handler
-     */
-    public function syncLocally(string $scope): void {
-        // Handle GLOBAL scope - sync all contexts
-        if ($scope === Scope::GLOBAL) {
-            $this->invalidateViewCache($scope);
-            $this->syncAllContexts();
-            $this->requestLogger->logBroadcast($scope, \count($this->contexts));
-
-            return;
-        }
-
-        // Handle ROUTE scope - sync all contexts on this route
-        if (Scope::isRouteBased($scope)) {
-            $parts = Scope::parse($scope);
-            $route = $parts[1] ?? null;
-
-            // If no specific route provided, broadcast to all routes
-            if ($route === null) {
-                // Find all route scopes and invalidate their caches
-                // Note: getKeys() returns cache keys with :initial or :update suffix
-                // We need to extract the base scope before invalidating
-                $seenScopes = [];
-                foreach ($this->viewCache->getKeys() as $cacheKey) {
-                    // Extract base scope by removing :initial or :update suffix
-                    $baseScope = preg_replace('/:(?:initial|update)$/', '', $cacheKey);
-
-                    // Only invalidate each base scope once
-                    if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
-                        $this->invalidateViewCache($baseScope);
-                        $seenScopes[$baseScope] = true;
-                    }
-                }
-                // Sync all contexts
-                $this->syncAllContexts();
-                $this->requestLogger->logBroadcast($scope, \count($this->contexts));
-            } else {
-                // Important: Invalidate cache using the full scope string (route:/path)
-                // The context's primary scope is "route:/path", not just "route"
-                $this->invalidateViewCache($scope);
-                $this->syncContextsOnRoute($route);
-                $this->requestLogger->logBroadcast($scope, 0);
-            }
-
-            return;
-        }
-
-        // Handle custom scopes (with wildcard support)
-        $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
-
-        // Invalidate cache for this scope
-        $this->invalidateViewCache($scope);
-
-        // Sync all matched contexts
-        foreach ($matchedContexts as $context) {
-            $context->sync();
-        }
-
-        $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
     }
 
     /**
@@ -603,10 +563,17 @@ class Via {
                 // Connect broker and subscribe to foreign invalidations.
                 // Must run inside workerStart (coroutine context) so that async
                 // brokers (Redis, NATS) can spawn their receive-loop coroutines.
-                $this->broker->connect();
-                $this->broker->subscribe(function (string $scope): void {
-                    $this->syncLocally($scope);
-                });
+                try {
+                    $this->broker->connect();
+
+                    // Log connection so operators know each worker opens its own broker
+                    // connection and can plan backend limits accordingly.
+                    if (!$this->broker instanceof InMemoryBroker) {
+                        $this->log('info', 'Broker ' . \get_class($this->broker) . " connected in worker {$workerId}");
+                    }
+                } catch (\Throwable $e) {
+                    $this->log('error', "Broker connect failed in worker {$workerId}: " . $e->getMessage() . ' — running without multi-node broadcast');
+                }
             });
 
             // Fires when a worker process exits abnormally (crash, OOM kill, fatal).
@@ -843,13 +810,13 @@ class Via {
      * Exposed as a public static method so it can be tested without an OpenSwoole
      * Request instance (which is a final extension class).
      *
-     * @param array<string, mixed>  $get  Parsed GET parameters
-     * @param array<string, mixed>  $post Parsed POST parameters
-     * @param string|false          $body Raw request body
+     * @param array<string, mixed> $get  Parsed GET parameters
+     * @param array<string, mixed> $post Parsed POST parameters
+     * @param false|string         $body Raw request body
      *
      * @return array<string, mixed> The decoded signals array
      */
-    public static function parseSignals(array $get, array $post, string|false $body): array {
+    public static function parseSignals(array $get, array $post, false|string $body): array {
         // 1. GET ?datastar=<json>
         if (isset($get['datastar'])) {
             $signals = json_decode((string) $get['datastar'], true);
@@ -900,7 +867,7 @@ class Via {
         $this->app->scheduleContextCleanup(
             $contextId,
             $delayMs,
-            fn(): bool => ($this->activeSseCount[$contextId] ?? 0) > 0,
+            fn (): bool => ($this->activeSseCount[$contextId] ?? 0) > 0,
         );
     }
 
@@ -958,6 +925,71 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Sync all local contexts matching the given scope and invalidate view cache.
+     *
+     * Called both by broadcast() (local work) and by the broker subscription
+     * callback (foreign node invalidations).
+     */
+    private function syncLocally(string $scope): void {
+        // Handle GLOBAL scope - sync all contexts
+        if ($scope === Scope::GLOBAL) {
+            $this->invalidateViewCache($scope);
+            $this->syncAllContexts();
+            $this->requestLogger->logBroadcast($scope, \count($this->contexts));
+
+            return;
+        }
+
+        // Handle ROUTE scope - sync all contexts on this route
+        if (Scope::isRouteBased($scope)) {
+            $parts = Scope::parse($scope);
+            $route = $parts[1] ?? null;
+
+            // If no specific route provided, broadcast to all routes
+            if ($route === null) {
+                // Find all route scopes and invalidate their caches
+                // Note: getKeys() returns cache keys with :initial or :update suffix
+                // We need to extract the base scope before invalidating
+                $seenScopes = [];
+                foreach ($this->viewCache->getKeys() as $cacheKey) {
+                    // Extract base scope by removing :initial or :update suffix
+                    $baseScope = preg_replace('/:(?:initial|update)$/', '', $cacheKey);
+
+                    // Only invalidate each base scope once
+                    if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
+                        $this->invalidateViewCache($baseScope);
+                        $seenScopes[$baseScope] = true;
+                    }
+                }
+                // Sync all contexts
+                $this->syncAllContexts();
+                $this->requestLogger->logBroadcast($scope, \count($this->contexts));
+            } else {
+                // Important: Invalidate cache using the full scope string (route:/path)
+                // The context's primary scope is "route:/path", not just "route"
+                $this->invalidateViewCache($scope);
+                $this->syncContextsOnRoute($route);
+                $this->requestLogger->logBroadcast($scope, 0);
+            }
+
+            return;
+        }
+
+        // Handle custom scopes (with wildcard support)
+        $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
+
+        // Invalidate cache for this scope
+        $this->invalidateViewCache($scope);
+
+        // Sync all matched contexts
+        foreach ($matchedContexts as $context) {
+            $context->sync();
+        }
+
+        $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
     }
 
     /**

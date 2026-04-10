@@ -25,8 +25,8 @@ final class TestBroker implements MessageBroker {
 
     private readonly string $nodeId;
 
-    /** @var callable(string $scope): void|null */
-    private $handler = null;
+    /** @var null|callable(string): void */
+    private $handler;
 
     private bool $connected = false;
 
@@ -89,5 +89,9 @@ final class TestBroker implements MessageBroker {
 
     public function getNodeId(): string {
         return $this->nodeId;
+    }
+
+    public function isConnected(): bool {
+        return $this->connected;
     }
 }

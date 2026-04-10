@@ -8,11 +8,12 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Timer;
 use PhpVia\Website\Examples\AllScopesExample;
 use PhpVia\Website\Examples\ChatRoomExample;
 use PhpVia\Website\Examples\ClientMonitorExample;
-use PhpVia\Website\Examples\ContactFormExample;
 use PhpVia\Website\Examples\ComponentsExample;
+use PhpVia\Website\Examples\ContactFormExample;
 use PhpVia\Website\Examples\CounterExample;
 use PhpVia\Website\Examples\GameOfLifeExample;
 use PhpVia\Website\Examples\GreeterExample;
@@ -154,14 +155,14 @@ $app->onShutdown(function (): void {
 // single broadcast. Without this, N connections joining simultaneously triggers
 // N broadcasts × N contexts = O(N²) renders that saturate the server.
 // Timer fires 200ms after the last event.
-/** @var int|null $presenceTimer */
+/** @var null|int $presenceTimer */
 $presenceTimer = null;
 
 $broadcastPresence = function () use ($app, &$presenceTimer): void {
     if ($presenceTimer !== null) {
-        \OpenSwoole\Timer::clear($presenceTimer);
+        Timer::clear($presenceTimer);
     }
-    $presenceTimer = \OpenSwoole\Timer::after(200, function () use ($app, &$presenceTimer): void {
+    $presenceTimer = Timer::after(200, function () use ($app, &$presenceTimer): void {
         $presenceTimer = null;
         $app->broadcast(Scope::GLOBAL);
     });

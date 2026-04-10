@@ -47,10 +47,12 @@ interface MessageBroker {
     public function publish(string $scope): void;
 
     /**
-     * Register a handler to be called when a foreign node publishes a scope invalidation.
+     * Register Via's internal scope-invalidation handler.
      *
-     * The handler receives only the scope string — own-node messages are silently
-     * filtered before the handler is invoked.
+     * @internal Called once by the Via constructor before connect(). Do not call this
+     *           directly — Via wires it automatically when you pass a broker via Config::withBroker().
+     *           Custom broker implementations must store the callable and invoke it for every
+     *           incoming message whose nodeId does not match getNodeId() (own-message filter).
      *
      * @param callable(string $scope): void $handler
      */
@@ -58,7 +60,19 @@ interface MessageBroker {
 
     /**
      * Return a unique identifier for this node/broker instance.
-     * Used to filter own messages on receive.
+     *
+     * @internal Used by Via internals to filter out own-node messages on receive.
+     *           Custom broker implementations must return a stable string that is unique
+     *           per process (e.g. random hex generated in the constructor).
      */
     public function getNodeId(): string;
+
+    /**
+     * Return true if the broker currently has an active connection to its backend.
+     *
+     * For InMemoryBroker this is always true after connect() is called.
+     * For Redis/NATS brokers this is false while in the reconnect backoff loop.
+     * Used by the /_health endpoint to signal degraded multi-node state.
+     */
+    public function isConnected(): bool;
 }

@@ -14,7 +14,6 @@ use OpenSwoole\Coroutine;
  * Must run inside an OpenSwoole coroutine context because NatsBroker::connect()
  * spawns a read-loop coroutine via Coroutine::create().
  */
-
 function natsAvailable(): bool {
     $sock = @fsockopen('127.0.0.1', 4222, $errno, $errstr, 0.5);
     if ($sock !== false) {

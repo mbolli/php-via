@@ -32,9 +32,6 @@ describe('Multi-node broadcast via TestBroker', function (): void {
         $viaA = createVia((new Config())->withBroker($brokerA));
         $viaB = createVia((new Config())->withBroker($brokerB));
 
-        // Wire brokers: simulate workerStart (connect + subscribe)
-        $brokerB->subscribe(fn (string $scope) => $viaB->syncLocally($scope));
-
         // Register a context on nodeB only
         $rendered = 0;
         $ctxB = new Context('ctx-b-1', '/test', $viaB);
@@ -62,9 +59,6 @@ describe('Multi-node broadcast via TestBroker', function (): void {
 
         $viaA = createVia((new Config())->withBroker($brokerA));
         $viaB = createVia((new Config())->withBroker($brokerB));
-
-        $brokerA->subscribe(fn (string $scope) => $viaA->syncLocally($scope));
-        $brokerB->subscribe(fn (string $scope) => $viaB->syncLocally($scope));
 
         $renderCount = 0;
         $ctxA = new Context('ctx-a-1', '/test', $viaA);
@@ -94,8 +88,6 @@ describe('Multi-node broadcast via TestBroker', function (): void {
 
         $viaA = createVia((new Config())->withBroker($brokerA));
         $viaB = createVia((new Config())->withBroker($brokerB));
-
-        $brokerB->subscribe(fn (string $scope) => $viaB->syncLocally($scope));
 
         // NodeB has a context on "room:lobby"
         $ctxB = new Context('ctx-b-room', '/chat', $viaB);

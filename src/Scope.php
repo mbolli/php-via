@@ -121,4 +121,32 @@ class Scope {
 
         return false;
     }
+
+    /**
+     * Validate a scope string received from the message broker wire.
+     *
+     * Accepts:
+     * - Built-in names: tab, route, session, global
+     * - Route-qualified: route:/any/path
+     * - Custom scopes: colon-separated segments of [a-zA-Z0-9_\-.*:/] — max 256 chars
+     *
+     * Rejects NUL bytes, shell metacharacters, overly long strings, or strings that
+     * don't match the expected scope grammar. This prevents a compromised or
+     * misconfigured broker from injecting arbitrary strings into syncLocally().
+     */
+    public static function isValidWireScope(string $scope): bool {
+        if ($scope === '' || \strlen($scope) > 256) {
+            return false;
+        }
+
+        // Built-in single-word scopes.
+        if (self::isBuiltIn($scope)) {
+            return true;
+        }
+
+        // All other scopes: colon-separated segments where each segment consists only
+        // of safe characters. Wildcards (*) are allowed for pattern-broadcast scopes
+        // (e.g. "room:*"). Slashes are required for route-qualified scopes (route:/path).
+        return (bool) preg_match('/^[a-zA-Z0-9_\-.:\/]+(?:\*[a-zA-Z0-9_\-.:\/]*)?$/', $scope);
+    }
 }

@@ -295,6 +295,7 @@ class Application {
                 // SSE still connected — reschedule instead of destroying.
                 $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
                 $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
+
                 return;
             }
 

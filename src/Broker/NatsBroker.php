@@ -23,6 +23,10 @@ use OpenSwoole\Coroutine\Client;
  * Usage:
  *   (new Config())->withBroker(new NatsBroker())
  *   (new Config())->withBroker(new NatsBroker('nats-host', 4222))
+ *   (new Config())->withBroker(new NatsBroker('nats-host', 4222, authToken: 'secret'))
+ *   (new Config())->withBroker(new NatsBroker('nats-host', 4243, tls: true))             // TLS, system CA
+ *   (new Config())->withBroker(new NatsBroker('nats-host', 4243, tls: true, tlsCaFile: '/etc/ssl/ca.pem'))
+ *   (new Config())->withBroker(new NatsBroker(subject: 'myapp.broadcast'))  // isolates from other apps on same NATS
  *
  * Requirements:
  *   - NATS server running (see NATS_INSTALL.md)
@@ -32,49 +36,44 @@ use OpenSwoole\Coroutine\Client;
  * node subscribes are lost. Use NATS JetStream for durable delivery.
  */
 final class NatsBroker implements MessageBroker {
-    private const string SUBJECT = 'via.broadcast';
+    private const int MAX_BACKOFF = 30;
 
     private readonly string $nodeId;
 
     private ?Client $client = null;
     private string $buf = '';
     private bool $running = false;
+    private bool $connected = false;
     private int $subSid = 1;
 
-    /** @var callable(string $scope): void|null */
-    private $handler = null;
+    /** @var null|callable(string): void */
+    private $handler;
+
+    /** @var null|callable(\Throwable): void */
+    private $errorHandler;
 
     public function __construct(
         private readonly string $host = '127.0.0.1',
         private readonly int $port = 4222,
+        #[\SensitiveParameter]
+        private readonly ?string $authToken = null,
+        private readonly string $subject = 'via.broadcast',
+        private readonly bool $tls = false,
+        private readonly ?string $tlsCaFile = null,
     ) {
         $this->nodeId = bin2hex(random_bytes(8));
     }
 
     public function connect(): void {
-        $this->client = new Client(SWOOLE_SOCK_TCP);
-        if (!$this->client->connect($this->host, $this->port, 3.0)) {
-            throw new \RuntimeException(
-                "NatsBroker: cannot connect to NATS at {$this->host}:{$this->port}: {$this->client->errMsg}"
-            );
-        }
-
-        $this->readLine(); // Discard INFO line.
-        $this->send('CONNECT ' . json_encode([
-            'verbose' => false,
-            'pedantic' => false,
-            'name' => 'php-via-broker-' . $this->nodeId,
-        ]) . "\r\n");
-
-        // Subscribe to the broadcast subject.
-        $this->send("SUB " . self::SUBJECT . " {$this->subSid}\r\n");
-
+        $this->doConnect();
+        $this->connected = true;
         $this->running = true;
         $this->startReadLoop();
     }
 
     public function disconnect(): void {
         $this->running = false;
+        $this->connected = false;
 
         if ($this->client !== null) {
             $this->client->close();
@@ -89,15 +88,72 @@ final class NatsBroker implements MessageBroker {
 
         $payload = json_encode(['scope' => $scope, 'nodeId' => $this->nodeId]);
         $bytes = \strlen($payload);
-        $this->send("PUB " . self::SUBJECT . " {$bytes}\r\n{$payload}\r\n");
+        $this->send('PUB ' . $this->subject . " {$bytes}\r\n{$payload}\r\n");
     }
 
     public function subscribe(callable $handler): void {
         $this->handler = $handler;
     }
 
+    public function setErrorHandler(callable $handler): void {
+        $this->errorHandler = $handler;
+    }
+
     public function getNodeId(): string {
         return $this->nodeId;
+    }
+
+    public function isConnected(): bool {
+        return $this->connected;
+    }
+
+    /**
+     * Establish (or re-establish) the NATS TCP connection and perform the
+     * INFO/CONNECT handshake and SUB registration.
+     *
+     * @throws \RuntimeException if the TCP connect fails
+     */
+    private function doConnect(): void {
+        $this->buf = ''; // Reset buffer on (re)connect.
+
+        $socketType = $this->tls ? (SWOOLE_SOCK_TCP | SWOOLE_SSL) : SWOOLE_SOCK_TCP;
+        $this->client = new Client($socketType);
+
+        if ($this->tls) {
+            $sslOpts = [
+                'ssl_verify_peer' => true,
+                'ssl_host_name' => $this->host,
+            ];
+
+            if ($this->tlsCaFile !== null) {
+                $sslOpts['ssl_cafile'] = $this->tlsCaFile;
+            }
+
+            $this->client->set($sslOpts);
+        }
+
+        if (!$this->client->connect($this->host, $this->port, 3.0)) {
+            throw new \RuntimeException(
+                "NatsBroker: cannot connect to NATS at {$this->host}:{$this->port}: {$this->client->errMsg}"
+            );
+        }
+
+        $this->readLine(); // Discard INFO line.
+
+        $connectOpts = [
+            'verbose' => false,
+            'pedantic' => false,
+            'name' => 'php-via-broker-' . $this->nodeId,
+        ];
+
+        if ($this->authToken !== null) {
+            $connectOpts['auth_token'] = $this->authToken;
+        }
+
+        $this->send('CONNECT ' . json_encode($connectOpts) . "\r\n");
+
+        // Subscribe to the broadcast subject.
+        $this->send('SUB ' . $this->subject . " {$this->subSid}\r\n");
     }
 
     private function send(string $data): void {
@@ -164,25 +220,58 @@ final class NatsBroker implements MessageBroker {
 
     /**
      * Spawn a dedicated read-loop coroutine that dispatches incoming NATS frames.
+     *
+     * On connection loss the loop reconnects with exponential backoff (1 s → 2 s → … → 30 s cap)
+     * via doConnect(), which re-establishes the TCP connection, handshake, and SUB.
      */
     private function startReadLoop(): void {
         Coroutine::create(function (): void {
-            while ($this->running && $this->client !== null) {
+            $backoff = 1;
+
+            while ($this->running) {
+                // Reconnect if the connection was lost.
+                if ($this->client === null) {
+                    try {
+                        $this->doConnect();
+                        $this->connected = true;
+                        $backoff = 1; // Reset on successful reconnect.
+                    } catch (\Throwable $e) {
+                        $this->notifyError($e);
+                        Coroutine::sleep($backoff);
+                        $backoff = min($backoff * 2, self::MAX_BACKOFF);
+
+                        continue;
+                    }
+                }
+
                 $line = $this->readLine();
 
                 if ($line === null) {
-                    break; // Connection closed.
+                    if (!$this->running) {
+                        break; // Intentional disconnect().
+                    }
+
+                    // Unexpected drop — null out and retry with backoff.
+                    $this->client = null;
+                    $this->connected = false;
+                    $this->notifyError(new \RuntimeException('NatsBroker: connection dropped, reconnecting'));
+                    Coroutine::sleep($backoff);
+                    $backoff = min($backoff * 2, self::MAX_BACKOFF);
+
+                    continue;
                 }
 
                 if ($line === 'PING') {
                     $this->send("PONG\r\n");
+
                     continue;
                 }
 
-                // MSG <subject> <sid> <bytes>
+                // MSG <subject> <sid> [<reply-to>] <bytes>
+                // Both 4-part and 5-part (reply-to) forms: byte count is always last.
                 if (str_starts_with($line, 'MSG ')) {
                     $parts = explode(' ', $line);
-                    $bytes = (int) ($parts[3] ?? $parts[2] ?? 0);
+                    $bytes = (int) end($parts);
 
                     $payload = $this->readBytes($bytes);
 
@@ -205,5 +294,11 @@ final class NatsBroker implements MessageBroker {
                 }
             }
         });
+    }
+
+    private function notifyError(\Throwable $e): void {
+        if ($this->errorHandler !== null) {
+            ($this->errorHandler)($e);
+        }
     }
 }

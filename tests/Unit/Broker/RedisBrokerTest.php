@@ -19,7 +19,6 @@ use OpenSwoole\Runtime;
  * intercepted and made coroutine-compatible. Normally Via enables this at
  * server startup; in tests we enable it explicitly.
  */
-
 function redisAvailable(): bool {
     $sock = @fsockopen('127.0.0.1', 6379, $errno, $errstr, 0.5);
     if ($sock !== false) {

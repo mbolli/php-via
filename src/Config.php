@@ -78,6 +78,8 @@ class Config {
 
     private ?MessageBroker $broker = null;
 
+    /** @var null|callable(\Throwable): void */
+    private $brokerErrorHandler;
 
     /**
      * Maximum action requests per IP per window (0 = unlimited).
@@ -385,6 +387,41 @@ class Config {
         $this->broker = $broker;
 
         return $this;
+    }
+
+    /**
+     * Register a callable to be invoked when the broker loses its connection and
+     * is attempting to reconnect. Use this to log alerts or expose health metrics.
+     *
+     * The callable receives the \Throwable that caused the drop.
+     *
+     * **Security note:** Do NOT log `$e->getMessage()` verbatim in production if the
+     * message may contain connection strings, auth tokens, or hostnames that should
+     * not appear in log files. Log a safe summary or use a structured logger with
+     * redaction.
+     *
+     * Example:
+     * ```php
+     * (new Config())
+     *     ->withBroker(new RedisBroker('127.0.0.1', 6379))
+     *     ->onBrokerError(fn (\Throwable $e) => $logger->error('Broker error: ' . $e->getMessage()))
+     * ```
+     *
+     * @param callable(\Throwable): void $handler
+     */
+    public function onBrokerError(callable $handler): self {
+        $this->brokerErrorHandler = $handler;
+
+        return $this;
+    }
+
+    /**
+     * Return the configured broker error handler, or null if none was set.
+     *
+     * @return null|callable(\Throwable): void
+     */
+    public function getBrokerErrorHandler(): ?callable {
+        return $this->brokerErrorHandler;
     }
 
     /**
