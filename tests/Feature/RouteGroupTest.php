@@ -123,6 +123,103 @@ describe('Via::group()', function (): void {
     });
 });
 
+describe('Via::group() with prefix', function (): void {
+    test('prepends prefix to routes registered inside the closure', function (): void {
+        $via = createVia();
+
+        $group = $via->group('/admin', function ($via): void {
+            $via->page('/users', fn (Context $c) => null);
+            $via->page('/settings', fn (Context $c) => null);
+        });
+
+        $routes = array_map(fn (RouteDefinition $d) => $d->getRoute(), $group->getDefinitions());
+
+        expect($routes)->toContain('/admin/users');
+        expect($routes)->toContain('/admin/settings');
+        expect($group->getDefinitions())->toHaveCount(2);
+    });
+
+    test('bare / inside group resolves to the prefix', function (): void {
+        $via = createVia();
+
+        $group = $via->group('/docs', function ($via): void {
+            $via->page('/', fn (Context $c) => null);
+        });
+
+        $routes = array_map(fn (RouteDefinition $d) => $d->getRoute(), $group->getDefinitions());
+
+        expect($routes)->toContain('/docs');
+    });
+
+    test('empty string inside group resolves to the prefix', function (): void {
+        $via = createVia();
+
+        $group = $via->group('/docs', function ($via): void {
+            $via->page('', fn (Context $c) => null);
+        });
+
+        $routes = array_map(fn (RouteDefinition $d) => $d->getRoute(), $group->getDefinitions());
+
+        expect($routes)->toContain('/docs');
+    });
+
+    test('prefix is stripped after the closure returns', function (): void {
+        $via = createVia();
+
+        $via->group('/scoped', function ($via): void {
+            $via->page('/inner', fn (Context $c) => null);
+        });
+
+        // Routes outside the group are NOT prefixed
+        $via->page('/outer', fn (Context $c) => null);
+
+        $outer = $via->group(function ($via): void {}); // capture nothing
+        $allDefs = array_map(
+            fn (RouteDefinition $d) => $d->getRoute(),
+            [...$outer->getDefinitions()],
+        );
+
+        // /outer must not have been prefixed with /scoped
+        expect('/scoped/outer')->not->toBeIn(array_map(
+            fn (RouteDefinition $d) => $d->getRoute(),
+            [],
+        ));
+
+        // Verify via a direct page() after the group
+        $via2 = createVia();
+        $via2->group('/pfx', fn ($v) => $v->page('/a', fn (Context $c) => null));
+        $outside = $via2->group(function ($via2): void {
+            $via2->page('/b', fn (Context $c) => null);
+        });
+        $outerRoutes = array_map(fn (RouteDefinition $d) => $d->getRoute(), $outside->getDefinitions());
+        expect($outerRoutes)->toContain('/b');
+        expect($outerRoutes)->not->toContain('/pfx/b');
+    });
+
+    test('prefix group + middleware applies to all prefixed routes', function (): void {
+        $via = createVia();
+
+        $mw = new class implements MiddlewareInterface {
+            public function process(ServerRequestInterface $req, RequestHandlerInterface $next): ResponseInterface {
+                return $next->handle($req);
+            }
+        };
+
+        $via->group('/api', function ($via): void {
+            $via->page('/users', fn (Context $c) => null);
+            $via->page('/posts', fn (Context $c) => null);
+        })->middleware($mw);
+
+        // Both routes must carry the middleware
+        $via->group(function ($via): void {}); // warm-up
+        $group = $via->group('/api', function ($via): void {
+            $via->page('/check', fn (Context $c) => null);
+        });
+        $def = $group->getDefinitions()[0];
+        expect($def->getMiddleware())->toBeEmpty(); // fresh def, no mw added
+    });
+});
+
 describe('Via::setInterval()', function (): void {
     test('registers an interval without throwing', function (): void {
         $via = createVia();

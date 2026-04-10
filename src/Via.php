@@ -105,6 +105,9 @@ class Via {
     /** @var array<string, RouteDefinition> Route definitions indexed by route pattern */
     private array $routeDefinitions = [];
 
+    /** Active URL prefix set by the currently executing group() closure */
+    private string $groupPrefix = '';
+
     public function __construct(private Config $config) {
         // Initialize support classes
         $this->logger = new Logger($this->config->getLogLevel());
@@ -343,6 +346,11 @@ class Via {
      * @param callable $handler Function that receives a Context instance
      */
     public function page(string $route, callable $handler): RouteDefinition {
+        if ($this->groupPrefix !== '') {
+            $base = rtrim($this->groupPrefix, '/');
+            $route = ($route === '' || $route === '/') ? $base : $base . '/' . ltrim($route, '/');
+        }
+
         $definition = new RouteDefinition($route, $handler);
         $this->routeDefinitions[$route] = $definition;
         $this->router->registerRoute($route, $handler);
@@ -351,30 +359,50 @@ class Via {
     }
 
     /**
-     * Register a group of routes that share middleware, without a URL prefix.
+     * Register a group of routes that share a URL prefix and/or middleware.
      *
-     * Call `->middleware()` on the returned RouteGroup to apply middleware to every
-     * route registered inside the closure. Routes still use their full paths — the
-     * group only affects middleware, not URL structure.
+     * Optionally pass a URL prefix as the first argument — every `page()` call inside
+     * the closure will have the prefix prepended to its route. Call `->middleware()` on
+     * the returned RouteGroup to apply shared middleware to all routes in the group.
      *
-     * Example:
      * ```php
+     * // With prefix + middleware
+     * $app->group('/admin', function (Via $app): void {
+     *     $app->page('/', fn(Context $c) => $c->view('admin.html.twig'));      // → /admin
+     *     $app->page('/users', fn(Context $c) => $c->view('users.html.twig')); // → /admin/users
+     * })->middleware(new AuthMiddleware());
+     *
+     * // Middleware-only (no prefix, backward-compatible)
      * $app->group(function (Via $app): void {
-     *     $app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'));
-     *     $app->page('/admin/users', fn(Context $c) => $c->view('users.html.twig'));
-     * })->middleware(new AuthMiddleware(), new AuditLogMiddleware());
+     *     $app->page('/login/dashboard', fn(Context $c) => ...);
+     *     $app->page('/login/profile', fn(Context $c) => ...);
+     * })->middleware(new AuthMiddleware());
      * ```
      *
-     * @param callable(Via): void $fn Closure in which you register routes via $app->page()
+     * @param callable|string          $prefixOrFn URL prefix string, or the route closure for prefix-less grouping
+     * @param null|callable(Via): void $fn         Route closure; omit when $prefixOrFn is the closure
      */
-    public function group(callable $fn): RouteGroup {
+    public function group(callable|string $prefixOrFn, ?callable $fn = null): RouteGroup {
+        if (\is_callable($prefixOrFn)) {
+            $prefix = '';
+            $fn = $prefixOrFn;
+        } else {
+            $prefix = $prefixOrFn;
+        }
+
         $before = array_keys($this->routeDefinitions);
-        $fn($this);
+        $this->groupPrefix = $prefix;
+
+        try {
+            $fn($this);
+        } finally {
+            $this->groupPrefix = '';
+        }
         $after = array_keys($this->routeDefinitions);
 
         // Collect only route definitions added inside the closure
         $newRoutes = array_diff($after, $before);
-        $definitions = array_map(fn (string $r) => $this->routeDefinitions[$r], $newRoutes);
+        $definitions = array_values(array_map(fn (string $r) => $this->routeDefinitions[$r], $newRoutes));
 
         return new RouteGroup($definitions);
     }

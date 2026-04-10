@@ -134,14 +134,10 @@ TypeRaceExample::register($app);
 MissionControlExample::register($app);
 
 $app->onStart(function () use ($app): void {
-    StockTickerExample::startTimer($app);
-    GameOfLifeExample::startTimer($app);
     LiveAuctionExample::startTimer($app);
 });
 
 $app->onShutdown(function (): void {
-    StockTickerExample::stopTimer();
-    GameOfLifeExample::stopTimer();
     LiveAuctionExample::stopTimer();
 });
 
@@ -377,121 +373,112 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
     });
 });
 
-// Docs landing
-$app->page('/docs', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs'));
-    $c->view('docs/index.html.twig');
-});
+// ─── Docs routes ─────────────────────────────────────────────────────────────
 
-// Getting started (tutorial with embedded demo)
-$app->page('/docs/getting-started', function (Context $c) use ($codeResultDemo): void {
-    $c->scope(Scope::routeScope('/docs/getting-started'));
+$app->group('/docs', function (Via $app) use ($codeResultDemo, $scopeComparisonDemo): void {
+    // Landing
+    $app->page('/', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs'));
+        $c->view('docs/index.html.twig');
+    });
 
-    $demo = $c->component($codeResultDemo, 'gs-demo');
+    // Getting started (tutorial with embedded demo)
+    $app->page('/getting-started', function (Context $c) use ($codeResultDemo): void {
+        $c->scope(Scope::routeScope('/docs/getting-started'));
 
-    $c->view('docs/getting-started.html.twig', [
-        'demo' => $demo(),
-    ]);
-});
+        $demo = $c->component($codeResultDemo, 'gs-demo');
 
-// Signals concept page
-$app->page('/docs/signals', function (Context $c) use ($scopeComparisonDemo): void {
-    $c->scope(Scope::routeScope('/docs/signals'));
+        $c->view('docs/getting-started.html.twig', [
+            'demo' => $demo(),
+        ]);
+    });
 
-    $demo = $c->component($scopeComparisonDemo, 'scope-demo');
+    // Signals concept page
+    $app->page('/signals', function (Context $c) use ($scopeComparisonDemo): void {
+        $c->scope(Scope::routeScope('/docs/signals'));
 
-    $c->view('docs/signals.html.twig', [
-        'demo' => $demo(),
-    ]);
-});
+        $demo = $c->component($scopeComparisonDemo, 'scope-demo');
 
-// Scopes concept page
-$app->page('/docs/scopes', function (Context $c) use ($scopeComparisonDemo): void {
-    $c->scope(Scope::routeScope('/docs/scopes'));
+        $c->view('docs/signals.html.twig', [
+            'demo' => $demo(),
+        ]);
+    });
 
-    $demo = $c->component($scopeComparisonDemo, 'scope-demo');
+    // Scopes concept page
+    $app->page('/scopes', function (Context $c) use ($scopeComparisonDemo): void {
+        $c->scope(Scope::routeScope('/docs/scopes'));
 
-    $c->view('docs/scopes.html.twig', [
-        'demo' => $demo(),
-    ]);
-});
+        $demo = $c->component($scopeComparisonDemo, 'scope-demo');
 
-// Actions
-$app->page('/docs/actions', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/actions'));
-    $c->view('docs/actions.html.twig');
-});
+        $c->view('docs/scopes.html.twig', [
+            'demo' => $demo(),
+        ]);
+    });
 
-// Views
-$app->page('/docs/views', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/views'));
-    $c->view('docs/views.html.twig');
-});
+    $app->page('/actions', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/actions'));
+        $c->view('docs/actions.html.twig');
+    });
 
-// Components
-$app->page('/docs/components', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/components'));
-    $c->view('docs/components.html.twig');
-});
+    $app->page('/views', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/views'));
+        $c->view('docs/views.html.twig');
+    });
 
-// Broadcasting
-$app->page('/docs/broadcasting', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/broadcasting'));
-    $c->view('docs/broadcasting.html.twig');
-});
+    $app->page('/components', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/components'));
+        $c->view('docs/components.html.twig');
+    });
 
-// Multi-node Broker
-$app->page('/docs/broker', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/broker'));
-    $c->view('docs/broker.html.twig');
-});
+    $app->page('/broadcasting', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/broadcasting'));
+        $c->view('docs/broadcasting.html.twig');
+    });
 
-// Lifecycle
-$app->page('/docs/lifecycle', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/lifecycle'));
-    $c->view('docs/lifecycle.html.twig');
-});
+    $app->page('/broker', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/broker'));
+        $c->view('docs/broker.html.twig');
+    });
 
-// Middleware & Security
-$app->page('/docs/middleware', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/middleware'));
-    $c->view('docs/middleware.html.twig');
-});
+    $app->page('/lifecycle', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/lifecycle'));
+        $c->view('docs/lifecycle.html.twig');
+    });
 
-// Twig templates
-$app->page('/docs/twig', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/twig'));
-    $c->view('docs/twig.html.twig');
-});
+    $app->page('/middleware', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/middleware'));
+        $c->view('docs/middleware.html.twig');
+    });
 
-// Deployment
-$app->page('/docs/deployment', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/deployment'));
-    $c->view('docs/deployment.html.twig');
-});
+    $app->page('/twig', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/twig'));
+        $c->view('docs/twig.html.twig');
+    });
 
-// API reference
-$app->page('/docs/api', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/api'));
-    $c->view('docs/api.html.twig');
-});
+    $app->page('/deployment', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/deployment'));
+        $c->view('docs/deployment.html.twig');
+    });
 
-// Design decisions
-$app->page('/docs/design', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/design'));
-    $c->view('docs/design.html.twig');
-});
+    $app->page('/api', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/api'));
+        $c->view('docs/api.html.twig');
+    });
 
-// Comparisons
-$app->page('/docs/comparisons', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/comparisons'));
-    $c->view('docs/comparisons.html.twig');
-});
+    $app->page('/design', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/design'));
+        $c->view('docs/design.html.twig');
+    });
 
-// FAQ / common pitfalls
-$app->page('/docs/faq', function (Context $c): void {
-    $c->scope(Scope::routeScope('/docs/faq'));
-    $c->view('docs/faq.html.twig');
+    $app->page('/comparisons', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/comparisons'));
+        $c->view('docs/comparisons.html.twig');
+    });
+
+    $app->page('/faq', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/faq'));
+        $c->view('docs/faq.html.twig');
+    });
 });
 
 // Examples gallery

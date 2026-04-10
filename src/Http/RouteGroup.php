@@ -7,14 +7,16 @@ namespace Mbolli\PhpVia\Http;
 use Psr\Http\Server\MiddlewareInterface;
 
 /**
- * A group of route definitions that share middleware.
+ * A group of route definitions that share a URL prefix and/or middleware.
  *
- * Returned by Via::group() to support fluent shared middleware registration:
+ * Returned by Via::group() to support fluent shared middleware registration.
+ * Routes in the group may all share a URL prefix (if one was given to group())
+ * and/or a set of middleware:
  *
  * ```php
- * $app->group(function (Via $app): void {
- *     $app->page('/admin', fn(Context $c) => ...);
- *     $app->page('/admin/users', fn(Context $c) => ...);
+ * $app->group('/admin', function (Via $app): void {
+ *     $app->page('/', fn(Context $c) => ...);      // → /admin
+ *     $app->page('/users', fn(Context $c) => ...); // → /admin/users
  * })->middleware(new AuthMiddleware());
  * ```
  */
