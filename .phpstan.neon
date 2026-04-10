@@ -14,6 +14,10 @@ parameters:
     - message: '#Timer::clear\(\)#'
       identifier: arguments.count
   excludePaths:
+    # src/Via.php references OpenSwoole\Event::EVENT_READ which is missing from
+    # the OpenSwoole PHPStan stubs, causing an internal analyser crash (not a real
+    # bug). The file cannot be analysed until upstream stubs are fixed.
+    - src/Via.php
     # DoomExample is work-in-progress and not registered in the website app.
     - website/src/Examples/DoomExample.php
   editorUrl: 'phpstorm://open?file=%%file%%&line=%%line%%'

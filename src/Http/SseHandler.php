@@ -207,6 +207,9 @@ class SseHandler {
                 if (!isset($this->via->contexts[$contextId])) {
                     $this->via->log('info', "Context destroyed while SSE active, sending reload: {$contextId}");
 
+                    // isWritable() guard: defensive check — context destruction and
+                    // response close can race in separate coroutines on reconnect.
+                    // @phpstan-ignore if.alwaysTrue
                     if ($response->isWritable()) {
                         try {
                             $response->write($sse->executeScript('window.location.reload()'));
