@@ -4,7 +4,15 @@ All notable changes to php-via will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-10
+
 ### New Features
+
+- **Proactive GC timer** — `Via` now runs `gc_collect_cycles()` on a configurable periodic timer (default 30 s) to prevent PHP's cycle collector from causing unpredictable mid-request pauses as circular references accumulate in the long-running process.
+  - `Config::withGcInterval(int $ms)` — set interval in milliseconds; pass `0` to disable and rely on PHP's automatic trigger
+  - `Via::runGcCycle()` — the GC tick body, public so it can be called from tests or triggered manually
+  - Each run logs at `debug` level: `GC: N cycles freed, mem=X MB peak=Y MB`
+  - `Stats::getAll()` now includes `gc_runs` and `gc_cycles_freed` counters
 
 - **`Via::setInterval(callable $callback, int $ms): void`** — Process-wide recurring timer. Started automatically when the server starts, cleared on shutdown. No manual `onStart`/`onShutdown` wiring needed.
 
@@ -16,7 +24,7 @@ All notable changes to php-via will be documented in this file.
       $app->page('/users', fn(Context $c) => ...); // → /admin/users
   })->middleware(new AuthMiddleware());
 
-  // Middleware-only (no prefix, backward-compatible)
+  // Middleware-only (no prefix)
   $app->group(function (Via $app): void {
       $app->page('/login/dashboard', fn(Context $c) => ...);
       $app->page('/login/profile', fn(Context $c) => ...);

@@ -92,6 +92,12 @@ class Config {
     private int $actionRateWindow = 60;
 
     /**
+     * Interval in milliseconds between proactive gc_collect_cycles() calls.
+     * 0 disables the timer and leaves GC entirely to PHP's automatic trigger.
+     */
+    private int $gcIntervalMs = 30_000;
+
+    /**
      * Set basePath from reverse proxy header.
      * Called on first request with X-Base-Path header from Caddy.
      */
@@ -290,6 +296,26 @@ class Config {
 
     public function getActionRateWindow(): int {
         return $this->actionRateWindow;
+    }
+
+    /**
+     * Configure the proactive GC timer interval.
+     *
+     * php-via runs as a persistent process; PHP's cycle collector only fires when
+     * its internal root buffer fills (~10,000 new roots), which can cause sudden
+     * micro-pauses under load. Calling gc_collect_cycles() on a fixed timer spreads
+     * that work out predictably during idle gaps between requests.
+     *
+     * @param int $ms Timer interval in milliseconds. Pass 0 to disable.
+     */
+    public function withGcInterval(int $ms): self {
+        $this->gcIntervalMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getGcIntervalMs(): int {
+        return $this->gcIntervalMs;
     }
 
     /**

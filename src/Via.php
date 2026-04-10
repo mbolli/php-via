@@ -640,6 +640,19 @@ class Via {
                     }
                 }
 
+                // Proactive GC timer: call gc_collect_cycles() on a fixed schedule
+                // to prevent unpredictable mid-request pauses. PHP's automatic cycle
+                // collector fires when its root buffer fills (~10,000 roots); calling
+                // it periodically spreads the work out during idle gaps between requests.
+                $gcIntervalMs = $this->config->getGcIntervalMs();
+                if ($gcIntervalMs > 0) {
+                    $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
+                    }
+                }
+
                 // Connect broker and subscribe to foreign invalidations.
                 // Must run inside workerStart (coroutine context) so that async
                 // brokers (Redis, NATS) can spawn their receive-loop coroutines.
@@ -802,6 +815,20 @@ class Via {
      */
     public function getStats(): Stats {
         return $this->stats;
+    }
+
+    /**
+     * Run one GC cycle: collect circular references, log memory usage, update stats.
+     *
+     * Called by the GC timer (configurable via Config::withGcInterval()) and
+     * exposed publicly so it can be invoked directly in tests or from user code.
+     */
+    public function runGcCycle(): void {
+        $cycles = gc_collect_cycles();
+        $memMb = round(memory_get_usage(true) / 1_048_576, 1);
+        $peakMb = round(memory_get_peak_usage(true) / 1_048_576, 1);
+        $this->log('debug', "GC: {$cycles} cycles freed, mem={$memMb}MB peak={$peakMb}MB");
+        $this->stats->trackGc($cycles);
     }
 
     /**

@@ -24,6 +24,10 @@ class Stats {
     private int $activeContexts = 0;
     private float $totalRequestTime = 0.0;
 
+    // GC stats
+    private int $gcRuns = 0;
+    private int $gcCyclesFreed = 0;
+
     /**
      * Track a render operation.
      *
@@ -75,6 +79,16 @@ class Stats {
     }
 
     /**
+     * Track a GC run.
+     *
+     * @param int $cyclesFreed Number of cycles freed, as returned by gc_collect_cycles()
+     */
+    public function trackGc(int $cyclesFreed): void {
+        ++$this->gcRuns;
+        $this->gcCyclesFreed += $cyclesFreed;
+    }
+
+    /**
      * Get render statistics summary.
      *
      * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
@@ -108,6 +122,8 @@ class Stats {
             'render_count' => $this->renderCount,
             'avg_render_time' => $this->renderCount > 0 ? $this->totalRenderTime / $this->renderCount : 0.0,
             'avg_request_time' => $this->requests > 0 ? $this->totalRequestTime / $this->requests : 0.0,
+            'gc_runs' => $this->gcRuns,
+            'gc_cycles_freed' => $this->gcCyclesFreed,
         ];
     }
 
@@ -123,6 +139,8 @@ class Stats {
         $this->sseConnections = 0;
         $this->actions = 0;
         $this->totalRequestTime = 0.0;
+        $this->gcRuns = 0;
+        $this->gcCyclesFreed = 0;
         // Note: active_sse and active_contexts are not reset
     }
 }
