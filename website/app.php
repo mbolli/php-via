@@ -133,10 +133,6 @@ LiveAuctionExample::register($app);
 TypeRaceExample::register($app);
 MissionControlExample::register($app);
 
-$app->onStart(function () use ($app): void {
-    LiveAuctionExample::startTimer($app);
-});
-
 $app->onShutdown(function (): void {
     LiveAuctionExample::stopTimer();
 });

@@ -150,10 +150,6 @@ final class LiveAuctionExample {
 
     // ── Timer ──────────────────────────────────────────────────────────────────
 
-    public static function startTimer(Via $app): void {
-        self::maybeStartTimer($app);
-    }
-
     public static function stopTimer(): void {
         if (self::$timerId !== null) {
             Timer::clear(self::$timerId);
