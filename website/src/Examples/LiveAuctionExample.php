@@ -150,7 +150,7 @@ final class LiveAuctionExample {
 
     // ── Timer ──────────────────────────────────────────────────────────────────
 
-    public static function stopTimer(): void {
+    private static function stopTimer(): void {
         if (self::$timerId !== null) {
             Timer::clear(self::$timerId);
             self::$timerId = null;

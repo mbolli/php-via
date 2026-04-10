@@ -133,10 +133,6 @@ LiveAuctionExample::register($app);
 TypeRaceExample::register($app);
 MissionControlExample::register($app);
 
-$app->onShutdown(function (): void {
-    LiveAuctionExample::stopTimer();
-});
-
 // ─── Shared state ────────────────────────────────────────────────────────────
 
 // (Scoped signals handle shared counter state — no globalState needed)
