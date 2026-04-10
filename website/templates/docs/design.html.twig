@@ -104,16 +104,18 @@ $c->scope('room:lobby');     // a custom group you define
         connect/disconnect time, and routes patches to the right clients automatically.
     </p>
     <p>
-        The tradeoff is that the scope system is currently single-process only — it uses in-process
-        PHP arrays shared across OpenSwoole coroutines, not an external broker. Multi-server deployments require an external state layer
-        (not yet built). <a href="/docs/comparisons#datastar-ecosystem">Datapages with NATS</a>
-        is the right choice today if you need multi-instance horizontal scaling.
+        The tradeoff is that the scope system uses in-process PHP arrays shared across OpenSwoole
+        coroutines — not an external store. For multi-server deployments you wire in a
+        <a href="/docs/broker">message broker</a> (<code>RedisBroker</code> or <code>NatsBroker</code>)
+        so <code>broadcast()</code> calls propagate scope invalidations across nodes. Adding a broker
+        requires one line in your config and doesn't change any application code.
     </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/scopes">Scopes</a> — the full scope API and custom scope patterns</li>
         <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to groups of clients</li>
+        <li><a href="/docs/broker">Multi-node broker</a> — Redis and NATS brokers for horizontal scaling</li>
         <li><a href="/docs/comparisons">Comparisons</a> — how php-via positions against Livewire, htmx, Inertia, LiveView</li>
         <li><a href="/docs/deployment">Deployment</a> — running OpenSwoole with native Brotli or behind a Caddy proxy</li>
     </ul>

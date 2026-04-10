@@ -202,6 +202,25 @@ $c->onDisconnect(function (Context $c) use ($room, $app): void {
 });
     {% endverbatim %}{% endcode %}
 
+    <h3 id="context-cookies"><code>cookie(string $name): ?string</code></h3>
+    <h3><code>setCookie(string $name, string $value, int $expires = 0, string $path = '/', bool $httpOnly = true, bool $secure = true, string $sameSite = 'Lax'): void</code></h3>
+    <h3><code>deleteCookie(string $name, string $path = '/'): void</code></h3>
+    <p>Coroutine-safe cookie access. <code>cookie()</code> reads a request cookie (replaces <code>$_COOKIE</code>, which is unsafe in OpenSwoole). <code>setCookie()</code> queues a cookie for the response with secure defaults. <code>deleteCookie()</code> expires a cookie immediately. Cookies queued during a page load are flushed by <code>RequestHandler</code>; cookies set inside an action are flushed by <code>ActionHandler</code>.</p>
+    {% code 'php' %}{% verbatim %}
+$theme = $c->cookie('theme');        // null if not set
+$c->setCookie('theme', 'dark');      // Secure, HttpOnly, SameSite=Lax by default
+$c->deleteCookie('theme');           // expires cookie immediately
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="context-file"><code>file(string $name): ?array</code></h3>
+    <p>Read a file from a multipart form upload. Returns the upload array (<code>name</code>, <code>type</code>, <code>tmp_name</code>, <code>size</code>) or <code>null</code> if the field is missing or errored. Use Datastar's <code>contentType: 'form'</code> modifier to submit the form as a real multipart POST.</p>
+    {% code 'php' %}{% verbatim %}
+$upload = $c->file('avatar');
+if ($upload !== null) {
+    move_uploaded_file($upload['tmp_name'], '/uploads/' . basename($upload['name']));
+}
+    {% endverbatim %}{% endcode %}
+
     <h3 id="context-getters">Getters</h3>
     {% code 'php' %}{% verbatim %}
 $c->getId();              // unique context ID
@@ -301,6 +320,9 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
     ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
     ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
+    // Multi-node broker (optional — required only for multi-server deployments)
+    ->withBroker(new RedisBroker('127.0.0.1', 6379))  // or new NatsBroker(...)
+    ->onBrokerError(fn(\Throwable $e) => error_log($e->getMessage())) // called on reconnect
     {% endverbatim %}{% endcode %}
 
     <p>
