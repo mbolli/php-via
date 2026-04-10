@@ -528,7 +528,8 @@ class Via {
             $this->requestHandler->setRoutes($this->router->getRoutes());
 
             $this->server->on('start', function (Server $server): void {
-                $this->log('info', "Via server started on {$this->config->getHost()}:{$this->config->getPort()}");
+                $scheme = $this->config->isHttps() ? 'https' : 'http';
+                $this->log('info', "Via server started on {$scheme}://{$this->config->getHost()}:{$this->config->getPort()}");
             });
 
             $this->server->on('workerStart', function (Server $server, int $workerId): void {

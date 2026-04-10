@@ -502,5 +502,6 @@ $app->page('/examples', function (Context $c): void {
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
-echo "⚡ php-via website running on http://0.0.0.0:3000\n";
+$startScheme = $config->isHttps() ? 'https' : 'http';
+echo "⚡ php-via website running on {$startScheme}://0.0.0.0:3000\n";
 $app->start();
