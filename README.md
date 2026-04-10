@@ -150,6 +150,16 @@ $b = $c->component($counterWidget, 'b');
 $c->onDisconnect(fn() => /* cleanup */);
 $c->setInterval(fn() => $c->sync(), 2000);  // auto-cleaned on disconnect
 $app->onClientConnect(fn(string $id) => /* ... */);
+$app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide timer
+```
+
+### Route Groups — shared prefix and/or middleware
+
+```php
+$app->group('/admin', function (Via $app): void {
+    $app->page('/', fn(Context $c) => ...);      // → /admin
+    $app->page('/users', fn(Context $c) => ...); // → /admin/users
+})->middleware(new AuthMiddleware());
 ```
 
 ### Broadcasting — push updates to other connected clients
@@ -222,30 +232,10 @@ cd php-via && composer install
 
 cd website && php app.php    # run website + examples on :3000
 
-vendor/bin/pest              # 147 tests, 323 assertions
+vendor/bin/pest              # run tests
 composer phpstan             # PHPStan level 6
 composer cs-fix              # code style
 ```
-
-## Deployment
-
-Single OpenSwoole process behind a reverse proxy. See [deploy/](deploy/) for systemd + Caddy configs.
-
-```
-# Direct TLS — php-via handles Brotli natively
-Browser → OpenSwoole :3000 (HTTPS/HTTP2 + Brotli)
-
-# Proxy — Caddy terminates TLS, php-via compresses via h2c
-Browser → Caddy (TLS) → OpenSwoole :3000 (h2c + Brotli)
-```
-
-See the [Deployment docs](https://via.zweiundeins.gmbh/docs/deployment) for setup guides for both scenarios.
-
-## Roadmap
-
-- [ ] Route groups (`$app->group('/prefix', fn)`)
-- [ ] `initAtBoot()` — explicit hook for boot-time shared state initialisation
-- [ ] Global intervals (`$app->setInterval()` — one shared timer per server process)
 
 ## Credits
 
