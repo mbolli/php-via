@@ -13,6 +13,7 @@ use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
+use Mbolli\PhpVia\Http\RouteGroup;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Rendering\ViewCache;
@@ -67,6 +68,12 @@ class Via {
 
     /** @var array<callable> Callbacks to run on graceful shutdown */
     private array $shutdownCallbacks = [];
+
+    /** @var array<array{callable, int}> Global process-wide intervals registered via setInterval() */
+    private array $serverIntervals = [];
+
+    /** @var list<int> Timer IDs for running server intervals (populated in workerStart) */
+    private array $serverIntervalIds = [];
 
     /** @var array<callable(Context): void> Callbacks to run when a client connects via SSE */
     private array $clientConnectCallbacks = [];
@@ -344,6 +351,35 @@ class Via {
     }
 
     /**
+     * Register a group of routes that share middleware, without a URL prefix.
+     *
+     * Call `->middleware()` on the returned RouteGroup to apply middleware to every
+     * route registered inside the closure. Routes still use their full paths — the
+     * group only affects middleware, not URL structure.
+     *
+     * Example:
+     * ```php
+     * $app->group(function (Via $app): void {
+     *     $app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'));
+     *     $app->page('/admin/users', fn(Context $c) => $c->view('users.html.twig'));
+     * })->middleware(new AuthMiddleware(), new AuditLogMiddleware());
+     * ```
+     *
+     * @param callable(Via): void $fn Closure in which you register routes via $app->page()
+     */
+    public function group(callable $fn): RouteGroup {
+        $before = array_keys($this->routeDefinitions);
+        $fn($this);
+        $after = array_keys($this->routeDefinitions);
+
+        // Collect only route definitions added inside the closure
+        $newRoutes = array_diff($after, $before);
+        $definitions = array_map(fn (string $r) => $this->routeDefinitions[$r], $newRoutes);
+
+        return new RouteGroup($definitions);
+    }
+
+    /**
      * Unified broadcast method supporting built-in and custom scopes.
      *
      * Examples:
@@ -561,6 +597,21 @@ class Via {
                     $callback();
                 }
 
+                // Register process-wide intervals (registered via setInterval())
+                foreach ($this->serverIntervals as [$callback, $ms]) {
+                    $id = Timer::tick($ms, function () use ($callback): void {
+                        try {
+                            $callback();
+                        } catch (\Throwable $e) {
+                            $this->log('error', 'setInterval callback threw: ' . $e->getMessage());
+                        }
+                    });
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
+                    }
+                }
+
                 // Connect broker and subscribe to foreign invalidations.
                 // Must run inside workerStart (coroutine context) so that async
                 // brokers (Redis, NATS) can spawn their receive-loop coroutines.
@@ -612,6 +663,30 @@ class Via {
      */
     public function onShutdown(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a process-wide recurring timer that fires every $ms milliseconds.
+     *
+     * Unlike Context::setInterval() (per-tab), this timer runs once per server process
+     * and is shared across all connections. Use it for background jobs: periodic broadcasts,
+     * cache refreshes, cleanup tasks, leaderboard ticks.
+     *
+     * The callback is wrapped in a try/catch — errors are logged and the timer continues.
+     * All registered intervals are automatically cleared on graceful shutdown.
+     *
+     * Example:
+     * ```php
+     * $app->setInterval(function () use ($app): void {
+     *     $app->broadcast(Scope::GLOBAL);
+     * }, 5000); // every 5 seconds
+     * ```
+     *
+     * @param callable(): void $callback Called every $ms milliseconds
+     * @param int              $ms       Interval in milliseconds (must be > 0)
+     */
+    public function setInterval(callable $callback, int $ms): void {
+        $this->serverIntervals[] = [$callback, $ms];
     }
 
     /**
@@ -1041,6 +1116,14 @@ class Via {
      */
     private function executeShutdownCallbacks(): void {
         $this->shuttingDown = true;
+
+        // Cancel process-wide intervals registered via setInterval()
+        foreach ($this->serverIntervalIds as $id) {
+            Timer::clear($id);
+        }
+
+        $this->serverIntervalIds = [];
+
         foreach ($this->shutdownCallbacks as $callback) {
             try {
                 $callback();

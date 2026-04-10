@@ -82,25 +82,20 @@ $c->setInterval(function () use ($elapsed, $c): void {
     <h2 id="server-timers">Server-level timers</h2>
     <p>
         For timers that run regardless of who is connected (e.g. a stock price tick), use
-        <code>onStart</code> with an OpenSwoole <code>Timer::tick()</code>, and clean up in <code>onShutdown</code>:
+        <code>$app->setInterval()</code>. It registers the timer once and clears it automatically on shutdown:
     </p>
     {% code 'php' %}{% verbatim %}
-$timerId = null;
-
-$app->onStart(function () use ($app, &$timerId): void {
-    $timerId = Timer::tick(5000, function () use ($app): void {
-        $price = fetchStockPrice();
-        $app->setGlobalState('price', $price);
-        $app->broadcast(Scope::routeScope('/ticker'));
-    });
-});
-
-$app->onShutdown(function () use (&$timerId): void {
-    if ($timerId !== null) {
-        Timer::clear($timerId);
-    }
-});
+$app->setInterval(function () use ($app): void {
+    $price = fetchStockPrice();
+    $app->setGlobalState('price', $price);
+    $app->broadcast(Scope::routeScope('/ticker'));
+}, 5000);
 {% endverbatim %}{% endcode %}
+    <p>
+        Under the hood <code>setInterval()</code> calls <code>Timer::tick()</code> in <code>onStart</code>
+        and clears the ID in <code>onShutdown</code>. You can still use that pattern directly when you need
+        the timer ID for conditional logic.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>

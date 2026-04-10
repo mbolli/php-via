@@ -6,6 +6,16 @@ All notable changes to php-via will be documented in this file.
 
 ### New Features
 
+- **`Via::setInterval(callable $callback, int $ms): void`** — Register a process-wide recurring timer that fires every `$ms` milliseconds across all workers. The callback runs inside the OpenSwoole event loop (started alongside the server). Multiple intervals can be registered; each is cleared automatically on shutdown.
+
+- **`Via::group(callable $fn): RouteGroup`** — Register a set of routes inside a closure and receive a `RouteGroup` for fluent shared middleware registration without a URL prefix. Only routes registered *inside* the closure are included.
+  ```php
+  $app->group(function (Via $app): void {
+      $app->page('/admin', fn(Context $c) => ...);
+      $app->page('/admin/users', fn(Context $c) => ...);
+  })->middleware(new AuthMiddleware());
+  ```
+
 - **MessageBroker interface for multi-node broadcasting — Redis and NATS built-in** — Pluggable broker layer so `broadcast()` propagates scope invalidations across multiple workers, servers, or containers without callers changing their code.
   - `MessageBroker` interface — `connect()`, `publish(string $scope)`, `subscribe(callable)`, `disconnect()`, `isConnected(): bool`
   - `InMemoryBroker` — no-op default; correct for single-node/single-worker deployments

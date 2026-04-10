@@ -66,6 +66,32 @@ $app->onShutdown(function () use (&$timerId): void {
 });
     {% endverbatim %}{% endcode %}
 
+    <h3 id="via-set-interval"><code>setInterval(callable $callback, int $ms): void</code></h3>
+    <p>
+        Register a process-wide recurring timer that fires every <code>$ms</code> milliseconds.
+        The timer is started automatically when the server starts and cleared on shutdown — no manual
+        <code>onStart</code>/<code>onShutdown</code> wiring required.
+    </p>
+    {% code 'php' %}{% verbatim %}
+// Broadcast global state every 5 seconds
+$app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000);
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="via-group"><code>group(callable $fn): RouteGroup</code></h3>
+    <p>
+        Register multiple routes inside a closure and attach shared middleware to all of them in one call.
+        Returns a <code>RouteGroup</code> with a fluent <code>middleware()</code> method.
+        Only routes registered <em>inside</em> the closure are included.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Http\RouteGroup;
+
+$app->group(function (Via $app): void {
+    $app->page('/admin', fn(Context $c) => ...);
+    $app->page('/admin/users', fn(Context $c) => ...);
+})->middleware(new AuthMiddleware());
+    {% endverbatim %}{% endcode %}
+
     <h3 id="via-on-client-connect"><code>onClientConnect(callable $callback): void</code></h3>
     <h3 id="via-on-client-disconnect"><code>onClientDisconnect(callable $callback): void</code></h3>
     <p>
