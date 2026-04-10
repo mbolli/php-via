@@ -38,7 +38,10 @@ jobs:
     
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
-    
+
+    - name: Install website dependencies
+      run: composer install --prefer-dist --no-progress --working-dir=website
+
     - name: Run test suite
       run: vendor/bin/pest
     
