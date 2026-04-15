@@ -1,0 +1,52 @@
+# php-via
+
+> Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole, Datastar, and Twig.
+
+php-via is a PHP library (MIT) that turns a standard PHP process into a persistent, multiplayer-capable web server. It provides three core primitives — Signals, Actions, and Views — and a Scope system that controls who shares state and receives real-time broadcasts. Built on OpenSwoole for the async server and Datastar for SSE-driven DOM morphing.
+
+## Documentation
+
+- [Getting Started](https://via.zweiundeins.gmbh/docs/getting-started): Installation, requirements, your first app
+- [Signals](https://via.zweiundeins.gmbh/docs/signals): Reactive state primitives, scoping, sharing state across contexts
+- [Actions](https://via.zweiundeins.gmbh/docs/actions): Server-side event handlers triggered from the browser
+- [Views](https://via.zweiundeins.gmbh/docs/views): Twig-rendered closures, update caching, block rendering
+- [Scopes](https://via.zweiundeins.gmbh/docs/scopes): TAB / ROUTE / SESSION / GLOBAL and custom scope strings
+- [Components](https://via.zweiundeins.gmbh/docs/components): Sub-contexts, isolated state, composable pages
+- [Broadcasting](https://via.zweiundeins.gmbh/docs/broadcasting): Pushing updates to groups of clients
+- [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle): Connect/disconnect hooks, timers, cleanup
+- [Multi-node broker](https://via.zweiundeins.gmbh/docs/broker): Scaling with Redis or NATS
+- [Middleware](https://via.zweiundeins.gmbh/docs/middleware): PSR-15 middleware, authentication, CORS
+- [Templates](https://via.zweiundeins.gmbh/docs/twig): Twig integration, syntax-highlighted code blocks
+- [Deployment](https://via.zweiundeins.gmbh/docs/deployment): Caddy, Docker, systemd, production checklist
+- [Design decisions](https://via.zweiundeins.gmbh/docs/design): Architecture rationale and trade-offs
+- [API reference](https://via.zweiundeins.gmbh/docs/api): Full public API surface
+- [vs other frameworks](https://via.zweiundeins.gmbh/docs/comparisons): Livewire, htmx, Inertia.js, Phoenix LiveView
+- [Common pitfalls](https://via.zweiundeins.gmbh/docs/faq): 11 frequently encountered bugs with fixes
+
+## Examples
+
+- [Counter](https://via.zweiundeins.gmbh/examples/counter): Minimal signal + action in under 20 lines
+- [Greeter](https://via.zweiundeins.gmbh/examples/greeter): Two-way data binding with a text input
+- [Todo](https://via.zweiundeins.gmbh/examples/todo): List management with add/complete/delete
+- [Components](https://via.zweiundeins.gmbh/examples/components): Sub-context composition with isolated state
+- [All scopes](https://via.zweiundeins.gmbh/examples/all-scopes): TAB vs ROUTE vs SESSION vs GLOBAL side by side
+- [Chat room](https://via.zweiundeins.gmbh/examples/chat-room): Multiplayer real-time chat with ROUTE scope
+- [Client monitor](https://via.zweiundeins.gmbh/examples/client-monitor): Live connected-client dashboard
+- [Live search](https://via.zweiundeins.gmbh/examples/live-search): Debounced server-side search
+- [Shopping cart](https://via.zweiundeins.gmbh/examples/shopping-cart): Session-scoped persistent cart
+- [Wizard](https://via.zweiundeins.gmbh/examples/wizard): Multi-step form with state validation
+- [Login flow](https://via.zweiundeins.gmbh/examples/login): Auth with redirect and session guard
+- [Contact form](https://via.zweiundeins.gmbh/examples/contact-form): Form validation and submission feedback
+- [File upload](https://via.zweiundeins.gmbh/examples/file-upload): Chunked upload with progress bar
+- [Live auction](https://via.zweiundeins.gmbh/examples/live-auction): Rapid real-time bidding, ROUTE scope
+- [Type race](https://via.zweiundeins.gmbh/examples/type-race): Multiplayer typing speed game
+- [Spreadsheet](https://via.zweiundeins.gmbh/examples/spreadsheet): Collaborative live spreadsheet
+- [Stock ticker](https://via.zweiundeins.gmbh/examples/stock-ticker): Server-pushed price feed
+- [Theme builder](https://via.zweiundeins.gmbh/examples/theme-builder): Live CSS variable editor
+- [Game of Life](https://via.zweiundeins.gmbh/examples/game-of-life): Conway's Game of Life, server-ticked
+- [Mission control](https://via.zweiundeins.gmbh/examples/mission-control): Multi-panel dashboard with timer
+- [Path params](https://via.zweiundeins.gmbh/examples/path-params): Dynamic route segments with typed injection
+
+## Optional
+
+- [Full LLM reference](https://via.zweiundeins.gmbh/llms-full.txt): Complete plain-text reference (concepts, API, examples, pitfalls)

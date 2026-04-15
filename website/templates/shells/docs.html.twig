@@ -1,5 +1,36 @@
 {% extends 'shells/base.html.twig' %}
 
+{% block og_type %}article{% endblock %}
+
+{% block head %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "{{ siteUrl }}"
+        },
+        {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Docs",
+            "item": "{{ siteUrl }}docs"
+        }{% if currentRoute != '/docs' %},
+        {
+            "@type": "ListItem",
+            "position": 3,
+            "name": "{{ block('title') | replace({' — php-via Docs': '', ' — php-via': ''}) | e('js') }}",
+            "item": "{{ siteUrl }}{{ currentRoute[1:] }}"
+        }{% endif %}
+    ]
+}
+</script>
+{% endblock %}
+
 {% block body_class %}docs-body{% endblock %}
 
 {% block layout %}

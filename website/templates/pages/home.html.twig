@@ -1,6 +1,34 @@
 {% extends 'shells/base.html.twig' %}
 {% block title %}php-via — Real-time PHP. No JavaScript. No build step.{% endblock %}
 {% block description %}php-via is a real-time engine for building reactive PHP web applications with OpenSwoole and Datastar. No JavaScript, no build step, multiplayer by default.{% endblock %}
+{% block head %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "php-via",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS",
+    "programmingLanguage": "PHP",
+    "description": "Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole, Datastar, and Twig.",
+    "url": "https://via.zweiundeins.gmbh/",
+    "downloadUrl": "https://packagist.org/packages/mbolli/php-via",
+    "installUrl": "https://packagist.org/packages/mbolli/php-via",
+    "softwareVersion": "latest",
+    "softwareRequirements": "PHP 8.4 or higher, OpenSwoole PHP extension",
+    "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+    },
+    "creator": {"@type": "Person", "@id": "https://zweiundeins.gmbh/#mbolli"},
+    "maintainer": {"@type": "Organization", "@id": "https://zweiundeins.gmbh/#organization"},
+    "license": "https://opensource.org/licenses/MIT",
+    "codeRepository": "https://github.com/mbolli/php-via",
+    "keywords": ["PHP", "real-time", "reactive", "OpenSwoole", "Datastar", "SSE", "server-sent events", "no JavaScript", "multiplayer", "web framework"]
+}
+</script>
+{% endblock %}
 {% block content %}
 <!-- Hero -->
 <section class="hero">

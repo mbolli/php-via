@@ -6,3 +6,4 @@
 website/*.db
 website/*.db-shm
 website/*.db-wal
+website/public/sitemap.xml

@@ -1,5 +1,104 @@
 {% extends 'shells/docs.html.twig' %}
 {% block title %}Common Pitfalls — php-via Docs{% endblock %}
+{% block head %}
+{{ parent() }}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+        {
+            "@type": "Question",
+            "name": "Broadcast re-renders other clients with stale data",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "When broadcast() fires, every context in the scope re-runs its view closure. If the view reads from a per-client signal, each client reads its own signal which was only updated for the client that triggered the action. Fix: read shared state from $app->globalState() inside the view closure instead of from a per-client signal."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Shared counter uses globalState + manual broadcast instead of scoped signals",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Scoped signals already are shared state. When a context has a non-TAB scope, every $c->signal() call for the same name returns the same Signal object across all contexts in that scope. Fix: use $c->scope(Scope::ROUTE) and $c->signal(0) — the signal auto-broadcasts on setValue(). Drop globalState and the manual broadcast() call."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "data-text uses the wrong signal ID",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Signal IDs are namespaced by the component hierarchy. A signal named 'votes' inside a component with namespace 'poll' gets the ID 'poll.votes'. Fix: always use $signal->id() in PHP and pass it to the template as a variable. Never hard-code signal IDs in HTML."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Full-page patch overwrites component updates",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "A page-level view with a Twig template re-renders the whole page HTML on every broadcast and sends it as a patch with no selector, which can overwrite fresher component patches. Fix: either return '' from the page view when $isUpdate === true, or use the block: parameter on $c->view() to send only a named Twig block on updates."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Variable is null inside a view closure",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "PHP closures don't capture outer variables automatically. A variable available in the route handler is not available inside the view closure unless explicitly listed in its use clause. Fix: add the variable to both the route handler's use list and the inner view closure's use list."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Scoped signals return stale values after broadcast",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "If the view is cached (default for ROUTE/SESSION/GLOBAL scopes), later clients reuse the cached HTML without re-rendering. Fix: pass cacheUpdates: false to $c->view() for views that must always reflect current state."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "PatchElementsNoTargetsFound on partial block rendering",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Datastar's merge-fragments mode reads the id from the root element in the fragment and looks for a matching element in the DOM. If the block content has no root element with an id, there is nothing to match against. Fix: ensure the block content has a single root element with a unique id attribute."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Partial update replaces the entire page due to duplicate id=\"content\"",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "If your fragment and the shell both use id=\"content\", Datastar replaces the outer main element, wiping out everything around the fragment. Fix: give the block's root element a unique ID that does not collide with the shell."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Timer keeps firing after every client disconnects",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "setInterval() runs for the lifetime of the server, not per client, with no built-in awareness of connected clients. Fix: guard broadcasts with if (empty($app->getClients())) return; or use onClientConnect and onClientDisconnect hooks instead of a timer."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Shell templates do not support Twig",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Shell templates are processed by HtmlBuilder using str_replace(), not the Twig engine. Twig block tags are invisible to this processor. Fix: move layout into a proper Twig base template using Twig extends and block inheritance. Page templates fill in the content block. The key injected variable is contextId (not context_id or via_ctx which are the HtmlBuilder placeholders)."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Action returns HTTP 400 Bad Request",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "A 400 means the via_ctx signal ID is missing or does not match any active context. Common causes: server restart (all in-memory contexts gone), SSE connection dropped and context cleaned up, or via_ctx omitted from a custom @post() payload. Fix: refresh the page to create a new context, or include via_ctx explicitly in custom action payloads."
+            }
+        }
+    ]
+}
+</script>
+{% endblock %}
 {% block content %}
 <article>
     <h1>Common Pitfalls</h1>

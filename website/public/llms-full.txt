@@ -1,0 +1,474 @@
+# php-via — Full LLM Reference
+
+**Version**: latest (MIT) | **Requires**: PHP 8.4+, OpenSwoole extension
+**Install**: `composer require mbolli/php-via`
+**Homepage**: https://via.zweiundeins.gmbh/
+**GitHub**: https://github.com/mbolli/php-via
+**Packagist**: https://packagist.org/packages/mbolli/php-via
+**Author**: Michael Bolli <michael@bolli.us>
+
+---
+
+## What is php-via?
+
+php-via is a real-time reactive web framework for PHP. It runs as a persistent
+OpenSwoole server that maintains long-lived SSE (Server-Sent Events) connections to
+every browser tab. When state changes on the server, it pushes DOM patches to
+connected clients via Datastar — a lightweight SSE library that uses the Declarative
+Shadow DOM morphing algorithm. No JavaScript, no build step, multiplayer by default.
+
+The name "via" means "the way". From a single PHP process you get full-duplex
+real-time communication without WebSockets, polling, or any frontend framework.
+
+---
+
+## Architecture Overview
+
+```
+Browser ──── GET /page ────────────────► RequestHandler  (creates Context, renders HTML)
+Browser ──── GET /_sse ────────────────► SseHandler      (SSE keep-alive, sends patches)
+Browser ──── POST /_action/:id ────────► ActionHandler   (injects signals, calls handler)
+                                              │
+                                         Application
+                                         ├── Router        (route matching, reflection DI)
+                                         ├── Context       (per-tab: signals, actions, views)
+                                         │   ├── PatchManager   (Channel → SSE queue)
+                                         │   ├── SignalFactory
+                                         │   ├── ComponentManager (sub-contexts)
+                                         │   └── ContextLifecycle (timers, cleanup)
+                                         └── Broker        (InMemory / Redis / NATS)
+```
+
+**Public API surface**: `Via`, `Context`, `Signal`, `Action`, `Scope`, `Config`
+
+---
+
+## Getting Started
+
+### Requirements
+
+- PHP 8.4 or higher
+- OpenSwoole extension (`pecl install openswoole`)
+- Composer
+- Optional: `ext-brotli` for Brotli compression
+
+### Installation
+
+```bash
+composer require mbolli/php-via
+```
+
+### Minimal counter app (complete working example)
+
+```php
+<?php
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+$app = new Via(new Config());
+
+$app->page('/', function (Context $c): void {
+    $count = $c->signal(0, 'count');
+
+    $c->action(function (Context $c) use ($count): void {
+        $count->setValue($count->int() + 1);
+        $c->sync();
+    }, 'increment');
+
+    $c->view(fn () => <<<HTML
+        <main>
+            <p data-text="\${$count->id()}">0</p>
+            <button data-on-click="@post('/increment')">+1</button>
+        </main>
+    HTML);
+});
+
+$app->start(); // http://localhost:8080
+```
+
+---
+
+## Core Concepts
+
+### 1. Signals
+
+Signals are reactive PHP values scoped to a connection, route, session, or the whole
+server. Signal values are automatically serialised to the browser's Datastar store and
+kept in sync.
+
+```php
+// Create a signal with initial value and optional name
+$count  = $c->signal(0, 'count');        // integer
+$name   = $c->signal('', 'name');        // string
+$active = $c->signal(false, 'active');   // bool
+$items  = $c->signal([], 'items');       // array → JSON
+
+// Read values (typed)
+$count->int();
+$name->string();
+$active->bool();
+$items->array();
+$count->getValue(); // mixed, raw
+
+// Write a value
+$count->setValue(42);
+$count->setValue($count->int() + 1);
+
+// Write and broadcast immediately (non-TAB scopes only)
+$count->setValue(42, broadcast: true);  // default when scope != TAB
+
+// Get the signal's Datastar store ID for use in Twig/HTML
+$count->id(); // e.g. "count" or "ns.count" inside a component
+```
+
+Signal IDs are namespaced by the component hierarchy. Always use `$signal->id()` in
+templates — never hard-code IDs.
+
+### 2. Actions
+
+Actions are server-side event handlers registered under a URL and invoked via Datastar
+expressions in HTML (`@post(...)`, `@get(...)`, `data-on-click`, etc.).
+
+```php
+// Register with an explicit name → URL /action/increment
+$inc = $c->action(function (Context $c) use ($count): void {
+    $count->setValue($count->int() + 1);
+    $c->sync(); // push updates to this tab only
+}, 'increment');
+
+// Get the URL for use in templates
+$inc->url(); // "/action/increment?..."
+
+// Signal injection: signal values from the browser are automatically injected
+// as typed PHP arguments when parameter names match signal names
+$greet = $c->action(function (Context $c, string $name): void {
+    // $name is automatically populated from the "$name" Datastar signal
+}, 'greet');
+
+// Receive arbitrary input (non-signal)
+$c->action(function (Context $c): void {
+    $option = $c->input('option'); // reads from POST body or query string
+}, 'vote');
+```
+
+### 3. Views
+
+Views are closures (or template strings) that render HTML for a Context. They run on
+initial page load and on every broadcast that affects this context.
+
+```php
+// Simple string view
+$c->view('<p>Hello</p>');
+
+// Twig template (string path, no closure overhead)
+$c->view('pages/home.html.twig', ['name' => 'world']);
+
+// Closure view — re-runs on every update
+$c->view(function () use ($count, $twig): string {
+    return $twig->render('counter.html.twig', ['count' => $count->int()]);
+});
+
+// Skip full-page re-render on SSE updates (when using components)
+$c->view(function (bool $isUpdate) use ($c, $data): string {
+    if ($isUpdate) {
+        return ''; // components own their own patches
+    }
+    return $c->render('page.html.twig', $data);
+});
+
+// Only send a named Twig block on SSE updates (most efficient)
+$c->view(fn () => $c->render('page.html.twig', $data), block: 'counter');
+
+// Disable update caching for views that must always re-render fresh
+$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);
+```
+
+### 4. Scopes
+
+Scope controls which contexts share the same signals and receive broadcasts together.
+
+| Scope | Who shares state |
+|---|---|
+| `Scope::TAB` (default) | Fully isolated per browser tab |
+| `Scope::ROUTE` | All tabs on the same route (`/docs/signals`) |
+| `Scope::SESSION` | All tabs in the same browser session |
+| `Scope::GLOBAL` | Every connected client |
+| `"room:lobby"` | Custom string — any group you define |
+| `"room:*"` | Wildcard — matches all `room:…` scopes |
+
+```php
+// Set the scope for a context
+$c->scope(Scope::GLOBAL);
+$c->scope(Scope::ROUTE);
+$c->scope(Scope::SESSION);
+$c->scope('room:' . $roomId);
+
+// Convenience helper for route-based scope
+$c->scope(Scope::routeScope('/dashboard'));
+
+// Add a second scope (context participates in multiple scopes)
+$c->addScope(Scope::routeScope($c->getRoute()));
+
+// Broadcast to a scope from anywhere
+$app->broadcast(Scope::GLOBAL);
+$app->broadcast('room:lobby');
+
+// Broadcast from within a context (uses the context's own scope)
+$c->broadcast();
+
+// Sync only this tab (does not broadcast)
+$c->sync();
+```
+
+### 5. Components
+
+Components are isolated sub-contexts composed inside a parent context. Each component
+has its own signals, actions, views, and a dedicated `<div id="c-{name}">` patch target.
+
+```php
+// Define a component closure
+$counterComp = function (Context $c) use ($twig): void {
+    $count = $c->signal(0, 'count');
+    $inc = $c->action(fn (Context $c) => $count->setValue($count->int() + 1), 'inc');
+    $c->view(fn () => $twig->render('components/counter.html.twig', [
+        'count_id'  => $count->id(),
+        'count_val' => $count->int(),
+        'inc_url'   => $inc->url(),
+    ]));
+};
+
+// Compose into a parent page
+$app->page('/dashboard', function (Context $c) use ($counterComp, $twig): void {
+    $counter = $c->component($counterComp, 'my-counter');
+    $c->view(fn () => $twig->render('pages/dashboard.html.twig', [
+        'counter' => $counter(),   // renders the component's initial HTML
+    ]));
+});
+```
+
+In the template, embed with:
+```twig
+<div id="c-my-counter">{{ counter | raw }}</div>
+```
+
+The `id="c-{name}"` div is the component's SSE update target. Via automatically
+targets it when the component re-renders on broadcast.
+
+---
+
+## Broadcasting
+
+```php
+// Broadcast from a context (scope set via $c->scope(...))
+$c->broadcast();
+
+// Broadcast to a specific scope from anywhere
+$app->broadcast(Scope::GLOBAL);
+$app->broadcast(Scope::routeScope('/leaderboard'));
+
+// Update one signal without broadcasting, then broadcast manually
+$count->setValue(42, broadcast: false);
+$c->broadcast();
+
+// Broadcast with a debounce to collapse bursts
+Timer::after(200, fn () => $app->broadcast(Scope::GLOBAL));
+```
+
+---
+
+## Lifecycle
+
+```php
+// Server lifecycle
+$app->onStart(function () use ($app): void {
+    // runs once when the Swoole server boots
+});
+
+$app->onShutdown(function () use ($app): void {
+    // graceful shutdown
+});
+
+// Per-client lifecycle
+$app->onClientConnect(function (Context $c) use ($app): void {
+    $app->broadcast(Scope::routeScope($c->getRoute()));
+});
+
+$app->onClientDisconnect(function (Context $c) use ($app): void {
+    // cleanup or broadcast
+});
+
+// Process-wide recurring timer
+$app->setInterval(function () use ($app): void {
+    if (empty($app->getClients())) {
+        return;
+    }
+    $app->broadcast(Scope::GLOBAL);
+}, 1000); // every 1000 ms
+
+// Context-level timer (tied to a single connection's lifecycle)
+// Must be started inside the page handler or component
+```
+
+---
+
+## Multi-node Scaling (Broker)
+
+Out of the box php-via uses an in-memory broker (single process). For multi-node
+deployments, swap in Redis or NATS:
+
+```php
+use Mbolli\PhpVia\Broker\RedisBroker;
+use Mbolli\PhpVia\Broker\NatsBroker;
+
+// Redis
+$config->withBroker(new RedisBroker('redis://127.0.0.1:6379'));
+
+// NATS (JetStream)
+$config->withBroker(new NatsBroker('nats://127.0.0.1:4222'));
+```
+
+All `broadcast()` calls are transparently forwarded through the broker. Signals and
+views stay per-node; only broadcast messages cross node boundaries.
+
+---
+
+## Config Reference
+
+```php
+$config = (new Config())
+    ->withHost('0.0.0.0')
+    ->withPort(8080)
+    ->withTemplateDir(__DIR__ . '/templates')
+    ->withStaticDir(__DIR__ . '/public')     // serves static files
+    ->withDevMode(true)                       // verbose logging, no cache headers
+    ->withBrotli()                            // requires ext-brotli
+    ->withH2c()                               // HTTP/2 cleartext (behind TLS proxy)
+    ->withTrustProxy(true)                    // trust X-Forwarded-* headers
+    ->withCertificate($crt, $key)             // enable HTTPS directly
+    ->withLogLevel('debug')                   // debug | info | warning | error
+    ->withBroker(new RedisBroker(...))        // multi-node broker
+    ->withBasePath('/app/')                   // if mounted at a sub-path
+;
+```
+
+---
+
+## Middleware
+
+php-via supports PSR-15 middleware for authentication, rate-limiting, CORS, etc.
+
+```php
+// Global middleware (runs on every request)
+$app->middleware(new CorsMiddleware([...]));
+
+// Per-route middleware (chained on RouteDefinition)
+$app->page('/admin', $handler)->middleware(new AuthMiddleware());
+
+// Per-group middleware
+$app->group('/admin', function (Via $app) use ($handler): void {
+    $app->page('/dashboard', $handler);
+    $app->page('/users',     $handler);
+})->middleware(new AuthMiddleware());
+```
+
+---
+
+## Twig Integration
+
+`Via::getTwig()` returns the Twig environment for registering custom extensions and
+runtime loaders. Variables automatically injected into every template via `Context::render()`:
+
+| Variable | Value |
+|---|---|
+| `contextId` | The connection's unique ID (used in `data-signals`) |
+| `currentRoute` | The matched route pattern, e.g. `/docs/signals` |
+| `basePath` | Base URL path, always ends with `/` (default: `/`) |
+| `siteUrl` | Your configured site URL (set via `$twig->addGlobal(...)`) |
+| `assetVersion` | Cache-busting version token (set via `addGlobal`) |
+
+Key `data-*` attributes for Datastar in templates:
+```html
+<!-- Display a signal value -->
+<span data-text="$count">0</span>
+
+<!-- Two-way bind an input to a signal -->
+<input data-bind="name" type="text">
+
+<!-- Trigger an action on click -->
+<button data-on-click="@post('{{ inc_url }}')">+1</button>
+
+<!-- Show/hide based on signal -->
+<div data-show="$loggedIn">Protected content</div>
+
+<!-- Class toggle -->
+<div data-class-active="$isActive">...</div>
+```
+
+---
+
+## Comparisons
+
+| Feature | php-via | Livewire | htmx + Alpine | Inertia.js | Phoenix LiveView |
+|---|---|---|---|---|---|
+| Language | PHP | PHP (Laravel) | PHP (any) | PHP + JS | Elixir |
+| Real-time push | ✅ SSE | ⚠️ needs Reverb | ❌ poll only | ❌ | ✅ WebSocket |
+| Multiplayer scopes | ✅ built-in | ❌ | ❌ | ❌ | ✅ PubSub |
+| Zero JavaScript | ✅ | ❌ Alpine | ❌ Alpine/JS | ❌ React/Vue | ✅ |
+| No build step | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Framework required | ❌ | Laravel | ❌ | Laravel/Symfony | Phoenix |
+| Multi-server scaling | ✅ Redis/NATS | ⚠️ | N/A | N/A | ✅ |
+| Persistent connection | ✅ SSE | ❌ HTTP | ❌ HTTP | ❌ HTTP | ✅ WS |
+
+**Choose php-via when**: you want real-time multiplayer UIs in plain PHP with no
+JavaScript or build tooling, or you need scoped broadcasts (route/session/global) without
+an external pub/sub system.
+
+**Choose Livewire when**: you're already in the Laravel ecosystem and don't need
+server-pushed real-time without Reverb.
+
+**Choose htmx when**: you're progressively enhancing an existing app and don't need
+persistent connections or server-initiated updates.
+
+**Choose Phoenix LiveView when**: you work in Elixir and want the mature, battle-tested
+original inspiration for php-via.
+
+---
+
+## Common Pitfalls (Quick Reference)
+
+1. **Broadcast sends stale data**: read from `$app->globalState()` inside view closures
+   instead of per-client signal values.
+2. **Dual state (globalState + Signal)**: scoped signals are already shared — drop
+   `globalState` and just use `$c->scope(Scope::ROUTE); $s = $c->signal(...)`.
+3. **Wrong signal ID in HTML**: always use `$signal->id()` in PHP and pass to template;
+   never hard-code signal IDs.
+4. **Full-page patch overwrites component updates**: return `''` from page view when
+   `$isUpdate === true`; or use `block:` parameter on `$c->view()`.
+5. **Variable null in view closure**: add it to both outer and inner `use` lists.
+6. **Stale cached view after broadcast**: pass `cacheUpdates: false` to `$c->view()`.
+7. **PatchElementsNoTargetsFound**: the root element in your rendered block must have
+   a unique `id` attribute.
+8. **Partial update replaces whole page**: your block root element's `id` collides with
+   the shell's `<main id="content">`; give it a unique ID.
+9. **Timer fires with no clients**: guard `$app->broadcast()` with
+   `if (empty($app->getClients())) return;`.
+10. **Shell templates ignore Twig**: shell HTML files use `str_replace` placeholders,
+    not Twig; put layout logic in proper `{% extends %}` / `{% block %}` templates.
+11. **Action returns HTTP 400**: stale `via_ctx` after server restart; refresh the page,
+    or include `via_ctx` explicitly in custom `@post()` payloads.
+
+---
+
+## Links
+
+- Website & docs: https://via.zweiundeins.gmbh/
+- GitHub: https://github.com/mbolli/php-via
+- Packagist: https://packagist.org/packages/mbolli/php-via
+- Changelog: https://github.com/mbolli/php-via/blob/master/CHANGELOG.md
+- Datastar (SSE/DOM library): https://data-star.dev/
+- OpenSwoole: https://openswoole.com/

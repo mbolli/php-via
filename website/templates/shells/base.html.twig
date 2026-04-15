@@ -16,13 +16,48 @@
     {% set _title = block('title') %}
     {% set _description %}{% block description %}Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole and Datastar.{% endblock %}{% endset %}
     <meta name="description" content="{{ _description }}">
-    <meta property="og:type" content="website">
+    <link rel="canonical" href="{{ siteUrl }}{{ currentRoute[1:] }}">
+    <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+    <meta property="og:url" content="{{ siteUrl }}{{ currentRoute[1:] }}">
     <meta property="og:title" content="{{ _title }}">
     <meta property="og:description" content="{{ _description }}">
-    <meta property="og:image" content="{{ siteUrl }}logo.png">
+    <meta property="og:image" content="{{ siteUrl }}logo-icon-512.png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:alt" content="php-via logo">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="{{ _title }}">
     <meta name="twitter:description" content="{{ _description }}">
+    <meta name="twitter:image" content="{{ siteUrl }}logo-icon-512.png">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://zweiundeins.gmbh/#organization",
+                "name": "zwei und eins gmbh",
+                "url": "https://zweiundeins.gmbh",
+                "logo": "https://zweiundeins.gmbh/assets/img/logo.svg",
+                "email": "info@zweiundeins.gmbh",
+                "sameAs": [
+                    "https://www.linkedin.com/company/zwei-und-eins-gmbh/",
+                    "https://github.com/zweiundeins"
+                ],
+                "employee": {
+                    "@type": "Person",
+                    "@id": "https://zweiundeins.gmbh/#mbolli",
+                    "name": "Michael Bolli",
+                    "url": "https://linkedin.com/in/mbolli",
+                    "jobTitle": "Owner & Software developer",
+                    "email": "michael@zweiundeins.gmbh",
+                    "sameAs": ["https://github.com/mbolli"]
+                }
+            }
+        ]
+    }
+    </script>
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
