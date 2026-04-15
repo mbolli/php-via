@@ -1,0 +1,107 @@
+{% extends 'examples/_file-upload-wrapper.html.twig' %}
+
+{% block fu_content %}
+<div class="fu-browser">
+    <div class="fu-browser-toolbar">
+        <span class="fu-breadcrumb">📁 Home / Documents / Archives</span>
+        <button class="fu-toolbar-btn" disabled>⬆ Upload</button>
+        <button class="fu-toolbar-btn" disabled>📁 New folder</button>
+    </div>
+
+    <table class="fu-file-table">
+        <thead>
+            <tr>
+                <th>Name</th><th>Size</th><th>Modified</th><th>Type</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span class="fu-file-icon">📁</span> Projects</td>
+                <td>—</td><td>2026-04-10</td><td>Folder</td>
+            </tr>
+            <tr class="fu-row-uploading"
+                data-show="{{ status.string == 'uploading' ? 'true' : '$' ~ status.id ~ ' === \"uploading\"' }}"
+                style="{{ status.string == 'uploading' ? '' : 'display:none' }}">
+                <td>
+                    <span class="fu-file-icon">📦</span>
+                    <span data-text="${{ fileName.id }}">{{ fileName.string }}</span>
+                    <span class="fu-uploading-badge">uploading
+                        <span data-text="${{ pct.id }} + '%'">{{ pct.int }}%</span></span>
+                </td>
+                <td><span data-text="Math.round(${{ totalBytes.id }} / 1048576) + ' MB'">{{ (totalBytes.int / 1048576)|number_format(0) }} MB</span></td>
+                <td>now</td><td>tar.gz</td>
+            </tr>
+            <tr class="fu-row-complete"
+                data-show="{{ status.string == 'complete' ? 'true' : '$' ~ status.id ~ ' === \"complete\"' }}"
+                style="{{ status.string == 'complete' ? '' : 'display:none' }}">
+                <td>
+                    <span class="fu-file-icon">✅</span>
+                    <span data-text="${{ fileName.id }}">{{ fileName.string }}</span>
+                </td>
+                <td><span data-text="Math.round(${{ totalBytes.id }} / 1048576) + ' MB'">{{ (totalBytes.int / 1048576)|number_format(0) }} MB</span></td>
+                <td>just now</td><td>tar.gz</td>
+            </tr>
+            <tr>
+                <td><span class="fu-file-icon">📄</span> quarterly-report-q1-2026.pdf</td>
+                <td>2.4 MB</td><td>2026-04-01</td><td>PDF</td>
+            </tr>
+            <tr>
+                <td><span class="fu-file-icon">🖼</span> architecture-diagram.png</td>
+                <td>840 KB</td><td>2026-03-28</td><td>PNG</td>
+            </tr>
+            <tr>
+                <td><span class="fu-file-icon">📦</span> staging-backup-2026-03-15.tar.gz</td>
+                <td>12.1 GB</td><td>2026-03-15</td><td>tar.gz</td>
+            </tr>
+            <tr>
+                <td><span class="fu-file-icon">📝</span> CHANGELOG.md</td>
+                <td>64 KB</td><td>2026-04-12</td><td>Markdown</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="fu-browser-memo">
+        ← You navigated here during an upload. The progress bar above is still running —
+        the server's SESSION signals survived the page change.
+    </p>
+</div>
+{% endblock %}
+
+{% block fu_extra %}
+<style>
+.fu-browser { border: 1px solid var(--border, #e2e8f0); border-radius: 12px; overflow: hidden; }
+.fu-browser-toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+    background: var(--surface-2, #f8fafc); border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.fu-breadcrumb { flex: 1; font-size: 0.875rem; color: var(--text-2, #64748b); }
+.fu-toolbar-btn {
+    padding: 4px 12px; border: 1px solid var(--border, #e2e8f0); border-radius: 6px;
+    background: var(--surface-1, #fff); font-size: 0.8rem; cursor: default; color: var(--text-2, #94a3b8);
+}
+.fu-file-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.fu-file-table th {
+    text-align: left; padding: 8px 16px; font-size: 0.75rem; font-weight: 600;
+    color: var(--text-2, #94a3b8); text-transform: uppercase; letter-spacing: 0.05em;
+    background: var(--surface-2, #f8fafc); border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.fu-file-table td {
+    padding: 10px 16px; border-bottom: 1px solid var(--border, #f1f5f9); color: var(--text-1, #1e293b);
+}
+.fu-file-table tr:last-child td { border-bottom: none; }
+.fu-file-table tr:hover td { background: var(--surface-2, #f8fafc); }
+.fu-file-icon { margin-right: 6px; }
+.fu-row-uploading td { color: var(--brand, #3b82f6) !important; }
+.fu-row-complete td { color: #16a34a !important; }
+.fu-uploading-badge {
+    display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 9999px;
+    background: #dbeafe; color: #1d4ed8; font-size: 0.75rem; font-weight: 600;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+.fu-browser-memo {
+    padding: 10px 16px; font-size: 0.8rem; color: var(--text-2, #94a3b8);
+    background: var(--surface-2, #f8fafc); border-top: 1px solid var(--border, #e2e8f0); margin: 0;
+}
+</style>
+{% endblock %}

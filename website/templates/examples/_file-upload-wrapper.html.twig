@@ -1,0 +1,288 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+<div id="file-upload-{{ activePage|default('upload') }}" class="fu-layout">
+
+    {# ── Persistent progress bar ───────────────────────────────────────────── #}
+    {% if status.string != 'idle' %}
+    <div id="upload-progress-bar" class="upload-progress-bar">
+        <div class="upload-progress-inner">
+            <div class="upload-track" aria-label="Upload progress" role="progressbar"
+                 aria-valuenow="{{ pct.int }}" aria-valuemin="0" aria-valuemax="100">
+                <div id="upload-fill" class="upload-fill" style="width: {{ pct.int }}%"></div>
+                {% if status.string == 'uploading' %}<div class="upload-shimmer"></div>{% endif %}
+            </div>
+
+            <div class="upload-info">
+                <span class="upload-icon">
+                    {% if status.string == 'uploading' %}📤{% endif %}
+                    {% if status.string == 'complete' %}✅{% endif %}
+                    {% if status.string == 'cancelled' %}🚫{% endif %}
+                </span>
+
+                <span id="upload-filename" class="upload-filename">{{ fileName.string }}</span>
+
+                <span class="upload-pct-wrap">
+                    <span id="upload-pct" class="upload-pct">{{ pct.int }}%</span>
+                    <span class="upload-status-label"> {{ status.string }}</span>
+                </span>
+
+                {% if status.string == 'uploading' %}
+                <button class="upload-cancel-btn" id="upload-cancel-btn" title="Cancel upload"
+                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ ctxId }}')">✕</button>
+                {% endif %}
+                {% if status.string == 'complete' or status.string == 'cancelled' %}
+                <button class="upload-reset-btn" id="upload-reset-btn"
+                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ ctxId }}')">↺ Reset</button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── Sub-page nav ──────────────────────────────────────────────────────── #}
+    <nav class="fu-subnav" aria-label="Upload example sub-pages">
+        <a href="{{ basePath }}examples/file-upload"
+           class="fu-subnav-link{{ activePage == 'upload' ? ' active' : '' }}"
+           {{ activePage == 'upload' ? 'aria-current="page"' : '' }}>⬆ Upload</a>
+        <a href="{{ basePath }}examples/file-upload/browse"
+           class="fu-subnav-link{{ activePage == 'browse' ? ' active' : '' }}"
+           {{ activePage == 'browse' ? 'aria-current="page"' : '' }}>📁 Browse</a>
+        <a href="{{ basePath }}examples/file-upload/settings"
+           class="fu-subnav-link{{ activePage == 'settings' ? ' active' : '' }}"
+           {{ activePage == 'settings' ? 'aria-current="page"' : '' }}>⚙ Settings</a>
+    </nav>
+
+    {# ── Per-sub-page content ──────────────────────────────────────────────── #}
+    <div class="fu-content">
+        {% block fu_content %}{% endblock %}
+    </div>
+
+</div>{# #file-upload-{activePage} #}
+
+{% endblock %}
+
+{% block extra %}
+
+{# ── Shared styles ─────────────────────────────────────────────────────────── #}
+<style>
+/* Progress bar */
+.upload-progress-bar {
+    border-radius: 12px;
+    background: var(--surface-2, #f1f5f9);
+    border: 1px solid var(--border, #e2e8f0);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    transition: opacity 0.3s;
+}
+.upload-progress-inner { display: flex; flex-direction: column; gap: 8px; }
+.upload-track {
+    position: relative;
+    height: 8px;
+    background: var(--border, #e2e8f0);
+    border-radius: 9999px;
+    overflow: hidden;
+}
+.upload-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #6366f1);
+    border-radius: 9999px;
+    transition: width 0.15s ease-out;
+    min-width: 4px;
+}
+.upload-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.upload-info { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-2, #64748b); }
+.upload-filename {
+    flex: 1;
+    font-weight: 500;
+    color: var(--text-1, #1e293b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+.upload-pct { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--brand, #3b82f6); }
+.upload-status-label { color: var(--text-2, #94a3b8); font-size: 0.8rem; }
+.upload-cancel-btn, .upload-reset-btn {
+    background: none;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text-2, #64748b);
+    line-height: 1.6;
+    transition: background 0.15s;
+}
+.upload-cancel-btn:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+.upload-reset-btn:hover  { background: #e0e7ff; color: #4f46e5; border-color: #a5b4fc; }
+
+/* Layout */
+.fu-layout { display: flex; flex-direction: column; gap: 0; }
+
+/* Sub-page nav */
+.fu-subnav {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    padding-bottom: 0;
+    margin-bottom: 24px;
+}
+.fu-subnav-link {
+    padding: 8px 16px;
+    border-radius: 8px 8px 0 0;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-2, #64748b);
+    text-decoration: none;
+    border: 1px solid transparent;
+    border-bottom: none;
+    transition: background 0.15s, color 0.15s;
+    position: relative;
+    bottom: -1px;
+}
+.fu-subnav-link:hover { background: var(--surface-2, #f1f5f9); color: var(--text-1, #1e293b); }
+.fu-subnav-link.active {
+    background: var(--surface-1, #fff);
+    color: var(--brand, #3b82f6);
+    border-color: var(--border, #e2e8f0);
+    border-bottom-color: var(--surface-1, #fff);
+}
+
+/* Shared form/button primitives used across sub-pages */
+.fu-field { display: flex; flex-direction: column; gap: 5px; }
+.fu-field label { font-size: 0.875rem; font-weight: 500; }
+.fu-input, .fu-select {
+    padding: 8px 12px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: var(--surface-1, #fff);
+    color: var(--text-1, #1e293b);
+}
+.fu-select { cursor: pointer; }
+.fu-start-btn {
+    padding: 10px 24px;
+    background: var(--brand, #3b82f6);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-start;
+    transition: background 0.15s;
+}
+.fu-start-btn:hover { background: #2563eb; }
+.fu-start-btn.secondary {
+    background: none;
+    border: 1px solid var(--border, #e2e8f0);
+    color: var(--text-1, #1e293b);
+}
+.fu-start-btn.secondary:hover { background: var(--surface-2, #f1f5f9); }
+</style>
+
+{# ── Shared JS: utility functions + SharedWorker init ─────────────────────── #}
+<script>
+'use strict';
+
+var _FU = {
+    chunkUrl:       '{{ receiveChunk.url }}',
+    uploadChunkUrl: '{{ uploadChunk.url }}',
+    cancelUrl:      '{{ cancelUpload.url }}',
+    ctxId:          '{{ ctxId }}',
+};
+
+function uploadCancelAction(url, ctxId) {
+    if (window.uploadWorkerPort) {
+        window.uploadWorkerPort.postMessage({ type: 'cancel' });
+    }
+    fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    new URLSearchParams({ via_ctx: ctxId }),
+    });
+}
+
+function applyWorkerState(s) {
+    var fill   = document.getElementById('upload-fill');
+    var pctEl  = document.getElementById('upload-pct');
+    var nameEl = document.getElementById('upload-filename');
+    if (fill)              fill.style.width   = s.pct + '%';
+    if (pctEl)             pctEl.textContent  = s.pct + '%';
+    if (nameEl && s.fileName) nameEl.textContent = s.fileName;
+
+    // Persist uploading state so a new worker instance can resume after
+    // Chrome GC'd the old one during MPA navigation.
+    // Real uploads are not persisted — the File object can't be serialised.
+    try {
+        if (s.status === 'uploading' && !s.isReal) {
+            sessionStorage.setItem('_fu_state', JSON.stringify(s));
+        } else if (s.status === 'complete' || s.status === 'cancelled') {
+            sessionStorage.removeItem('_fu_state');
+        }
+    } catch {}
+}
+
+(function () {
+    if (!('SharedWorker' in window)) {
+        console.warn('SharedWorker not supported — upload continuity across navigation unavailable.');
+        return;
+    }
+    // extendedLifetime: true — Chrome 139+ Origin Trial. Belt-and-suspenders companion to the
+    // Web Locks strategy used in the worker. Silently ignored without an OT token.
+    var worker = new SharedWorker(
+        '{{ basePath }}upload-worker.js?v={{ workerVersion }}',
+        { extendedLifetime: true }
+    );
+    window.uploadWorkerPort = worker.port;
+    worker.port.start();
+    worker.port.postMessage({
+        type:           'connect',
+        chunkUrl:       _FU.chunkUrl,
+        uploadChunkUrl: _FU.uploadChunkUrl,
+        cancelUrl:      _FU.cancelUrl,
+        ctxId:          _FU.ctxId,
+    });
+
+    // On the first state message: if the worker is fresh (idle) but sessionStorage
+    // has an in-progress upload, send a resume message to pick up where we left off.
+    var resumeChecked = false;
+    worker.port.addEventListener('message', function (e) {
+        if (e.data.type === 'log') {
+            console.log(e.data.msg);
+            return;
+        }
+        if (!resumeChecked) {
+            resumeChecked = true;
+            if (e.data.status === 'idle') {
+                try {
+                    var saved = JSON.parse(sessionStorage.getItem('_fu_state') || 'null');
+                    if (saved && saved.pct < 100) {
+                        console.log('[upload-worker] worker was GC\'d — resuming from sessionStorage pct=' + saved.pct + '%');
+                        worker.port.postMessage(Object.assign({}, saved, {
+                            type:      'resume',
+                            chunkUrl:  _FU.chunkUrl,
+                            cancelUrl: _FU.cancelUrl,
+                            ctxId:     _FU.ctxId,
+                        }));
+                    }
+                } catch {}
+            }
+        }
+        applyWorkerState(e.data);
+    });
+}());
+</script>
+
+{# ── Per-sub-page CSS / JS slot ────────────────────────────────────────────── #}
+{% block fu_extra %}{% endblock %}
+
+{% endblock %}{# extra #}

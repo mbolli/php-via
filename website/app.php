@@ -15,6 +15,7 @@ use PhpVia\Website\Examples\ClientMonitorExample;
 use PhpVia\Website\Examples\ComponentsExample;
 use PhpVia\Website\Examples\ContactFormExample;
 use PhpVia\Website\Examples\CounterExample;
+use PhpVia\Website\Examples\FileUploadExample;
 use PhpVia\Website\Examples\GameOfLifeExample;
 use PhpVia\Website\Examples\GreeterExample;
 use PhpVia\Website\Examples\LiveAuctionExample;
@@ -107,6 +108,8 @@ $twig = $app->getTwig();
 // Asset cache-busting version (based on CSS file mtime)
 $cssPath = __DIR__ . '/public/css/site.css';
 $twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
+$workerPath = __DIR__ . '/public/upload-worker.js';
+$twig->addGlobal('workerVersion', (string) (file_exists($workerPath) ? filemtime($workerPath) : time()));
 $twig->addGlobal('siteUrl', 'https://via.zweiundeins.gmbh/');
 
 // ─── Examples: register routes ───────────────────────────────────────────────
@@ -129,6 +132,7 @@ ThemeBuilderExample::register($app);
 WizardExample::register($app);
 LoginExample::register($app);
 ContactFormExample::register($app);
+FileUploadExample::register($app);
 LiveAuctionExample::register($app);
 TypeRaceExample::register($app);
 MissionControlExample::register($app);

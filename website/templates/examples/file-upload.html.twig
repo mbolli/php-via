@@ -1,0 +1,270 @@
+{% extends 'examples/_file-upload-wrapper.html.twig' %}
+
+{% block fu_content %}
+
+    {% if status.string == 'idle' %}
+
+    {# ── Mode toggle ───────────────────────────────────────────────────────── #}
+    <div class="fu-mode-toggle">
+        <button class="fu-mode-btn{{ uploadMode.string == 'sim' ? ' active' : '' }}"
+                data-on:click="@post('{{ setMode.url }}?mode=sim')">
+            🎲 Simulate
+        </button>
+        <button class="fu-mode-btn{{ uploadMode.string == 'real' ? ' active' : '' }}"
+                data-on:click="@post('{{ setMode.url }}?mode=real')">
+            📁 Real file
+        </button>
+    </div>
+
+    {% if uploadMode.string == 'sim' %}
+
+    {# ── Simulation form ───────────────────────────────────────────────────── #}
+    <div class="fu-form-wrap">
+        <h3 class="fu-heading">Simulate a large file upload</h3>
+        <p class="fu-subheading">
+            No real data is transferred — the worker sends virtual byte counts.
+            Navigate to Browse or Settings while uploading to see the progress bar survive.
+        </p>
+
+        <div class="fu-form">
+            <div class="fu-field">
+                <label for="sim-name">Virtual filename</label>
+                <input id="sim-name"
+                       type="text"
+                       class="fu-input"
+                       value="backup-db-2026.tar.gz"
+                       placeholder="filename.tar.gz">
+            </div>
+
+            <div class="fu-field-row">
+                <div class="fu-field">
+                    <label for="sim-size">Virtual file size</label>
+                    <select id="sim-size" class="fu-select">
+                        {% for label, bytes in sizes %}
+                        <option value="{{ bytes }}"{{ label == '200 MB' ? ' selected' : '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="fu-field">
+                    <label for="sim-speed">Upload speed</label>
+                    <select id="sim-speed" class="fu-select">
+                        {% for label, bps in speeds %}
+                        <option value="{{ bps }}"{{ label == '1 MB/s' ? ' selected' : '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <button class="fu-start-btn" onclick="handleStart()">📤 Start Upload</button>
+        </div>
+
+        <p class="fu-tip">
+            💡 <strong>Try it:</strong> start the upload, then click <strong>Browse</strong>
+            or <strong>Settings</strong> above — the bar never stops.
+        </p>
+    </div>
+
+    {% else %}
+
+    {# ── Real file upload form ─────────────────────────────────────────────── #}
+    <div class="fu-form-wrap">
+        <h3 class="fu-heading">Upload a real file</h3>
+        <p class="fu-subheading">
+            Actual multipart/form-data POST — <code>$c->file('file')</code> reads the upload.
+            Max {{ realMaxMb }} MB. Server formats the human-readable size and extension.
+        </p>
+
+        <form id="fu-real-form"
+              class="fu-form"
+              enctype="multipart/form-data"
+              onsubmit="window.handleRealUpload(this); return false">
+            <input type="hidden" name="via_ctx" value="{{ ctxId }}">
+
+            <div class="fu-field">
+                <label for="fu-file">Choose file <span class="fu-optional">(max {{ realMaxMb }} MB)</span></label>
+                <input id="fu-file"
+                       type="file"
+                       name="file"
+                       required
+                       data-on:change="
+                         const f = evt.target.files[0];
+                         const info = document.getElementById('fu-file-preview');
+                         if (f) {
+                           const ext = f.name.split('.').pop().toUpperCase() || 'file';
+                           const mb  = f.size / 1048576;
+                           const sz  = mb >= 1 ? mb.toFixed(1) + ' MB' : Math.ceil(f.size/1024) + ' kB';
+                           info.textContent = f.name + ' — ' + sz + ' · ' + ext;
+                           info.style.display = '';
+                         } else {
+                           info.textContent = '';
+                           info.style.display = 'none';
+                         }
+                       ">
+                <span id="fu-file-preview" class="fu-file-preview" style="display:none"></span>
+                {% if fileError != '' %}
+                <span class="fu-field-error">{{ fileError|e }}</span>
+                {% endif %}
+            </div>
+
+            <button type="submit" class="fu-start-btn">📁 Upload file</button>
+        </form>
+    </div>
+
+    {% endif %}{# uploadMode #}
+
+    {% elseif status.string == 'uploading' %}
+
+    {# ── Uploading state ───────────────────────────────────────────────────── #}
+    <div class="fu-status-panel">
+        <div class="fu-status-icon">📤</div>
+        <h3>Uploading…</h3>
+        <p>
+            Navigate to
+            <a href="{{ basePath }}examples/file-upload/browse">Browse</a>
+            or
+            <a href="{{ basePath }}examples/file-upload/settings">Settings</a>
+            — the progress bar will still be there.
+        </p>
+        <p class="fu-bytes-info">
+            {{ (uploadedBytes.int / 1048576)|number_format(0) }} MB
+            /
+            {{ (totalBytes.int / 1048576)|number_format(0) }} MB
+            transferred
+        </p>
+    </div>
+
+    {% elseif status.string == 'complete' %}
+
+    {# ── Complete state ────────────────────────────────────────────────────── #}
+    <div class="fu-status-panel">
+        <div class="fu-status-icon">✅</div>
+        <h3>Upload complete!</h3>
+        <p>
+            <strong>{{ fileName.string|e }}</strong>
+            uploaded successfully.
+        </p>
+        {% if uploadFileInfo.string != '' %}
+        <p class="fu-file-meta">{{ uploadFileInfo.string|e }}</p>
+        {% endif %}
+        <button class="fu-start-btn secondary" onclick="handleReset('{{ resetUpload.url }}', '{{ ctxId }}')">
+            ↺ Upload another file
+        </button>
+    </div>
+
+    {% else %}
+
+    {# ── Cancelled state ───────────────────────────────────────────────────── #}
+    <div class="fu-status-panel">
+        <div class="fu-status-icon">🚫</div>
+        <h3>Upload cancelled</h3>
+        <button class="fu-start-btn" onclick="handleReset('{{ resetUpload.url }}', '{{ ctxId }}')">
+            ↺ Start a new upload
+        </button>
+    </div>
+
+    {% endif %}
+
+{% endblock %}
+
+{% block fu_extra %}
+<style>
+.fu-form-wrap { max-width: 480px; }
+.fu-heading { font-size: 1.1rem; font-weight: 600; margin: 0 0 6px; }
+.fu-subheading { color: var(--text-2, #64748b); font-size: 0.9rem; margin-bottom: 20px; }
+.fu-form { display: flex; flex-direction: column; gap: 16px; }
+.fu-field { gap: 6px; }
+.fu-field label { color: var(--text-1, #1e293b); }
+.fu-field-row { display: flex; gap: 12px; }
+.fu-field-row .fu-field { flex: 1; }
+.fu-tip {
+    margin-top: 16px; font-size: 0.85rem; color: var(--text-2, #64748b);
+    background: var(--surface-2, #f8fafc); border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px; padding: 10px 14px;
+}
+.fu-mode-toggle { display: flex; gap: 4px; margin-bottom: 20px; }
+.fu-mode-btn {
+    padding: 7px 18px; border: 1px solid var(--border, #e2e8f0); border-radius: 8px;
+    background: var(--surface-2, #f8fafc); color: var(--text-2, #64748b);
+    font-size: 0.9rem; font-weight: 500; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.fu-mode-btn:hover { background: var(--surface-3, #e2e8f0); color: var(--text-1, #1e293b); }
+.fu-mode-btn.active { background: #eff6ff; color: var(--brand, #3b82f6); border-color: #bfdbfe; font-weight: 600; }
+.fu-optional { font-size: 0.8rem; font-weight: 400; color: var(--text-2, #94a3b8); }
+.fu-file-preview {
+    margin-top: 4px; font-size: 0.825rem; font-weight: 500;
+    color: var(--brand, #3b82f6); background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 6px; padding: 4px 10px;
+}
+.fu-field-error {
+    margin-top: 4px; font-size: 0.825rem; color: #dc2626;
+    background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; padding: 4px 10px;
+}
+.fu-file-meta {
+    font-size: 0.9rem; color: #16a34a; font-weight: 500;
+    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
+    padding: 6px 14px; display: inline-block; margin-bottom: 12px;
+}
+.fu-status-panel { text-align: center; padding: 32px 16px; }
+.fu-status-icon { font-size: 3rem; margin-bottom: 12px; }
+.fu-status-panel h3 { margin: 0 0 8px; font-size: 1.25rem; }
+.fu-status-panel p { color: var(--text-2, #64748b); margin: 4px 0 16px; }
+.fu-bytes-info { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+</style>
+<script>
+'use strict';
+window.handleStart = function () {
+    var size  = parseInt(document.getElementById('sim-size').value, 10);
+    var speed = parseInt(document.getElementById('sim-speed').value, 10);
+    var name  = document.getElementById('sim-name').value.trim() || 'backup.tar.gz';
+    // Worker handles the startUpload POST + chunk loop.
+    // Centralising here means navigation can't interrupt the handshake.
+    window.uploadWorkerPort.postMessage({
+        type:        'start',
+        virtualSize: size,
+        fileName:    name,
+        speedBps:    speed,
+        startUrl:    '{{ startUpload.url }}',
+        chunkUrl:    _FU.chunkUrl,
+        cancelUrl:   _FU.cancelUrl,
+        ctxId:       _FU.ctxId,
+    });
+};
+window.handleReset = function (url, ctxId) {
+    window.uploadWorkerPort.postMessage({ type: 'reset' });
+    fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    new URLSearchParams({ via_ctx: ctxId }),
+    });
+};
+window.handleRealUpload = function (form) {
+    var fileInput = document.getElementById('fu-file');
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
+    var file     = fileInput.files[0];
+    var maxBytes = {{ realMaxMb }} * 1024 * 1024;
+    var errEl    = form.querySelector('.fu-field-error');
+    if (!errEl) {
+        errEl = document.createElement('span');
+        errEl.className = 'fu-field-error';
+        fileInput.parentNode.appendChild(errEl);
+    }
+    if (file.size > maxBytes) {
+        errEl.textContent = 'File too large \u2014 maximum is {{ realMaxMb }}\u00a0MB. Use Simulate mode for larger files.';
+        return;
+    }
+    errEl.textContent = '';
+    // Hand the File to the worker — chunk loop runs there so navigation can't abort it
+    window.uploadWorkerPort.postMessage({
+        type:           'startReal',
+        file:           file,
+        startUrl:       '{{ startUpload.url }}',
+        uploadChunkUrl: _FU.uploadChunkUrl,
+        chunkUrl:       _FU.chunkUrl,
+        cancelUrl:      _FU.cancelUrl,
+        ctxId:          _FU.ctxId,
+    });
+};
+</script>
+{% endblock %}
