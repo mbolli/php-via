@@ -2755,48 +2755,8 @@ stock-chart {
 
 .gol-fuchsia { background: #d946ef; }
 
+
 .gol-purple  { background: #a855f7; }
-
-/* ─── DOOM example ─────────────────────────────────────── */
-
-.doom-error {
-  border-left: 3px solid var(--red-6);
-  margin-block-end: var(--size-3);
-}
-
-.doom-viewport {
-  position: relative;
-  cursor: crosshair;
-  outline: none;
-  border: 2px solid var(--surface-3);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  max-width: 640px;
-  margin-inline: auto;
-}
-
-.doom-frame {
-  display: block;
-  width: 100%;
-  height: auto;
-  image-rendering: pixelated;
-}
-
-.doom-hero {
-  text-align: center;
-  padding: var(--size-6);
-}
-
-.doom-hero-icon {
-  font-size: 3rem;
-}
-
-.doom-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: var(--size-2);
-  margin-block-start: var(--size-3);
-}
 
 /* ─── Cross-document View Transitions ──────────────────── */
 

@@ -18,8 +18,6 @@ parameters:
     # the OpenSwoole PHPStan stubs, causing an internal analyser crash (not a real
     # bug). The file cannot be analysed until upstream stubs are fixed.
     - src/Via.php
-    # DoomExample is work-in-progress and not registered in the website app.
-    - website/src/Examples/DoomExample.php
   editorUrl: 'phpstorm://open?file=%%file%%&line=%%line%%'
   editorUrlTitle: '%%file%%:%%line%%'
   type_perfect:

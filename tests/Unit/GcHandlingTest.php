@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Support\Stats;
-use Mbolli\PhpVia\Via;
 
 describe('Config GC interval', function (): void {
     test('default interval is 30 seconds', function (): void {

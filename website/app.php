@@ -493,9 +493,9 @@ $app->page('/examples', function (Context $c): void {
     // Falls back to the app.php mtime itself if no template is found.
     $routeTemplatePath = static function (string $route) use ($templateDir): string {
         $explicit = [
-            '/'                     => $templateDir . '/pages/home.html.twig',
-            '/docs'                 => $templateDir . '/docs/index.html.twig',
-            '/examples'             => $templateDir . '/pages/examples-index.html.twig',
+            '/' => $templateDir . '/pages/home.html.twig',
+            '/docs' => $templateDir . '/docs/index.html.twig',
+            '/examples' => $templateDir . '/pages/examples-index.html.twig',
             // Route slug differs from template name
             '/examples/stock-ticker' => $templateDir . '/examples/stock_dashboard.html.twig',
         ];
@@ -548,6 +548,7 @@ $app->page('/examples', function (Context $c): void {
         if (str_contains($route, ':') || str_contains($route, '{')) {
             return false;
         }
+
         return true;
     });
 

@@ -4,6 +4,17 @@ All notable changes to php-via will be documented in this file.
 
 ## [Unreleased]
 
+### Dependencies
+
+- Upgraded Datastar to v1 final.
+  - Replaced bundled client script in `public/datastar.js` from `v1.0.0-RC.8` to `v1.0.0`.
+  - Pinned `starfederation/datastar-php` to stable `^1.0` (resolved to `1.0.0`) in root and website lockfiles.
+
+### Migration Notes
+
+- No template syntax migration required in this codebase: runtime markup was already using v1 attribute syntax (for example `data-on:click`, `data-init`) and v1 SSE event names (`datastar-patch-elements`, `datastar-patch-signals`).
+- Audited for deprecated backend action option naming; no application-level `retryMaxWaitMs` usage was found outside vendored assets.
+
 ## [0.7.0] - 2026-04-10
 
 ### New Features
