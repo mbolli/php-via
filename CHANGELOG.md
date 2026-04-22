@@ -2,18 +2,28 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [Unreleased]
+## [0.7.1] - 2026-04-22
+
+### Bug Fixes
+
+- **Signal native storage** — `Signal::setValue()` no longer pre-encodes arrays/objects as
+  JSON strings. Values are stored as their native PHP type and serialized once by the Datastar
+  SDK when building the SSE payload. Previously, arrays were double-encoded and arrived at the
+  client as a JSON string instead of an array.
+- **`Signal::string()` / `Signal::bool()`** — both methods now guard against array/object
+  values to avoid PHP "Array to string conversion" notices.
+
+### New API
+
+- **`Signal::array(): array`** — convenience accessor that returns the signal value cast to
+  a PHP array, consistent with the existing `int()`, `float()`, `string()`, and `bool()` casts.
 
 ### Dependencies
 
-- Upgraded Datastar to v1 final.
-  - Replaced bundled client script in `public/datastar.js` from `v1.0.0-RC.8` to `v1.0.0`.
-  - Pinned `starfederation/datastar-php` to stable `^1.0` (resolved to `1.0.0`) in root and website lockfiles.
-
-### Migration Notes
-
-- No template syntax migration required in this codebase: runtime markup was already using v1 attribute syntax (for example `data-on:click`, `data-init`) and v1 SSE event names (`datastar-patch-elements`, `datastar-patch-signals`).
-- Audited for deprecated backend action option naming; no application-level `retryMaxWaitMs` usage was found outside vendored assets.
+- Upgraded Datastar JS client to `v1.0.1` (`public/datastar.js`).
+- Upgraded Datastar PHP SDK to v1 final; pinned `starfederation/datastar-php` to stable `^1.0` (resolved to `1.0.0`) in root and website lockfiles.
+- Removed `src/Via.php` from PHPStan analysis (OpenSwoole stub gap for `Event::EVENT_READ`); suppressed false-positive `alwaysTrue` warning in `SseHandler`.
+- CI: install `website/vendor` before running PHPStan.
 
 ## [0.7.0] - 2026-04-10
 

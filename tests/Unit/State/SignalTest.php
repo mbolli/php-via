@@ -32,7 +32,7 @@ describe('Signal Creation', function (): void {
 
         expect($string->getValue())->toBe('text');
         expect($int->getValue())->toBe(42);
-        expect($array->getValue())->toBeJson();
+        expect($array->getValue())->toBe([1, 2, 3]);
         expect($bool->getValue())->toBe(true);
     });
 });

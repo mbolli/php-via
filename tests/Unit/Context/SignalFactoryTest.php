@@ -69,16 +69,16 @@ test('signal updates with complex values like arrays', function (): void {
     $context->scope(Scope::build('stock', 'AAPL'));
 
     $signal1 = $context->signal(['a', 'b'], 'data');
-    // Signal stores complex values as JSON
-    expect(json_decode($signal1->getValue(), true))->toEqual(['a', 'b']);
+    // Signal stores complex values natively
+    expect($signal1->getValue())->toEqual(['a', 'b']);
 
     // Re-registration returns same signal, initial value ignored
     $signal2 = $context->signal(['c', 'd', 'e'], 'data');
     expect($signal1->id())->toBe($signal2->id());
-    expect(json_decode($signal1->getValue(), true))->toEqual(['a', 'b']); // unchanged
+    expect($signal1->getValue())->toEqual(['a', 'b']); // unchanged
 
     // Explicit update works correctly
     $signal1->setValue(['c', 'd', 'e']);
-    expect(json_decode($signal1->getValue(), true))->toEqual(['c', 'd', 'e']);
-    expect(json_decode($signal2->getValue(), true))->toEqual(['c', 'd', 'e']);
+    expect($signal1->getValue())->toEqual(['c', 'd', 'e']);
+    expect($signal2->getValue())->toEqual(['c', 'd', 'e']);
 });

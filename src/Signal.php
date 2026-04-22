@@ -60,12 +60,7 @@ class Signal {
         // Check if value actually changed
         $oldValue = $this->value;
 
-        // Convert arrays/objects to JSON for complex types
-        if (\is_array($value) || \is_object($value)) {
-            $this->value = json_encode($value);
-        } else {
-            $this->value = $value;
-        }
+        $this->value = $value;
 
         if ($markChanged) {
             $this->changed = true;
@@ -122,6 +117,10 @@ class Signal {
      * Get value as string.
      */
     public function string(): string {
+        if (\is_array($this->value) || \is_object($this->value)) {
+            return json_encode($this->value) ?: '';
+        }
+
         return (string) $this->value;
     }
 
@@ -143,9 +142,22 @@ class Signal {
      * Get value as boolean.
      */
     public function bool(): bool {
+        if (\is_array($this->value) || \is_object($this->value)) {
+            return !empty($this->value);
+        }
+
         $val = mb_strtolower((string) $this->value);
 
         return \in_array($val, ['true', '1', 'yes', 'on'], true);
+    }
+
+    /**
+     * Get value as array.
+     *
+     * @return array<mixed>
+     */
+    public function array(): array {
+        return \is_array($this->value) ? $this->value : (array) $this->value;
     }
 
     /**
