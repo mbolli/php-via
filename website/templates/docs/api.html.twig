@@ -334,13 +334,12 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withTemplateDir(__DIR__ . '/templates')
     ->withShellTemplate(__DIR__ . '/shell.html')
     ->withStaticDir(__DIR__ . '/public')
-    ->withBasePath('/')             // URL base path prefix
+    ->withBasePath('/')             // base path when mounted at a sub-path (see below)
     ->withSsePollIntervalMs(50)     // SSE poll interval in ms
     ->withSwooleSettings([...])     // raw OpenSwoole server settings
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
-    ->withTrustProxy(true)          // honour X-Base-Path from proxy
     ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP
     // HTTPS / HTTP2 / Brotli compression (requires ext-brotli)
     ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
@@ -356,8 +355,14 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         (proxy with Caddy/Nginx handling TLS). A hard error is thrown at <code>start()</code> if <code>ext-brotli</code>
         is missing or neither HTTPS mode is configured.
         See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
+    </p>    <p>
+        <code>withBasePath(string $basePath)</code> sets the URL prefix when the app is mounted at a sub-path
+        (e.g. <code>example.com/myapp/</code>). The value must be a relative path such as <code>/</code>,
+        <code>/myapp</code>, or <code>/sub/path</code>. An <code>\InvalidArgumentException</code> is thrown
+        at startup for invalid inputs (absolute URLs, protocol-relative paths, etc.).
+        The basePath is exposed to every Twig template as <code>{{ basePath }}</code>.
+        See <a href="/docs/deployment#sub-path">Deployment &rarr; Sub-path mounting</a> for a Caddy example.
     </p>
-
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/signals">Signals</a> — reactive state in depth</li>

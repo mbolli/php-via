@@ -348,11 +348,13 @@ $config = (new Config())
     ->withDevMode(true)                       // verbose logging, no cache headers
     ->withBrotli()                            // requires ext-brotli
     ->withH2c()                               // HTTP/2 cleartext (behind TLS proxy)
-    ->withTrustProxy(true)                    // trust X-Forwarded-* headers
     ->withCertificate($crt, $key)             // enable HTTPS directly
     ->withLogLevel('debug')                   // debug | info | warning | error
     ->withBroker(new RedisBroker(...))        // multi-node broker
-    ->withBasePath('/app/')                   // if mounted at a sub-path
+    ->withBasePath('/app/')                   // set at startup when mounted at a sub-path;
+                                              // throws InvalidArgumentException for invalid paths
+                                              // (absolute URLs, protocol-relative, etc.)
+                                              // exposes {{ basePath }} to all Twig templates
 ;
 ```
 

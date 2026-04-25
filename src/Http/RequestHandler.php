@@ -69,15 +69,6 @@ class RequestHandler {
         $method = $request->server['request_method'];
         $requestStart = hrtime(true);
 
-        // Detect basePath from X-Base-Path header (set by reverse proxy like Caddy).
-        // Only trusted when Config::withTrustProxy(true) is set — otherwise clients
-        // could inject arbitrary base paths.
-        if ($this->via->getConfig()->getTrustProxy()) {
-            $basePathHeader = $request->header['x-base-path'] ?? null;
-            $this->via->getApp()->getConfig()->detectBasePathFromRequest($basePathHeader);
-        }
-        $this->via->getApp()->getTwig()->addGlobal('basePath', $this->via->getApp()->getConfig()->getBasePath());
-
         // Note: $_GET/$_POST/$_FILES are intentionally NOT set here.
         // Superglobals are shared across coroutines in OpenSwoole and cause
         // race conditions. Use $c->input() in actions or $request->get in handlers.

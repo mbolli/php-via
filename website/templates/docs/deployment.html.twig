@@ -67,6 +67,32 @@ myapp.example.com {
 }
     {% endverbatim %}{% endcode %}
 
+    <h2 id="sub-path">Sub-path mounting</h2>
+    <p>
+        If your app is hosted at a sub-path (e.g. <code>example.com/myapp/</code>), tell php-via
+        the base path at startup with <code>withBasePath()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withBasePath('/myapp');   // also accepts '/myapp/' — trailing slash is added automatically
+    {% endverbatim %}{% endcode %}
+    <p>
+        This sets the <code>{{ basePath }}</code> Twig global used by all action URLs and navigation
+        links throughout your templates. The value must be a relative path (<code>/myapp</code>,
+        <code>/sub/path</code>, etc.). An <code>\InvalidArgumentException</code> is thrown at startup
+        if an invalid value is supplied (absolute URL, protocol-relative path, etc.).
+    </p>
+    <p>Configure the matching Caddy block:</p>
+    {% code 'caddy' %}{% verbatim %}
+example.com {
+    handle /myapp/* {
+        reverse_proxy localhost:3000 {
+            flush_interval -1
+        }
+    }
+}
+    {% endverbatim %}{% endcode %}
+
     <h2 id="brotli">Brotli compression</h2>
     <p>
         php-via can compress pages, static assets, and live SSE streams with Brotli.
@@ -180,7 +206,6 @@ $config->withSecureCookie(true);
         <li>Set <code>withTrustedOrigins([…])</code> to your production domain(s).</li>
         <li>Set <code>withSecureCookie(true)</code> when serving over HTTPS.</li>
         <li>Bind the server to <code>127.0.0.1</code> (not <code>0.0.0.0</code>) and let Caddy/nginx face the internet.</li>
-        <li>Use <code>withTrustProxy(true)</code> only when a trusted reverse proxy sits in front — never expose this directly.</li>
         <li>Use <code>@post()</code> (not <code>@get()</code>) for all action buttons and form submissions.</li>
     </ul>
 
@@ -221,7 +246,7 @@ $config->withStaticDir(__DIR__ . '/public');
     <ul>
         <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
         <li><a href="/docs/actions#url">Actions → URL</a> — why <code>@post()</code> is required</li>
-        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>)</li>
+        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>)</li>
     </ul>
 </article>
 

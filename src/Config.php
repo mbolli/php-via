@@ -18,7 +18,6 @@ class Config {
     private ?string $templateDir = null;
     private ?string $shellTemplate = null;
     private string $basePath = '/';
-    private bool $basePathDetected = false;
     private ?string $staticDir = null;
 
     /** @var array<string, mixed> */
@@ -42,12 +41,6 @@ class Config {
      * @var null|list<string>
      */
     private ?array $trustedOrigins = null;
-
-    /**
-     * Whether to trust reverse-proxy headers (X-Base-Path, X-Forwarded-*).
-     * Disabled by default — only enable behind a trusted proxy (Caddy, Nginx, etc.).
-     */
-    private bool $trustProxy = false;
 
     /** Path to SSL certificate file (PEM). Required for HTTPS/HTTP2. */
     private ?string $sslCertFile = null;
@@ -97,37 +90,6 @@ class Config {
      */
     private int $gcIntervalMs = 30_000;
 
-    /**
-     * Set basePath from reverse proxy header.
-     * Called on first request with X-Base-Path header from Caddy.
-     *
-     * Only relative path-only values are accepted: e.g. '/', '/app/', '/sub/path/'.
-     * Values containing scheme prefixes (https://), protocol-relative forms (//),
-     * backslashes, or control characters are silently rejected and leave the
-     * configured default unchanged.  An invalid value does NOT lock detection,
-     * so the next valid proxied request can still set the base path correctly.
-     */
-    public function detectBasePathFromRequest(?string $basePathHeader): void {
-        if ($this->basePathDetected) {
-            return;
-        }
-
-        if ($basePathHeader === null || $basePathHeader === '') {
-            return;
-        }
-
-        // Validate: accept only a safe relative path.
-        // Pattern: zero or more /segment components (each starting with [a-zA-Z0-9])
-        // followed by an optional trailing slash.  This rejects protocol-relative
-        // paths (//evil.com), absolute URLs (https://…), and any unexpected chars.
-        if (!preg_match('#^(?:/[a-zA-Z0-9][a-zA-Z0-9_.-]*)*/?$#', $basePathHeader)) {
-            return;
-        }
-
-        $this->basePath = rtrim($basePathHeader, '/') . '/';
-        $this->basePathDetected = true;
-    }
-
     public function withHost(string $host): self {
         $this->host = $host;
 
@@ -174,7 +136,23 @@ class Config {
         return $this;
     }
 
+    /**
+     * Set the URL base path prefix (e.g. '/app/' when mounted at a sub-path).
+     * Must be a relative path: '/', '/app', '/sub/path', etc.
+     *
+     * @throws \InvalidArgumentException if the value is not a valid relative path.
+     */
     public function withBasePath(string $basePath): self {
+        // Accept only safe relative paths: zero or more /segment components
+        // (each starting with [a-zA-Z0-9]) followed by an optional trailing slash.
+        // Rejects protocol-relative paths (//evil.com), absolute URLs (https://…),
+        // backslashes, and any other unexpected characters.
+        if (!preg_match('#^(?:/[a-zA-Z0-9][a-zA-Z0-9_.-]*)*/?$#', $basePath)) {
+            throw new \InvalidArgumentException(
+                "Invalid basePath '{$basePath}': must be a relative path like '/', '/app', or '/sub/path'."
+            );
+        }
+
         $this->basePath = rtrim($basePath, '/') . '/';
 
         return $this;
@@ -272,21 +250,6 @@ class Config {
      */
     public function getTrustedOrigins(): ?array {
         return $this->trustedOrigins;
-    }
-
-    /**
-     * Trust reverse-proxy headers like X-Base-Path.
-     * Only enable this when running behind a trusted reverse proxy (Caddy, Nginx, etc.).
-     * Without this, clients cannot inject arbitrary base paths.
-     */
-    public function withTrustProxy(bool $trust = true): self {
-        $this->trustProxy = $trust;
-
-        return $this;
-    }
-
-    public function getTrustProxy(): bool {
-        return $this->trustProxy;
     }
 
     /**

@@ -173,16 +173,6 @@ $config = (new Config())
     ->withActionRateLimit(100, 60);  // max 100 actions per 60 seconds per IP
     {% endverbatim %}{% endcode %}
 
-    <h3 id="trust-proxy">Proxy trust</h3>
-    <p>
-        If your app runs behind a reverse proxy (Caddy, nginx), enable proxy trust so <code>X-Base-Path</code>
-        headers are honoured:
-    </p>
-    {% code 'php' %}{% verbatim %}
-$config = (new Config())
-    ->withTrustProxy(true);
-    {% endverbatim %}{% endcode %}
-
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
