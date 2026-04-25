@@ -139,6 +139,51 @@ $config = (new Config())
     ]);
     {% endverbatim %}{% endcode %}
 
+    <h2 id="security">Security hardening</h2>
+    <p>Two <code>Config</code> options should always be set in production:</p>
+
+    <h3 id="security-origins">Trusted origins — CSRF protection</h3>
+    <p>
+        By default, when no trusted-origin list is configured, php-via falls back to a
+        <em>same-host</em> check: the <code>Origin</code> header of every action request must match
+        the <code>Host</code> header. This already blocks cross-site requests in most cases.
+        For a stronger guarantee, set an explicit allowlist:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withTrustedOrigins(['https://myapp.example.com']);
+    {% endverbatim %}{% endcode %}
+    <p>
+        With an allowlist configured, action requests whose <code>Origin</code> header is absent
+        or does not exactly match one of the listed origins are rejected with
+        <strong>403 Forbidden</strong>. Non-browser clients (curl, server-to-server) that omit
+        <code>Origin</code> are still allowed when no list is configured (same-host fallback only
+        applies to browser-sent requests).
+    </p>
+    <p>
+        Note: <code>GET /_action/…</code> always returns <strong>405 Method Not Allowed</strong>
+        regardless of this setting — see <a href="/docs/actions#url">Actions → URL</a> for details.
+    </p>
+
+    <h3 id="security-cookie">Secure cookie</h3>
+    <p>
+        The session cookie uses <code>HttpOnly</code> and <code>SameSite=Lax</code> by default.
+        Behind HTTPS, add the <code>Secure</code> flag (and the <code>__Host-</code> prefix, which
+        prevents subdomain injection) by enabling:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withSecureCookie(true);
+    {% endverbatim %}{% endcode %}
+    <p>Do not enable this in local HTTP development — the browser will silently drop the cookie.</p>
+
+    <h3 id="security-checklist">Quick checklist</h3>
+    <ul>
+        <li>Set <code>withTrustedOrigins([…])</code> to your production domain(s).</li>
+        <li>Set <code>withSecureCookie(true)</code> when serving over HTTPS.</li>
+        <li>Bind the server to <code>127.0.0.1</code> (not <code>0.0.0.0</code>) and let Caddy/nginx face the internet.</li>
+        <li>Use <code>withTrustProxy(true)</code> only when a trusted reverse proxy sits in front — never expose this directly.</li>
+        <li>Use <code>@post()</code> (not <code>@get()</code>) for all action buttons and form submissions.</li>
+    </ul>
+
     <h2 id="graceful-restart">Graceful restart</h2>
     <p>
         To deploy new code without dropping connections, reload the service:
@@ -175,7 +220,8 @@ $config->withStaticDir(__DIR__ . '/public');
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
-        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>)</li>
+        <li><a href="/docs/actions#url">Actions → URL</a> — why <code>@post()</code> is required</li>
+        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>)</li>
     </ul>
 </article>
 

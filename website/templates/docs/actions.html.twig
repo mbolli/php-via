@@ -32,6 +32,18 @@ $increment->url();  // '/_action/increment'
 <button data-on:click="@post('{{ increment_url }}')">>+1</button>
     {% endverbatim %}{% endcode %}
 
+    <div class="callout callout--warn">
+        <strong>Always use <code>@post()</code> for actions.</strong>
+        <code>GET /_action/…</code> returns <strong>405 Method Not Allowed</strong>.
+        Accepting actions over GET would allow top-level browser navigation (a link or redirect from any
+        origin) to trigger state changes without the user's intent — a classic
+        <a href="https://owasp.org/www-community/attacks/csrf" target="_blank" rel="noopener">CSRF</a> vector.
+        Use <code>@post()</code>, <code>@patch()</code>, <code>@put()</code>, or <code>@delete()</code> —
+        all of these require an explicit browser <code>fetch()</code> call, which the browser's
+        cross-origin policy controls. <code>@get()</code> is fine for the SSE endpoint
+        (<code>/_sse</code>), just not for actions.
+    </div>
+
     <h2 id="post-data">Reading POST data</h2>
     <p>POST body and query params are accessible via <code>$_POST</code> and <code>$_GET</code> inside the callback:</p>
     {% code 'php' %}{% verbatim %}
