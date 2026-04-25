@@ -54,7 +54,7 @@ final class AllScopesExample {
                             <div class="scope-card-label">GLOBAL &mdash; System Status</div>
                             <div>Status: <strong>{$status}</strong> · Visitors: <strong>{$visitors}</strong></div>
                         </div>
-                        <button data-on:click="@get('{$updateStatus->url()}')">Update Status</button>
+                        <button data-on:click="@post('{$updateStatus->url()}')">Update Status</button>
                     </div>
                     <p class="scope-card-hint">Shared across ALL pages and users. Changes propagate everywhere.</p>
                 </div>
@@ -88,8 +88,8 @@ final class AllScopesExample {
                             <div style="font-size: var(--font-size-5); font-weight: var(--font-weight-9);">{$count}</div>
                         </div>
                         <div style="display: flex; gap: var(--size-2);">
-                            <button data-on:click="@get('{$increment->url()}')">+ Increment</button>
-                            <button class="danger" data-on:click="@get('{$reset->url()}')">Reset</button>
+                            <button data-on:click="@post('{$increment->url()}')">+ Increment</button>
+                            <button class="danger" data-on:click="@post('{$reset->url()}')">Reset</button>
                         </div>
                     </div>
                     <p class="scope-card-hint">Shared by all users on THIS page only. Different pages have different counters.</p>
