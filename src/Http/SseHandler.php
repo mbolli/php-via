@@ -95,6 +95,14 @@ class SseHandler {
 
         $context = $this->via->contexts[$contextId];
 
+        // Verify the caller's session owns this context to prevent unauthorized SSE attachment.
+        if (!$this->isSessionAuthorized($contextId, $this->via->getSessionId($request))) {
+            $response->status(403);
+            $response->end('Forbidden');
+
+            return;
+        }
+
         // If the context exists but its view was cleared (cleanup ran and removed it from Via::$contexts
         // but the callback hadn't fired yet), force a reload so the page re-initialises cleanly.
         if (!$context->hasView()) {
@@ -287,5 +295,18 @@ class SseHandler {
             'script' => $sse->executeScript($content),
             default => ''
         };
+    }
+
+    /**
+     * Check whether the caller's session is authorised to open an SSE stream for the context.
+     * @see ActionHandler::isSessionAuthorized() — identical contract
+     */
+    private function isSessionAuthorized(string $contextId, ?string $callerSessionId): bool {
+        $storedSessionId = $this->via->getContextSessionId($contextId);
+        if ($storedSessionId === null) {
+            return true;
+        }
+
+        return $callerSessionId !== null && $callerSessionId === $storedSessionId;
     }
 }

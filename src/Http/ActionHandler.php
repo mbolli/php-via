@@ -36,10 +36,12 @@ class ActionHandler {
     public function handleAction(Request $request, Response $response, string $actionId): void {
         $actionStart = hrtime(true);
 
-        // CSRF: validate the Origin header when trustedOrigins is configured.
+        // CSRF: validate the Origin header.
         // Datastar fires actions via fetch(), which always sends Origin on cross-origin
-        // requests. We reject any request whose Origin is not in the allowlist.
-        if (!$this->isOriginAllowed($request->header['origin'] ?? null)) {
+        // requests. When no explicit allowlist is configured, the framework falls back to
+        // a same-host check derived from the Host header.  In dev mode, absent Origin is
+        // also accepted (curl, Postman, local tooling).
+        if (!$this->isOriginAllowed($request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end('Forbidden: untrusted origin');
 
@@ -71,6 +73,14 @@ class ActionHandler {
         }
 
         $context = $this->via->contexts[$contextId];
+
+        // Verify the caller's session owns this context to prevent cross-session IDOR.
+        if (!$this->isSessionAuthorized($contextId, $this->via->getSessionId($request))) {
+            $response->status(403);
+            $response->end('Forbidden');
+
+            return;
+        }
 
         try {
             // Inject HTTP request params so action callbacks can use $c->input() / $c->file() / $c->cookie()
@@ -174,19 +184,68 @@ class ActionHandler {
         return true;
     }
 
-    private function isOriginAllowed(?string $origin): bool {
-        $trustedOrigins = $this->via->getConfig()->getTrustedOrigins();
-
-        // No allowlist configured — allow all origins (explicit opt-in required for restriction).
-        if ($trustedOrigins === null) {
+    /**
+     * Check whether the caller's session is authorised to interact with the given context.
+     *
+     * Returns true when:
+     *   - The context has no stored session binding (accessible to any caller).
+     *   - The caller's session matches the session that originally created the context.
+     *
+     * Returns false (block the request) when there is a stored session and the
+     * caller's session does not match it.
+     */
+    private function isSessionAuthorized(string $contextId, ?string $callerSessionId): bool {
+        $storedSessionId = $this->via->getContextSessionId($contextId);
+        if ($storedSessionId === null) {
             return true;
         }
 
-        // Absent Origin header: allow (non-browser clients, same-origin curl, etc.).
+        return $callerSessionId !== null && $callerSessionId === $storedSessionId;
+    }
+
+    /**
+     * Validate the Origin header against the configured allowlist or a derived same-host check.
+     *
+     * Explicit allowlist (withTrustedOrigins):
+     *   – Absent Origin is always allowed (non-browser clients, curl, server-to-server).
+     *   – Present Origin must be in the list.
+     *
+     * No explicit allowlist:
+     *   – Falls back to a same-host check: the Origin's host must equal the Host header.
+     *     Accepts both http:// and https:// prefixes so it works behind a TLS-terminating proxy.
+     *   – Absent Origin: allowed in dev mode (curl/tools), denied in production.
+     *   – No Host header: allowed in dev mode, denied in production.
+     */
+    private function isOriginAllowed(?string $origin, ?string $host): bool {
+        $config = $this->via->getConfig();
+        $trustedOrigins = $config->getTrustedOrigins();
+        $devMode = $config->getDevMode();
+
+        if ($trustedOrigins !== null) {
+            // Explicit allowlist configured — check strictly.
+            // Absent Origin is always allowed (non-browser clients, curl, server-to-server).
+            if ($origin === null) {
+                return true;
+            }
+
+            return \in_array($origin, $trustedOrigins, strict: true);
+        }
+
+        // No explicit allowlist: same-host fallback.
         if ($origin === null) {
-            return true;
+            // Dev: allow absent Origin (curl, local tooling).  Prod: deny.
+            return $devMode;
         }
 
-        return \in_array($origin, $trustedOrigins, strict: true);
+        if ($host === null) {
+            // No Host header: allow in dev (unusual setup), deny in prod.
+            return $devMode;
+        }
+
+        // Strip the scheme from the Origin header and compare to the Host header.
+        // This handles both http:// and https:// transparently.
+        $originHost = (string) preg_replace('#^https?://#', '', $origin);
+
+        return $originHost === $host;
     }
 }
