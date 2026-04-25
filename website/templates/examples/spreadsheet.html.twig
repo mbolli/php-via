@@ -31,7 +31,7 @@
             el.__lastScroll = now;
             if (axis === 'v') { ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }}); }
             else { ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }}); }
-            @get('{{ scrollToUrl }}');
+            @post('{{ scrollToUrl }}');
         };
         el.__sbEnd = (cx, cy) => {
             if (!el.__drag) return;
@@ -46,7 +46,7 @@
                     : Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
                 if (axis === 'v') { ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }}); }
                 else { ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }}); }
-                @get('{{ scrollToUrl }}');
+                @post('{{ scrollToUrl }}');
             }
             el.__drag = null; document.body.style.userSelect = '';
         };
@@ -70,22 +70,22 @@
         const k = evt.key, e = ${{ editingId }};
         if (e) {
             if (['Tab','Enter','Escape'].includes(k)) {
-                @get('{{ navigateUrl }}'); evt.preventDefault();
+                @post('{{ navigateUrl }}'); evt.preventDefault();
             }
             return;
         }
         if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
-            @get('{{ navigateUrl }}'); evt.preventDefault();
+            @post('{{ navigateUrl }}'); evt.preventDefault();
         } else if (['Tab','Enter','Escape','PageUp','PageDown','Home'].includes(k)) {
-            @get('{{ navigateUrl }}'); evt.preventDefault();
+            @post('{{ navigateUrl }}'); evt.preventDefault();
         } else if (k === 'F2') {
-            @get('{{ startEditUrl }}'); evt.preventDefault();
+            @post('{{ startEditUrl }}'); evt.preventDefault();
         } else if (k === 'c' && (evt.ctrlKey || evt.metaKey)) {
-            @get('{{ getCopyDataUrl }}');
+            @post('{{ getCopyDataUrl }}');
         } else if (k === 'Delete' || k === 'Backspace') {
-            @get('{{ clearCellsUrl }}'); evt.preventDefault();
+            @post('{{ clearCellsUrl }}'); evt.preventDefault();
         } else if (k.length === 1 && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
-            @get('{{ startEditUrl }}'); evt.preventDefault();
+            @post('{{ startEditUrl }}'); evt.preventDefault();
         }
      "
      data-on:keyup__window="${{ keyId }} = ''; ${{ shiftId }} = false"
@@ -93,7 +93,7 @@
      data-on:wheel__throttle.100ms__prevent="
         ${{ drId }} = evt.deltaY > 0 ? 4 : evt.deltaY < 0 ? -4 : 0;
         ${{ dcId }} = evt.deltaX > 0 ? 4 : evt.deltaX < 0 ? -4 : 0;
-        if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @get('{{ scrollUrl }}');
+        if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @post('{{ scrollUrl }}');
      "
      data-on:mousemove__window="el.__sbDrag(evt.clientX, evt.clientY)"
      data-on:touchmove__window="if (el.__drag) { evt.preventDefault(); const t = evt.touches[0]; el.__sbDrag(t.clientX, t.clientY); }"
@@ -111,8 +111,8 @@
                class="ss-jump-input"
                data-bind="{{ jumpId }}"
                placeholder="B5"
-               data-on:keydown="if (evt.key === 'Enter') { evt.preventDefault(); @get('{{ jumpUrl }}') }"
-               data-on:blur="${{ jumpId }} !== '' && @get('{{ jumpUrl }}')"
+               data-on:keydown="if (evt.key === 'Enter') { evt.preventDefault(); @post('{{ jumpUrl }}') }"
+               data-on:blur="${{ jumpId }} !== '' && @post('{{ jumpUrl }}')"
         >
         <div class="ss-formula-bar">{{ focusedCellValue }}</div>
         <div class="ss-users">
@@ -151,9 +151,9 @@
                                     {% if isFocused %}style="outline: 2px solid hsl({{ myHue }}, 70%, 50%); outline-offset: -1px;"{% endif %}
                                     {% if otherHue is not null and not isFocused %}style="box-shadow: inset 0 0 0 2px hsl({{ otherHue }}, 70%, 50%);"{% endif %}
                                     {% if not isFocused %}
-                                        data-on:click="${{ shiftId }} = evt.shiftKey; ${{ trId }} = {{ absRow }}; ${{ tcId }} = {{ absCol }}; @get('{{ focusCellUrl }}')"
+                                        data-on:click="${{ shiftId }} = evt.shiftKey; ${{ trId }} = {{ absRow }}; ${{ tcId }} = {{ absCol }}; @post('{{ focusCellUrl }}')"
                                     {% endif %}
-                                    data-on:dblclick="@get('{{ startEditUrl }}')"
+                                    data-on:dblclick="@post('{{ startEditUrl }}')"
                                 >
                                     {% if isFocused and isEditing %}
                                         <input type="text" data-init="el.focus()" id="ss-active-input" class="ss-edit-input" data-bind="{{ editValueId }}">
@@ -175,7 +175,7 @@
                     el.closest('#spreadsheet').__drag = 'v'; document.body.style.userSelect = 'none';
                 } else {
                     ${{ scrollToRowId }} = Math.round(Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height)) * {{ maxRow - viewportRows }});
-                    @get('{{ scrollToUrl }}');
+                    @post('{{ scrollToUrl }}');
                 }
              "
              data-on:touchstart__prevent="
@@ -184,7 +184,7 @@
                     el.closest('#spreadsheet').__drag = 'v';
                 } else {
                     ${{ scrollToRowId }} = Math.round(Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)) * {{ maxRow - viewportRows }});
-                    @get('{{ scrollToUrl }}');
+                    @post('{{ scrollToUrl }}');
                 }
              ">
             <div class="ss-scrollbar-track" data-ref="ssTrackV">
@@ -201,7 +201,7 @@
                     el.closest('#spreadsheet').__drag = 'h'; document.body.style.userSelect = 'none';
                 } else {
                     ${{ scrollToColId }} = Math.round(Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) * {{ maxCol - viewportCols }});
-                    @get('{{ scrollToUrl }}');
+                    @post('{{ scrollToUrl }}');
                 }
              "
              data-on:touchstart__prevent="
@@ -210,7 +210,7 @@
                     el.closest('#spreadsheet').__drag = 'h';
                 } else {
                     ${{ scrollToColId }} = Math.round(Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width)) * {{ maxCol - viewportCols }});
-                    @get('{{ scrollToUrl }}');
+                    @post('{{ scrollToUrl }}');
                 }
              ">
             <div class="ss-scrollbar-track" data-ref="ssTrackH">

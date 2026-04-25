@@ -11,11 +11,11 @@
     </p>
 
     <div class="flex gap-1 mb-2">
-        <button data-on:click="@get('{{ toggleUrl }}')">{{ runningEmoji }} {{ runningText }}</button>
-        <button class="secondary" data-on:click="@get('{{ resetUrl }}')">🔄 Reset</button>
+        <button data-on:click="@post('{{ toggleUrl }}')">{{ runningEmoji }} {{ runningText }}</button>
+        <button class="secondary" data-on:click="@post('{{ resetUrl }}')">🔄 Reset</button>
     </div>
 
-    <div class="gol-board" data-on:pointerdown="@get('{{ tapUrl }}?id=' + event.target.dataset.id)">
+    <div class="gol-board" data-on:pointerdown="@post('{{ tapUrl }}?id=' + event.target.dataset.id)">
         {{ tiles | raw }}
     </div>
 </div>

@@ -58,11 +58,11 @@
                 <input type="text"
                        placeholder="Type a message..."
                        data-bind="{{ messageInputId }}"
-                       data-on:keyup__throttle.500ms="evt.key != 'Enter' && @get('{{ updateTypingUrl }}')"
-                       data-on:keydown="evt.key === 'Enter' && @get('{{ sendMessageUrl }}')"
+                       data-on:keyup__throttle.500ms="evt.key != 'Enter' && @post('{{ updateTypingUrl }}')"
+                       data-on:keydown="evt.key === 'Enter' && @post('{{ sendMessageUrl }}')"
                        autofocus
                        class="flex-1">
-                <button class="secondary" data-on:click="@get('{{ sendMessageUrl }}')">Send</button>
+                <button class="secondary" data-on:click="@post('{{ sendMessageUrl }}')">Send</button>
             </div>
         </div>
 

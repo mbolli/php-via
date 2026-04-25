@@ -5,7 +5,7 @@
     </p>
     {% for option in options %}
     <div class="poll-option" id="poll-option-{{ option.key }}">
-        <button class="poll-vote-btn" data-on:click="@get('{{ option.url }}')">
+        <button class="poll-vote-btn" data-on:click="@post('{{ option.url }}')">
             {{ option.label }}
         </button>
         <span style="font-size: var(--font-size-0); color: var(--text-3); font-variant-numeric: tabular-nums;">{{ option.count }}</span>

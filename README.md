@@ -113,6 +113,10 @@ $save = $c->action(function () use ($c): void {
 <button data-on:click="@post('{{ save.url }}')">Save</button>
 ```
 
+> **Important:** Always trigger actions with `@post()` (or `@patch`/`@put`/`@delete`).
+> `@get()` is blocked on `/_action/…` — GET requests return **405 Method Not Allowed** —
+> because allowing actions over GET enables top-level cross-site navigation CSRF.
+
 ### Scopes — control who shares state and receives broadcasts
 
 | Scope | Sharing | Use Case |

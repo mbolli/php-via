@@ -4,7 +4,7 @@
         Count: {{ count.value }}
     </p>
     <div class="flex gap-1">
-        <button class="danger component-counter-btn" data-on:click="@get('{{ decrement.url }}')">➖ Decrement</button>
-        <button class="success component-counter-btn" data-on:click="@get('{{ increment.url }}')">➕ Increment</button>
+        <button class="danger component-counter-btn" data-on:click="@post('{{ decrement.url }}')">➖ Decrement</button>
+        <button class="success component-counter-btn" data-on:click="@post('{{ increment.url }}')">➕ Increment</button>
     </div>
 </div>

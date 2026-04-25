@@ -6,7 +6,7 @@
 </p>
 
 <div class="flex gap-2 justify-center">
-    <button data-on:click="@get('{{ greet_bob.url }}')">Greet Bob</button>
-    <button class="secondary" data-on:click="@get('{{ greet_alice.url }}')">Greet Alice</button>
+    <button data-on:click="@post('{{ greet_bob.url }}')">Greet Bob</button>
+    <button class="secondary" data-on:click="@post('{{ greet_alice.url }}')">Greet Alice</button>
 </div>
 {% endblock %}
