@@ -133,6 +133,18 @@ class RequestHandler {
 
         // Handle action triggers (logged separately by ActionHandler)
         if (preg_match('#^/_action/(.+)$#', $path, $matches)) {
+            // State-changing actions must not be invocable via GET browser navigation
+            // (top-level cross-site navigation CSRF).  Allow POST/PATCH/PUT/DELETE;
+            // non-GET safe methods all trigger CORS preflight in browsers.
+            // Note: HEAD is already handled above and never reaches this point.
+            if ($method === 'GET') {
+                $response->status(405);
+                $response->header('Allow', 'POST');
+                $response->end('Method Not Allowed');
+
+                return;
+            }
+
             $this->handleActionWithMiddleware($request, $response, $matches[1]);
 
             return;

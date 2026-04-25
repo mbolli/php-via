@@ -51,6 +51,17 @@ $config = (new Config())
     ->withLogLevel($isDev ? 'debug' : 'info')
 ;
 
+if (!$isDev) {
+    // Production hardening: Secure cookie flag (HTTPS) + explicit trusted origins.
+    // CORS_ORIGIN is set by the deployment env (e.g. "https://via.zweiundeins.gmbh").
+    // When it is a concrete origin (not the wildcard default) use it as the action
+    // origin allowlist so cross-site action requests are blocked at the framework level.
+    $config->withSecureCookie(true);
+    if ($corsOrigin !== '*') {
+        $config->withTrustedOrigins([$corsOrigin]);
+    }
+}
+
 if ($isDev) {
     // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed)
     $certFile = __DIR__ . '/../certs/dev.crt';
