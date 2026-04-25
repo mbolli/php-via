@@ -100,20 +100,32 @@ class Config {
     /**
      * Set basePath from reverse proxy header.
      * Called on first request with X-Base-Path header from Caddy.
+     *
+     * Only relative path-only values are accepted: e.g. '/', '/app/', '/sub/path/'.
+     * Values containing scheme prefixes (https://), protocol-relative forms (//),
+     * backslashes, or control characters are silently rejected and leave the
+     * configured default unchanged.  An invalid value does NOT lock detection,
+     * so the next valid proxied request can still set the base path correctly.
      */
     public function detectBasePathFromRequest(?string $basePathHeader): void {
         if ($this->basePathDetected) {
             return;
         }
 
-        // Only lock once we've seen the actual header.
-        // If there's no header (direct hit, health check, local dev without proxy),
-        // leave basePath at its configured default and don't lock — the next
-        // real proxied request will still be able to set it correctly.
-        if ($basePathHeader !== null && $basePathHeader !== '') {
-            $this->basePath = rtrim($basePathHeader, '/') . '/';
-            $this->basePathDetected = true;
+        if ($basePathHeader === null || $basePathHeader === '') {
+            return;
         }
+
+        // Validate: accept only a safe relative path.
+        // Pattern: zero or more /segment components (each starting with [a-zA-Z0-9])
+        // followed by an optional trailing slash.  This rejects protocol-relative
+        // paths (//evil.com), absolute URLs (https://…), and any unexpected chars.
+        if (!preg_match('#^(?:/[a-zA-Z0-9][a-zA-Z0-9_.-]*)*/?$#', $basePathHeader)) {
+            return;
+        }
+
+        $this->basePath = rtrim($basePathHeader, '/') . '/';
+        $this->basePathDetected = true;
     }
 
     public function withHost(string $host): self {
