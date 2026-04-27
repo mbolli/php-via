@@ -140,7 +140,7 @@ class Config {
      * Set the URL base path prefix (e.g. '/app/' when mounted at a sub-path).
      * Must be a relative path: '/', '/app', '/sub/path', etc.
      *
-     * @throws \InvalidArgumentException if the value is not a valid relative path.
+     * @throws \InvalidArgumentException if the value is not a valid relative path
      */
     public function withBasePath(string $basePath): self {
         // Accept only safe relative paths: zero or more /segment components

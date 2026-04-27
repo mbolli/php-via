@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\SseHandler;

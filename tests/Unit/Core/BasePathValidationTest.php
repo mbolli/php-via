@@ -56,36 +56,42 @@ describe('Config::withBasePath()', function (): void {
 
     test('protocol-relative path throws', function (): void {
         expect(fn () => (new Config())->withBasePath('//attacker.example.com/pwn'))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('absolute HTTPS URL throws', function (): void {
         expect(fn () => (new Config())->withBasePath('https://attacker.example.com/steal'))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('absolute HTTP URL throws', function (): void {
         expect(fn () => (new Config())->withBasePath('http://evil.example.com/'))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('path with backslash throws', function (): void {
         expect(fn () => (new Config())->withBasePath('/path\\sub'))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('path with space throws', function (): void {
         expect(fn () => (new Config())->withBasePath('/path with spaces'))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('path with control character throws', function (): void {
         expect(fn () => (new Config())->withBasePath("/path\x00evil"))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('javascript: URI throws', function (): void {
         expect(fn () => (new Config())->withBasePath('javascript:alert(1)'))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class);
     });
 });

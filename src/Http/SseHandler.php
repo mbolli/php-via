@@ -299,6 +299,7 @@ class SseHandler {
 
     /**
      * Check whether the caller's session is authorised to open an SSE stream for the context.
+     *
      * @see ActionHandler::isSessionAuthorized() — identical contract
      */
     private function isSessionAuthorized(string $contextId, ?string $callerSessionId): bool {
