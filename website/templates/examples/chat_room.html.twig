@@ -51,8 +51,8 @@
             </div>
 
             <div class="chat-typing"
-                 data-on-interval__duration.5s__viewtransition="$['{{ typingIndicatorId }}'] = ''"
-                 data-text="$['{{ typingIndicatorId }}']"></div>
+                 data-on-interval__duration.5s__viewtransition="${{ typingIndicatorId }} = ''"
+                 data-text="${{ typingIndicatorId }} && ${{ typingIndicatorId }} !== '{{ username }}' ? ${{ typingIndicatorId }} + ' is typing...' : ''"></div>
 
             <div class="chat-input-row">
                 <input type="text"

@@ -86,20 +86,17 @@ final class ChatRoomExample {
         }
         $username = $usernameSignal->getValue();
         $contextId = $c->getId();
-        $sessionId = $c->getSessionId();
 
         self::$roomUsers[$room] ??= [];
-        $wasNewUser = !isset(self::$roomUsers[$room][$sessionId]);
-        self::$roomUsers[$room][$sessionId] = $username;
+        $wasNewUser = !isset(self::$roomUsers[$room][$contextId]);
+        self::$roomUsers[$room][$contextId] = $username;
 
         $messageInput = $c->signal('', 'messageInput');
         $roomScope = Scope::build('example:chat', $room);
         $c->addScope($roomScope);
         $typingIndicator = $c->signal('', 'typingIndicator', $roomScope, false);
 
-        $sendMessage = $c->action(function (Context $ctx) use ($room, $messageInput, $typingIndicator, $roomScope): void {
-            $sessionId = $ctx->getSessionId();
-            $username = self::$roomUsers[$room][$sessionId] ?? 'Unknown';
+        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $messageInput, $typingIndicator, $roomScope): void {
             $message = trim($messageInput->getValue());
             if ($message === '') {
                 return;
@@ -112,28 +109,17 @@ final class ChatRoomExample {
             self::$app?->broadcast($roomScope);
         }, 'sendMessage');
 
-        $updateTyping = $c->action(function (Context $ctx) use ($room, $typingIndicator, $roomScope): void {
-            $sessionId = $ctx->getSessionId();
-            $username = self::$roomUsers[$room][$sessionId] ?? 'Unknown';
-            $typingIndicator->setValue($username . ' is typing...');
+        $updateTyping = $c->action(function (Context $ctx) use ($username, $typingIndicator, $roomScope): void {
+            $typingIndicator->setValue($username);
             self::$app?->broadcast($roomScope);
         }, 'updateTyping');
 
-        $c->onDisconnect(function () use ($room, $roomScope, $sessionId): void {
-            if (isset(self::$roomUsers[$room][$sessionId])) {
-                unset(self::$roomUsers[$room][$sessionId]);
+        $c->onDisconnect(function () use ($room, $roomScope, $contextId): void {
+            if (isset(self::$roomUsers[$room][$contextId])) {
+                unset(self::$roomUsers[$room][$contextId]);
                 self::$app?->broadcast($roomScope);
             }
         });
-
-        $rooms = [];
-        foreach (self::$rooms as $id => $data) {
-            $rooms[] = [
-                'id' => $id,
-                'name' => $data['name'],
-                'userCount' => \count(self::$roomUsers[$id] ?? []),
-            ];
-        }
 
         $c->view(fn (): string => $c->render('examples/chat_room.html.twig', [
             'title' => '💬 Chat Room',
@@ -142,14 +128,22 @@ final class ChatRoomExample {
             'anatomy' => self::ANATOMY,
             'githubLinks' => self::GITHUB_LINKS,
             'room' => $room,
-            'rooms' => $rooms,
+            'rooms' => array_map(
+                fn (string $id, array $data): array => [
+                    'id' => $id,
+                    'name' => $data['name'],
+                    'userCount' => \count(array_unique(self::$roomUsers[$id] ?? [])),
+                ],
+                array_keys(self::$rooms),
+                self::$rooms
+            ),
             'roomName' => self::$rooms[$room]['name'],
             'username' => $username,
             'contextId' => $contextId,
             'messages' => self::getMessages($room),
             'messageInputId' => $messageInput->id(),
             'typingIndicatorId' => $typingIndicator->id(),
-            'users' => array_values(self::$roomUsers[$room] ?? []),
+            'users' => array_values(array_unique(self::$roomUsers[$room] ?? [])),
             'sendMessageUrl' => $sendMessage->url(),
             'updateTypingUrl' => $updateTyping->url(),
         ]), block: 'demo');
