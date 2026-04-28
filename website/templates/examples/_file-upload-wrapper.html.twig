@@ -53,6 +53,15 @@
            {{ activePage == 'settings' ? 'aria-current="page"' : '' }}>⚙ Settings</a>
     </nav>
 
+    {# Confirm dialog shown when navigating during a real upload on browsers without extendedLifetime. #}
+    {# JS shows/hides it; kept in {% block demo %} so Datastar morphing can find the element. #}
+    <div id="fu-nav-confirm" class="fu-nav-confirm" style="display:none" role="alertdialog"
+         aria-labelledby="fu-nav-confirm-msg">
+        <span id="fu-nav-confirm-msg">⚠️ Navigating will cancel the upload in progress.</span>
+        <button id="fu-nav-confirm-ok"   class="fu-nav-confirm-btn fu-nav-confirm-ok">Cancel upload &amp; navigate</button>
+        <button id="fu-nav-confirm-stay" class="fu-nav-confirm-btn">Stay</button>
+    </div>
+
     {# ── Per-sub-page content ──────────────────────────────────────────────── #}
     <div class="fu-content">
         {% block fu_content %}{% endblock %}
@@ -155,6 +164,33 @@
     border-color: var(--border, #e2e8f0);
     border-bottom-color: var(--surface-1, #fff);
 }
+/* Confirm-before-navigate dialog shown during real uploads on browsers without extendedLifetime */
+.fu-nav-confirm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: #92400e;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+}
+.fu-nav-confirm-btn {
+    padding: 3px 12px;
+    border-radius: 5px;
+    border: 1px solid #d97706;
+    background: #fff;
+    color: #92400e;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.fu-nav-confirm-btn:hover { background: #fde68a; }
+.fu-nav-confirm-ok { border-color: #ef4444; color: #dc2626; }
+.fu-nav-confirm-ok:hover { background: #fee2e2; }
 
 /* Shared form/button primitives used across sub-pages */
 .fu-field { display: flex; flex-direction: column; gap: 5px; }
@@ -187,6 +223,8 @@
     color: var(--text-1, #1e293b);
 }
 .fu-start-btn.secondary:hover { background: var(--surface-2, #f1f5f9); }
+/* Reset Open Props prose constraints inside demo blocks */
+.example-demo h3, .example-demo p { max-inline-size: unset; }
 </style>
 
 {# ── Shared JS: utility functions + SharedWorker init ─────────────────────── #}
@@ -219,9 +257,8 @@ function applyWorkerState(s) {
     if (pctEl)             pctEl.textContent  = s.pct + '%';
     if (nameEl && s.fileName) nameEl.textContent = s.fileName;
 
-    // Persist uploading state so a new worker instance can resume after
-    // Chrome GC'd the old one during MPA navigation.
-    // Real uploads are not persisted — the File object can't be serialised.
+    // Persist uploading state so a new worker instance can resume after GC
+    // during MPA navigation. Real uploads are not persisted — File is not serialisable.
     try {
         if (s.status === 'uploading' && !s.isReal) {
             sessionStorage.setItem('_fu_state', JSON.stringify(s));
@@ -229,6 +266,14 @@ function applyWorkerState(s) {
             sessionStorage.removeItem('_fu_state');
         }
     } catch {}
+
+    // Guard: show confirm dialog on subnav when a real upload is in progress
+    // and extendedLifetime did NOT keep the worker alive (detected first time by
+    // workerBorn comparison; undefined = first load, show it conservatively).
+    var confirm = document.getElementById('fu-nav-confirm');
+    if (confirm) {
+        confirm.style.display = (s.status === 'uploading' && s.isReal && !window._fuExtended) ? '' : 'none';
+    }
 }
 
 (function () {
@@ -236,8 +281,9 @@ function applyWorkerState(s) {
         console.warn('SharedWorker not supported — upload continuity across navigation unavailable.');
         return;
     }
-    // extendedLifetime: true — Chrome 139+ Origin Trial. Belt-and-suspenders companion to the
-    // Web Locks strategy used in the worker. Silently ignored without an OT token.
+    // extendedLifetime: true — shipped in Chrome 148 (stable, no flag needed).
+    // Keeps the worker alive for up to 30 s after the last port disconnects so it
+    // survives MPA navigation gaps. Silently ignored on unsupported browsers.
     var worker = new SharedWorker(
         '{{ basePath }}upload-worker.js?v={{ workerVersion }}',
         { extendedLifetime: true }
@@ -252,8 +298,9 @@ function applyWorkerState(s) {
         ctxId:          _FU.ctxId,
     });
 
-    // On the first state message: if the worker is fresh (idle) but sessionStorage
-    // has an in-progress upload, send a resume message to pick up where we left off.
+    // On the first state message: detect if the worker survived the last navigation
+    // (workerBorn unchanged → extendedLifetime is working, no need for nav guard).
+    // Then check sessionStorage for a sim-upload to resume.
     var resumeChecked = false;
     worker.port.addEventListener('message', function (e) {
         if (e.data.type === 'log') {
@@ -262,6 +309,16 @@ function applyWorkerState(s) {
         }
         if (!resumeChecked) {
             resumeChecked = true;
+            try {
+                var prevBorn = sessionStorage.getItem('_fu_worker_born');
+                if (prevBorn && e.data.workerBorn && String(e.data.workerBorn) === prevBorn) {
+                    // Same worker instance — extendedLifetime is active; nav guard not needed.
+                    window._fuExtended = true;
+                    console.log('[upload-worker] worker survived navigation (extendedLifetime active)');
+                }
+                if (e.data.workerBorn) sessionStorage.setItem('_fu_worker_born', String(e.data.workerBorn));
+            } catch {}
+
             if (e.data.status === 'idle') {
                 try {
                     var saved = JSON.parse(sessionStorage.getItem('_fu_state') || 'null');
@@ -278,6 +335,51 @@ function applyWorkerState(s) {
             }
         }
         applyWorkerState(e.data);
+    });
+
+    // ── Navigation guard for real uploads ──────────────────────────────────────────
+    // beforeunload: safety net for back button / address bar / external links
+    window.addEventListener('beforeunload', function (e) {
+        if (window._fuRealUploading && !window._fuExtended) {
+            e.preventDefault();
+            return (e.returnValue = '');
+        }
+    });
+
+    // Subnav links: show in-page confirm so user can cancel cleanly
+    document.addEventListener('click', function (e) {
+        var link = e.target.closest('.fu-subnav-link');
+        if (!link || !window._fuRealUploading || window._fuExtended) return;
+        var href = link.href;
+        e.preventDefault();
+        var confirmEl = document.getElementById('fu-nav-confirm');
+        var okBtn     = document.getElementById('fu-nav-confirm-ok');
+        var stayBtn   = document.getElementById('fu-nav-confirm-stay');
+        if (!confirmEl) return;
+        confirmEl.style.display = '';
+        var cleanup = function () {
+            okBtn.removeEventListener('click', doNavigate);
+            stayBtn.removeEventListener('click', doStay);
+        };
+        var doNavigate = function () {
+            cleanup();
+            uploadCancelAction(_FU.cancelUrl, _FU.ctxId);
+            window._fuRealUploading = false;
+            window.location.href = href;
+        };
+        var doStay = function () {
+            cleanup();
+            confirmEl.style.display = 'none';
+        };
+        okBtn.addEventListener('click', doNavigate);
+        stayBtn.addEventListener('click', doStay);
+    });
+
+    // Track real-upload state for the guards above
+    worker.port.addEventListener('message', function (e) {
+        if (e.data.type !== 'log') {
+            window._fuRealUploading = e.data.status === 'uploading' && e.data.isReal;
+        }
     });
 }());
 </script>

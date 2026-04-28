@@ -11,17 +11,17 @@ use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
 
 /**
- * File Upload example.
+ * File Upload example — SharedWorker extendedLifetime demo.
  *
- * Demonstrates uninterrupted uploads across MPA navigation:
- *  - A SharedWorker drives virtual chunk delivery; it survives tab navigations
- *  - SESSION-scoped signals hold upload state (status, %, filename)
- *  - Three sub-pages share those signals — navigate between them while the
- *    upload is running and the progress bar picks up exactly where it left off
- *  - server-side: receiveChunk action updates the SESSION state and broadcasts
- *    to all connected tabs so every open window stays in sync
- *  - Real file upload mode: actual multipart POST, server reads the file and
- *    stores human-readable size + extension in the uploadFileInfo signal
+ * Shows how an MPA can gain SPA-like continuity with no SPA routing code:
+ *  - SharedWorker survives page navigations; extendedLifetime (Chrome 148+)
+ *    covers even the brief port-zero gap between pages
+ *  - SESSION-scoped signals hold upload state server-side; new pages pick up
+ *    instantly when their SSE stream opens
+ *  - Simulated mode: receiveChunk action called every 200 ms by the worker
+ *  - Real file mode: File.slice() 512 KB chunks POSTed sequentially;
+ *    mid-upload navigation is transparent via connect/URL refresh
+ *  - Fallback: nav guard (confirm dialog + beforeunload) on non-Chrome browsers
  */
 final class FileUploadExample {
     public const string SLUG = 'file-upload';
@@ -193,14 +193,14 @@ final class FileUploadExample {
      */
     private static function meta(): array {
         return [
-            'title' => '📤 Persistent File Upload',
-            'description' => 'Upload continues across MPA navigation. A <strong>SharedWorker</strong> drives chunk delivery; <strong>SESSION-scoped signals</strong> keep every tab in sync via SSE.',
+            'title' => '🧵 Background Upload via SharedWorker',
+            'description' => 'A demonstration of how <code>SharedWorker</code> + <code>extendedLifetime</code> (Chrome 148+) lets an MPA behave like an SPA — background work survives page navigations without a single line of SPA routing code.',
             'summary' => [
-                '<strong>SharedWorker</strong> lives as long as any tab in the session is open. Navigate away — it keeps sending chunks. Navigate back — the new page connects to the same worker.',
-                '<strong>SESSION-scoped signals</strong> hold <code>uploadStatus</code>, <code>uploadPct</code>, <code>uploadFileName</code>, and byte counters. When the new page\'s SSE connects, the server immediately pushes current state.',
-                '<strong>receiveChunk action</strong> is called by the worker every 200 ms. It updates the session signals and calls <code>$app->broadcast($uploadScope)</code> so all open tabs see the same progress.',
-                '<strong>Real file mode</strong> submits an actual <code>multipart/form-data</code> POST. <code>$c->file(\'file\')</code> returns the upload array; the server formats type + size and stores it in the SESSION-scoped <code>uploadFileInfo</code> signal.',
-                '<strong>MPA navigation is the proof</strong>. Click Browse or Settings while uploading — the progress bar persists because state lives on the server, not the page.',
+                '<strong>The core idea</strong>: in a classic MPA, navigating away tears down the page, kills any in-flight XHR, and resets all client state. A <strong>SharedWorker</strong> partially breaks that rule — it is shared across tabs and not tied to a single page lifecycle. But the browser is still allowed to terminate it the moment all ports disconnect, which happens briefly during every navigation.',
+                '<strong>extendedLifetime</strong> (Chrome 148+) closes the last gap: without it, the browser may terminate the SharedWorker during the brief moment between pages when the port count drops to zero. On Chrome 148+, a real upload continues chunking with zero user friction. On other browsers, that gap can kill the worker — hence the navigation guard.',
+                '<strong>SESSION-scoped signals</strong> are the server-side complement. They hold <code>uploadStatus</code>, <code>uploadPct</code>, <code>uploadFileName</code>, and byte counters across all tabs. When the new page\'s SSE stream opens, the server immediately pushes the current state — no polling, no local storage.',
+                '<strong>Real file mode</strong> shows the full picture: the worker slices the file into 512 KB chunks (<code>File.slice()</code>) and POSTs them one by one to the <code>uploadChunk</code> action. Between each <code>await</code> the worker may receive a <code>connect</code> message with fresh URLs from the new page, making mid-upload navigation transparent.',
+                '<strong>Graceful fallback</strong>: on browsers where the worker can be killed between pages, an in-page confirm dialog intercepts subnav clicks and a <code>beforeunload</code> handler covers other navigation. The guard is automatically suppressed on Chrome 148+ once the worker\'s <code>workerBorn</code> timestamp confirms it survived.',
             ],
             'anatomy' => [
                 'signals' => [
@@ -213,15 +213,15 @@ final class FileUploadExample {
                     ['name' => 'uploadMode', 'type' => 'string', 'scope' => 'TAB', 'default' => '"sim"', 'desc' => 'Which form is shown: sim (SharedWorker simulation) or real (multipart upload). TAB-scoped — each tab can differ.'],
                 ],
                 'actions' => [
-                    ['name' => 'startUpload', 'scope' => 'SESSION', 'desc' => 'Initialises upload SESSION signals and broadcasts to all tabs.'],
-                    ['name' => 'receiveChunk', 'scope' => 'SESSION', 'desc' => 'Called by SharedWorker every 200 ms. Updates pct + uploadedBytes, self-heals missed chunks, broadcasts.'],
-                    ['name' => 'uploadChunk', 'scope' => 'SESSION', 'desc' => 'Receives a 512\u202fKB slice from the SharedWorker chunk loop. Tracks offset+size, updates pct/uploadedBytes, sets status=complete on the final chunk.'],
-                    ['name' => 'setMode', 'scope' => 'TAB', 'desc' => 'Switches uploadMode between sim and real, clears file errors, re-renders the form block.'],
-                    ['name' => 'cancelUpload', 'scope' => 'SESSION', 'desc' => 'Resets all upload signals to idle. Works from any sub-page.'],
-                    ['name' => 'resetUpload', 'scope' => 'SESSION', 'desc' => 'Clears completed/cancelled state so a new upload can begin.'],
+                    ['name' => 'startUpload',  'scope' => 'SESSION', 'desc' => 'Initialises upload SESSION signals (status=uploading, total, filename) and broadcasts to all tabs. Called by the worker before the chunk loop.'],
+                    ['name' => 'receiveChunk', 'scope' => 'SESSION', 'desc' => 'Simulated mode only. Called by SharedWorker every 200\u202fms. Updates pct\u202f+\u202fuploadedBytes using authoritative worker value (self-heals navigation gaps), broadcasts.'],
+                    ['name' => 'uploadChunk',  'scope' => 'SESSION', 'desc' => 'Real file mode only. Receives a 512\u202fKB slice from the SharedWorker chunk loop. Tracks offset\u202f+\u202fsize, updates pct/uploadedBytes, sets status=complete and formats uploadFileInfo on the final chunk.'],
+                    ['name' => 'setMode',       'scope' => 'TAB',     'desc' => 'Switches uploadMode between sim and real, clears file errors, re-renders the form block.'],
+                    ['name' => 'cancelUpload',  'scope' => 'SESSION', 'desc' => 'Resets all upload signals to idle. Works from any sub-page.'],
+                    ['name' => 'resetUpload',   'scope' => 'SESSION', 'desc' => 'Clears completed/cancelled state so a new upload can begin.'],
                 ],
                 'views' => [
-                    ['name' => 'file-upload.html.twig', 'desc' => 'Mode toggle, sim form (filename + size/speed pickers), real file form (multipart, $c->file(), file info display).'],
+                    ['name' => 'file-upload.html.twig', 'desc' => 'Mode toggle, sim form (filename + size/speed pickers), real file form. Real uploads use File.slice() chunks (512\u202fKB each) sent by the SharedWorker via uploadChunk. Navigation guard shown on non-Chrome browsers.'],
                     ['name' => 'file-upload-browse.html.twig', 'desc' => 'Fake file browser sub-page showing live upload row during transfer.'],
                     ['name' => 'file-upload-settings.html.twig', 'desc' => 'Fake settings sub-page proving upload state survives any navigation.'],
                 ],

@@ -11,8 +11,8 @@
  *   {type:'connect',   chunkUrl, cancelUrl, ctxId}               — sent on every page load
  *   {type:'start',     fileName, virtualSize, speedBps,
  *          startUrl, chunkUrl, cancelUrl, ctxId}                  — start simulated upload (worker notifies server)
- *   {type:'startReal', file, startUrl, uploadChunkUrl,
- *          chunkUrl, cancelUrl, ctxId}                            — start real file chunked upload inside worker
+ *   {type:'startReal', file, startUrl, uploadUrl,
+ *          chunkUrl, cancelUrl, ctxId}                            — start real file XHR inside worker
  *   {type:'resume',    fileName, virtualTotal, virtualUploaded,
  *          pct, speedBps, chunkUrl, cancelUrl, ctxId}             — resume simulated upload after worker GC
  *   {type:'cancel'}                                               — cancel current upload
@@ -31,6 +31,7 @@
 
 const INTERVAL_MS      = 200;          // simulation tick interval – 5 per second
 const CHUNK_SIZE_BYTES = 512 * 1024;   // 512 KB per real chunk
+const WORKER_BORN      = Date.now();   // unique per worker instance; used by pages to detect survival
 
 let ports        = [];
 let uploadTimer  = null;
@@ -176,15 +177,8 @@ self.onconnect = function (e) {
                     ' — ' + Math.ceil(file.size / CHUNK_SIZE_BYTES) + ' chunks');
                 broadcast({ type: 'state', ...snapshot() });
 
-                // Acquire an exclusive Web Lock for the lifetime of this upload.
-                // The Web Locks spec forbids browsers from terminating a worker while
-                // it holds a lock, so the worker (and the File it owns) survive MPA
-                // navigation gaps even without extendedLifetime origin trial support.
-                // The lock is released automatically when the returned Promise settles.
-                const _runRealUpload = function () {
-
                 // 1. Initialise server SESSION signals so all tabs see "uploading"
-                return fetch(msg.startUrl, {
+                fetch(msg.startUrl, {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body:    new URLSearchParams({
@@ -199,68 +193,37 @@ self.onconnect = function (e) {
                     // 2. Send file in slices — each chunk is a separate POST so the
                     //    loop is suspend/resumable: navigation updates state.ctxId and
                     //    state.uploadChunkUrl via "connect" messages between awaits.
-                    //
-                    //    Offset advances only AFTER a successful response. On failure we
-                    //    wait 350 ms (enough for the new page's "connect" to refresh URLs)
-                    //    and retry once with the updated ctxId + uploadChunkUrl.
                     while (offset < file.size && state.status === 'uploading') {
+                        const chunk       = file.slice(offset, offset + CHUNK_SIZE_BYTES);
                         const chunkOffset = offset;
-                        const chunk       = file.slice(chunkOffset, chunkOffset + CHUNK_SIZE_BYTES);
+                        offset += chunk.size;
 
-                        const sendChunkOnce = async function () {
-                            const fd = new FormData();
-                            fd.append('chunk',   chunk, file.name);
-                            fd.append('offset',  String(chunkOffset));
-                            fd.append('total',   String(file.size));
-                            fd.append('name',    file.name);
-                            fd.append('via_ctx', state.ctxId);  // refreshed by connect on navigation
-                            return fetch(state.uploadChunkUrl, { method: 'POST', body: fd });
-                        };
+                        const fd = new FormData();
+                        fd.append('chunk',   chunk, file.name);
+                        fd.append('offset',  String(chunkOffset));
+                        fd.append('total',   String(file.size));
+                        fd.append('name',    file.name);
+                        fd.append('via_ctx', state.ctxId);  // refreshed by connect on navigation
 
                         let res;
                         try {
-                            res = await sendChunkOnce();
+                            res = await fetch(state.uploadChunkUrl, { method: 'POST', body: fd });
                         } catch (err) {
-                            log('chunk fetch error at offset ' + chunkOffset + ' — retrying: ' + err);
-                            // Wait for new page's connect message to refresh ctxId/uploadChunkUrl
-                            await new Promise(function (r) { setTimeout(r, 350); });
-                            if (state.status !== 'uploading') return;
-                            try {
-                                res = await sendChunkOnce();
-                            } catch (err2) {
-                                log('chunk retry failed: ' + err2);
-                                state.status = 'cancelled';
-                                state.isReal = false;
-                                broadcast({ type: 'state', ...snapshot() });
-                                return;
-                            }
+                            log('chunk error at offset ' + chunkOffset + ': ' + err);
+                            state.status = 'cancelled';
+                            state.isReal = false;
+                            broadcast({ type: 'state', ...snapshot() });
+                            return;
                         }
 
                         if (!res.ok) {
-                            // 4xx/5xx — possibly stale ctxId during navigation; wait + retry once
-                            log('chunk POST HTTP ' + res.status + ' at offset ' + chunkOffset + ' — retrying after delay');
-                            await new Promise(function (r) { setTimeout(r, 350); });
-                            if (state.status !== 'uploading') return;
-                            try {
-                                res = await sendChunkOnce();
-                            } catch (err2) {
-                                log('chunk retry fetch error: ' + err2);
-                                state.status = 'cancelled';
-                                state.isReal = false;
-                                broadcast({ type: 'state', ...snapshot() });
-                                return;
-                            }
-                            if (!res.ok) {
-                                log('chunk retry also failed: HTTP ' + res.status);
-                                state.status = 'cancelled';
-                                state.isReal = false;
-                                broadcast({ type: 'state', ...snapshot() });
-                                return;
-                            }
+                            log('chunk POST failed: HTTP ' + res.status + ' at offset ' + chunkOffset);
+                            state.status = 'cancelled';
+                            state.isReal = false;
+                            broadcast({ type: 'state', ...snapshot() });
+                            return;
                         }
 
-                        // Success — advance offset
-                        offset += chunk.size;
                         state.virtualUploaded = offset;
                         state.pct             = Math.min(99, Math.round(offset / file.size * 100));
                         broadcast({ type: 'state', ...snapshot() });
@@ -282,15 +245,7 @@ self.onconnect = function (e) {
                     state.status = 'cancelled';
                     state.isReal = false;
                     broadcast({ type: 'state', ...snapshot() });
-                }); // end _runRealUpload
-                };
-
-                if ('locks' in navigator) {
-                    navigator.locks.request('fu-real-upload', { mode: 'exclusive' }, _runRealUpload);
-                } else {
-                    log('Web Locks not available — worker may be GC\'d during navigation');
-                    _runRealUpload();
-                }
+                });
                 break;
             }
 
@@ -298,7 +253,6 @@ self.onconnect = function (e) {
                 log('cancel received');
                 stopTimer();
                 state.status          = 'cancelled';
-                state.isReal          = false;
                 state.virtualUploaded = 0;
                 state.pct             = 0;
                 broadcast({ type: 'state', ...snapshot() });
@@ -315,8 +269,8 @@ self.onconnect = function (e) {
     };
 
     port.start();
-    // State is sent in the 'connect' message handler; no extra push needed here.
-    // (A newly connected port sends 'connect' immediately after start())
+    // Greet the newly connected port with current state
+    port.postMessage({ type: 'state', ...snapshot() });
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -330,6 +284,7 @@ function snapshot() {
         isReal:          state.isReal,
         virtualUploaded: state.virtualUploaded,
         virtualTotal:    state.virtualTotal,
+        workerBorn:      WORKER_BORN,
     };
 }
 
