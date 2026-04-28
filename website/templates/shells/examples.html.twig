@@ -17,6 +17,11 @@
             {% endmacro %}
             {% import _self as m %}
             <section class="sidebar-section">
+                <ul role="list">
+                    {{ m.navlink('examples', '📖 Overview', currentRoute, basePath) }}
+                </ul>
+            </section>
+            <section class="sidebar-section">
                 <h3 class="sidebar-heading">Beginner</h3>
                 <ul role="list">
                     {{ m.navlink('examples/counter', '⚡ Counter', currentRoute, basePath) }}

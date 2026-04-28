@@ -487,10 +487,10 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $scopeComparisonD
     });
 });
 
-// Examples gallery
+// Examples intro
 $app->page('/examples', function (Context $c): void {
     $c->scope(Scope::routeScope('/examples'));
-    $c->view('pages/examples-index.html.twig');
+    $c->view('pages/examples-intro.html.twig');
 });
 
 // ─── Sitemap ─────────────────────────────────────────────────────────────────
@@ -505,7 +505,7 @@ $app->page('/examples', function (Context $c): void {
         $explicit = [
             '/' => $templateDir . '/pages/home.html.twig',
             '/docs' => $templateDir . '/docs/index.html.twig',
-            '/examples' => $templateDir . '/pages/examples-index.html.twig',
+            '/examples' => $templateDir . '/pages/examples-intro.html.twig',
             // Route slug differs from template name
             '/examples/stock-ticker' => $templateDir . '/examples/stock_dashboard.html.twig',
         ];

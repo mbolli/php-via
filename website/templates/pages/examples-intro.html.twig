@@ -1,0 +1,53 @@
+{% extends 'shells/examples.html.twig' %}
+{% block title %}Examples — php-via{% endblock %}
+
+{% block content %}
+<article class="docs-article">
+
+    <header class="example-page-header">
+        <h1>Examples</h1>
+        <p>
+            Every demo on this site runs inside the same php-via server you are connected to right now.
+            There is no separate backend, no compiled JavaScript bundle, and no hydration step —
+            just PHP, Twig, and a persistent SSE stream.
+        </p>
+    </header>
+
+    <section class="ex-intro-grid">
+        <div class="ex-intro-card">
+            <div class="ex-intro-icon">⚡</div>
+            <h3>Reactive without JavaScript</h3>
+            <p>Signals live on the server. Actions are PHP closures. The browser sends a POST and receives DOM patches over SSE — no client framework required.</p>
+        </div>
+        <div class="ex-intro-card">
+            <div class="ex-intro-icon">👥</div>
+            <h3>Built-in multiplayer</h3>
+            <p>Scope signals to a route, a session, or every connected client. Open two tabs and watch them stay in sync automatically.</p>
+        </div>
+        <div class="ex-intro-card">
+            <div class="ex-intro-icon">🔀</div>
+            <h3>MPA navigation</h3>
+            <p>Full page loads, real URLs, browser history — no SPA router. SESSION-scoped signals follow the user across every page change.</p>
+        </div>
+    </section>
+
+    <section class="ex-intro-levels">
+        <h2>Where to start</h2>
+        <dl class="ex-intro-dl">
+            <div>
+                <dt><span class="badge badge-beginner">Beginner</span></dt>
+                <dd>Counter, Greeter, Live Search — signals, actions, and two-way binding in under 50 lines of PHP.</dd>
+            </div>
+            <div>
+                <dt><span class="badge badge-intermediate">Intermediate</span></dt>
+                <dd>Shopping Cart, Login Flow, Multi-step Form — SESSION scope, PSR-15 middleware, file uploads, and server-side validation.</dd>
+            </div>
+            <div>
+                <dt><span class="badge badge-advanced">Advanced</span></dt>
+                <dd>Chat Room, Game of Life, SharedWorker Upload — custom scope strings, NATS pub/sub, and <code>extendedLifetime</code> SharedWorkers.</dd>
+            </div>
+        </dl>
+    </section>
+
+</article>
+{% endblock %}

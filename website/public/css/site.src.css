@@ -1119,6 +1119,30 @@ main, .site-footer { position: relative; }
   gap: var(--size-4);
 }
 
+/* ─── Examples intro page ───────────────────────────────── */
+.ex-intro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--size-4);
+  margin-block: var(--size-6);
+}
+.ex-intro-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-3);
+  padding: var(--size-5);
+}
+.ex-intro-icon { font-size: 1.75rem; margin-bottom: var(--size-2); }
+.ex-intro-card h3 { font-size: var(--font-size-2); margin: 0 0 var(--size-2); max-inline-size: unset; }
+.ex-intro-card p  { font-size: var(--font-size-0); color: var(--text-2); margin: 0; max-inline-size: unset; }
+
+.ex-intro-levels { margin-block: var(--size-7) 0; }
+.ex-intro-levels h2 { font-size: var(--font-size-3); margin-bottom: var(--size-4); max-inline-size: unset; }
+.ex-intro-dl { display: flex; flex-direction: column; gap: var(--size-4); }
+.ex-intro-dl > div { display: flex; align-items: baseline; gap: var(--size-3); flex-wrap: wrap; }
+.ex-intro-dl dt { flex-shrink: 0; }
+.ex-intro-dl dd { margin: 0; font-size: var(--font-size-0); color: var(--text-2); max-inline-size: unset; }
+
 .example-card {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
