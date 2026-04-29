@@ -26,6 +26,12 @@ class Context {
     /** @var array<string, callable> */
     private array $actionRegistry = [];
 
+    /** @var array<string, Action> Named actions keyed by user-supplied name (raw, not camelCased) */
+    private array $namedActions = [];
+
+    /** @var null|array<string, mixed> Cached result of buildAutoData() — frozen after first render */
+    private ?array $autoDataCache = null;
+
     private ?string $namespace = null;
 
     /** Whether to cache update renders (default true for performance) */
@@ -653,9 +659,67 @@ class Context {
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
         $effectiveBlock = $block ?? ($this->isUpdating ? $this->updateBlock : null);
+        $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
         $data += ['contextId' => $this->id, 'currentRoute' => $this->route];
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $effectiveBlock);
+    }
+
+    /**
+     * Build the auto-injection data array for Twig templates.
+     *
+     * Merges all named signals (keyed by user-supplied name) and named actions
+     * (keyed by camelCase of user-supplied name) into a single array, plus a
+     * `_via` debug key listing all available names.
+     *
+     * Result is cached after first call — signals and actions are frozen after
+     * page setup, so repeated calls during SSE ticks are free.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildAutoData(): array {
+        if ($this->autoDataCache !== null) {
+            return $this->autoDataCache;
+        }
+
+        $namedSignals = $this->signalFactory->getNamedSignals();
+
+        $camelActions = [];
+        $camelKeyToRaw = [];
+
+        foreach ($this->namedActions as $rawName => $action) {
+            $camelKey = $this->toCamelCase($rawName);
+
+            if (isset($camelKeyToRaw[$camelKey])) {
+                $this->app->log('warning', "Auto-inject action name collision: '{$camelKeyToRaw[$camelKey]}' and '{$rawName}' both resolve to '{$camelKey}'");
+            }
+
+            $camelKeyToRaw[$camelKey] = $rawName;
+            $camelActions[$camelKey] = $action;
+        }
+
+        foreach ($namedSignals as $signalName => $_) {
+            if (isset($camelActions[$signalName])) {
+                $this->app->log('warning', "Auto-inject clash: '{$signalName}' is both a signal name and a camelCased action name");
+            }
+        }
+
+        $this->autoDataCache = array_merge(
+            $namedSignals,
+            $camelActions,
+            ['_via' => ['signals' => array_keys($namedSignals), 'actions' => array_keys($camelActions)]],
+        );
+
+        return $this->autoDataCache;
+    }
+
+    /**
+     * Convert a kebab-case or snake_case name to camelCase.
+     *
+     * Examples: 'refresh-graphs' => 'refreshGraphs', 'save_settings' => 'saveSettings'
+     */
+    private function toCamelCase(string $name): string {
+        return lcfirst(str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $name))));
     }
 
     /**
@@ -726,14 +790,27 @@ class Context {
     }
 
     /**
-     * Get a signal by name.
+     * Get a signal by its user-supplied name.
      *
-     * @param string $name Signal name (without namespace prefix)
+     * Works for both TAB-scoped and scoped (ROUTE/SESSION/GLOBAL/custom) signals.
+     *
+     * @param string $name Signal name as passed to signal()
      *
      * @return null|Signal The signal if found, null otherwise
      */
     public function getSignal(string $name): ?Signal {
         return $this->signalFactory->getSignal($name);
+    }
+
+    /**
+     * Get all named signals registered on this context, keyed by user-supplied name.
+     *
+     * Covers all scopes: TAB, ROUTE, SESSION, GLOBAL, and custom.
+     *
+     * @return array<string, Signal>
+     */
+    public function getNamedSignals(): array {
+        return $this->signalFactory->getNamedSignals();
     }
 
     /**
@@ -748,6 +825,30 @@ class Context {
      */
     public function getSignals(): array {
         return $this->signalFactory->getAllSignals();
+    }
+
+    /**
+     * Get a named action by its user-supplied name.
+     *
+     * Only actions registered with an explicit $name are retrievable.
+     *
+     * @param string $name Action name as passed to action()
+     *
+     * @return null|Action The action if found, null otherwise
+     */
+    public function getAction(string $name): ?Action {
+        return $this->namedActions[$name] ?? null;
+    }
+
+    /**
+     * Get all named actions registered on this context, keyed by user-supplied name.
+     *
+     * Only actions registered with an explicit $name are included.
+     *
+     * @return array<string, Action>
+     */
+    public function getNamedActions(): array {
+        return $this->namedActions;
     }
 
     /**
@@ -783,8 +884,10 @@ class Context {
             if ($existingAction !== null) {
                 // Action already registered in this scope, reuse it
                 $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
+                $action = new Action($actionId, $this->getConfig()->getBasePath());
+                $this->namedActions[$name] = $action;
 
-                return new Action($actionId, $this->getConfig()->getBasePath());
+                return $action;
             }
 
             // Register as scoped action
@@ -797,7 +900,13 @@ class Context {
             $this->actionRegistry[$actionId] = $fn;
         }
 
-        return new Action($actionId, $this->getConfig()->getBasePath());
+        $action = new Action($actionId, $this->getConfig()->getBasePath());
+
+        if ($name !== null) {
+            $this->namedActions[$name] = $action;
+        }
+
+        return $action;
     }
 
     /**

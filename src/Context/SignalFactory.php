@@ -22,6 +22,9 @@ class SignalFactory {
     /** @var array<string, Signal> */
     private array $signals = [];
 
+    /** @var array<string, Signal> Map of user-supplied signal name → Signal (all scopes) */
+    private array $signalNameMap = [];
+
     public function __construct(
         private Context $context,
         private Via $app,
@@ -76,6 +79,8 @@ class SignalFactory {
                 // (e.g. when a second context joins the scope, or on view re-render)
                 // must not overwrite the live value with a potentially stale initialValue.
                 // To mutate a scoped signal, call $signal->setValue() explicitly.
+                $this->signalNameMap[$baseName] = $existingSignal;
+
                 return $existingSignal;
             }
 
@@ -84,6 +89,8 @@ class SignalFactory {
 
             // Register in Via's scoped signals
             $this->app->registerScopedSignal($scope, $signal);
+
+            $this->signalNameMap[$baseName] = $signal;
 
             return $signal;
         }
@@ -98,31 +105,41 @@ class SignalFactory {
         // Check if signal already exists
         if (isset($this->signals[$signalId])) {
             $this->signals[$signalId]->setValue($initialValue);
+            $this->signalNameMap[$baseName] = $this->signals[$signalId];
 
             return $this->signals[$signalId];
         }
 
         $signal = new Signal($signalId, $initialValue);
         $this->signals[$signalId] = $signal;
+        $this->signalNameMap[$baseName] = $signal;
 
         return $signal;
     }
 
     /**
-     * Get a signal by name.
+     * Get a signal by its user-supplied name.
      *
-     * @param string $name Signal name (without namespace prefix)
+     * Works for both TAB-scoped and scoped (ROUTE/SESSION/GLOBAL/custom) signals.
+     *
+     * @param string $name Signal name as passed to signal()
      *
      * @return null|Signal The signal if found, null otherwise
      */
     public function getSignal(string $name): ?Signal {
-        $namespace = $this->context->getNamespace();
-        $signalId = $namespace
-            ? $namespace . '.' . $name
-            : $name . '_' . $this->context->getId();
-        $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
+        return $this->signalNameMap[$name] ?? null;
+    }
 
-        return $this->signals[$signalId] ?? null;
+    /**
+     * Get all named signals registered on this context.
+     *
+     * Returns signals keyed by user-supplied name (as passed to signal()).
+     * Covers all scopes: TAB, ROUTE, SESSION, GLOBAL, and custom.
+     *
+     * @return array<string, Signal>
+     */
+    public function getNamedSignals(): array {
+        return $this->signalNameMap;
     }
 
     /**
