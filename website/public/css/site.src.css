@@ -1338,9 +1338,8 @@ main, .site-footer { position: relative; }
 }
 
 .example-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: var(--size-3);
+  columns: 18rem 3;
+  column-gap: var(--size-3);
   margin-block-start: var(--size-3);
   padding-block-start: var(--size-3);
   border-block-start: 1px solid var(--border);
@@ -1349,6 +1348,8 @@ main, .site-footer { position: relative; }
   font-size: var(--font-size-0);
   color: var(--text-2);
   line-height: var(--font-lineheight-3);
+  break-inside: avoid;
+  margin-block-end: var(--size-3);
 }
 
 .example-split {
