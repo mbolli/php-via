@@ -681,12 +681,14 @@ main, .site-footer { position: relative; }
   font-size: var(--font-size-2);
   margin-block-end: var(--size-2);
   color: var(--text-1);
+  max-inline-size: unset;
 }
 .feature-card p {
   font-size: var(--font-size-0);
   color: var(--text-2);
   line-height: var(--font-lineheight-4);
   margin: 0;
+  max-inline-size: unset;
 }
 
 /* ─── Comparison table ─────────────────────────────────── */
@@ -865,11 +867,13 @@ main, .site-footer { position: relative; }
 .how-step h3 {
   font-size: var(--font-size-1);
   margin-block-end: var(--size-2);
+  max-inline-size: unset;
 }
 .how-step p {
   font-size: var(--font-size-0);
   color: var(--text-2);
   margin: 0;
+  max-inline-size: unset;
 }
 .how-arrow {
   font-size: var(--font-size-4);
@@ -1234,6 +1238,7 @@ main, .site-footer { position: relative; }
   font-weight: var(--font-weight-8);
   letter-spacing: -0.02em;
   margin-block-end: var(--size-4);
+  max-inline-size: unset;
 }
 .section-lead {
   font-size: var(--font-size-2);
@@ -2216,3 +2221,99 @@ stock-chart {
 
 /* ─── Cross-document View Transitions ──────────────────── */
 /* @view-transition { navigation: auto } is set near the top of this file */
+
+/* ─── Support page ─────────────────────────────────────── */
+
+/* Hero variant — orange/warm gradient to differentiate from blue home hero */
+.support-hero {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in srgb, var(--brand-secondary) 22%, transparent), transparent);
+}
+
+/* 3-step variant of how-it-works (the base uses 4 steps) */
+.how-it-works--3steps {
+  grid-template-columns: 1fr 2rem 1fr 2rem 1fr;
+  max-width: 56rem;
+  margin-inline: auto;
+}
+@media (max-width: 900px) {
+  .how-it-works--3steps { grid-template-columns: 1fr; }
+}
+
+/* Founder / bio card — horizontal glass card */
+.founder-card {
+  display: flex;
+  gap: var(--size-6);
+  align-items: flex-start;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: var(--radius-lg);
+  padding: var(--size-6);
+}
+@media (max-width: 640px) {
+  .founder-card { flex-direction: column; align-items: center; text-align: center; }
+}
+
+.founder-avatar {
+  flex-shrink: 0;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--brand-secondary) 20%, var(--surface-3));
+  border: 2px solid color-mix(in srgb, var(--brand-secondary) 40%, transparent);
+  color: var(--brand-secondary);
+  font-weight: var(--font-weight-8);
+  font-size: var(--font-size-2);
+  display: grid;
+  place-items: center;
+  letter-spacing: 0.02em;
+}
+
+.founder-bio p {
+  font-size: var(--font-size-1);
+  color: var(--text-2);
+  line-height: var(--font-lineheight-4);
+  margin-block-end: var(--size-3);
+  max-inline-size: unset;
+}
+.founder-bio p:last-of-type { margin-block-end: var(--size-4); }
+
+.founder-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2);
+}
+
+/* Button size variants */
+.btn-sm {
+  font-size: var(--font-size-0);
+  padding: var(--size-1) var(--size-3);
+}
+.btn-lg {
+  font-size: var(--font-size-2);
+  padding: var(--size-3) var(--size-7);
+}
+
+/* CTA bottom section */
+.support-cta-section {
+  text-align: center;
+}
+.support-cta-inner {
+  max-width: 48rem;
+  margin-inline: auto;
+  padding-inline: var(--size-4);
+}
+.support-cta-section .section-label,
+.support-cta-section .section-title,
+.support-cta-section .section-lead {
+  text-align: center;
+}
+.support-cta-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4);
+  justify-content: center;
+  margin-block-start: var(--size-6);
+}

@@ -493,6 +493,12 @@ $app->page('/examples', function (Context $c): void {
     $c->view('pages/examples-intro.html.twig');
 });
 
+// Professional support / body-leasing page
+$app->page('/support', function (Context $c): void {
+    $c->scope(Scope::routeScope('/support'));
+    $c->view('pages/support.html.twig');
+});
+
 // ─── Sitemap ─────────────────────────────────────────────────────────────────
 
 (static function () use ($app): void {
@@ -506,6 +512,7 @@ $app->page('/examples', function (Context $c): void {
             '/' => $templateDir . '/pages/home.html.twig',
             '/docs' => $templateDir . '/docs/index.html.twig',
             '/examples' => $templateDir . '/pages/examples-intro.html.twig',
+            '/support' => $templateDir . '/pages/support.html.twig',
             // Route slug differs from template name
             '/examples/stock-ticker' => $templateDir . '/examples/stock_dashboard.html.twig',
         ];
