@@ -80,22 +80,18 @@ final class LiveAuctionExample {
 
             // ── Actions ───────────────────────────────────────────────────────
 
-            $placeBid = $c->action(function () use (
-                $bidInput,
-                $usernameSignal,
-                $app,
-            ): void {
+            $placeBid = $c->action(function (Context $ctx) use ($app): void {
                 if (self::$status === 'sold') {
                     return;
                 }
 
-                $amount = (int) $bidInput->getValue();
+                $amount = (int) $ctx->getSignal('bidInput')->getValue();
                 if ($amount <= self::$topBid) {
                     return; // silently ignore invalid bids
                 }
 
                 self::$topBid = $amount;
-                self::$topBidder = $usernameSignal->getValue();
+                self::$topBidder = (string) $ctx->getSignal('username')->getValue();
                 self::$bidHistory[] = [
                     'bidder' => self::$topBidder,
                     'amount' => $amount,
@@ -114,7 +110,7 @@ final class LiveAuctionExample {
                 $app->broadcast(self::SCOPE);
             }, 'placeBid');
 
-            $resetAuction = $c->action(function () use ($app): void {
+            $resetAuction = $c->action(function (Context $ctx) use ($app): void {
                 self::$timeLeft = self::AUCTION_DURATION;
                 self::$topBid = 50;
                 self::$topBidder = '';

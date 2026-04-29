@@ -73,11 +73,15 @@ final class LoginExample {
                 $c->execScript("window.location.href = '/examples/login/dashboard'");
             }
 
-            $usernameInput = $c->signal('', 'username');
-            $passwordInput = $c->signal('', 'password');
-            $errorMsg = $c->signal('', 'error');
+            $c->signal('', 'username');
+            $c->signal('', 'password');
+            $c->signal('', 'error');
 
-            $login = $c->action(function () use ($usernameInput, $passwordInput, $errorMsg, $c): void {
+            $c->action(function (Context $ctx): void {
+                $usernameInput = $ctx->getSignal('username');
+                $passwordInput = $ctx->getSignal('password');
+                $errorMsg      = $ctx->getSignal('error');
+
                 $user = mb_strtolower(mb_trim($usernameInput->string()));
                 $pass = $passwordInput->string();
 
@@ -86,13 +90,13 @@ final class LoginExample {
                 if ($record === null || $record['password'] !== $pass) {
                     $errorMsg->setValue('Invalid username or password.');
                     $passwordInput->setValue('');
-                    $c->sync();
+                    $ctx->sync();
 
                     return;
                 }
 
                 $errorMsg->setValue('');
-                $c->setSessionData('auth', [
+                $ctx->setSessionData('auth', [
                     'user' => $user,
                     'name' => $record['name'],
                     'role' => $record['role'],
@@ -100,7 +104,7 @@ final class LoginExample {
                 ]);
 
                 // Redirect to the protected dashboard
-                $c->execScript("window.location.href = '/examples/login/dashboard'");
+                $ctx->execScript("window.location.href = '/examples/login/dashboard'");
             }, 'login');
 
             $c->view(fn (): string => $c->render('examples/login.html.twig', [
@@ -120,10 +124,6 @@ final class LoginExample {
                     'middleware' => self::MIDDLEWARE_ANATOMY,
                 ],
                 'githubLinks' => self::GITHUB_LINKS,
-                'usernameInput' => $usernameInput,
-                'passwordInput' => $passwordInput,
-                'errorMsg' => $errorMsg,
-                'login' => $login,
                 'users' => array_map(
                     fn (string $k, array $u): array => ['username' => $k, 'password' => $u['password'], 'name' => $u['name'], 'role' => $u['role']],
                     array_keys(self::USERS),
@@ -138,9 +138,9 @@ final class LoginExample {
                 /** @var array{user: string, name: string, role: string, at: int} $auth */
                 $auth = $c->getRequestAttribute('auth');
 
-                $logout = $c->action(function () use ($c): void {
-                    $c->clearSessionData('auth');
-                    $c->execScript("window.location.href = '/examples/login'");
+                $logout = $c->action(function (Context $ctx): void {
+                    $ctx->clearSessionData('auth');
+                    $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
                 $c->view(fn (): string => $c->render('examples/login_dashboard.html.twig', [
@@ -157,7 +157,6 @@ final class LoginExample {
                     ],
                     'githubLinks' => self::GITHUB_LINKS,
                     'auth' => $auth,
-                    'logout' => $logout,
                 ]), block: 'demo', cacheUpdates: false);
             });
 
@@ -165,9 +164,9 @@ final class LoginExample {
                 /** @var array{user: string, name: string, role: string, at: int} $auth */
                 $auth = $c->getRequestAttribute('auth');
 
-                $logout = $c->action(function () use ($c): void {
-                    $c->clearSessionData('auth');
-                    $c->execScript("window.location.href = '/examples/login'");
+                $logout = $c->action(function (Context $ctx): void {
+                    $ctx->clearSessionData('auth');
+                    $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
                 $c->view(fn (): string => $c->render('examples/login_profile.html.twig', [
@@ -184,7 +183,6 @@ final class LoginExample {
                     ],
                     'githubLinks' => self::GITHUB_LINKS,
                     'auth' => $auth,
-                    'logout' => $logout,
                 ]), block: 'demo', cacheUpdates: false);
             });
         })->middleware($authMiddleware);

@@ -59,24 +59,27 @@ final class WizardExample {
             $editor = $c->signal((string) ($saved['editor'] ?? 'VS Code'), 'editor');
 
             // Persist current form state to session so it survives page navigations
-            $saveState = function () use ($c, $step, $name, $role, $years, $editor, $stack): void {
+            $saveState = function () use ($c, $stack): void {
                 $c->setSessionData('wizard', [
-                    'step' => $step->int(),
-                    'name' => $name->string(),
-                    'role' => $role->string(),
-                    'years' => $years->int(),
-                    'editor' => $editor->string(),
-                    'stack' => array_map(static fn ($s) => $s->bool(), $stack),
+                    'step'   => $c->getSignal('step')->int(),
+                    'name'   => $c->getSignal('name')->string(),
+                    'role'   => $c->getSignal('role')->string(),
+                    'years'  => $c->getSignal('years')->int(),
+                    'editor' => $c->getSignal('editor')->string(),
+                    'stack'  => array_map(static fn ($s) => $s->bool(), $stack),
                 ]);
             };
 
-            $next = $c->action(function () use ($step, $name, $error, $c, $saveState): void {
+            $c->action(function (Context $ctx) use ($saveState): void {
+                $step  = $ctx->getSignal('step');
+                $name  = $ctx->getSignal('name');
+                $error = $ctx->getSignal('error');
                 $s = $step->int();
 
                 if ($s === 1) {
                     if (mb_trim($name->string()) === '') {
                         $error->setValue('Please enter your name.');
-                        $c->sync();
+                        $ctx->sync();
 
                         return;
                     }
@@ -89,10 +92,12 @@ final class WizardExample {
                 }
 
                 $saveState();
-                $c->sync();
+                $ctx->sync();
             }, 'next');
 
-            $back = $c->action(function () use ($step, $error, $c, $saveState): void {
+            $c->action(function (Context $ctx) use ($saveState): void {
+                $step  = $ctx->getSignal('step');
+                $error = $ctx->getSignal('error');
                 $error->setValue('');
 
                 if ($step->int() > 1) {
@@ -100,23 +105,23 @@ final class WizardExample {
                 }
 
                 $saveState();
-                $c->sync();
+                $ctx->sync();
             }, 'back');
 
-            $restart = $c->action(function () use ($step, $error, $name, $role, $years, $editor, $stack, $c): void {
-                $step->setValue(1);
-                $error->setValue('');
-                $name->setValue('');
-                $role->setValue('Backend Dev');
-                $years->setValue(3);
-                $editor->setValue('VS Code');
+            $c->action(function (Context $ctx) use ($stack): void {
+                $ctx->getSignal('step')->setValue(1);
+                $ctx->getSignal('error')->setValue('');
+                $ctx->getSignal('name')->setValue('');
+                $ctx->getSignal('role')->setValue('Backend Dev');
+                $ctx->getSignal('years')->setValue(3);
+                $ctx->getSignal('editor')->setValue('VS Code');
 
                 foreach ($stack as $sig) {
                     $sig->setValue(false);
                 }
 
-                $c->clearSessionData('wizard');
-                $c->sync();
+                $ctx->clearSessionData('wizard');
+                $ctx->sync();
             }, 'restart');
 
             $c->view(fn (): string => $c->render('examples/wizard.html.twig', [
@@ -153,19 +158,10 @@ final class WizardExample {
                     ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/WizardExample.php'],
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/wizard.html.twig'],
                 ],
-                'step' => $step,
-                'error' => $error,
-                'name' => $name,
-                'role' => $role,
-                'years' => $years,
                 'stack' => $stack,
                 'stackOptions' => self::STACK_OPTIONS,
-                'editor' => $editor,
                 'roles' => self::ROLES,
                 'editors' => self::EDITORS,
-                'next' => $next,
-                'back' => $back,
-                'restart' => $restart,
                 'selectedStack' => array_values(array_filter(
                     array_map(
                         static fn (array $opt) => $stack[$opt['key']]->bool() ? $opt['label'] : null,

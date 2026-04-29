@@ -56,9 +56,9 @@ final class ThemeBuilderExample {
                 unset(self::$history[$contextId], self::$historyIdx[$contextId]);
             });
 
-            $setColor = $c->action(function () use ($contextId, $c): void {
-                $slot = $c->input('slot', '');
-                $color = ltrim($c->input('color', ''), '#');
+            $c->action(function (Context $ctx) use ($contextId): void {
+                $slot = $ctx->input('slot', '');
+                $color = ltrim($ctx->input('color', ''), '#');
 
                 // Only accept known slots and pre-approved swatch colors
                 $allowedColors = self::SWATCHES[$slot] ?? [];
@@ -84,27 +84,27 @@ final class ThemeBuilderExample {
                 self::$history[$contextId][] = $newTheme;
                 self::$historyIdx[$contextId] = \count(self::$history[$contextId]) - 1;
 
-                $c->sync();
+                $ctx->sync();
             }, 'setColor');
 
-            $undo = $c->action(function () use ($contextId, $c): void {
+            $c->action(function (Context $ctx) use ($contextId): void {
                 if (self::$historyIdx[$contextId] > 0) {
                     --self::$historyIdx[$contextId];
-                    $c->sync();
+                    $ctx->sync();
                 }
             }, 'undo');
 
-            $redo = $c->action(function () use ($contextId, $c): void {
+            $c->action(function (Context $ctx) use ($contextId): void {
                 if (self::$historyIdx[$contextId] < \count(self::$history[$contextId]) - 1) {
                     ++self::$historyIdx[$contextId];
-                    $c->sync();
+                    $ctx->sync();
                 }
             }, 'redo');
 
-            $reset = $c->action(function () use ($contextId, $c): void {
+            $c->action(function (Context $ctx) use ($contextId): void {
                 self::$history[$contextId] = [self::DEFAULT_THEME];
                 self::$historyIdx[$contextId] = 0;
-                $c->sync();
+                $ctx->sync();
             }, 'reset');
 
             $c->view(fn (): string => $c->render('examples/theme_builder.html.twig', [
@@ -141,10 +141,6 @@ final class ThemeBuilderExample {
                 'historyIdx' => self::$historyIdx[$contextId],
                 'swatches' => self::SWATCHES,
                 'slotLabels' => self::SLOT_LABELS,
-                'setColor' => $setColor,
-                'undo' => $undo,
-                'redo' => $redo,
-                'reset' => $reset,
             ]), block: 'demo', cacheUpdates: false);
         });
     }

@@ -12,16 +12,16 @@ final class GreeterExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/greeter', function (Context $c): void {
-            $greeting = $c->signal('Hello...', 'greeting');
+            $c->signal('Hello...', 'greeting');
 
-            $greetBob = $c->action(function () use ($greeting, $c): void {
-                $greeting->setValue('Hello Bob!');
-                $c->syncSignals();
+            $c->action(function (Context $ctx): void {
+                $ctx->getSignal('greeting')->setValue('Hello Bob!');
+                $ctx->syncSignals();
             }, 'greetBob');
 
-            $greetAlice = $c->action(function () use ($greeting, $c): void {
-                $greeting->setValue('Hello Alice!');
-                $c->syncSignals();
+            $c->action(function (Context $ctx): void {
+                $ctx->getSignal('greeting')->setValue('Hello Alice!');
+                $ctx->syncSignals();
             }, 'greetAlice');
 
             $c->view('examples/greeter.html.twig', [
@@ -48,9 +48,6 @@ final class GreeterExample {
                     ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/GreeterExample.php'],
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/greeter.html.twig'],
                 ],
-                'greeting' => $greeting,
-                'greet_bob' => $greetBob,
-                'greet_alice' => $greetAlice,
             ]);
         });
     }

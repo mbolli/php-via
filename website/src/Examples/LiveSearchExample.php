@@ -147,17 +147,18 @@ final class LiveSearchExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/live-search', function (Context $c): void {
-            $query = $c->signal('', 'query');
-            $category = $c->signal('all', 'category');
+            $c->signal('', 'query');
+            $c->signal('all', 'category');
 
-            $search = $c->action(function () use ($category, $c): void {
-                $cat = $c->input('cat');
+            $c->action(function (Context $ctx): void {
+                $cat = $ctx->input('cat');
+                $category = $ctx->getSignal('category');
 
                 if ($cat !== null && \in_array($cat, self::CATEGORIES, strict: true)) {
                     $category->setValue($cat, broadcast: false);
                 }
 
-                $c->sync();
+                $ctx->sync();
             }, 'search');
 
             $c->view(fn (): string => $c->render('examples/live_search.html.twig', [
@@ -186,10 +187,7 @@ final class LiveSearchExample {
                     ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/LiveSearchExample.php'],
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/live_search.html.twig'],
                 ],
-                'query' => $query,
-                'category' => $category,
-                'search' => $search,
-                'results' => self::filter($query->string(), $category->string()),
+                'results' => self::filter($c->getSignal('query')->string(), $c->getSignal('category')->string()),
                 'categories' => self::CATEGORIES,
             ]), block: 'results', cacheUpdates: false);
         });

@@ -24,9 +24,9 @@ final class TodoExample {
         $app->page('/examples/todo', function (Context $c) use ($app): void {
             $c->scope(Scope::ROUTE);
 
-            $newTodo = $c->signal('', 'newTodo', Scope::TAB);
+            $c->signal('', 'newTodo', Scope::TAB);
 
-            $addTodo = $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function (Context $ctx) use ($app): void {
                 $newTodo = $ctx->getSignal('newTodo');
                 $task = $newTodo ? mb_trim($newTodo->string()) : '';
                 if ($task !== '') {
@@ -36,13 +36,13 @@ final class TodoExample {
                 }
             }, 'addTodo');
 
-            $deleteTodo = $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function (Context $ctx) use ($app): void {
                 $id = (int) $ctx->input('id', 0);
                 self::$todos = array_values(array_filter(self::$todos, fn (array $todo) => $todo['id'] !== $id));
                 $app->broadcast(Scope::ROUTE);
             }, 'deleteTodo');
 
-            $toggleTodo = $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function (Context $ctx) use ($app): void {
                 $id = (int) $ctx->input('id', 0);
                 foreach (self::$todos as $key => $todo) {
                     if ($todo['id'] === $id) {
@@ -83,10 +83,6 @@ final class TodoExample {
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/todo.html.twig'],
                 ],
                 'todos' => self::$todos,
-                'newTodo' => $newTodo,
-                'addTodo' => $addTodo,
-                'deleteTodo' => $deleteTodo,
-                'toggleTodo' => $toggleTodo,
             ]), block: 'demo', cacheUpdates: false);
         });
     }

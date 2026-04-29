@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace PhpVia\Website\Examples;
 
+use Mbolli\PhpVia\Action;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
 
 final class SpreadsheetExample {
@@ -45,32 +47,32 @@ final class SpreadsheetExample {
             $c->addScope(self::SCOPE);
 
             // TAB-scoped signals: viewport + focus + editing
-            $viewRow = $c->signal(0, 'viewRow', Scope::TAB);
-            $viewCol = $c->signal(0, 'viewCol', Scope::TAB);
-            $focusRow = $c->signal(0, 'focusRow', Scope::TAB);
-            $focusCol = $c->signal(0, 'focusCol', Scope::TAB);
-            $editing = $c->signal(false, 'editing', Scope::TAB);
-            $editValue = $c->signal('', 'editValue', Scope::TAB);
+            $c->signal(0, 'viewRow', Scope::TAB);
+            $c->signal(0, 'viewCol', Scope::TAB);
+            $c->signal(0, 'focusRow', Scope::TAB);
+            $c->signal(0, 'focusCol', Scope::TAB);
+            $c->signal(false, 'editing', Scope::TAB);
+            $c->signal('', 'editValue', Scope::TAB);
 
             // Client-writable action parameter signals
-            $targetRow = $c->signal(0, 'tr', Scope::TAB);
-            $targetCol = $c->signal(0, 'tc', Scope::TAB);
-            $key = $c->signal('', 'key', Scope::TAB);
-            $shift = $c->signal(false, 'shift', Scope::TAB);
-            $scrollDr = $c->signal(0, 'dr', Scope::TAB);
-            $scrollDc = $c->signal(0, 'dc', Scope::TAB);
-            $pasted = $c->signal('', 'pasted', Scope::TAB);
+            $c->signal(0, 'tr', Scope::TAB);
+            $c->signal(0, 'tc', Scope::TAB);
+            $c->signal('', 'key', Scope::TAB);
+            $c->signal(false, 'shift', Scope::TAB);
+            $c->signal(0, 'dr', Scope::TAB);
+            $c->signal(0, 'dc', Scope::TAB);
+            $c->signal('', 'pasted', Scope::TAB);
 
             // Dynamic viewport dimensions (written by client ResizeObserver)
-            $viewportRows = $c->signal(20, 'vrows', Scope::TAB);
-            $viewportCols = $c->signal(10, 'vcols', Scope::TAB);
+            $c->signal(20, 'vrows', Scope::TAB);
+            $c->signal(10, 'vcols', Scope::TAB);
 
             // Jump-to-coordinate input value
-            $jumpTarget = $c->signal('', 'jump', Scope::TAB);
+            $c->signal('', 'jump', Scope::TAB);
 
             // Scope-level version counter: bumped on every cursor/edit change
             // so that broadcast() has a changed signal to deliver, triggering re-renders
-            $version = $c->signal(0, 'v', self::SCOPE, autoBroadcast: false);
+            $c->signal(0, 'v', self::SCOPE, autoBroadcast: false);
 
             // Selection range stored server-side per context (not as signals)
             if (!isset(self::$selections[$contextId])) {
@@ -79,7 +81,15 @@ final class SpreadsheetExample {
 
             // -- Actions --
 
-            $focusCell = $c->action(function (Context $ctx) use ($app, $sessionId, $contextId, $focusRow, $focusCol, $editing, $editValue, $version, $targetRow, $targetCol, $shift): void {
+            $c->action(function (Context $ctx) use ($app, $sessionId, $contextId): void {
+                /** @var Signal $targetRow */ $targetRow = $ctx->getSignal('tr');
+                /** @var Signal $targetCol */ $targetCol = $ctx->getSignal('tc');
+                /** @var Signal $shift */ $shift = $ctx->getSignal('shift');
+                /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
+                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $row = $targetRow->int();
                 $col = $targetCol->int();
                 $isShift = $shift->bool();
@@ -112,7 +122,18 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'focusCell');
 
-            $navigate = $c->action(function (Context $ctx) use ($app, $sessionId, $contextId, $viewRow, $viewCol, $focusRow, $focusCol, $editing, $editValue, $version, $key, $shift, $viewportRows, $viewportCols): void {
+            $c->action(function (Context $ctx) use ($app, $sessionId, $contextId): void {
+                /** @var Signal $viewRow */ $viewRow = $ctx->getSignal('viewRow');
+                /** @var Signal $viewCol */ $viewCol = $ctx->getSignal('viewCol');
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
+                /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
+                /** @var Signal $version */ $version = $ctx->getSignal('v');
+                /** @var Signal $key */ $key = $ctx->getSignal('key');
+                /** @var Signal $shift */ $shift = $ctx->getSignal('shift');
+                /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
+                /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
                 $direction = $key->string();
                 $isShift = $shift->bool();
                 $fr = $focusRow->int();
@@ -182,7 +203,12 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'navigate');
 
-            $startEdit = $c->action(function (Context $ctx) use ($focusRow, $focusCol, $editing, $editValue, $key): void {
+            $c->action(function (Context $ctx): void {
+                /** @var Signal $key */ $key = $ctx->getSignal('key');
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
+                /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
                 $keyVal = $key->string();
                 $prefill = mb_strlen($keyVal) === 1 ? $keyVal : '';
                 $currentValue = self::getCell($focusRow->int(), $focusCol->int());
@@ -191,7 +217,12 @@ final class SpreadsheetExample {
                 $ctx->sync();
             }, 'startEdit');
 
-            $commitEdit = $c->action(function (Context $ctx) use ($app, $focusRow, $focusCol, $editing, $editValue, $version): void {
+            $c->action(function (Context $ctx) use ($app): void {
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
+                /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
+                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 if (!$editing->bool()) {
                     return;
                 }
@@ -203,23 +234,37 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'commitEdit');
 
-            $scroll = $c->action(function (Context $ctx) use ($viewRow, $viewCol, $scrollDr, $scrollDc): void {
+            $c->action(function (Context $ctx): void {
+                /** @var Signal $viewRow */ $viewRow = $ctx->getSignal('viewRow');
+                /** @var Signal $viewCol */ $viewCol = $ctx->getSignal('viewCol');
+                /** @var Signal $scrollDr */ $scrollDr = $ctx->getSignal('dr');
+                /** @var Signal $scrollDc */ $scrollDc = $ctx->getSignal('dc');
                 $viewRow->setValue(max(0, $viewRow->int() + $scrollDr->int()), broadcast: false);
                 $viewCol->setValue(max(0, $viewCol->int() + $scrollDc->int()), broadcast: false);
                 $ctx->sync();
             }, 'scroll');
 
             // Absolute-position scroll targets (written by scrollbar drag)
-            $scrollToRow = $c->signal(0, 'str', Scope::TAB);
-            $scrollToCol = $c->signal(0, 'stc', Scope::TAB);
+            $c->signal(0, 'str', Scope::TAB);
+            $c->signal(0, 'stc', Scope::TAB);
 
-            $scrollTo = $c->action(function (Context $ctx) use ($viewRow, $viewCol, $scrollToRow, $scrollToCol): void {
+            $c->action(function (Context $ctx): void {
+                /** @var Signal $viewRow */ $viewRow = $ctx->getSignal('viewRow');
+                /** @var Signal $viewCol */ $viewCol = $ctx->getSignal('viewCol');
+                /** @var Signal $scrollToRow */ $scrollToRow = $ctx->getSignal('str');
+                /** @var Signal $scrollToCol */ $scrollToCol = $ctx->getSignal('stc');
                 $viewRow->setValue(max(0, $scrollToRow->int()), broadcast: false);
                 $viewCol->setValue(max(0, $scrollToCol->int()), broadcast: false);
                 $ctx->sync();
             }, 'scrollTo');
 
-            $paste = $c->action(function (Context $ctx) use ($app, $focusRow, $focusCol, $editing, $editValue, $pasted, $version): void {
+            $c->action(function (Context $ctx) use ($app): void {
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
+                /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
+                /** @var Signal $pasted */ $pasted = $ctx->getSignal('pasted');
+                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $data = $pasted->string();
                 $pasted->setValue('', broadcast: false);
                 if ($data === '') {
@@ -248,7 +293,7 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'paste');
 
-            $getCopyData = $c->action(function (Context $ctx) use ($contextId): void {
+            $c->action(function (Context $ctx) use ($contextId): void {
                 $sel = self::$selections[$contextId] ?? ['r1' => 0, 'c1' => 0, 'r2' => 0, 'c2' => 0];
                 $r1 = min($sel['r1'], $sel['r2']);
                 $r2 = max($sel['r1'], $sel['r2']);
@@ -269,13 +314,23 @@ final class SpreadsheetExample {
                 $ctx->execScript("navigator.clipboard.writeText({$tsvJson})");
             }, 'getCopyData');
 
-            $resize = $c->action(function (Context $ctx) use ($viewportRows, $viewportCols): void {
+            $c->action(function (Context $ctx): void {
+                /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
+                /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
                 $viewportRows->setValue(max(3, min(100, $viewportRows->int())), broadcast: false);
                 $viewportCols->setValue(max(3, min(52, $viewportCols->int())), broadcast: false);
                 $ctx->sync();
             }, 'resize');
 
-            $jumpTo = $c->action(function (Context $ctx) use ($app, $sessionId, $contextId, $viewRow, $viewCol, $focusRow, $focusCol, $jumpTarget, $version, $viewportRows, $viewportCols): void {
+            $c->action(function (Context $ctx) use ($app, $sessionId, $contextId): void {
+                /** @var Signal $viewRow */ $viewRow = $ctx->getSignal('viewRow');
+                /** @var Signal $viewCol */ $viewCol = $ctx->getSignal('viewCol');
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $jumpTarget */ $jumpTarget = $ctx->getSignal('jump');
+                /** @var Signal $version */ $version = $ctx->getSignal('v');
+                /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
+                /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
                 $target = trim($jumpTarget->string());
                 $jumpTarget->setValue('', broadcast: false);
                 if (!preg_match('/^([A-Za-z]+)(\d+)$/i', $target, $matches)) {
@@ -302,7 +357,11 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'jumpTo');
 
-            $clearCells = $c->action(function (Context $ctx) use ($app, $contextId, $focusRow, $focusCol, $editing, $version): void {
+            $c->action(function (Context $ctx) use ($app, $contextId): void {
+                /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
+                /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
+                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 if ($editing->bool()) {
                     return;
                 }
@@ -332,41 +391,36 @@ final class SpreadsheetExample {
 
             // -- Render --
 
-            $c->view(function () use (
-                $c,
-                $sessionId,
-                $contextId,
-                $viewRow,
-                $viewCol,
-                $focusRow,
-                $focusCol,
-                $editing,
-                $editValue,
-                $targetRow,
-                $targetCol,
-                $key,
-                $shift,
-                $scrollDr,
-                $scrollDc,
-                $scrollToRow,
-                $scrollToCol,
-                $pasted,
-                $viewportRows,
-                $viewportCols,
-                $jumpTarget,
-                $focusCell,
-                $navigate,
-                $startEdit,
-                $commitEdit,
-                $scroll,
-                $scrollTo,
-                $paste,
-                $getCopyData,
-                $clearCells,
-                $resize,
-                $jumpTo,
-                $app,
-            ): string {
+            $c->view(function () use ($c, $sessionId, $contextId, $app): string {
+                /** @var Signal $viewRow */ $viewRow = $c->getSignal('viewRow');
+                /** @var Signal $viewCol */ $viewCol = $c->getSignal('viewCol');
+                /** @var Signal $focusRow */ $focusRow = $c->getSignal('focusRow');
+                /** @var Signal $focusCol */ $focusCol = $c->getSignal('focusCol');
+                /** @var Signal $editing */ $editing = $c->getSignal('editing');
+                /** @var Signal $editValue */ $editValue = $c->getSignal('editValue');
+                /** @var Signal $targetRow */ $targetRow = $c->getSignal('tr');
+                /** @var Signal $targetCol */ $targetCol = $c->getSignal('tc');
+                /** @var Signal $key */ $key = $c->getSignal('key');
+                /** @var Signal $shift */ $shift = $c->getSignal('shift');
+                /** @var Signal $scrollDr */ $scrollDr = $c->getSignal('dr');
+                /** @var Signal $scrollDc */ $scrollDc = $c->getSignal('dc');
+                /** @var Signal $scrollToRow */ $scrollToRow = $c->getSignal('str');
+                /** @var Signal $scrollToCol */ $scrollToCol = $c->getSignal('stc');
+                /** @var Signal $pasted */ $pasted = $c->getSignal('pasted');
+                /** @var Signal $viewportRows */ $viewportRows = $c->getSignal('vrows');
+                /** @var Signal $viewportCols */ $viewportCols = $c->getSignal('vcols');
+                /** @var Signal $jumpTarget */ $jumpTarget = $c->getSignal('jump');
+                /** @var Action $focusCell */ $focusCell = $c->getAction('focusCell');
+                /** @var Action $navigate */ $navigate = $c->getAction('navigate');
+                /** @var Action $startEdit */ $startEdit = $c->getAction('startEdit');
+                /** @var Action $commitEdit */ $commitEdit = $c->getAction('commitEdit');
+                /** @var Action $scroll */ $scroll = $c->getAction('scroll');
+                /** @var Action $scrollTo */ $scrollTo = $c->getAction('scrollTo');
+                /** @var Action $paste */ $paste = $c->getAction('paste');
+                /** @var Action $getCopyData */ $getCopyData = $c->getAction('getCopyData');
+                /** @var Action $clearCells */ $clearCells = $c->getAction('clearCells');
+                /** @var Action $resize */ $resize = $c->getAction('resize');
+                /** @var Action $jumpTo */ $jumpTo = $c->getAction('jumpTo');
                 $vr = $viewRow->int();
                 $vc = $viewCol->int();
                 $fr = $focusRow->int();

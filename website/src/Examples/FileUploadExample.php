@@ -51,74 +51,30 @@ final class FileUploadExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/file-upload', function (Context $c) use ($app): void {
-            [
-                'status' => $status,
-                'pct' => $pct,
-                'uploadedBytes' => $uploadedBytes,
-                'totalBytes' => $totalBytes,
-                'fileName' => $fileName,
-                'uploadFileInfo' => $uploadFileInfo,
-                'uploadScope' => $uploadScope,
-                'startUpload' => $startUpload,
-                'receiveChunk' => $receiveChunk,
-                'cancelUpload' => $cancelUpload,
-                'resetUpload' => $resetUpload,
-                'uploadChunk' => $uploadChunk,
-            ] = self::mountUploadState($c, $app);
+            self::mountUploadState($c, $app);
 
             // ── TAB-local state (not broadcast) ───────────────────────────
-            $uploadMode = $c->signal('sim', 'uploadMode'); // 'sim' | 'real'
+            $c->signal('sim', 'uploadMode'); // 'sim' | 'real'
             $fileError = '';
 
             // ── setMode — instantly switches between sim and real forms
-            $setMode = $c->action(function () use ($c, $uploadMode, &$fileError): void {
-                $mode = (string) $c->input('mode', 'sim');
+            $c->action(function (Context $ctx) use (&$fileError): void {
+                $mode = (string) $ctx->input('mode', 'sim');
                 if (!\in_array($mode, ['sim', 'real'], strict: true)) {
                     return;
                 }
                 $fileError = '';
-                $uploadMode->setValue($mode);
-                $c->syncSignals();
-                $c->sync();
+                $ctx->getSignal('uploadMode')->setValue($mode);
+                $ctx->syncSignals();
+                $ctx->sync();
             }, 'setMode');
 
             // ── uploadRealFile is no longer used:
             // Real uploads go through startReal (worker) → startUpload → uploadChunk.
             // The action is removed to avoid a dead URL being registered.
 
-            $c->view(function () use (
-                $c,
-                $status,
-                $pct,
-                $uploadedBytes,
-                $totalBytes,
-                $fileName,
-                $uploadFileInfo,
-                $uploadMode,
-                &$fileError,
-                $startUpload,
-                $receiveChunk,
-                $cancelUpload,
-                $resetUpload,
-                $setMode,
-                $uploadChunk,
-            ): string {
+            $c->view(function () use ($c, &$fileError): string {
                 return $c->render('examples/file-upload.html.twig', array_merge(self::meta(), [
-                    // Upload state
-                    'status' => $status,
-                    'pct' => $pct,
-                    'uploadedBytes' => $uploadedBytes,
-                    'totalBytes' => $totalBytes,
-                    'fileName' => $fileName,
-                    'uploadFileInfo' => $uploadFileInfo,
-                    'uploadMode' => $uploadMode,
-                    // Actions
-                    'startUpload' => $startUpload,
-                    'receiveChunk' => $receiveChunk,
-                    'cancelUpload' => $cancelUpload,
-                    'resetUpload' => $resetUpload,
-                    'setMode' => $setMode,
-                    'uploadChunk' => $uploadChunk,
                     // Sim options
                     'sizes' => self::SIZES,
                     'speeds' => self::SPEEDS,
@@ -132,52 +88,18 @@ final class FileUploadExample {
         });
 
         $app->page('/examples/file-upload/browse', function (Context $c) use ($app): void {
-            [
-                'status' => $status,
-                'pct' => $pct,
-                'totalBytes' => $totalBytes,
-                'fileName' => $fileName,
-                'uploadFileInfo' => $uploadFileInfo,
-                'receiveChunk' => $receiveChunk,
-                'cancelUpload' => $cancelUpload,
-                'uploadChunk' => $uploadChunk,
-            ] = self::mountUploadState($c, $app);
+            self::mountUploadState($c, $app);
 
             $c->view(fn (): string => $c->render('examples/file-upload-browse.html.twig', array_merge(self::meta(), [
-                'status' => $status,
-                'pct' => $pct,
-                'totalBytes' => $totalBytes,
-                'fileName' => $fileName,
-                'uploadFileInfo' => $uploadFileInfo,
-                'receiveChunk' => $receiveChunk,
-                'cancelUpload' => $cancelUpload,
-                'uploadChunk' => $uploadChunk,
                 'ctxId' => $c->getId(),
                 'activePage' => 'browse',
             ])), block: 'demo', cacheUpdates: false);
         });
 
         $app->page('/examples/file-upload/settings', function (Context $c) use ($app): void {
-            [
-                'status' => $status,
-                'pct' => $pct,
-                'totalBytes' => $totalBytes,
-                'fileName' => $fileName,
-                'uploadFileInfo' => $uploadFileInfo,
-                'receiveChunk' => $receiveChunk,
-                'cancelUpload' => $cancelUpload,
-                'uploadChunk' => $uploadChunk,
-            ] = self::mountUploadState($c, $app);
+            self::mountUploadState($c, $app);
 
             $c->view(fn (): string => $c->render('examples/file-upload-settings.html.twig', array_merge(self::meta(), [
-                'status' => $status,
-                'pct' => $pct,
-                'totalBytes' => $totalBytes,
-                'fileName' => $fileName,
-                'uploadFileInfo' => $uploadFileInfo,
-                'receiveChunk' => $receiveChunk,
-                'cancelUpload' => $cancelUpload,
-                'uploadChunk' => $uploadChunk,
                 'ctxId' => $c->getId(),
                 'activePage' => 'settings',
             ])), block: 'demo', cacheUpdates: false);
@@ -268,30 +190,20 @@ final class FileUploadExample {
         $uploadFileInfo = $c->signal('', 'uploadFileInfo', $uploadScope);
 
         // ── startUpload — called once by the page JS before the worker begins chunking
-        $startUpload = $c->action(function () use (
-            $c,
-            $status,
-            $pct,
-            $uploadedBytes,
-            $totalBytes,
-            $fileName,
-            $uploadFileInfo,
-            $uploadScope,
-            $app,
-        ): void {
-            $total = (int) $c->input('total', 0);
-            $name = (string) $c->input('file', 'file.bin');
+        $startUpload = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
+            $total = (int) $ctx->input('total', 0);
+            $name = (string) $ctx->input('file', 'file.bin');
 
             if ($total <= 0) {
                 return;
             }
 
-            $status->setValue('uploading');
-            $fileName->setValue($name);
-            $totalBytes->setValue($total);
-            $uploadedBytes->setValue(0);
-            $pct->setValue(0);
-            $uploadFileInfo->setValue('');
+            $ctx->getSignal('uploadStatus')->setValue('uploading');
+            $ctx->getSignal('uploadFileName')->setValue($name);
+            $ctx->getSignal('uploadTotalBytes')->setValue($total);
+            $ctx->getSignal('uploadedBytes')->setValue(0);
+            $ctx->getSignal('uploadPct')->setValue(0);
+            $ctx->getSignal('uploadFileInfo')->setValue('');
 
             $app->broadcast($uploadScope);
         }, 'startUpload');
@@ -299,23 +211,20 @@ final class FileUploadExample {
         // ── receiveChunk — called by SharedWorker every 200 ms
         // The worker sends its authoritative pct so navigation gaps self-heal:
         // if two chunks were missed, the next chunk jumps pct forward correctly.
-        $receiveChunk = $c->action(function () use (
-            $c,
-            $status,
-            $pct,
-            $uploadedBytes,
-            $totalBytes,
-            $fileName,
-            $uploadScope,
-            $app,
-        ): void {
+        $receiveChunk = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
+            $status     = $ctx->getSignal('uploadStatus');
+            $pct        = $ctx->getSignal('uploadPct');
+            $uploadedBytes = $ctx->getSignal('uploadedBytes');
+            $totalBytes = $ctx->getSignal('uploadTotalBytes');
+            $fileName   = $ctx->getSignal('uploadFileName');
+
             if ($status->string() !== 'uploading') {
                 return;
             }
 
-            $workerPct = (int) $c->input('pct', 0);
-            $total = (int) $c->input('total', 0);
-            $name = (string) $c->input('file', '');
+            $workerPct = (int) $ctx->input('pct', 0);
+            $total = (int) $ctx->input('total', 0);
+            $name = (string) $ctx->input('file', '');
 
             // Initialise on first chunk if startUpload was not yet received
             if ($total > 0 && $totalBytes->int() === 0) {
@@ -338,43 +247,25 @@ final class FileUploadExample {
         }, 'receiveChunk');
 
         // ── cancelUpload — resets to idle; works from any sub-page
-        $cancelUpload = $c->action(function () use (
-            $status,
-            $pct,
-            $uploadedBytes,
-            $totalBytes,
-            $fileName,
-            $uploadFileInfo,
-            $uploadScope,
-            $app,
-        ): void {
-            $status->setValue('idle');
-            $fileName->setValue('');
-            $totalBytes->setValue(0);
-            $uploadedBytes->setValue(0);
-            $pct->setValue(0);
-            $uploadFileInfo->setValue('');
+        $cancelUpload = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
+            $ctx->getSignal('uploadStatus')->setValue('idle');
+            $ctx->getSignal('uploadFileName')->setValue('');
+            $ctx->getSignal('uploadTotalBytes')->setValue(0);
+            $ctx->getSignal('uploadedBytes')->setValue(0);
+            $ctx->getSignal('uploadPct')->setValue(0);
+            $ctx->getSignal('uploadFileInfo')->setValue('');
 
             $app->broadcast($uploadScope);
         }, 'cancelUpload');
 
         // ── resetUpload — clears complete/cancelled; allows starting again
-        $resetUpload = $c->action(function () use (
-            $status,
-            $pct,
-            $uploadedBytes,
-            $totalBytes,
-            $fileName,
-            $uploadFileInfo,
-            $uploadScope,
-            $app,
-        ): void {
-            $status->setValue('idle');
-            $fileName->setValue('');
-            $totalBytes->setValue(0);
-            $uploadedBytes->setValue(0);
-            $pct->setValue(0);
-            $uploadFileInfo->setValue('');
+        $resetUpload = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
+            $ctx->getSignal('uploadStatus')->setValue('idle');
+            $ctx->getSignal('uploadFileName')->setValue('');
+            $ctx->getSignal('uploadTotalBytes')->setValue(0);
+            $ctx->getSignal('uploadedBytes')->setValue(0);
+            $ctx->getSignal('uploadPct')->setValue(0);
+            $ctx->getSignal('uploadFileInfo')->setValue('');
 
             $app->broadcast($uploadScope);
         }, 'resetUpload');
@@ -382,25 +273,22 @@ final class FileUploadExample {
         // ── uploadChunk — receives a real file slice from the SharedWorker chunk loop.
         // NOTE: this is a demo — the chunk bytes are intentionally discarded after
         //       validation. A real implementation would write them to disk or object storage.
-        $uploadChunk = $c->action(function () use (
-            $c,
-            $app,
-            $status,
-            $pct,
-            $uploadedBytes,
-            $totalBytes,
-            $fileName,
-            $uploadFileInfo,
-            $uploadScope,
-        ): void {
+        $uploadChunk = $c->action(function (Context $ctx) use ($app, $uploadScope): void {
+            $status        = $ctx->getSignal('uploadStatus');
+            $pct           = $ctx->getSignal('uploadPct');
+            $uploadedBytes = $ctx->getSignal('uploadedBytes');
+            $totalBytes    = $ctx->getSignal('uploadTotalBytes');
+            $fileName      = $ctx->getSignal('uploadFileName');
+            $uploadFileInfo = $ctx->getSignal('uploadFileInfo');
+
             if ($status->string() !== 'uploading') {
                 return;
             }
 
-            $chunk = $c->file('chunk');
-            $offset = (int) $c->input('offset', 0);
-            $total = (int) $c->input('total', 0);
-            $name = (string) $c->input('name', '');
+            $chunk = $ctx->file('chunk');
+            $offset = (int) $ctx->input('offset', 0);
+            $total = (int) $ctx->input('total', 0);
+            $name = (string) $ctx->input('name', '');
 
             if ($chunk === null || $total <= 0) {
                 return;

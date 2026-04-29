@@ -96,21 +96,21 @@ final class ChatRoomExample {
         $c->addScope($roomScope);
         $typingIndicator = $c->signal('', 'typingIndicator', $roomScope, false);
 
-        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $messageInput, $typingIndicator, $roomScope): void {
-            $message = trim($messageInput->getValue());
+        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $roomScope): void {
+            $message = trim($ctx->getSignal('messageInput')->getValue());
             if ($message === '') {
                 return;
             }
 
             self::addMessage($room, $username, $message);
 
-            $messageInput->setValue('');
-            $typingIndicator->setValue('');
+            $ctx->getSignal('messageInput')->setValue('');
+            $ctx->getSignal('typingIndicator')->setValue('');
             self::$app?->broadcast($roomScope);
         }, 'sendMessage');
 
-        $updateTyping = $c->action(function (Context $ctx) use ($username, $typingIndicator, $roomScope): void {
-            $typingIndicator->setValue($username);
+        $updateTyping = $c->action(function (Context $ctx) use ($username, $roomScope): void {
+            $ctx->getSignal('typingIndicator')->setValue($username);
             self::$app?->broadcast($roomScope);
         }, 'updateTyping');
 

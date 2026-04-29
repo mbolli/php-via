@@ -12,23 +12,22 @@ final class ComponentsExample {
 
     public static function register(Via $app): void {
         $counterComponent = function (Context $c): void {
-            $count = $c->signal(0, 'count');
+            $c->signal(0, 'count');
 
-            $increment = $c->action(function () use ($count, $c): void {
+            $c->action(function (Context $ctx): void {
+                $count = $ctx->getSignal('count');
                 $count->setValue($count->int() + 1);
-                $c->sync();
+                $ctx->sync();
             }, 'increment');
 
-            $decrement = $c->action(function () use ($count, $c): void {
+            $c->action(function (Context $ctx): void {
+                $count = $ctx->getSignal('count');
                 $count->setValue($count->int() - 1);
-                $c->sync();
+                $ctx->sync();
             }, 'decrement');
 
             $c->view('examples/component_counter.html.twig', [
                 'namespace' => $c->getNamespace(),
-                'count' => $count,
-                'increment' => $increment,
-                'decrement' => $decrement,
             ]);
         };
 

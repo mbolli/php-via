@@ -12,22 +12,24 @@ final class CounterExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/counter', function (Context $c): void {
-            $count = $c->signal(0, 'count');
-            $step = $c->signal(1, 'step');
+            $c->signal(0, 'count');
+            $c->signal(1, 'step');
 
-            $increment = $c->action(function () use ($count, $step, $c): void {
-                $count->setValue($count->int() + $step->int());
-                $c->syncSignals();
+            $c->action(function (Context $ctx): void {
+                $count = $ctx->getSignal('count');
+                $count->setValue($count->int() + $ctx->getSignal('step')->int());
+                $ctx->syncSignals();
             }, 'increment');
 
-            $decrement = $c->action(function () use ($count, $step, $c): void {
-                $count->setValue($count->int() - $step->int());
-                $c->syncSignals();
+            $c->action(function (Context $ctx): void {
+                $count = $ctx->getSignal('count');
+                $count->setValue($count->int() - $ctx->getSignal('step')->int());
+                $ctx->syncSignals();
             }, 'decrement');
 
-            $reset = $c->action(function () use ($count, $c): void {
-                $count->setValue(0);
-                $c->syncSignals();
+            $c->action(function (Context $ctx): void {
+                $ctx->getSignal('count')->setValue(0);
+                $ctx->syncSignals();
             }, 'reset');
 
             $c->view('examples/counter.html.twig', [
@@ -59,11 +61,6 @@ final class CounterExample {
                     ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/CounterExample.php'],
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/counter.html.twig'],
                 ],
-                'count' => $count,
-                'step' => $step,
-                'increment' => $increment,
-                'decrement' => $decrement,
-                'reset' => $reset,
             ]);
         });
     }

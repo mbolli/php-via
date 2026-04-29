@@ -28,8 +28,8 @@ final class ShoppingCartExample {
             $cartScope = Scope::build('cart', $c->getSessionId() ?? $c->getId());
             $c->addScope($cartScope);
 
-            $addItem = $c->action(function () use ($c, $cartScope, $app): void {
-                $id = (int) $c->input('id', 0);
+            $c->action(function (Context $ctx) use ($cartScope, $app): void {
+                $id = (int) $ctx->input('id', 0);
                 $product = self::findProduct($id);
 
                 if ($product === null) {
@@ -37,7 +37,7 @@ final class ShoppingCartExample {
                 }
 
                 /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> $cart */
-                $cart = $c->sessionData('cart', []);
+                $cart = $ctx->sessionData('cart', []);
 
                 if (isset($cart[$id])) {
                     ++$cart[$id]['qty'];
@@ -45,22 +45,22 @@ final class ShoppingCartExample {
                     $cart[$id] = [...$product, 'qty' => 1];
                 }
 
-                $c->setSessionData('cart', $cart);
+                $ctx->setSessionData('cart', $cart);
                 $app->broadcast($cartScope);
             }, 'addItem');
 
-            $removeItem = $c->action(function () use ($c, $cartScope, $app): void {
-                $id = (int) $c->input('id', 0);
+            $c->action(function (Context $ctx) use ($cartScope, $app): void {
+                $id = (int) $ctx->input('id', 0);
 
                 /** @var array<int, mixed> $cart */
-                $cart = $c->sessionData('cart', []);
+                $cart = $ctx->sessionData('cart', []);
                 unset($cart[$id]);
-                $c->setSessionData('cart', $cart);
+                $ctx->setSessionData('cart', $cart);
                 $app->broadcast($cartScope);
             }, 'removeItem');
 
-            $clearCart = $c->action(function () use ($c, $cartScope, $app): void {
-                $c->clearSessionData('cart');
+            $c->action(function (Context $ctx) use ($cartScope, $app): void {
+                $ctx->clearSessionData('cart');
                 $app->broadcast($cartScope);
             }, 'clearCart');
 
@@ -96,9 +96,6 @@ final class ShoppingCartExample {
                     static fn (array $item): float => (float) $item['price'] * (int) $item['qty'],
                     $c->sessionData('cart', [])
                 )),
-                'addItem' => $addItem,
-                'removeItem' => $removeItem,
-                'clearCart' => $clearCart,
             ]), block: 'cart', cacheUpdates: false);
         });
     }

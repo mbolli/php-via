@@ -130,7 +130,6 @@ final class TypeRaceExample {
             $updateProgress = $c->action(function (Context $ctx) use (
                 $raceId,
                 $contextId,
-                $typedText,
                 $app,
             ): void {
                 $raceScope = Scope::build('example:typerace', $raceId);
@@ -142,7 +141,7 @@ final class TypeRaceExample {
                     return;
                 }
 
-                $text = $typedText->getValue();
+                $text = (string) $ctx->getSignal('typedText')->getValue();
                 $snippet = $race['snippet'];
                 $len = \strlen($snippet);
 
