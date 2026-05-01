@@ -54,9 +54,9 @@
     </nav>
 
     {# Confirm dialog shown when navigating during a real upload on browsers without extendedLifetime. #}
-    {# JS shows/hides it; kept in {% block demo %} so Datastar morphing can find the element. #}
+    {# data-ignore-morph: JS owns visibility; prevent idiomorph from touching this element on SSE updates. #}
     <div id="fu-nav-confirm" class="fu-nav-confirm" style="display:none" role="alertdialog"
-         aria-labelledby="fu-nav-confirm-msg">
+         aria-labelledby="fu-nav-confirm-msg" data-ignore-morph>
         <span id="fu-nav-confirm-msg">⚠️ Navigating will cancel the upload in progress.</span>
         <button id="fu-nav-confirm-ok"   class="fu-nav-confirm-btn fu-nav-confirm-ok">Cancel upload &amp; navigate</button>
         <button id="fu-nav-confirm-stay" class="fu-nav-confirm-btn">Stay</button>
