@@ -230,16 +230,25 @@ Returns HTTP 503 when the broker is in the reconnect backoff window.
 
 ## Development
 
-```
+```bash
 git clone https://github.com/mbolli/php-via.git
 cd php-via && composer install
 
-cd website && php app.php    # run website + examples on :3000
+# Start website + hot PHP reload + CSS watcher (requires entr)
+composer run dev
 
-vendor/bin/pest              # run tests
-composer phpstan             # PHPStan level 6
-composer cs-fix              # code style
+# Run tests
+composer run test
+
+# Watch tests on file change (requires entr)
+composer run watch-test
+
+# Static analysis and code style
+composer phpstan
+composer cs-fix
 ```
+
+**Hot PHP reload**: edit a file in `website/src/`, the worker restarts automatically (~1 s) without dropping other connections. Twig templates are always live with no restart. See [docs/development](https://via.zweiundeins.gmbh/docs/development) for the full workflow and how to replicate this pattern in your own project.
 
 ## Credits
 
