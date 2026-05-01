@@ -3,8 +3,8 @@
 {% block demo %}
 <div id="login-demo">
 
-{% if errorMsg.string != '' %}
-<div class="login-error">✕ {{ errorMsg.string|e }}</div>
+{% if error.string != '' %}
+<div class="login-error">✕ {{ error.string|e }}</div>
 {% endif %}
 
 <form class="login-form" onsubmit="return false">
@@ -16,7 +16,7 @@
                type="text"
                autocomplete="username"
                placeholder="ada"
-               data-bind="{{ usernameInput.id }}">
+               data-bind="{{ username.id }}">
     </div>
 
     <div class="login-field">
@@ -25,7 +25,7 @@
                type="password"
                autocomplete="current-password"
                placeholder="········"
-               data-bind="{{ passwordInput.id }}">
+               data-bind="{{ password.id }}">
     </div>
 
     <button class="login-submit-btn" data-on:click="@post('{{ login.url }}')">Log in</button>

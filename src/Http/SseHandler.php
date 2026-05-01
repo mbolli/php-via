@@ -127,11 +127,15 @@ class SseHandler {
         // Track client info when SSE connects (not at page load)
         if (!isset($this->via->clients[$contextId])) {
             $clientId = $this->via->generateClientId();
+            $xff = $request->header['x-forwarded-for'] ?? null;
+            $ip = $xff !== null
+                ? trim(explode(',', $xff)[0])
+                : ($request->header['x-real-ip'] ?? $request->server['remote_addr'] ?? 'unknown');
             $clientInfo = [
                 'id' => $clientId,
                 'identicon' => $this->via->generateIdenticon($clientId),
                 'connected_at' => time(),
-                'ip' => $request->server['remote_addr'] ?? 'unknown',
+                'ip' => $ip,
             ];
             $this->via->clients[$contextId] = $clientInfo;
             $this->via->getApp()->registerClient($contextId, $clientInfo);
