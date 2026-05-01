@@ -52,6 +52,10 @@
         }
     },
     "scripts": {
+        "dev": "bash scripts/dev.sh",
+        "test": "vendor/bin/pest",
+        "watch-test": "find src tests -name '*.php' | entr -c vendor/bin/pest",
+        "css": "cd website && pnpm build",
         "phpstan": "phpstan analyse --configuration=.phpstan.neon",
         "cs-fix": "php-cs-fixer fix -v --config=.php-cs-fixer.php"
     }
