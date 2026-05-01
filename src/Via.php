@@ -562,16 +562,20 @@ class Via {
             $socketType = $this->config->isHttps()
                 ? (SWOOLE_SOCK_TCP | SWOOLE_SSL)
                 : SWOOLE_SOCK_TCP;
-            $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::SIMPLE_MODE, $socketType);
+            $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::POOL_MODE, $socketType);
 
             // Configure OpenSwoole for SSE streaming
             $defaultSettings = [
                 'open_http2_protocol' => $this->config->isHttps() || $this->config->isH2c(),
                 'http_compression' => false,
-                'buffer_output_size' => 0,   // NO OUTPUT BUFFERING
+                // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
+                // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
+                // ERRNO 1203 on every send. 2MB is the OpenSwoole default; send_yield=true
+                // handles backpressure without stalling. SSE events are flushed per-chunk by
+                // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
                 'socket_buffer_size' => 1024 * 1024,
                 'max_coroutine' => 100000,
-                'worker_num' => 1,   // Single worker = shared state (clients, render stats)
+                'worker_num' => 1,   // Single worker = shared state; POOL_MODE enables USR1 graceful worker reload
                 'send_yield' => true,
                 'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
                 'reload_async' => true,  // Enable async reload
@@ -594,6 +598,13 @@ class Via {
             $this->server->on('start', function (Server $server): void {
                 $scheme = $this->config->isHttps() ? 'https' : 'http';
                 $this->log('info', "Via server started on {$scheme}://{$this->config->getHost()}:{$this->config->getPort()}");
+
+                // Write master PID so external tools (e.g. scripts/dev.sh) can send
+                // SIGUSR1 to the correct process for hot worker reload.
+                if ($this->config->getDevMode()) {
+                    $pidFile = sys_get_temp_dir() . '/php-via-master.pid';
+                    file_put_contents($pidFile, (string) $server->master_pid);
+                }
             });
 
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
@@ -624,6 +635,11 @@ class Via {
                 foreach ($this->startCallbacks as $callback) {
                     $callback();
                 }
+
+                // Refresh route table: startCallbacks may have registered new routes (e.g. via
+                // the thin-bootstrap pattern where route registration is deferred to onWorkerStart
+                // so that USR1 hot reload picks up fresh class definitions from disk).
+                $this->requestHandler->setRoutes($this->router->getRoutes());
 
                 // Register process-wide intervals (registered via setInterval())
                 foreach ($this->serverIntervals as [$callback, $ms]) {
