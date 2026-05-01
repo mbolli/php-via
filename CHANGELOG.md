@@ -2,6 +2,60 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.8.0] - 2026-05-01
+
+### New Features
+
+- **Auto-inject signals and actions into Twig** — `Context::render()` (and `$c->view()` with
+  a template string) now automatically injects all registered signals and actions as named
+  variables into every Twig render. No manual data-array passing required:
+  - Signals are keyed by their user-supplied baseName (e.g. `$c->signal(0, 'count')` → `{{ count }}`)
+  - Actions are keyed by the camelCase form of their registration name
+    (e.g. `'refresh-graphs'` → `{{ refreshGraphs }}`)
+  - Explicit entries in the `$data` array still win on conflict
+  - Result is memoized after the first call — zero overhead on SSE ticks
+  - A `_via` debug key is injected in dev mode listing all injected signal and action names
+
+- **`Context::getSignal(string $name): ?Signal`** — retrieve a registered signal by its
+  user-supplied name. Works for all scopes (TAB, ROUTE, SESSION, GLOBAL, custom).
+
+- **`Context::getAction(string $name): ?Action`** — retrieve a registered action by its
+  user-supplied name. Useful in action bodies that need sibling actions without captured vars.
+
+### Bug Fixes
+
+- **File-upload templates** — aligned all template variable names with signal baseNames after
+  the auto-inject refactor (`status` → `uploadStatus`, `pct` → `uploadPct`,
+  `fileName` → `uploadFileName`, `totalBytes` → `uploadTotalBytes`).
+- **Login template** — aligned variable names with signal baseNames
+  (`errorMsg` → `error`, `usernameInput` → `username`, `passwordInput` → `password`).
+- **Real IP from proxy headers** — `SseHandler` now reads `X-Forwarded-For` → `X-Real-IP`
+  → `remote_addr` in priority order, so the correct client IP is logged and stored when
+  php-via runs behind a reverse proxy.
+- **File-upload nav-confirm flicker** — added `data-ignore-morph` to the yellow
+  navigation-guard dialog so Datastar's idiomorph skips it on every SSE patch (JS owns
+  its visibility; server-rendered `style="display:none"` was causing a flicker on each
+  progress update).
+
+### Refactoring
+
+- All 15 website example files updated to use auto-inject: signal and action variables
+  are no longer passed explicitly to `render()` / `view()` calls. Action closures now
+  receive the `Context` as a parameter and call `$ctx->getSignal()` instead of capturing
+  variables from the outer scope.
+
+### Documentation
+
+- **Twig docs** — rewrote "Passing data to templates" section; updated reactive-text,
+  two-way binding, and action examples to use auto-injected `Signal`/`Action` objects
+  (`{{ count.int }}`, `{{ inc.url }}`).
+- **Views docs** — removed manual signal/action passing from "Defining a view" and
+  "Partial updates" examples; simplified component view example.
+- **Components docs** — removed manual `count_id`/`count_val`/`inc_url` passing from the
+  "Creating a component" example.
+- **API docs** — documented auto-inject behaviour on `view()`; added `getSignal()` and
+  `getAction()` method entries; updated component example.
+
 ## [0.7.1] - 2026-04-22
 
 ### Bug Fixes
