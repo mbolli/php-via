@@ -880,6 +880,23 @@ main, .site-footer { position: relative; }
   color: var(--border);
 }
 
+/* ─── Nav PRO badge ────────────────────────────────────── */
+.nav-pro-badge {
+  display: inline-block;
+  font-size: 0.55rem;
+  font-weight: var(--font-weight-8);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 0.2em 0.45em;
+  border-radius: var(--radius-1);
+  background: color-mix(in srgb, var(--brand-secondary) 18%, transparent);
+  color: var(--brand-secondary);
+  border: 1px solid color-mix(in srgb, var(--brand-secondary) 40%, transparent);
+  vertical-align: super;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ─── Docs layout ──────────────────────────────────────── */
 .docs-layout {
   display: grid;
