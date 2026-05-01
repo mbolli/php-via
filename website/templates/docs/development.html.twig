@@ -1,0 +1,198 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Development — php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Development</h1>
+    <p>
+        This page covers local development workflow: starting a dev server with hot PHP reload,
+        file watching with <code>entr</code>, and running tests.
+    </p>
+
+    <h2 id="quick-start">Quick start</h2>
+    {% code 'bash' %}{% verbatim %}
+# Install dependencies
+composer install
+cd website && pnpm install && cd ..
+
+# Start server + file watcher + CSS watcher (all-in-one)
+composer run dev
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="prerequisites">Prerequisites</h2>
+    <p>Beyond PHP + OpenSwoole + Composer, the dev workflow needs two extra tools:</p>
+    <ul>
+        <li>
+            <strong><code>entr</code></strong> — file watcher that triggers a command when watched files change.<br>
+            Ubuntu/Debian: <code>sudo apt install entr</code>&ensp;·&ensp;macOS: <code>brew install entr</code>
+        </li>
+        <li>
+            <strong><code>pnpm</code></strong> — runs the PostCSS CSS watcher for the website.
+            Only required for the website; skip if you're working on a project without a CSS pipeline.
+            Install from <a href="https://pnpm.io" target="_blank" rel="noopener">pnpm.io</a>.
+        </li>
+    </ul>
+    <p><code>scripts/dev.sh</code> checks for <code>entr</code> at startup and exits with install instructions if it's missing. <code>pnpm</code> is optional — CSS watch is silently skipped if it's absent.</p>
+
+    <h2 id="dev-server">What <code>composer run dev</code> does</h2>
+    <p>It starts three concurrent processes:</p>
+    <ol>
+        <li><strong>PHP server</strong> — <code>APP_ENV=dev php website/app.php</code> on <code>:3000</code></li>
+        <li><strong>CSS watcher</strong> — <code>pnpm dev</code> (PostCSS <code>--watch</code>, website only)</li>
+        <li><strong>PHP file watcher</strong> — <code>find … | entr -dn kill -USR1 $MASTER_PID</code></li>
+    </ol>
+    <p>Ctrl+C kills all three cleanly.</p>
+
+    <p><strong><code>APP_ENV=dev</code></strong> enables:</p>
+    <ul>
+        <li>Debug-level logging</li>
+        <li>Self-signed TLS certificate loading (if <code>certs/dev.crt</code> and <code>certs/dev.key</code> exist — see <a href="{{ basePath }}docs/deployment#brotli-dev">Deployment → Dev mode</a>)</li>
+        <li>CORS logger output</li>
+    </ul>
+
+    <h2 id="hot-reload">How PHP hot reload works</h2>
+    <p>
+        php-via runs in <strong>POOL_MODE</strong> (OpenSwoole's process model): a long-lived master process manages
+        a manager and one or more worker processes. When <code>entr</code> detects a <code>.php</code> file change, it
+        sends <code>SIGUSR1</code> to the master. The master signals the manager, which gracefully rotates the worker:
+    </p>
+    <ol>
+        <li>The current worker finishes its in-flight requests.</li>
+        <li>A new worker process is forked from the master.</li>
+        <li>The new worker runs <code>onWorkerStart</code>, which executes the <code>onStart</code> callbacks.</li>
+        <li>The <code>onStart</code> callback <code>require</code>s <code>routes.php</code> — loading fresh class definitions from disk.</li>
+        <li>The route table is refreshed so <code>RequestHandler</code> sees the new routes.</li>
+    </ol>
+
+    <h3 id="thin-bootstrap">The thin bootstrap pattern</h3>
+    <p>
+        Hot reload only picks up fresh class definitions for files that were <em>not already loaded in the master process</em>.
+        If a class is loaded during master startup, all forked workers inherit that old definition — USR1 makes no difference.
+    </p>
+    <p>
+        The solution is a <strong>thin <code>app.php</code></strong>: the entry script only sets up configuration,
+        middleware, and routes that don't reference app-layer classes. Everything else — example classes, route handlers,
+        and the sitemap — lives in <code>routes.php</code>, which is loaded via <code>onStart()</code> and therefore
+        runs inside the worker, not master:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// app.php — thin bootstrap (master process)
+$app = new Via($config);
+$app->middleware(/* ... */);
+
+// Docs routes (closures only, no app-layer class references)
+$app->group('/docs', function (Via $app): void { /* ... */ });
+
+// Defer example route registration to worker startup
+$app->onStart(function () use ($app): void {
+    require __DIR__ . '/routes.php';   // ← loaded fresh per worker
+});
+
+$app->start();
+    {% endverbatim %}{% endcode %}
+
+    {% code 'php' %}{% verbatim %}
+// routes.php — loaded inside each worker (hot-reloadable)
+use MyApp\Examples\CounterExample;
+use MyApp\Examples\ChatExample;
+
+CounterExample::register($app);
+ChatExample::register($app);
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="what-reloads">What gets reloaded vs. what doesn't</h3>
+    <table>
+        <thead><tr><th>Change</th><th>Reload needed?</th><th>How</th></tr></thead>
+        <tbody>
+            <tr><td>Files in <code>routes.php</code> and its <code>use</code>d classes</td><td>USR1 (<code>entr</code> automatic)</td><td>Fresh worker re-includes <code>routes.php</code></td></tr>
+            <tr><td>Twig templates (<code>.twig</code>)</td><td>USR1 (<code>entr</code> automatic)</td><td>Fresh worker clears in-memory compiled-template cache and ViewCache</td></tr>
+            <tr><td>CSS (<code>.css.src</code>)</td><td>None — already live</td><td><code>pnpm dev</code> watches and rebuilds</td></tr>
+            <tr><td>Changes to <code>app.php</code> itself</td><td>Full restart</td><td>Ctrl+C → <code>composer run dev</code></td></tr>
+            <tr><td>Framework files in <code>src/</code></td><td>Full restart</td><td>Framework classes load in master</td></tr>
+        </tbody>
+    </table>
+
+    <h3 id="opcache">OPcache note</h3>
+    <p>
+        For hot reload to pick up changed files, OPcache must revalidate timestamps.
+        In most dev setups this is the default (<code>opcache.validate_timestamps=1</code>).
+        If files aren't updating after reload, check your <code>php.ini</code>:
+    </p>
+    {% code 'ini' %}{% verbatim %}
+; php.ini (dev)
+opcache.validate_timestamps = 1
+opcache.revalidate_freq = 0   ; check every request (0 = always)
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="templates">Twig template changes</h2>
+    <p>
+        Twig compiles each template into a PHP class and stores it in memory for the worker's lifetime.
+        Editing a <code>.twig</code> file triggers <code>entr</code> → USR1 → a fresh worker, which starts
+        with an empty template cache and also clears ViewCache (important for ROUTE/SESSION/GLOBAL scoped pages
+        that cache rendered HTML in memory). No browser action needed beyond the automatic reload.
+    </p>
+
+    <h2 id="css">CSS changes</h2>
+    <p>
+        <code>composer run dev</code> starts <code>pnpm dev</code> alongside the server. This runs PostCSS with
+        <code>--watch</code>, rebuilding <code>site.css</code> whenever the source changes.
+        For a one-off rebuild: <code>composer run css</code>.
+    </p>
+
+    <h2 id="tests">Running tests</h2>
+    {% code 'bash' %}{% verbatim %}
+# Run the full suite once
+composer run test
+
+# Watch mode: re-run on every .php file change (requires entr)
+composer run watch-test
+    {% endverbatim %}{% endcode %}
+    <p>
+        Tests use <code>VIA_TEST_MODE=1</code> (set in <code>tests/Pest.php</code>), which prevents
+        OpenSwoole from binding a port — no running server needed.
+    </p>
+
+    <h2 id="your-project">Using this pattern in your project</h2>
+    <p>
+        Copy the thin bootstrap pattern into your own app. The key rules:
+    </p>
+    <ul>
+        <li><code>app.php</code> must not <code>use</code> or instantiate any class you want to hot-reload.</li>
+        <li>Put all hot-reloadable route registrations in a separate file (e.g. <code>routes.php</code>) and load it via <code>onStart()</code>.</li>
+        <li>Any code that runs before <code>$app->onStart()</code> in <code>app.php</code> is fixed for the lifetime of the master process.</li>
+    </ul>
+
+    <p>A minimal <code>scripts/dev.sh</code> for your project:</p>
+    {% code 'bash' %}{% verbatim %}
+#!/usr/bin/env bash
+# Requires entr: apt install entr / brew install entr
+
+APP_ENV=dev php app.php &
+SERVER_PID=$!
+
+cleanup() { kill "$SERVER_PID" 2>/dev/null; exit 0; }
+trap cleanup INT TERM
+
+while kill -0 "$SERVER_PID" 2>/dev/null; do
+    find . \( -name '*.php' -o -name '*.twig' \) | grep -v /vendor/ | \
+        entr -dn sh -c "kill -USR1 $SERVER_PID && echo '↻ Workers reloading...'" || true
+done
+    {% endverbatim %}{% endcode %}
+
+    <p>And in your <code>composer.json</code>:</p>
+    {% code 'json' %}{% verbatim %}
+{
+    "scripts": {
+        "dev": "bash scripts/dev.sh",
+        "test": "vendor/bin/pest",
+        "watch-test": "find src tests -name '*.php' | entr -c vendor/bin/pest"
+    }
+}
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="{{ basePath }}docs/deployment">Deployment</a> — systemd, Caddy, TLS, graceful restart in production</li>
+        <li><a href="{{ basePath }}docs/lifecycle">Lifecycle</a> — <code>onStart</code>, <code>onShutdown</code>, timers</li>
+    </ul>
+</article>
+{% endblock %}
