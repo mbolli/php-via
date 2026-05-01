@@ -28,7 +28,7 @@
                     <span class="fu-uploading-badge">uploading
                         <span data-text="${{ uploadPct.id }} + '%'">{{ uploadPct.int }}%</span></span>
                 </td>
-                <td><span data-text="Math.round(${{ totalBytes.id }} / 1048576) + ' MB'">{{ (totalBytes.int / 1048576)|number_format(0) }} MB</span></td>
+                <td><span data-text="Math.round(${{ uploadTotalBytes.id }} / 1048576) + ' MB'">{{ (uploadTotalBytes.int / 1048576)|number_format(0) }} MB</span></td>
                 <td>now</td><td>tar.gz</td>
             </tr>
             <tr class="fu-row-complete"
@@ -38,7 +38,7 @@
                     <span class="fu-file-icon">✅</span>
                     <span data-text="${{ uploadFileName.id }}">{{ uploadFileName.string }}</span>
                 </td>
-                <td><span data-text="Math.round(${{ totalBytes.id }} / 1048576) + ' MB'">{{ (totalBytes.int / 1048576)|number_format(0) }} MB</span></td>
+                <td><span data-text="Math.round(${{ uploadTotalBytes.id }} / 1048576) + ' MB'">{{ (uploadTotalBytes.int / 1048576)|number_format(0) }} MB</span></td>
                 <td>just now</td><td>tar.gz</td>
             </tr>
             <tr>
