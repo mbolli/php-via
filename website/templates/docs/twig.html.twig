@@ -43,13 +43,10 @@
                 (requires <code>withTemplateDir()</code>) or a plain PHP closure.
             </p>
             {% code 'php' %}{% verbatim %}
-// Twig template (string name)
-$c->view('counter.html.twig', [
-    'count' => $count->int(),
-    'id'    => $count->id(),
-]);
+// Twig template — signals & actions auto-injected by name
+$c->view('counter.html.twig');
 
-// PHP closure — no Twig needed
+// PHP closure — no Twig needed, access via use()
 $c->view(function () use ($count): string {
     return '<p>' . $count->int() . '</p>';
 });
