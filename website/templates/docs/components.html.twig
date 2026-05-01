@@ -11,15 +11,12 @@
     <h2 id="creating">Creating a component</h2>
     <p>Define a component as a callable that configures a <code>Context</code>:</p>
     {% code 'php' %}{% verbatim %}
-$counterComponent = function (Context $c) use ($twig): void {
+$counterComponent = function (Context $c): void {
     $count = $c->signal(0, 'count');
     $inc   = $c->action(fn() => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
 
-    $c->view('components/counter.html.twig', [
-        'count_id'  => $count->id(),
-        'count_val' => $count->int(),
-        'inc_url'   => $inc->url(),
-    ]);
+    // count and inc are auto-injected into the template as Signal/Action objects
+    $c->view('components/counter.html.twig');
 };
 {% endverbatim %}{% endcode %}
 

@@ -11,17 +11,16 @@
     <h2 id="defining">Defining a view</h2>
     <p>Call <code>$c-&gt;view()</code> once per context. It accepts either a Twig template name or a callable:</p>
     {% code 'php' %}{% verbatim %}
-// Twig template
-$c->view('counter.html.twig', [
-    'count_id'  => $count->id(),
-    'count_val' => $count->int(),
-    'inc_url'   => $increment->url(),
-]);
+// Twig template — signals and actions are auto-injected; only pass non-signal data
+$c->view('counter.html.twig');
+
+// With extra data (e.g. PHP arrays, scalars that aren't signals):
+$c->view('todo.html.twig', ['todos' => $todos]);
 
 // Callable (inline)
 $c->view(function () use ($count, $increment): string {
     return "<p>Count: {$count->int()}</p>"
-         . "<button data-on:click=\"@post('{$increment->url()}')\"&gt;+1</button>";
+         . "<button data-on:click=\"@post('{$increment->url()}')\">&gt;+1</button>";
 });
 {% endverbatim %}{% endcode %}
 
@@ -35,9 +34,9 @@ $c->view(function () use ($count, $increment): string {
     {% code 'php' %}{% verbatim %}
 // On initial load: renders the full template (layout, nav, content)
 // On SSE updates:  renders only {% block demo %}
+// addTodo (action) is auto-injected; only pass non-signal data explicitly
 $c->view(fn () => $c->render('todo.html.twig', [
     'todos' => self::$todos,
-    'addTodo' => $addTodo,
 ]), block: 'demo', cacheUpdates: false);
 {% endverbatim %}{% endcode %}
     {% code 'twig' %}{% verbatim %}
@@ -152,7 +151,8 @@ $c->view(function () use ($app, $twig): string {
 $counter = $c->component(function (Context $c): void {
     $n   = $c->signal(0, 'n');
     $inc = $c->action(fn() => $n->setValue($n->int() + 1) & $c->sync(), 'inc');
-    $c->view('counter.html.twig', ['n_val' => $n->int(), 'inc_url' => $inc->url()]);
+    // n and inc are auto-injected into counter.html.twig
+    $c->view('counter.html.twig');
 }, 'counter');
 
 $c->view('page.html.twig', ['counter' => $counter()]);

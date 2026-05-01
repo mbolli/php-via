@@ -115,23 +115,31 @@ $app = new Via(
     <p>Skip <code>withTemplateDir()</code> if you use only PHP closures for views, and skip <code>withShellTemplate()</code> if your views extend <code>base.html.twig</code>.</p>
 
     <h2 id="passing-data">Passing data to templates</h2>
-    <p>Pass signal IDs and current values from PHP into Twig via <code>$c-&gt;view()</code>'s data array:</p>
+    <p>
+        Signals and actions are <strong>auto-injected</strong> into every Twig render. You don't need to pass them
+        manually — just register them and they're available by name:
+    </p>
     {% code 'php' %}{% verbatim %}
 $count = $c->signal(0, 'count');
 $inc   = $c->action(fn() => $count->setValue($count->int() + 1), 'inc');
 
-$c->view('counter.html.twig', [
-    'count_id'  => $count->id(),    // 'count'
-    'count_val' => $count->int(),   // 0
-    'inc_url'   => $inc->url(),     // '/_action/inc'
-]);
+// Signal 'count' → {{ count }}  (a Signal object, call .int, .string, .id(), .url(), …)
+// Action 'inc'   → {{ inc }}    (an Action object, call .url)
+$c->view('counter.html.twig'); // no data needed
+
+// Only pass data that isn't a signal or action:
+$c->view('todo.html.twig', ['todos' => $todos]);
     {% endverbatim %}{% endcode %}
+    <p>
+        Explicit entries in the <code>$data</code> array take priority over auto-injected values —
+        useful when you need to pass a derived or renamed value for a specific render.
+    </p>
 
     <h2 id="reactive-text">Reactive text</h2>
     <p>Use <code>data-text</code> to keep an element in sync with a signal. Always seed the initial value to avoid a flash:</p>
     {% code 'html' %}{% verbatim %}
-<!-- counter.html.twig -->
-<span data-text="${{ count_id }}">{{ count_val }}</span>
+<!-- counter.html.twig — count is auto-injected as a Signal object -->
+<span data-text="${{ count.id() }}">{{ count.int }}</span>
     {% endverbatim %}{% endcode %}
 
     <p>Or use <code>$signal-&gt;text()</code> in PHP to generate the span directly, then output with <code>| raw</code>:</p>
@@ -147,24 +155,21 @@ $c->view('counter.html.twig', [
     <h2 id="two-way-binding">Two-way binding</h2>
     <p>Use <code>data-bind</code> for inputs that should reflect <em>and update</em> a signal:</p>
     {% code 'html' %}{% verbatim %}
-<input data-bind="{{ name_id }}" type="text">
+<!-- name is auto-injected as a Signal object -->
+<input data-bind="{{ name.id() }}" type="text">
 
-<!-- Or use the bind() Twig function with the Signal object: -->
-<input {{ bind(name_signal) }} type="text">
-    {% endverbatim %}{% endcode %}
-
-    <p>Pass the Signal object itself when using <code>bind()</code>:</p>
-    {% code 'php' %}{% verbatim %}
-$c->view('form.html.twig', ['name' => $nameSignal]);
+<!-- Or use the bind() Twig function with the auto-injected Signal: -->
+<input {{ bind(name) }} type="text">
     {% endverbatim %}{% endcode %}
 
     <h2 id="actions">Triggering actions</h2>
     <p>Use Datastar's event attributes to POST to an action URL:</p>
     {% code 'html' %}{% verbatim %}
-<button data-on:click="@post('{{ inc_url }}')">+1</button>
+<!-- inc is auto-injected as an Action object -->
+<button data-on:click="@post('{{ inc.url }}')">+1</button>
 
 <!-- Pass data via query params -->
-<button data-on:click="@post('{{ vote_url }}?option=tab')">Vote TAB</button>
+<button data-on:click="@post('{{ vote.url }}?option=tab')">Vote TAB</button>
     {% endverbatim %}{% endcode %}
 
     <h2 id="template-inheritance">Template inheritance</h2>
