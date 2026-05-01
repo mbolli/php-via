@@ -166,13 +166,21 @@ $inc = $c->action(function (Context $c) use ($count): void {
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-view"><code>view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void</code></h3>
+    <p>
+        Signals and actions registered on the context are <strong>auto-injected</strong> into every Twig render
+        as named variables (signal baseName, action camelCase name). Entries in <code>$data</code> take priority.
+    </p>
     {% code 'php' %}{% verbatim %}
-$c->view('counter.html.twig', ['count_val' => $count->int()]);
+// count and increment are auto-injected — no explicit passing needed
+$c->view('counter.html.twig');
+
+// Only pass data that isn't a signal/action:
+$c->view('todo.html.twig', ['todos' => $todos]);
 
 $c->view(fn() => "<p>Count: {$count->int()}</p>");
 
 // Send only {% block demo %} on SSE updates (full template on initial load):
-$c->view(fn() => $c->render('todo.html.twig', $data), block: 'demo');
+$c->view(fn() => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo');
 
 // Disable caching for views that read external state:
 $c->view('presence.html.twig', ['n' => count($app->getClients())], cacheUpdates: false);
@@ -184,10 +192,19 @@ $c->view('presence.html.twig', ['n' => count($app->getClients())], cacheUpdates:
 $counter = $c->component(function (Context $c): void {
     $n   = $c->signal(0, 'n');
     $inc = $c->action(fn() => $n->setValue($n->int() + 1), 'inc');
-    $c->view('counter.html.twig', ['n_val' => $n->int(), 'inc_url' => $inc->url()]);
+    // n and inc are auto-injected into counter.html.twig
+    $c->view('counter.html.twig');
 }, 'counter');
 
 $c->view('page.html.twig', ['counter' => $counter()]);
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="context-get-signal"><code>getSignal(string $name): ?Signal</code></h3>
+    <h3 id="context-get-action"><code>getAction(string $name): ?Action</code></h3>
+    <p>Retrieve a registered signal or action by name after registration. Useful in actions that need to look up signals by name rather than via a captured variable.</p>
+    {% code 'php' %}{% verbatim %}
+$c->getSignal('count');    // returns the Signal registered as 'count', or null
+$c->getAction('increment'); // returns the Action registered as 'increment', or null
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-scope"><code>scope(string $scope): void</code></h3>
