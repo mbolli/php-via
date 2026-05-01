@@ -4,34 +4,34 @@
 <div id="file-upload-{{ activePage|default('upload') }}" class="fu-layout">
 
     {# ── Persistent progress bar ───────────────────────────────────────────── #}
-    {% if status.string != 'idle' %}
+    {% if uploadStatus.string != 'idle' %}
     <div id="upload-progress-bar" class="upload-progress-bar">
         <div class="upload-progress-inner">
             <div class="upload-track" aria-label="Upload progress" role="progressbar"
-                 aria-valuenow="{{ pct.int }}" aria-valuemin="0" aria-valuemax="100">
-                <div id="upload-fill" class="upload-fill" style="width: {{ pct.int }}%"></div>
-                {% if status.string == 'uploading' %}<div class="upload-shimmer"></div>{% endif %}
+                 aria-valuenow="{{ uploadPct.int }}" aria-valuemin="0" aria-valuemax="100">
+                <div id="upload-fill" class="upload-fill" style="width: {{ uploadPct.int }}%"></div>
+                {% if uploadStatus.string == 'uploading' %}<div class="upload-shimmer"></div>{% endif %}
             </div>
 
             <div class="upload-info">
                 <span class="upload-icon">
-                    {% if status.string == 'uploading' %}📤{% endif %}
-                    {% if status.string == 'complete' %}✅{% endif %}
-                    {% if status.string == 'cancelled' %}🚫{% endif %}
+                    {% if uploadStatus.string == 'uploading' %}📤{% endif %}
+                    {% if uploadStatus.string == 'complete' %}✅{% endif %}
+                    {% if uploadStatus.string == 'cancelled' %}🚫{% endif %}
                 </span>
 
-                <span id="upload-filename" class="upload-filename">{{ fileName.string }}</span>
+                <span id="upload-filename" class="upload-filename">{{ uploadFileName.string }}</span>
 
                 <span class="upload-pct-wrap">
-                    <span id="upload-pct" class="upload-pct">{{ pct.int }}%</span>
-                    <span class="upload-status-label"> {{ status.string }}</span>
+                    <span id="upload-pct" class="upload-pct">{{ uploadPct.int }}%</span>
+                    <span class="upload-status-label"> {{ uploadStatus.string }}</span>
                 </span>
 
-                {% if status.string == 'uploading' %}
+                {% if uploadStatus.string == 'uploading' %}
                 <button class="upload-cancel-btn" id="upload-cancel-btn" title="Cancel upload"
                         onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ ctxId }}')">✕</button>
                 {% endif %}
-                {% if status.string == 'complete' or status.string == 'cancelled' %}
+                {% if uploadStatus.string == 'complete' or uploadStatus.string == 'cancelled' %}
                 <button class="upload-reset-btn" id="upload-reset-btn"
                         onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ ctxId }}')">↺ Reset</button>
                 {% endif %}

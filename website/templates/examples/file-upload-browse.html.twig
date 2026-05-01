@@ -20,23 +20,23 @@
                 <td>—</td><td>2026-04-10</td><td>Folder</td>
             </tr>
             <tr class="fu-row-uploading"
-                data-show="{{ status.string == 'uploading' ? 'true' : '$' ~ status.id ~ ' === \"uploading\"' }}"
-                style="{{ status.string == 'uploading' ? '' : 'display:none' }}">
+                data-show="{{ uploadStatus.string == 'uploading' ? 'true' : '$' ~ uploadStatus.id ~ ' === \"uploading\"' }}"
+                style="{{ uploadStatus.string == 'uploading' ? '' : 'display:none' }}">
                 <td>
                     <span class="fu-file-icon">📦</span>
-                    <span data-text="${{ fileName.id }}">{{ fileName.string }}</span>
+                    <span data-text="${{ uploadFileName.id }}">{{ uploadFileName.string }}</span>
                     <span class="fu-uploading-badge">uploading
-                        <span data-text="${{ pct.id }} + '%'">{{ pct.int }}%</span></span>
+                        <span data-text="${{ uploadPct.id }} + '%'">{{ uploadPct.int }}%</span></span>
                 </td>
                 <td><span data-text="Math.round(${{ totalBytes.id }} / 1048576) + ' MB'">{{ (totalBytes.int / 1048576)|number_format(0) }} MB</span></td>
                 <td>now</td><td>tar.gz</td>
             </tr>
             <tr class="fu-row-complete"
-                data-show="{{ status.string == 'complete' ? 'true' : '$' ~ status.id ~ ' === \"complete\"' }}"
-                style="{{ status.string == 'complete' ? '' : 'display:none' }}">
+                data-show="{{ uploadStatus.string == 'complete' ? 'true' : '$' ~ uploadStatus.id ~ ' === \"complete\"' }}"
+                style="{{ uploadStatus.string == 'complete' ? '' : 'display:none' }}">
                 <td>
                     <span class="fu-file-icon">✅</span>
-                    <span data-text="${{ fileName.id }}">{{ fileName.string }}</span>
+                    <span data-text="${{ uploadFileName.id }}">{{ uploadFileName.string }}</span>
                 </td>
                 <td><span data-text="Math.round(${{ totalBytes.id }} / 1048576) + ' MB'">{{ (totalBytes.int / 1048576)|number_format(0) }} MB</span></td>
                 <td>just now</td><td>tar.gz</td>
@@ -61,8 +61,8 @@
     </table>
 
     <p class="fu-browser-memo"
-        data-show="{{ status.string == 'uploading' ? 'true' : '$' ~ status.id ~ ' === \"uploading\"' }}"
-        style="{{ status.string == 'uploading' ? '' : 'display:none' }}">
+        data-show="{{ uploadStatus.string == 'uploading' ? 'true' : '$' ~ uploadStatus.id ~ ' === \"uploading\"' }}"
+        style="{{ uploadStatus.string == 'uploading' ? '' : 'display:none' }}">
         ← You navigated here during an upload. The progress bar above is still running —
         server SESSION signals survived the page change.
     </p>

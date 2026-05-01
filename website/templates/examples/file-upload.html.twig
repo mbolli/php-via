@@ -2,7 +2,7 @@
 
 {% block fu_content %}
 
-    {% if status.string == 'idle' %}
+    {% if uploadStatus.string == 'idle' %}
 
     {# ── Mode toggle ───────────────────────────────────────────────────────── #}
     <div class="fu-mode-toggle">
@@ -113,7 +113,7 @@
 
     {% endif %}{# uploadMode #}
 
-    {% elseif status.string == 'uploading' %}
+    {% elseif uploadStatus.string == 'uploading' %}
 
     {# ── Uploading state ───────────────────────────────────────────────────── #}
     <div class="fu-status-panel">
@@ -134,14 +134,14 @@
         </p>
     </div>
 
-    {% elseif status.string == 'complete' %}
+    {% elseif uploadStatus.string == 'complete' %}
 
     {# ── Complete state ────────────────────────────────────────────────────── #}
     <div class="fu-status-panel">
         <div class="fu-status-icon">✅</div>
         <h3>Upload complete!</h3>
         <p>
-            <strong>{{ fileName.string|e }}</strong>
+            <strong>{{ uploadFileName.string|e }}</strong>
             uploaded successfully.
         </p>
         {% if uploadFileInfo.string != '' %}
