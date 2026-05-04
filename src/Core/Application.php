@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
+use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
@@ -47,6 +48,12 @@ class Application {
 
     /** @var array<string, mixed> Global state shared across all routes and clients */
     private array $globalState = [];
+
+    /**
+     * Shared-memory table for global state (used when worker_num > 1).
+     * Null until injected by Via after server creation.
+     */
+    private ?SharedTable $sharedTable = null;
 
     /** @var array<string, array<string, mixed>> Per-session key-value storage (sessionId => key => value) */
     private array $sessionData = [];
@@ -208,9 +215,21 @@ class Application {
     }
 
     /**
+     * Inject the SharedTable for cross-worker GlobalState storage.
+     * Called by Via before $server->start() when worker_num > 1.
+     */
+    public function setSharedTable(SharedTable $table): void {
+        $this->sharedTable = $table;
+    }
+
+    /**
      * Get global state value.
      */
     public function getGlobalState(string $key, mixed $default = null): mixed {
+        if ($this->sharedTable !== null) {
+            return $this->sharedTable->get($key, $default);
+        }
+
         return $this->globalState[$key] ?? $default;
     }
 
@@ -218,6 +237,12 @@ class Application {
      * Set global state value.
      */
     public function setGlobalState(string $key, mixed $value): void {
+        if ($this->sharedTable !== null) {
+            $this->sharedTable->set($key, $value);
+
+            return;
+        }
+
         $this->globalState[$key] = $value;
     }
 
