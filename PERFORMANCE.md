@@ -21,19 +21,19 @@ OpenSwoole 22.13.0, PHP 8.4.19, port 3000 (HTTPS/TLS, self-signed cert).
 | Parameter | Value |
 |-----------|-------|
 | Route | `/` (homepage, shared ROUTE-scoped counter) |
-| Action | `/_action/increment` (no hash — route-scoped) |
+| Action | `/_action/increment` (no hash, route-scoped) |
 | Signal | `route___counter` |
 | Observers | 50 live SSE connections watching for patches |
 | Actions | 2000 per run |
 
 The test measures three things independently:
 
-- **HTTP OK rate** — did the server *respond* with 2xx?
-- **Net signal increment** — did the server *process* the action (state mutation)?
-- **Patch delivery rate** — did the 50 SSE observers receive the broadcast?
+- **HTTP OK rate**: did the server *respond* with 2xx?
+- **Net signal increment**: did the server *process* the action (state mutation)?
+- **Patch delivery rate**: did the 50 SSE observers receive the broadcast?
 
 These can diverge because OpenSwoole may finish processing a request but the client
-times out before receiving the response — the mutation has already happened.
+times out before receiving the response; the mutation has already happened.
 
 ### Results
 
@@ -57,7 +57,7 @@ php tests/Load/action_hammer.php \
 | Wall time | 43.1s |
 
 Near-perfect run. Every action mutated state. 0.4% patch drops are expected and
-by design — `PatchManager` uses a non-blocking `Channel(50)` per SSE connection;
+by design: `PatchManager` uses a non-blocking `Channel(50)` per SSE connection;
 state is always consistent even if one frame is dropped.
 
 #### Concurrency = 500 (above OS accept-queue limit)
@@ -73,7 +73,7 @@ php tests/Load/action_hammer.php \
 |--------|-------|
 | Actions sent | 2000 |
 | HTTP OK | 357 (17.8%) |
-| Net increment | 716 (200.6% of HTTP OK — server processed ~2x more than responded) |
+| Net increment | 716 (200.6% of HTTP OK, server processed ~2x more than responded) |
 | True drops (never reached handler) | ~1284 (64.2%) |
 | Patches observed vs net-increment expected | 40,378 / 35,800 (112.8%) |
 | Throughput | ~72 req/s (higher because failures return fast) |
@@ -82,7 +82,7 @@ php tests/Load/action_hammer.php \
 At concurrency=500 the OS TCP accept queue is saturated. Connections queue at the
 kernel level and time out on the client side before OpenSwoole's `accept()` loop
 drains them. The gap between HTTP OK (357) and net increment (716) shows ~359
-requests were processed server-side but clients had already dropped — this is
+requests were processed server-side but clients had already dropped; this is
 TCP-level loss, not application-level corruption. State remained internally
 consistent throughout.
 
@@ -120,7 +120,7 @@ SSE connection, and holds it open. Ramp delay = 10ms between connection attempts
 **Patch latency at 2,000 active SSE connections: 1,188 ms**
 (time from action POST to patch received on the observer context)
 
-2,000 concurrent SSE connections — fully coroutine-resident in a single PHP process —
+2,000 concurrent SSE connections, fully coroutine-resident in a single PHP process,
 with zero failures and clean shutdown. The latency at 2,000 connections reflects
 coroutine scheduling overhead, not dropped frames.
 
@@ -174,14 +174,14 @@ comes from Redis pub/sub overhead: every action now makes two Redis round-trips 
 client timeout windows.
 
 **Net state remains correct.** Despite HTTP timeouts, net increment was 1992/2000 (99.6%)
-at concurrency=200 — nearly identical to single-worker. The broker correctly propagated
+at concurrency=200, nearly identical to single-worker. The broker correctly propagated
 mutations across workers.
 
 **Patch delivery exceeded 100% (111.8%).** With 16 workers sharing 50 observer SSE
 connections, a single Redis broadcast triggers all 16 workers to sync their local
 contexts. Observers distributed across multiple workers each receive the patch from
 their own worker's sync, while the "expected" count was calculated assuming 1:1
-(HTTP OK × observers). This is correct behaviour — the broker fan-out amplifies
+(HTTP OK × observers). This is correct behaviour: the broker fan-out amplifies
 patch delivery.
 
 **SSE connection ceiling dropped at 2,000** (78% vs 100%). With 16 workers sharing
@@ -191,7 +191,7 @@ connections to be refused before the queue drains.
 
 **Latency improved significantly: 760ms vs 1,188ms.** With 16 workers, each event loop
 is less saturated. The SSE push from the action handler to the observer happens on a
-different worker's loop — still fast because Redis pub/sub is sub-millisecond on localhost.
+different worker's loop, still fast because Redis pub/sub is sub-millisecond on localhost.
 
 ### When multi-worker helps (and when it doesn't)
 
@@ -287,7 +287,7 @@ without any broker.
 Modern browsers multiplex multiple requests over a single TCP connection with
 HTTP/2. A user with 10 in-flight requests would use 1 connection instead of 10,
 reducing instantaneous concurrency by ~10×. OpenSwoole supports HTTP/2 natively
-but SSE over HTTP/2 has edge-case support issues in some browsers — test before
+but SSE over HTTP/2 has edge-case support issues in some browsers; test before
 enabling in production.
 
 ### 4. Reverse proxy (offload TLS + static assets)
@@ -331,13 +331,13 @@ latency is ~0.5ms; NATS is ~0.1ms.
 - A deploy config for each Via node
 - A Redis/NATS cluster (or single instance for moderate load)
 - A session-sticky load balancer for SSE connections (so a user's SSE and their
-  action POST reach the same node — optional but reduces broker traffic)
+  action POST reach the same node, optional but reduces broker traffic)
 
 ### Realistic targets by approach
 
 | Approach | Concurrent SSE connections | Effort |
 |----------|---------------------------|--------|
-| Baseline (current, single process) | 2,000 (0% failure) | — |
+| Baseline (current, single process) | 2,000 (0% failure) | - |
 | OS tuning + increased backlog | ~5,000 | Low |
 | Multi-worker (8 cores) + OS tuning | ~10,000 | Low |
 | Multi-worker + reverse proxy (TLS offload) | ~20,000 | Medium |

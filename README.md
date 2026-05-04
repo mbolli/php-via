@@ -10,18 +10,18 @@
 
 <a href="https://via.zweiundeins.gmbh"><img src="https://raw.githubusercontent.com/mbolli/php-via/master/logo.png" alt="php-via"></a>
 
-Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using [OpenSwoole](https://openswoole.com/) for async PHP, [Datastar](https://data-star.dev) (RC.8) for SSE + DOM morphing, and [Twig](https://twig.symfony.com/) for templating.
+Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using [OpenSwoole](https://openswoole.com/) for async PHP, [Datastar](https://data-star.dev) for SSE + DOM morphing, and [Twig](https://twig.symfony.com/) for templating.
 
 **[Documentation & Live Examples](https://via.zweiundeins.gmbh)**
 
 ## Why php-via?
 
-- **No JavaScript to write** — Datastar handles client-side reactivity, SSE, and DOM morphing
-- **Twig templates** — familiar, powerful server-side templating
-- **No build step** — no transpilation, no bundling, no node_modules
-- **Real-time by default** — every page gets a live SSE connection
-- **Scoped state** — TAB, ROUTE, SESSION, GLOBAL, and custom scopes control who shares what
-- **Single SSE stream** — extremely efficient with Brotli compression
+- **No JavaScript to write**: Datastar handles client-side reactivity, SSE, and DOM morphing
+- **Twig templates**: familiar, powerful server-side templating
+- **No build step**: no transpilation, no bundling, no node_modules
+- **Real-time by default**: every page gets a live SSE connection
+- **Scoped state**: TAB, ROUTE, SESSION, GLOBAL, and custom scopes control who shares what
+- **Single SSE stream**: extremely efficient with Brotli compression
 
 ## Requirements
 
@@ -54,16 +54,12 @@ $app->page('/', function (Context $c): void {
     $count = $c->signal(0, 'count');
     $step  = $c->signal(1, 'step');
 
-    $increment = $c->action(function () use ($count, $step, $c): void {
+    $c->action(function () use ($count, $step, $c): void {
         $count->setValue($count->int() + $step->int());
         $c->syncSignals();
     }, 'increment');
 
-    $c->view('counter.html.twig', [
-        'count'     => $count,
-        'step'      => $step,
-        'increment' => $increment,
-    ]);
+    $c->view('counter.html.twig');
 });
 
 $app->start();
@@ -88,7 +84,7 @@ php app.php
 
 Full documentation at **[via.zweiundeins.gmbh/docs](https://via.zweiundeins.gmbh/docs)**
 
-### Signals — reactive state that syncs between server and client
+### Signals: reactive state that syncs between server and client
 
 ```php
 $name = $c->signal('Alice', 'name');
@@ -101,7 +97,7 @@ $name->setValue('Bob');    // write → auto-pushes to browser
 <span data-text="${{ name.id }}">{{ name.string }}</span>
 ```
 
-### Actions — server-side functions triggered by client events
+### Actions: server-side functions triggered by client events
 
 ```php
 $save = $c->action(function () use ($c): void {
@@ -114,10 +110,10 @@ $save = $c->action(function () use ($c): void {
 ```
 
 > **Important:** Always trigger actions with `@post()` (or `@patch`/`@put`/`@delete`).
-> `@get()` is blocked on `/_action/…` — GET requests return **405 Method Not Allowed** —
+> `@get()` is blocked on `/_action/…`: GET requests return **405 Method Not Allowed**,
 > because allowing actions over GET enables top-level cross-site navigation CSRF.
 
-### Scopes — control who shares state and receives broadcasts
+### Scopes: control who shares state and receives broadcasts
 
 | Scope | Sharing | Use Case |
 |-------|---------|----------|
@@ -127,13 +123,13 @@ $save = $c->action(function () use ($c): void {
 | `Scope::GLOBAL` | All users everywhere | Notifications, announcements |
 | Custom (`"room:lobby"`) | All contexts in that scope | Chat rooms, game lobbies |
 
-### Views — Twig template files or inline strings
+### Views: Twig template files or inline strings
 
 ```php
 $c->view('dashboard.html.twig', ['user' => $user]);
 ```
 
-### Path Parameters — auto-injected by name
+### Path Parameters: auto-injected by name
 
 ```php
 $app->page('/blog/{year}/{slug}', function (Context $c, string $year, string $slug): void {
@@ -141,7 +137,7 @@ $app->page('/blog/{year}/{slug}', function (Context $c, string $year, string $sl
 });
 ```
 
-### Components — reusable sub-contexts with isolated state
+### Components: reusable sub-contexts with isolated state
 
 ```php
 $a = $c->component($counterWidget, 'a');
@@ -157,7 +153,7 @@ $app->onClientConnect(fn(string $id) => /* ... */);
 $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide timer
 ```
 
-### Route Groups — shared prefix and/or middleware
+### Route Groups: shared prefix and/or middleware
 
 ```php
 $app->group('/admin', function (Via $app): void {
@@ -166,7 +162,7 @@ $app->group('/admin', function (Via $app): void {
 })->middleware(new AuthMiddleware());
 ```
 
-### Broadcasting — push updates to other connected clients
+### Broadcasting: push updates to other connected clients
 
 ```php
 $c->broadcast();                    // same scope
@@ -174,7 +170,7 @@ $app->broadcast(Scope::GLOBAL);     // all contexts
 $app->broadcast('room:lobby');      // custom scope
 ```
 
-### Multi-node broadcasting — Redis and NATS brokers
+### Multi-node broadcasting: Redis and NATS brokers
 
 By default php-via uses an `InMemoryBroker` that is correct for single-process deployments.
 To fan out `broadcast()` calls across multiple servers or containers, swap in `RedisBroker` or
@@ -210,7 +206,7 @@ $config->onBrokerError(fn(\Throwable $e) => error_log('Broker: ' . $e->getMessag
 
 Both brokers reconnect automatically with exponential backoff (1 s → 30 s cap).
 
-A `GET /_health` endpoint is available on every php-via server — no configuration needed:
+A `GET /_health` endpoint is available on every php-via server (no configuration needed):
 
 ```json
 {"status":"ok","version":"0.7.0","broker":{"driver":"RedisBroker","connected":true},"connections":{"contexts":42,"sse":38}}
@@ -252,10 +248,10 @@ composer cs-fix
 
 ## Credits
 
-- [Datastar](https://data-star.dev/) — SSE + DOM morphing
-- [OpenSwoole](https://openswoole.com/) — Async PHP
-- [Twig](https://twig.symfony.com/) — Templating
-- [go-via/via](https://github.com/go-via/via) — Original Go inspiration
+- [Datastar](https://data-star.dev/): SSE + DOM morphing
+- [OpenSwoole](https://openswoole.com/): Async PHP
+- [Twig](https://twig.symfony.com/): Templating
+- [go-via/via](https://github.com/go-via/via): Original Go inspiration
 
 ## License
 

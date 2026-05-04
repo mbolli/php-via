@@ -82,10 +82,10 @@ Via (facade)
 
 ### Scope System
 Controls who shares state and receives broadcasts:
-- `Scope::TAB` — default, fully isolated per tab
-- `Scope::ROUTE` — all users on same route share state + view cache
-- `Scope::SESSION` — all tabs in same session
-- `Scope::GLOBAL` — all users across all routes
+- `Scope::TAB`: default, fully isolated per tab
+- `Scope::ROUTE`: all users on same route share state + view cache
+- `Scope::SESSION`: all tabs in same session
+- `Scope::GLOBAL`: all users across all routes
 - Custom strings (`"room:lobby"`, `"user:123"`) with wildcard matching (`"room:*"`)
 
 ### Sub-project: `website/`
@@ -120,12 +120,12 @@ pnpm build
 ```
 
 Tests use `VIA_TEST_MODE=1` (set in `tests/Pest.php`) to prevent OpenSwoole server binding.  
-No mocking framework — tests use real class instantiation with the env guard.
+No mocking framework: tests use real class instantiation with the env guard.
 
 ## Code Style & Conventions
 
 - `declare(strict_types=1)` on **every** PHP file
-- PHPStan level 6 — keep type coverage high; avoid `@phpstan-ignore` unless justified
+- PHPStan level 6: keep type coverage high; avoid `@phpstan-ignore` unless justified
 - No `mixed` params without a docblock explaining why
 - Inject dependencies via constructor; avoid static state outside `Application`
 - Scope constants preferred over raw strings (e.g. `Scope::GLOBAL` not `"global"`)

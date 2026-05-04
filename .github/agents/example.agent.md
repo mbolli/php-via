@@ -87,7 +87,7 @@ Rules:
 ```
 
 Rules:
-- Never put the title, description, or summary in this file — they come from the wrapper.
+- Never put the title, description, or summary in this file: they come from the wrapper.
 - Use Datastar attributes (`data-text`, `data-bind`, `data-on:click`, `data-show`, etc.)
   for all reactivity.
 - Signal interpolation in `data-text` uses `${{ signal.id }}` (double braces escape Twig).
@@ -120,7 +120,7 @@ In `website/templates/pages/examples-index.html.twig`, add to the `examples` arr
 
 ## Code style rules (from project AGENTS.md)
 
-- PHPStan level 6 — keep types explicit, no `@phpstan-ignore` without justification.
+- PHPStan level 6: keep types explicit, no `@phpstan-ignore` without justification.
 - Inject via constructor or closures; avoid static state outside demo storage arrays.
 - Prefer `Scope::CONSTANT` over raw strings.
 - After writing files, run `vendor/bin/pest` to verify nothing is broken.
