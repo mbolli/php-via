@@ -1226,31 +1226,24 @@ class Via {
         }
         $this->signalsRegistered = true;
 
-        // SIGTERM - systemd stop/restart
+        // SIGTERM — sent by the master when it calls $server->shutdown().
+        // Workers must NOT call $server->shutdown() back (that would send SIGTERM to
+        // the master again, creating a circular signal loop and preventing teardown).
+        // Run cleanup callbacks and exit cleanly; the master orchestrates the rest.
         Process::signal(SIGTERM, function (): void {
             $this->log('info', 'Received SIGTERM, shutting down gracefully...');
             $this->shuttingDown = true;
             $this->executeShutdownCallbacks();
-
-            // Force kill the server to stop all coroutines immediately
-            if ($this->server !== null) {
-                $this->server->shutdown();
-            } else {
-                exit(0);
-            }
+            exit(0);
         });
 
-        // SIGINT - Ctrl+C
+        // SIGINT — Ctrl+C may also reach workers if they share the terminal process
+        // group. Same rule: run cleanup and exit; master drives $server->shutdown().
         Process::signal(SIGINT, function (): void {
             $this->log('info', 'Received SIGINT (Ctrl+C), shutting down gracefully...');
             $this->shuttingDown = true;
             $this->executeShutdownCallbacks();
-
-            if ($this->server !== null) {
-                $this->server->shutdown();
-            } else {
-                exit(0);
-            }
+            exit(0);
         });
 
         // SIGHUP - systemd reload (just log, don't exit)
