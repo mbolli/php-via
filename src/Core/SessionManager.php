@@ -17,12 +17,46 @@ use OpenSwoole\Http\Response;
  * - Session-to-context mapping
  */
 class SessionManager {
-    private const string SESSION_COOKIE_NAME = 'via_session_id';
-    private const string SESSION_COOKIE_NAME_SECURE = '__Host-via_session_id';
+    public const string SESSION_COOKIE_NAME = 'via_session_id';
+    public const string SESSION_COOKIE_NAME_SECURE = '__Host-via_session_id';
 
     public function __construct(
         private Logger $logger,
     ) {}
+
+    /**
+     * Determine which worker should handle a request based on session cookie.
+     *
+     * Used as OpenSwoole's `dispatch_func` when `worker_num > 1`. Runs in the
+     * master reactor process (not a worker coroutine), so it must be allocation-free
+     * and never use coroutine APIs. The raw HTTP header bytes for the first packet of
+     * each new connection are passed in `$data`.
+     *
+     * Both cookie names are checked so that requests survive a HTTP→HTTPS migration.
+     *
+     * @param object $server    OpenSwoole\Http\Server (typed as object for testability)
+     * @param int    $fd        Connection file descriptor
+     * @param int    $type      Dispatch type (1 = data, 2 = close, 3 = connect)
+     * @param string $data      Raw HTTP bytes (first packet of the connection)
+     * @param int    $workerNum Total number of workers
+     */
+    public static function workerForRequest(object $server, int $fd, int $type, string $data, int $workerNum): int {
+        if ($workerNum <= 1) {
+            return 0;
+        }
+
+        // Try secure cookie first (__Host-via_session_id), then plain via_session_id.
+        // Cookie values are hex strings (32 chars), so [a-f0-9]+ is a safe pattern.
+        foreach ([self::SESSION_COOKIE_NAME_SECURE, self::SESSION_COOKIE_NAME] as $name) {
+            $pattern = '/' . preg_quote($name, '/') . '=([a-f0-9]+)/i';
+            if (preg_match($pattern, $data, $m) === 1) {
+                return (int) (abs(crc32($m[1])) % $workerNum);
+            }
+        }
+
+        // No session cookie yet (first request) — fall back to fd hash.
+        return (int) ($fd % $workerNum);
+    }
 
     /**
      * Get or create session ID from request cookies.
