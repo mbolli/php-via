@@ -663,6 +663,19 @@ class Via {
                     $pidFile = sys_get_temp_dir() . '/php-via-master.pid';
                     file_put_contents($pidFile, (string) $server->master_pid);
                 }
+
+                // Register SIGINT/SIGTERM in the master process so that Ctrl-C or
+                // systemd stop reliably triggers a clean shutdown. Workers register
+                // their own handlers in workerStart; the master must do so here
+                // because it is the process that holds the port binding — if the
+                // master's reactor does not explicitly handle the signal the port
+                // stays bound after workers exit.
+                Process::signal(SIGTERM, function () use ($server): void {
+                    $server->shutdown();
+                });
+                Process::signal(SIGINT, function () use ($server): void {
+                    $server->shutdown();
+                });
             });
 
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
@@ -1182,8 +1195,8 @@ class Via {
                 // Important: Invalidate cache using the full scope string (route:/path)
                 // The context's primary scope is "route:/path", not just "route"
                 $this->invalidateViewCache($scope);
-                $this->syncContextsOnRoute($route);
-                $this->requestLogger->logBroadcast($scope, 0);
+                $count = $this->syncContextsOnRoute($route);
+                $this->requestLogger->logBroadcast($scope, $count);
             }
 
             return;
@@ -1272,12 +1285,15 @@ class Via {
     /**
      * Sync all contexts on a specific route.
      */
-    private function syncContextsOnRoute(string $route): void {
+    private function syncContextsOnRoute(string $route): int {
+        $count = 0;
         foreach ($this->contexts as $context) {
             if ($context->getRoute() === $route) {
                 $context->sync();
+                ++$count;
             }
         }
+        return $count;
     }
 
     /**
