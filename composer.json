@@ -44,6 +44,7 @@
         "ext-brotli": "Required for Config::withBrotli(): Native Brotli compression for pages, static assets, and SSE streams"
     },
     "config": {
+        "process-timeout": 0,
         "optimize-autoloader": true,
         "classmap-authoritative": true,
         "allow-plugins": {

@@ -2,7 +2,7 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [0.8.0] - 2026-05-01
+## [0.8.0] - 2026-05-04
 
 ### Breaking Changes
 

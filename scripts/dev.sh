@@ -42,6 +42,7 @@ cleanup() {
     echo "⏹  Stopping..."
     [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
     [ -n "$CSS_PID" ]    && kill "$CSS_PID"    2>/dev/null || true
+    pkill -f "entr -dn" 2>/dev/null || true
     rm -f "$PID_FILE"
     wait 2>/dev/null || true
     exit 0
@@ -53,7 +54,29 @@ trap cleanup INT TERM
 
 cd "$PROJECT_ROOT"
 
-rm -f "$PID_FILE"
+# Kill any stale processes from a previous session (handles the case where
+# Composer killed this script via SIGKILL after timeout, leaving orphans).
+
+# 1. Kill by saved master PID (fast path when PID file is fresh).
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "⚠️  Killing stale server (pid $OLD_PID)..."
+        kill "$OLD_PID" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+fi
+
+# 2. Belt-and-suspenders: kill by port in case the PID file was absent/stale.
+if command -v fuser >/dev/null 2>&1; then
+    fuser -k 3000/tcp 2>/dev/null || true
+elif command -v lsof >/dev/null 2>&1; then
+    lsof -ti:3000 2>/dev/null | xargs -r kill 2>/dev/null || true
+fi
+
+# 3. Kill orphaned entr instances from a previous session.
+pkill -f "entr -dn" 2>/dev/null || true
+
 APP_ENV=dev php website/app.php &
 SERVER_PID=$!
 
