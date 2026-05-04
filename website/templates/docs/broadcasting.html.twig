@@ -85,6 +85,16 @@ $send = $c->action(function (Context $c) use ($app): void {
     $app->broadcast(Scope::routeScope('/chat'));
 }, 'send');
 {% endverbatim %}{% endcode %}
+    <p>
+        <strong>Multi-worker note.</strong> With <code>withWorkerNum(&gt;1)</code>, GlobalState is backed
+        by an <code>OpenSwoole\Table</code> shared across all workers. Values are PHP-serialized
+        before storage; the default column size is 4 096 bytes per value. For large values (deep arrays,
+        long strings), increase the limit with
+        <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code> before calling
+        <code>start()</code>. An <code>\OverflowException</code> is thrown at write time if a value
+        exceeds the configured size. For high-frequency or large shared data, prefer scoped signals
+        with explicit <code>broadcast()</code> over GlobalState.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>

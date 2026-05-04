@@ -4,33 +4,70 @@
 <article>
     <h1>Multi-node Broker</h1>
     <p>
-        By default php-via keeps all state in a single process. That's correct for most deployments —
+        By default php-via keeps all state in a single worker process. That's correct for most deployments —
         OpenSwoole handles thousands of concurrent SSE connections comfortably in one worker.
-        When you need to run multiple servers or containers, a <strong>broker</strong> fans out
-        <code>broadcast()</code> calls so every node can react to changes that happened on any other node.
+        When you need multiple workers on the same machine (CPU parallelism) or multiple servers,
+        a <strong>broker</strong> fans out <code>broadcast()</code> calls so every worker can react
+        to changes that happened on any other worker.
     </p>
 
     <h2 id="when-you-need-it">When do you need a broker?</h2>
-    <p>You need a broker when:</p>
-    <ul>
-        <li>You run more than one php-via process (horizontal scaling, zero-downtime deploys)</li>
-        <li>You use <strong>ROUTE</strong>, <strong>SESSION</strong>, or <strong>GLOBAL</strong> scopes and clients can connect to different nodes</li>
-        <li>You use <strong>TAB</strong> scope only — you <em>don't</em> need a broker; TAB is fully isolated per connection anyway</li>
-    </ul>
+
+    <table>
+        <thead>
+            <tr><th>Scenario</th><th>Broker</th><th>External dep?</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Single worker (default)</td><td><code>InMemoryBroker</code></td><td>None</td></tr>
+            <tr><td>Multiple workers, same machine</td><td><code>SwooleBroker</code></td><td>None</td></tr>
+            <tr><td>Multiple servers / containers</td><td><code>RedisBroker</code> or <code>NatsBroker</code></td><td>Redis / NATS</td></tr>
+        </tbody>
+    </table>
     <p>
-        The <code>InMemoryBroker</code> (the default) is correct for single-node setups. It has zero
-        overhead and no external dependencies. Only add a broker when you have a concrete reason to scale out.
+        TAB scope is always fully isolated per-connection — no broker ever carries TAB broadcasts.
     </p>
 
     <h2 id="inmemorybroker">InMemoryBroker (default)</h2>
     <p>
-        No configuration needed. This is the broker used when you don't call <code>withBroker()</code>:
+        No configuration needed. Correct for single-worker deployments. Has zero overhead and no
+        external dependencies. Calling <code>withWorkerNum(N)</code> with <code>N &gt; 1</code> and
+        leaving <code>InMemoryBroker</code> as the broker is a startup error — php-via will throw
+        a <code>\RuntimeException</code> with a clear message.
     </p>
     {% code 'php' %}{% verbatim %}
 // These are equivalent — InMemoryBroker is the implicit default
 $config = new Config();
 $config = (new Config())->withBroker(new InMemoryBroker());
 {% endverbatim %}{% endcode %}
+
+    <h2 id="swoolebbroker">SwooleBroker (multi-worker, same machine)</h2>
+    <p>
+        Uses OpenSwoole's built-in inter-worker pipe (<code>Server::sendMessage</code> /
+        <code>onPipeMessage</code>) to fan-out scope invalidations across all worker processes on
+        the same machine. <strong>No external infrastructure required.</strong>
+        GlobalState is backed by <code>OpenSwoole\Table</code> — shared memory that is
+        allocated in the master process and mmap'd into every worker on fork.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Broker\SwooleBroker;
+
+$config = (new Config())
+    ->withWorkerNum(swoole_cpu_num())  // use all CPU cores
+    ->withBroker(new SwooleBroker());
+{% endverbatim %}{% endcode %}
+    <p>
+        <strong>Sticky sessions required.</strong> Session data is stored per-worker. Configure your
+        load balancer to route each session to the same worker (e.g. Caddy's
+        <a href="https://caddyserver.com/docs/caddyfile/directives/reverse_proxy" target="_blank" rel="noopener"><code>lb_policy cookie</code></a>).
+        GlobalState and broadcasts work correctly across all workers without sticky sessions.
+    </p>
+    <p>
+        <strong>Limits (configurable).</strong> <code>GlobalState</code> is backed by an
+        <code>OpenSwoole\Table</code> with a fixed capacity allocated at startup:
+        1 024 keys × 4 096 bytes per value by default. Increase with
+        <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code>.
+        An <code>\OverflowException</code> is thrown if a value exceeds the configured size.
+    </p>
 
     <h2 id="redisbroker">RedisBroker</h2>
     <p>
@@ -225,14 +262,22 @@ reverse_proxy node1:3000 node2:3000 {
 
     <h2 id="connection-count">Connection count</h2>
     <p>
-        Each php-via worker process opens its own connection(s) to the broker backend. With
-        <code>RedisBroker</code> that is <strong>2 connections per worker</strong> (publish + subscribe).
-        With <code>NatsBroker</code> it is <strong>1 connection per worker</strong>.
-        Plan your Redis/NATS <code>maxclients</code> / connection limits accordingly.
+        Each php-via worker process opens its own connection(s) to the broker backend.
     </p>
+    <table>
+        <thead>
+            <tr><th>Broker</th><th>Connections per worker</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>InMemoryBroker</code></td><td>0</td></tr>
+            <tr><td><code>SwooleBroker</code></td><td>0 (in-process pipes)</td></tr>
+            <tr><td><code>RedisBroker</code></td><td>2 (publish + subscribe)</td></tr>
+            <tr><td><code>NatsBroker</code></td><td>1</td></tr>
+        </tbody>
+    </table>
     <p>
-        php-via defaults to a single worker (<code>worker_num: 1</code>). If you override this via
-        <code>Config::withSwooleSettings(['worker_num' => N])</code>, multiply the above numbers by N.
+        Plan your Redis/NATS <code>maxclients</code> / connection limits accordingly.
+        With <code>withWorkerNum(N)</code>, multiply the per-worker count by N.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

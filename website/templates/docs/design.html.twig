@@ -105,10 +105,13 @@ $c->scope('room:lobby');     // a custom group you define
     </p>
     <p>
         The tradeoff is that the scope system uses in-process PHP arrays shared across OpenSwoole
-        coroutines — not an external store. For multi-server deployments you wire in a
-        <a href="/docs/broker">message broker</a> (<code>RedisBroker</code> or <code>NatsBroker</code>)
-        so <code>broadcast()</code> calls propagate scope invalidations across nodes. Adding a broker
-        requires one line in your config and doesn't change any application code.
+        coroutines — not an external store. For multi-worker deployments on the same machine you
+        wire in <a href="/docs/broker#swoolebbroker"><code>SwooleBroker</code></a> (zero external
+        dependencies — OpenSwoole inter-worker pipes + shared memory). For multi-server deployments
+        you wire in a <a href="/docs/broker">message broker</a> (<code>RedisBroker</code> or
+        <code>NatsBroker</code>) so <code>broadcast()</code> calls propagate scope invalidations
+        across nodes. Either way, adding a broker requires one line in your config and doesn't
+        change any application code.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

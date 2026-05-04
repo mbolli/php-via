@@ -157,12 +157,9 @@ $config = (new Config())
     ->withPort(3000)
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
     ->withTemplateDir(__DIR__ . '/templates')
-    ->withStaticDir(__DIR__ . '/public')
-    ->withSwooleSettings([
-        'worker_num'        => swoole_cpu_num(),
-        'max_request'       => 0,      // long-lived process
-        'enable_coroutine'  => true,
-    ]);
+    ->withStaticDir(__DIR__ . '/public');
+    // Add ->withWorkerNum(swoole_cpu_num())->withBroker(new SwooleBroker())
+    // for multi-worker CPU parallelism (see above).
     {% endverbatim %}{% endcode %}
 
     <h2 id="security">Security hardening</h2>
@@ -224,13 +221,53 @@ kill -USR1 $(cat /var/run/myapp.pid)
         callbacks before stopping. Register cleanup callbacks for any timers or open resources.
     </p>
 
-    <h2 id="multiple-instances">Multiple instances</h2>
+    <h2 id="multiple-instances">Multi-worker scaling</h2>
     <p>
-        php-via uses OpenSwoole's in-memory shared state for the scope system. This means multiple instances
-        do <em>not</em> share state — a broadcast on instance A won't reach clients on instance B.
-        For now, horizontal scaling requires a sticky-session load balancer and the understanding that
-        per-route state won't be globally consistent.
+        php-via defaults to a single worker process. That's the right choice for most deployments:
+        a single worker handles thousands of concurrent SSE connections without context-switch overhead.
+        Use multiple workers when you have <strong>CPU-bound actions</strong> (computation, rendering)
+        and need parallelism on a multi-core machine.
     </p>
+
+    <h3 id="same-machine">Same machine — SwooleBroker</h3>
+    <p>
+        <a href="/docs/broker#swoolebbroker">SwooleBroker</a> uses OpenSwoole's built-in inter-worker
+        pipes and shared memory (<code>OpenSwoole\Table</code>). No external infrastructure required:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Broker\SwooleBroker;
+
+$config = (new Config())
+    ->withWorkerNum(swoole_cpu_num())
+    ->withBroker(new SwooleBroker());
+    {% endverbatim %}{% endcode %}
+    <p>
+        <strong>Sticky sessions required.</strong> Session data is per-worker. Configure your
+        load balancer to route each session to the same worker (e.g. Caddy <code>lb_policy cookie</code>
+        or nginx <code>ip_hash</code>). GlobalState and broadcasts work across workers without sticky sessions.
+    </p>
+    <p>
+        GlobalState is backed by an <code>OpenSwoole\Table</code> with capacity fixed at startup
+        (default: 1 024 keys &times; 4 096 bytes). Tune with
+        <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code> before calling
+        <code>start()</code>.
+    </p>
+
+    <h3 id="multi-server">Multiple servers — RedisBroker / NatsBroker</h3>
+    <p>
+        For deployments across multiple machines or containers, use
+        <a href="/docs/broker#redisbroker">RedisBroker</a> or
+        <a href="/docs/broker#natsbroker">NatsBroker</a>. These carry scope invalidations over
+        the network so every server reacts to changes on any other server.
+        Session data still requires sticky sessions (same constraint as same-machine).
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Broker\RedisBroker;
+
+$config = (new Config())
+    ->withWorkerNum(4)
+    ->withBroker(new RedisBroker($_ENV['REDIS_HOST'], 6379));
+    {% endverbatim %}{% endcode %}
 
     <h2 id="static-assets">Static assets</h2>
     <p>

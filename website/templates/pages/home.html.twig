@@ -399,8 +399,8 @@ $app->start();
                     <td>Large</td>
                 </tr>
                 <tr>
-                    <td>Multi-server scaling</td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-multiserver"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-multiserver">Opt-in via RedisBroker or NatsBroker. One line in Config.</span></span></td>
+                    <td>Multi-worker / multi-server scaling</td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-multiserver"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-multiserver">Same machine: withWorkerNum() + SwooleBroker (no external deps, sticky sessions required). Multi-server: RedisBroker or NatsBroker. One line in Config.</span></span></td>
                     <td><span class="check">✓</span></td>
                     <td><span class="check">✓</span></td>
                     <td><span class="check">✓</span></td>

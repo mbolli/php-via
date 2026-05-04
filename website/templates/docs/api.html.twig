@@ -362,7 +362,11 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
     ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
     ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
-    // Multi-node broker (optional — required only for multi-server deployments)
+    // Multi-worker (single machine)
+    ->withWorkerNum(swoole_cpu_num())   // default: 1; requires SwooleBroker/RedisBroker/NatsBroker when > 1
+    ->withGlobalStateTableSize(2048, 8192)  // GlobalState table: rows × value bytes (default 1024 × 4096)
+    // Multi-node broker (optional — required only for multi-worker / multi-server deployments)
+    ->withBroker(new SwooleBroker())    // same machine, no external deps
     ->withBroker(new RedisBroker('127.0.0.1', 6379))  // or new NatsBroker(...)
     ->onBrokerError(fn(\Throwable $e) => error_log($e->getMessage())) // called on reconnect
     {% endverbatim %}{% endcode %}
