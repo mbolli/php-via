@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Broker\ServerAwareBroker;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
@@ -20,6 +21,7 @@ use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Rendering\ViewRenderer;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
+use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\Logger;
@@ -542,6 +544,16 @@ class Via {
     public function start(): void {
         // Lazy initialization: create server only when starting
         if ($this->server === null) {
+            // Multi-worker guard: InMemoryBroker is a no-op — cross-worker broadcasts
+            // will be silently lost. Fail loudly so operators don't run with broken config.
+            if ($this->config->getWorkerNum() > 1 && $this->broker instanceof InMemoryBroker) {
+                throw new \RuntimeException(
+                    'worker_num > 1 requires a multi-worker broker. '
+                    . 'Use SwooleBroker (same machine), RedisBroker, or NatsBroker. '
+                    . 'Example: (new Config())->withWorkerNum(4)->withBroker(new SwooleBroker())'
+                );
+            }
+
             // Validate Brotli requirements before binding any socket
             if ($this->config->getBrotli()) {
                 if (!\function_exists('brotli_compress_init')) {
@@ -575,7 +587,7 @@ class Via {
                 // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
                 'socket_buffer_size' => 1024 * 1024,
                 'max_coroutine' => 100000,
-                'worker_num' => 1,   // Single worker = shared state; POOL_MODE enables USR1 graceful worker reload
+                'worker_num' => $this->config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
                 'send_yield' => true,
                 'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
                 'reload_async' => true,  // Enable async reload
@@ -588,12 +600,58 @@ class Via {
                 'max_conn' => 10000,
                 'backlog' => 4096,  // OS accept queue depth (needs net.core.somaxconn ≥ this)
             ];
+
+            // Session-affinity dispatch: route each request to the worker that owns the
+            // session, so that Context lookup and sessionData() always hit the right process.
+            // Only enabled for multi-worker — single-worker doesn't need it.
+            if ($this->config->getWorkerNum() > 1) {
+                $workerNum = $this->config->getWorkerNum();
+                $defaultSettings['dispatch_mode'] = 7; // custom dispatch_func
+                $defaultSettings['dispatch_func'] = static fn (object $server, int $fd, int $type, string $data): int => SessionManager::workerForRequest($server, $fd, $type, $data, $workerNum);
+            }
+
             $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings(), array_filter([
                 'ssl_cert_file' => $this->config->getSslCertFile(),
                 'ssl_key_file' => $this->config->getSslKeyFile(),
             ])));
 
             $this->requestHandler->setRoutes($this->router->getRoutes());
+
+            // SharedTable: allocate in master process so it is mmap'd into all workers
+            // on fork. Only needed when worker_num > 1 — single-worker uses a plain PHP array.
+            if ($this->config->getWorkerNum() > 1) {
+                $sharedTable = new SharedTable(
+                    $this->config->getGlobalStateTableRows(),
+                    $this->config->getGlobalStateTableValueBytes(),
+                );
+                $this->app->setSharedTable($sharedTable);
+            }
+
+            // SwooleBroker receive path: decode inter-worker pipe messages and apply
+            // them locally. Registered here (master-process context) so it is active
+            // before any worker starts. The nodeId filter prevents double-syncs when
+            // a worker receives its own publish (shouldn't happen with the self-skip
+            // in SwooleBroker::publish(), but kept as a belt-and-suspenders guard).
+            $this->server->on('pipeMessage', function (Server $server, int $srcWorkerId, string $data): void {
+                $msg = json_decode($data, true);
+
+                if (!\is_array($msg) || !isset($msg['scope'], $msg['nodeId'])) {
+                    return;
+                }
+
+                // Filter own messages (redundant guard — SwooleBroker skips self in publish)
+                if ($msg['nodeId'] === $this->broker->getNodeId()) {
+                    return;
+                }
+
+                if (!Scope::isValidWireScope($msg['scope'])) {
+                    $this->log('warning', "SwooleBroker: rejected invalid scope \"{$msg['scope']}\" from worker {$srcWorkerId}");
+
+                    return;
+                }
+
+                $this->syncLocally($msg['scope']);
+            });
 
             $this->server->on('start', function (Server $server): void {
                 $scheme = $this->config->isHttps() ? 'https' : 'http';
@@ -674,6 +732,12 @@ class Via {
                 // brokers (Redis, NATS) can spawn their receive-loop coroutines.
                 try {
                     $this->broker->connect();
+
+                    // Inject server reference into ServerAwareBroker implementations (e.g. SwooleBroker).
+                    // Must happen after connect() so the worker is fully initialised.
+                    if ($this->broker instanceof ServerAwareBroker) {
+                        $this->broker->setServer($server, $workerId, $server->worker_num);
+                    }
 
                     // Log connection so operators know each worker opens its own broker
                     // connection and can plan backend limits accordingly.
