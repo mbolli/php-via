@@ -135,12 +135,12 @@ final class FileUploadExample {
                     ['name' => 'uploadMode', 'type' => 'string', 'scope' => 'TAB', 'default' => '"sim"', 'desc' => 'Which form is shown: sim (SharedWorker simulation) or real (multipart upload). TAB-scoped — each tab can differ.'],
                 ],
                 'actions' => [
-                    ['name' => 'startUpload',  'scope' => 'SESSION', 'desc' => 'Initialises upload SESSION signals (status=uploading, total, filename) and broadcasts to all tabs. Called by the worker before the chunk loop.'],
+                    ['name' => 'startUpload', 'scope' => 'SESSION', 'desc' => 'Initialises upload SESSION signals (status=uploading, total, filename) and broadcasts to all tabs. Called by the worker before the chunk loop.'],
                     ['name' => 'receiveChunk', 'scope' => 'SESSION', 'desc' => 'Simulated mode only. Called by SharedWorker every 200\u202fms. Updates pct\u202f+\u202fuploadedBytes using authoritative worker value (self-heals navigation gaps), broadcasts.'],
-                    ['name' => 'uploadChunk',  'scope' => 'SESSION', 'desc' => 'Real file mode only. Receives a 512\u202fKB slice from the SharedWorker chunk loop. Tracks offset\u202f+\u202fsize, updates pct/uploadedBytes, sets status=complete and formats uploadFileInfo on the final chunk.'],
-                    ['name' => 'setMode',       'scope' => 'TAB',     'desc' => 'Switches uploadMode between sim and real, clears file errors, re-renders the form block.'],
-                    ['name' => 'cancelUpload',  'scope' => 'SESSION', 'desc' => 'Resets all upload signals to idle. Works from any sub-page.'],
-                    ['name' => 'resetUpload',   'scope' => 'SESSION', 'desc' => 'Clears completed/cancelled state so a new upload can begin.'],
+                    ['name' => 'uploadChunk', 'scope' => 'SESSION', 'desc' => 'Real file mode only. Receives a 512\u202fKB slice from the SharedWorker chunk loop. Tracks offset\u202f+\u202fsize, updates pct/uploadedBytes, sets status=complete and formats uploadFileInfo on the final chunk.'],
+                    ['name' => 'setMode', 'scope' => 'TAB', 'desc' => 'Switches uploadMode between sim and real, clears file errors, re-renders the form block.'],
+                    ['name' => 'cancelUpload', 'scope' => 'SESSION', 'desc' => 'Resets all upload signals to idle. Works from any sub-page.'],
+                    ['name' => 'resetUpload', 'scope' => 'SESSION', 'desc' => 'Clears completed/cancelled state so a new upload can begin.'],
                 ],
                 'views' => [
                     ['name' => 'file-upload.html.twig', 'desc' => 'Mode toggle, sim form (filename + size/speed pickers), real file form. Real uploads use File.slice() chunks (512\u202fKB each) sent by the SharedWorker via uploadChunk. Navigation guard shown on non-Chrome browsers.'],
@@ -212,11 +212,11 @@ final class FileUploadExample {
         // The worker sends its authoritative pct so navigation gaps self-heal:
         // if two chunks were missed, the next chunk jumps pct forward correctly.
         $receiveChunk = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
-            $status     = $ctx->getSignal('uploadStatus');
-            $pct        = $ctx->getSignal('uploadPct');
+            $status = $ctx->getSignal('uploadStatus');
+            $pct = $ctx->getSignal('uploadPct');
             $uploadedBytes = $ctx->getSignal('uploadedBytes');
             $totalBytes = $ctx->getSignal('uploadTotalBytes');
-            $fileName   = $ctx->getSignal('uploadFileName');
+            $fileName = $ctx->getSignal('uploadFileName');
 
             if ($status->string() !== 'uploading') {
                 return;
@@ -274,11 +274,11 @@ final class FileUploadExample {
         // NOTE: this is a demo — the chunk bytes are intentionally discarded after
         //       validation. A real implementation would write them to disk or object storage.
         $uploadChunk = $c->action(function (Context $ctx) use ($app, $uploadScope): void {
-            $status        = $ctx->getSignal('uploadStatus');
-            $pct           = $ctx->getSignal('uploadPct');
+            $status = $ctx->getSignal('uploadStatus');
+            $pct = $ctx->getSignal('uploadPct');
             $uploadedBytes = $ctx->getSignal('uploadedBytes');
-            $totalBytes    = $ctx->getSignal('uploadTotalBytes');
-            $fileName      = $ctx->getSignal('uploadFileName');
+            $totalBytes = $ctx->getSignal('uploadTotalBytes');
+            $fileName = $ctx->getSignal('uploadFileName');
             $uploadFileInfo = $ctx->getSignal('uploadFileInfo');
 
             if ($status->string() !== 'uploading') {

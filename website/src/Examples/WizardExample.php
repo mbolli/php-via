@@ -61,18 +61,18 @@ final class WizardExample {
             // Persist current form state to session so it survives page navigations
             $saveState = function () use ($c, $stack): void {
                 $c->setSessionData('wizard', [
-                    'step'   => $c->getSignal('step')->int(),
-                    'name'   => $c->getSignal('name')->string(),
-                    'role'   => $c->getSignal('role')->string(),
-                    'years'  => $c->getSignal('years')->int(),
+                    'step' => $c->getSignal('step')->int(),
+                    'name' => $c->getSignal('name')->string(),
+                    'role' => $c->getSignal('role')->string(),
+                    'years' => $c->getSignal('years')->int(),
                     'editor' => $c->getSignal('editor')->string(),
-                    'stack'  => array_map(static fn ($s) => $s->bool(), $stack),
+                    'stack' => array_map(static fn ($s) => $s->bool(), $stack),
                 ]);
             };
 
             $c->action(function (Context $ctx) use ($saveState): void {
-                $step  = $ctx->getSignal('step');
-                $name  = $ctx->getSignal('name');
+                $step = $ctx->getSignal('step');
+                $name = $ctx->getSignal('name');
                 $error = $ctx->getSignal('error');
                 $s = $step->int();
 
@@ -96,7 +96,7 @@ final class WizardExample {
             }, 'next');
 
             $c->action(function (Context $ctx) use ($saveState): void {
-                $step  = $ctx->getSignal('step');
+                $step = $ctx->getSignal('step');
                 $error = $ctx->getSignal('error');
                 $error->setValue('');
 

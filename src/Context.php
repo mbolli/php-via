@@ -666,63 +666,6 @@ class Context {
     }
 
     /**
-     * Build the auto-injection data array for Twig templates.
-     *
-     * Merges all named signals (keyed by user-supplied name) and named actions
-     * (keyed by camelCase of user-supplied name) into a single array, plus a
-     * `_via` debug key listing all available names.
-     *
-     * Result is cached after first call — signals and actions are frozen after
-     * page setup, so repeated calls during SSE ticks are free.
-     *
-     * @return array<string, mixed>
-     */
-    private function buildAutoData(): array {
-        if ($this->autoDataCache !== null) {
-            return $this->autoDataCache;
-        }
-
-        $namedSignals = $this->signalFactory->getNamedSignals();
-
-        $camelActions = [];
-        $camelKeyToRaw = [];
-
-        foreach ($this->namedActions as $rawName => $action) {
-            $camelKey = $this->toCamelCase($rawName);
-
-            if (isset($camelKeyToRaw[$camelKey])) {
-                $this->app->log('warning', "Auto-inject action name collision: '{$camelKeyToRaw[$camelKey]}' and '{$rawName}' both resolve to '{$camelKey}'");
-            }
-
-            $camelKeyToRaw[$camelKey] = $rawName;
-            $camelActions[$camelKey] = $action;
-        }
-
-        foreach ($namedSignals as $signalName => $_) {
-            if (isset($camelActions[$signalName])) {
-                $this->app->log('warning', "Auto-inject clash: '{$signalName}' is both a signal name and a camelCased action name");
-            }
-        }
-
-        $this->autoDataCache = array_merge(
-            $namedSignals,
-            $camelActions,
-            ['_via' => ['signals' => array_keys($namedSignals), 'actions' => array_keys($camelActions)]],
-        );
-
-        return $this->autoDataCache;
-    }
-
-    /**
-     * Convert a kebab-case or snake_case name to camelCase.
-     *
-     * Examples: 'refresh-graphs' => 'refreshGraphs', 'save_settings' => 'saveSettings'
-     */
-    private function toCamelCase(string $name): string {
-        return lcfirst(str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $name))));
-    }
-
-    /**
      * Render a Twig template from string.
      *
      * @param string               $template Template content
@@ -1048,6 +991,63 @@ class Context {
      */
     public function syncSignals(): void {
         $this->patchManager->syncSignals();
+    }
+
+    /**
+     * Build the auto-injection data array for Twig templates.
+     *
+     * Merges all named signals (keyed by user-supplied name) and named actions
+     * (keyed by camelCase of user-supplied name) into a single array, plus a
+     * `_via` debug key listing all available names.
+     *
+     * Result is cached after first call — signals and actions are frozen after
+     * page setup, so repeated calls during SSE ticks are free.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildAutoData(): array {
+        if ($this->autoDataCache !== null) {
+            return $this->autoDataCache;
+        }
+
+        $namedSignals = $this->signalFactory->getNamedSignals();
+
+        $camelActions = [];
+        $camelKeyToRaw = [];
+
+        foreach ($this->namedActions as $rawName => $action) {
+            $camelKey = $this->toCamelCase($rawName);
+
+            if (isset($camelKeyToRaw[$camelKey])) {
+                $this->app->log('warning', "Auto-inject action name collision: '{$camelKeyToRaw[$camelKey]}' and '{$rawName}' both resolve to '{$camelKey}'");
+            }
+
+            $camelKeyToRaw[$camelKey] = $rawName;
+            $camelActions[$camelKey] = $action;
+        }
+
+        foreach ($namedSignals as $signalName => $_) {
+            if (isset($camelActions[$signalName])) {
+                $this->app->log('warning', "Auto-inject clash: '{$signalName}' is both a signal name and a camelCased action name");
+            }
+        }
+
+        $this->autoDataCache = array_merge(
+            $namedSignals,
+            $camelActions,
+            ['_via' => ['signals' => array_keys($namedSignals), 'actions' => array_keys($camelActions)]],
+        );
+
+        return $this->autoDataCache;
+    }
+
+    /**
+     * Convert a kebab-case or snake_case name to camelCase.
+     *
+     * Examples: 'refresh-graphs' => 'refreshGraphs', 'save_settings' => 'saveSettings'
+     */
+    private function toCamelCase(string $name): string {
+        return lcfirst(str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $name))));
     }
 
     /**

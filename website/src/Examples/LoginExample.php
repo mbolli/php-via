@@ -80,7 +80,7 @@ final class LoginExample {
             $c->action(function (Context $ctx): void {
                 $usernameInput = $ctx->getSignal('username');
                 $passwordInput = $ctx->getSignal('password');
-                $errorMsg      = $ctx->getSignal('error');
+                $errorMsg = $ctx->getSignal('error');
 
                 $user = mb_strtolower(mb_trim($usernameInput->string()));
                 $pass = $passwordInput->string();
