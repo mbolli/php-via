@@ -69,6 +69,24 @@ class Config {
     /** Brotli level for static assets. 0–11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
     private int $brotliStaticLevel = 11;
 
+    /**
+     * Number of OpenSwoole worker processes.
+     * Worker values > 1 require a multi-worker-capable broker (SwooleBroker, RedisBroker, NatsBroker).
+     */
+    private int $workerNum = 1;
+
+    /**
+     * Maximum number of rows in the GlobalState OpenSwoole\Table.
+     * Each row holds one global-state key. Increase if you need more than 1024 distinct keys.
+     */
+    private int $globalStateTableRows = 1024;
+
+    /**
+     * Maximum serialized byte size of a single global-state value.
+     * Values exceeding this limit will throw at setGlobalState() time.
+     */
+    private int $globalStateTableValueBytes = 4096;
+
     private ?MessageBroker $broker = null;
 
     /** @var null|callable(\Throwable): void */
@@ -430,5 +448,54 @@ class Config {
      */
     public function getBroker(): MessageBroker {
         return $this->broker ?? new InMemoryBroker();
+    }
+
+    /**
+     * Set the number of OpenSwoole worker processes.
+     *
+     * Using more than one worker distributes CPU-bound actions across cores.
+     * Requires a multi-worker-capable broker: SwooleBroker (same machine),
+     * RedisBroker or NatsBroker (multi-server). A RuntimeException is thrown at
+     * start() if worker_num > 1 and InMemoryBroker is still in use.
+     *
+     * Session data is NOT shared across workers — use a sticky-session load
+     * balancer when running multi-worker (e.g. Caddy sticky_cookie).
+     *
+     * Example:
+     * ```php
+     * (new Config())
+     *     ->withWorkerNum(swoole_cpu_num())
+     *     ->withBroker(new SwooleBroker())
+     * ```
+     */
+    public function withWorkerNum(int $n): self {
+        $this->workerNum = max(1, $n);
+
+        return $this;
+    }
+
+    public function getWorkerNum(): int {
+        return $this->workerNum;
+    }
+
+    /**
+     * Tune the OpenSwoole\Table that backs GlobalState in multi-worker mode.
+     *
+     * @param int $maxRows       Maximum number of distinct global-state keys (default 1024)
+     * @param int $maxValueBytes Maximum serialized byte size per value (default 4096)
+     */
+    public function withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 4096): self {
+        $this->globalStateTableRows = max(1, $maxRows);
+        $this->globalStateTableValueBytes = max(64, $maxValueBytes);
+
+        return $this;
+    }
+
+    public function getGlobalStateTableRows(): int {
+        return $this->globalStateTableRows;
+    }
+
+    public function getGlobalStateTableValueBytes(): int {
+        return $this->globalStateTableValueBytes;
     }
 }
