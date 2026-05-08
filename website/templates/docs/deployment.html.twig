@@ -162,8 +162,52 @@ $config = (new Config())
     // for multi-worker CPU parallelism (see above).
     {% endverbatim %}{% endcode %}
 
+    <h2 id="opcache-jit">OPcache &amp; JIT</h2>
+    <p>
+        OPcache and PHP's JIT compiler are disabled for CLI processes by default.
+        Enable them explicitly in your server's <code>php.ini</code> (or via <code>-d</code> flags):
+    </p>
+    {% code 'ini' %}{% verbatim %}
+opcache.enable=1
+opcache.enable_cli=1                ; required — CLI is off by default
+opcache.memory_consumption=128
+opcache.interned_strings_buffer=16
+opcache.max_accelerated_files=10000
+opcache.validate_timestamps=0       ; set to 1 in development
+opcache.jit=tracing                 ; safe with OpenSwoole; omit if no CPU-bound actions
+opcache.jit_buffer_size=32M
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="opcache-findings">Key findings</h3>
+    <p class="note">
+        Results below are from a synthetic benchmark on a single WSL2 host (PHP 8.4.20, OpenSwoole 25.2.0).
+        Absolute numbers vary by hardware — treat deltas as directional guidance, not guarantees.
+    </p>
+    <ul>
+        <li>
+            <strong>JIT tracing gives ~7.9× speedup on CPU-bound actions</strong> (tight loops, float
+            arithmetic, template rendering). A Mandelbrot workload went from 349 req/s (no OPcache) to
+            2,744 req/s with <code>jit=tracing</code>.
+        </li>
+        <li>
+            <strong>OPcache alone doubles CPU throughput</strong> without JIT. Enabling OPcache only
+            still gives roughly +120% on computation-heavy actions, with no JIT risk.
+        </li>
+        <li>
+            <strong>IO-bound workloads are unaffected.</strong> If your actions mostly wait on database
+            queries, external APIs, or file IO, OPcache and JIT add &lt;10% — invest in connection
+            pooling instead.
+        </li>
+        <li>
+            <strong>Never use <code>opcache.jit=function</code> with OpenSwoole.</strong> Function-mode
+            JIT compiles <code>usleep()</code> / <code>sleep()</code> as regular blocking calls, bypassing
+            OpenSwoole's coroutine hook (<code>SWOOLE_HOOK_ALL</code>). This turns a non-blocking 2 ms
+            yield into a thread-blocking sleep and reduces IO concurrency by ~89%.
+            Use <code>jit=tracing</code> instead — it does not have this regression.
+        </li>
+    </ul>
+
     <h2 id="security">Security hardening</h2>
-    <p>Two <code>Config</code> options should always be set in production:</p>
 
     <h3 id="security-origins">Trusted origins — CSRF protection</h3>
     <p>
