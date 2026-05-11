@@ -365,6 +365,7 @@ Four workloads, seven profiles:
 | **CPU** | bench_app | Mandelbrot 50×50 grid, ~250k float ops/action. Canonical JIT target. |
 | **IO** | bench_app | `usleep(2_000)` per action. Bottleneck is coroutine scheduling, not bytecode. |
 | **Spreadsheet live** | website/app.php | Full Twig rendering + SQLite range query (20×10 viewport) + virtual scroll. Real-app baseline. |
+| **Spreadsheet raw live** | website/app.php | Same as above but raw PHP string building replaces Twig on the SSE hot path. Isolates Twig overhead. |
 
 ### Results summary (warm pass, req/s)
 
@@ -372,11 +373,11 @@ Four workloads, seven profiles:
 
 | Profile | Counter | CPU | IO |
 |---------|---------|-----|-----|
-| no-opcache (baseline) | 4,016 | 349 | 4,055 |
-| opcache-default-cli | 3,952 | 766 | 4,351 |
-| opcache-tuned | 4,345 | 591 | 3,934 |
-| jit-function | 3,921 | 2,749 | **431** ⚠️ |
-| jit-tracing | **4,839** | **2,744** | 3,940 |
+| no-opcache (baseline) | 4,107 | 366 | 4,009 |
+| opcache-default-cli | 3,872 | 642 | 3,846 |
+| opcache-tuned | 4,815 | 817 | 4,449 |
+| jit-function | 4,519 | 2,608 | **431** ⚠️ |
+| jit-tracing | **4,980** | **2,875** | 4,522 |
 | opcache-preload | SKIPPED† | | |
 | multi-worker-4w | — ‡ | — ‡ | — ‡ |
 
@@ -389,30 +390,43 @@ Four workloads, seven profiles:
 
 | Profile | Cold req/s | Warm req/s | vs baseline | Cold OK% |
 |---------|------------|------------|-------------|----------|
-| no-opcache (baseline) | 101 | 101 | — | 100% |
-| opcache-default-cli | 101 | 111 | +9.9% | 100% |
-| opcache-tuned | 125 | 116 | **+14.9%** | 100% |
-| jit-function | 141 | 110 | +8.9% | 100% |
-| jit-tracing | 151 | 106 | +5.0% | 100% |
+| no-opcache (baseline) | 277 | 223 | — | 100% |
+| opcache-default-cli | 316 | 267 | +19.7% | 100% |
+| opcache-tuned | 332 | 266 | +19.3% | 100% |
+| jit-function | 306 | 257 | +15.2% | 100% |
+| jit-tracing | **395** | **344** | **+54.3%** | 100% |
 | opcache-preload | SKIPPED† | | | |
-| multi-worker-4w | 49 | 46 | −54.5% ⚠️ | 100% |
+| multi-worker-4w | — ‡ | — ‡ | | |
+
+#### Spreadsheet raw live workload (1,000 actions, concurrency=50, website/app.php)
+
+`navigate` action against `/examples/spreadsheet-raw` — raw PHP string building on SSE update path, Twig only for initial page load.
+
+| Profile | Cold req/s | Warm req/s | vs baseline | Cold OK% |
+|---------|------------|------------|-------------|----------|
+| no-opcache (baseline) | 1,005 | 942 | — | 100% |
+| opcache-default-cli | 1,120 | 996 | +5.7% | 100% |
+| opcache-tuned | 1,062 | ~~336~~ ⚠️ | *(artifact)* | 100% |
+| jit-function | 1,076 | 1,021 | +8.4% | 100% |
+| jit-tracing | **1,318** | **1,072** | **+13.8%** | 100% |
+| opcache-preload | SKIPPED† | | | |
 
 ### Key findings
 
 **JIT is transformative for CPU-bound code.**  
-`jit=tracing` lifts the Mandelbrot workload from 349 → 2,744 req/s (**+686%**, ~7.9×). The tight float loop is exactly what tracing JIT compiles best. `jit=function` gives a nearly identical gain (+687%) for this pure-computation case.
+`jit=tracing` lifts the Mandelbrot workload from 366 → 2,875 req/s (**+685%**, ~7.9×). The tight float loop is exactly what tracing JIT compiles best. `jit=function` gives a comparable gain (+612%) but is unsafe in OpenSwoole (see below).
 
 **`jit=function` breaks OpenSwoole's coroutine hooks — avoid it.**  
-IO throughput collapsed from 4,055 → 431 req/s (−89%) with `jit=function`. Root cause: function-mode JIT compiles `usleep()` as a regular function call, bypassing OpenSwoole's `SWOOLE_HOOK_ALL` coroutine hook that makes `usleep()` yield instead of blocking the thread. At 2ms blocking sleep, max throughput = 500 req/s — matching the observed 431. `jit=tracing` does not have this regression.
+IO throughput collapsed from 4,009 → 431 req/s (−89%) with `jit=function`. Root cause: function-mode JIT compiles `usleep()` as a regular function call, bypassing OpenSwoole's `SWOOLE_HOOK_ALL` coroutine hook that makes `usleep()` yield instead of blocking the thread. At 2ms blocking sleep, max throughput = 500 req/s — matching the observed 431. `jit=tracing` does not have this regression.
 
-**OPcache alone gives +120% on CPU-bound work, modest gains elsewhere.**  
-For applications without tight loops, opcache-tuned adds ~8% on the counter workload — within noise on a busy server, but free.
+**OPcache alone gives +75–120% on CPU-bound work, modest gains elsewhere.**  
+For applications without tight loops, opcache-tuned adds ~17% on the counter workload and ~19% on spreadsheet-live — free gains from eliminating parse overhead.
 
 **IO-bound workloads are unaffected by OPcache/JIT.**  
 All profiles hover within ±10% for the IO workload (except the `jit=function` anomaly above). If your bottleneck is database queries, external API calls, or network IO, OPcache/JIT won't help — invest in connection pooling and query optimisation instead.
 
-**Real-app (Twig + SQLite) gains are modest — SQLite is the ceiling.**  
-The spreadsheet-live workload processes full Twig rendering and a SQLite range query per action. OPcache-tuned gives the best return (+14.9% warm), with the cold-pass bonus higher still (opcache-tuned cold: 125 req/s, jit-tracing cold: 151 req/s) because the JIT compilation burst helps the first pass more than steady state. Warm-pass JIT tracing (+5%) offers little over plain opcache-tuned (+14.9%) because the dominant cost is SQLite I/O — not PHP bytecode. OPcache still helps by eliminating parse overhead on Twig's compiled templates. Multi-worker (4w) halved throughput (−54.5%): the hammer loads the page on one worker, then fires actions that land on random workers which don't own that session context, producing overhead from cross-worker coordination.
+**Real-app (Twig + SQLite): `jit-tracing` delivers +54%, Twig is the second bottleneck.**  
+The spreadsheet-live workload runs full Twig `renderBlock` + SQLite per action. After Twig file caching and partial block rendering were applied, throughput rose substantially from the April 2026 baseline. `jit-tracing` warm (+54.3%) is now the best real-app JIT gain in this suite. OPcache alone already gives ~+19%. The remaining gap between spreadsheet-live (344 req/s) and spreadsheet-raw-live (1,072 req/s) shows Twig costs **~3.1×** throughput on the hot SSE path even with file-cached compiled templates — the single largest optimisation available is replacing `renderBlock` with raw PHP string building on the SSE update path.
 
 ### Recommendations
 

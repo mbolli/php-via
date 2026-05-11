@@ -14,19 +14,27 @@ All numbers measured on PHP 8.4.20, opcache-tuned (no JIT), `--actions=2000 --co
 | 1 — Twig file cache | `withTwigCacheDir()` | ~215 req/s (+33%) | 179 KB | ~2.2M |
 | 2 — Partial block | `block: 'spreadsheet_update'` | ~215 req/s | **~30 KB** | ~2.2M |
 | 3 — Event delegation | 200 per-cell handlers → 1 on `<tbody>` | ~215 req/s | **21 KB** | **~1.1M** |
-| 4 — HTML minification | `preg_replace` in `ViewRenderer` | **225 req/s** | **21 KB** | ~1.1M |
-| 5 — Raw PHP renderer | `SpreadsheetRawExample`, no Twig on SSE | **805 req/s** | 26 KB | **237K** |
+| ~~4 — HTML minification~~ | ~~`preg_replace` in `ViewRenderer`~~ | ~~**225 req/s**~~ | ~~**21 KB**~~ | ~~~1.1M~~ |
+| 5 — Raw PHP renderer | `SpreadsheetRawExample`, no Twig on SSE | **805–942 req/s** | 26 KB | **237K** |
 
-> Steps 1–4 compound: each is applied on top of the previous. Step 5 is an independent alternative
-> that replaces Twig on the SSE hot path while keeping Twig for the initial page load.
+> Steps 1–3 compound and are all currently committed. Step 4 (HTML minification) was
+> subsequently **reverted**: Brotli compression over the SSE stream makes whitespace
+> removal redundant, and the two `preg_replace` calls added complexity for no net gain.
+> Step 5 is an independent alternative that replaces Twig on the SSE hot path while
+> keeping Twig for the initial page load.
 
 ### Throughput (req/s, warm pass)
 
 | Step | Throughput | vs original |
 |---|---|---|
 | 0 — original | 162 req/s | baseline |
-| 1+2+3+4 — all Twig optimisations | **225 req/s** | **+39%** |
-| 5 — raw PHP renderer | **805 req/s** | **+397%** |
+| 1+2+3 — all Twig optimisations (current state) | **~215 req/s** | **+33%** |
+| 5 — raw PHP renderer | **805–942 req/s** | **+397–481%** |
+
+> The step 5 range reflects different test parameters: 805 req/s was measured with
+> `--actions=2000 --concurrency=100, opcache-tuned`; 942 req/s with
+> `--actions=1000 --concurrency=50, no-opcache` (bench_opcache.php, May 2026).
+> With `jit-tracing` the raw path reaches **1,072 req/s** under the same conditions.
 
 ### SSE payload size per action
 
