@@ -117,7 +117,13 @@
         </details>
         {% block content %}{% endblock %}
     </main>
+
+    <aside class="docs-toc-sidebar" aria-label="On this page" data-ignore-morph>
+        <docs-toc data-content="article" data-title="On this page" data-intro="Introduction"></docs-toc>
+    </aside>
 </div>
 {% endblock %}
 
-{% block foot_scripts %}{% endblock %}
+{% block foot_scripts %}
+<script type="module" src="{{ basePath }}js/docs-toc.js?v={{ assetVersion }}"></script>
+{% endblock %}
