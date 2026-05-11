@@ -10,10 +10,14 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
 
-final class SpreadsheetExample {
-    public const string SLUG = 'spreadsheet';
+/**
+ * Raw-PHP clone of SpreadsheetExample — no Twig on the SSE update path.
+ * Used to benchmark Twig overhead vs plain PHP string building.
+ */
+final class SpreadsheetRawExample {
+    public const string SLUG = 'spreadsheet-raw';
 
-    private const string SCOPE = 'example:spreadsheet';
+    private const string SCOPE = 'example:spreadsheet-raw';
 
     /** @var array<string, array{row: int, col: int, hue: int}> contextId => cursor */
     private static array $cursors = [];
@@ -29,12 +33,11 @@ final class SpreadsheetExample {
     public static function register(Via $app): void {
         self::db(); // initialize on registration
 
-        $app->page('/examples/spreadsheet', function (Context $c) use ($app): void {
+        $app->page('/examples/spreadsheet-raw', function (Context $c) use ($app): void {
             $sessionId = $c->getSessionId() ?? $c->getId();
             $contextId = $c->getId();
             $hue = self::hueForSession($sessionId);
 
-            // Initialize cursor for this context
             if (!isset(self::$cursors[$contextId])) {
                 self::$cursors[$contextId] = ['row' => 0, 'col' => 0, 'hue' => $hue];
             }
@@ -49,7 +52,6 @@ final class SpreadsheetExample {
 
             $c->addScope(self::SCOPE);
 
-            // TAB-scoped signals: viewport + focus + editing
             $c->signal(0, 'viewRow', Scope::TAB);
             $c->signal(0, 'viewCol', Scope::TAB);
             $c->signal(0, 'focusRow', Scope::TAB);
@@ -57,7 +59,6 @@ final class SpreadsheetExample {
             $c->signal(false, 'editing', Scope::TAB);
             $c->signal('', 'editValue', Scope::TAB);
 
-            // Client-writable action parameter signals
             $c->signal(0, 'tr', Scope::TAB);
             $c->signal(0, 'tc', Scope::TAB);
             $c->signal('', 'key', Scope::TAB);
@@ -66,18 +67,13 @@ final class SpreadsheetExample {
             $c->signal(0, 'dc', Scope::TAB);
             $c->signal('', 'pasted', Scope::TAB);
 
-            // Dynamic viewport dimensions (written by client ResizeObserver)
             $c->signal(20, 'vrows', Scope::TAB);
             $c->signal(10, 'vcols', Scope::TAB);
 
-            // Jump-to-coordinate input value
             $c->signal('', 'jump', Scope::TAB);
 
-            // Scope-level version counter: bumped on every cursor/edit change
-            // so that broadcast() has a changed signal to deliver, triggering re-renders
             $c->signal(0, 'v', self::SCOPE, autoBroadcast: false);
 
-            // Selection range stored server-side per context (not as signals)
             if (!isset(self::$selections[$contextId])) {
                 self::$selections[$contextId] = ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1];
             }
@@ -104,7 +100,6 @@ final class SpreadsheetExample {
                 $col = $targetCol->int();
                 $isShift = $shift->bool();
 
-                // Commit any pending edit
                 if ($editing->bool()) {
                     self::setCell($focusRow->int(), $focusCol->int(), $editValue->string());
                     $editing->setValue(false, broadcast: false);
@@ -158,7 +153,6 @@ final class SpreadsheetExample {
                 $fr = $focusRow->int();
                 $fc = $focusCol->int();
 
-                // Commit on navigation if editing
                 if ($editing->bool() && $direction !== 'escape') {
                     self::setCell($fr, $fc, $editValue->string());
                     $editing->setValue(false, broadcast: false);
@@ -200,7 +194,6 @@ final class SpreadsheetExample {
                     $sel = ['r1' => $fr, 'c1' => $fc, 'r2' => $fr, 'c2' => $fc];
                 }
 
-                // Auto-scroll viewport
                 $vr = $viewRow->int();
                 $vc = $viewCol->int();
                 if ($fr < $vr) {
@@ -272,7 +265,6 @@ final class SpreadsheetExample {
                 $ctx->sync();
             }, 'scroll');
 
-            // Absolute-position scroll targets (written by scrollbar drag)
             $c->signal(0, 'str', Scope::TAB);
             $c->signal(0, 'stc', Scope::TAB);
 
@@ -339,8 +331,8 @@ final class SpreadsheetExample {
                 $tsv = '';
                 for ($r = $r1; $r <= $r2; ++$r) {
                     $row = [];
-                    for ($c = $c1; $c <= $c2; ++$c) {
-                        $row[] = $cells[$r . ':' . $c] ?? '';
+                    for ($col = $c1; $col <= $c2; ++$col) {
+                        $row[] = $cells[$r . ':' . $col] ?? '';
                     }
                     $tsv .= implode("\t", $row) . "\n";
                 }
@@ -416,14 +408,13 @@ final class SpreadsheetExample {
                 $c1 = min($sel['c1'], $sel['c2']);
                 $c2 = max($sel['c1'], $sel['c2']);
 
-                // If no multi-cell selection, clear just the focused cell
                 if ($r1 === $r2 && $c1 === $c2) {
                     self::setCell($focusRow->int(), $focusCol->int(), '');
                 } else {
                     $cells = [];
                     for ($r = $r1; $r <= $r2; ++$r) {
-                        for ($c = $c1; $c <= $c2; ++$c) {
-                            $cells[] = ['row' => $r, 'col' => $c, 'value' => ''];
+                        for ($col = $c1; $col <= $c2; ++$col) {
+                            $cells[] = ['row' => $r, 'col' => $col, 'value' => ''];
                         }
                     }
                     self::setCells($cells);
@@ -433,9 +424,9 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'clearCells');
 
-            // -- Render --
+            // -- View: raw PHP on the SSE update hot path, Twig only on initial page load --
 
-            $c->view(function () use ($c, $sessionId, $contextId, $app): string {
+            $c->view(function (bool $isUpdate) use ($c, $sessionId, $contextId, $app): string {
                 /** @var Signal $viewRow */ $viewRow = $c->getSignal('viewRow');
 
                 /** @var Signal $viewCol */ $viewCol = $c->getSignal('viewCol');
@@ -493,6 +484,7 @@ final class SpreadsheetExample {
                 /** @var Action $resize */ $resize = $c->getAction('resize');
 
                 /** @var Action $jumpTo */ $jumpTo = $c->getAction('jumpTo');
+
                 $vr = $viewRow->int();
                 $vc = $viewCol->int();
                 $fr = $focusRow->int();
@@ -504,7 +496,6 @@ final class SpreadsheetExample {
 
                 $cells = self::getCellRange($vr, $vc, $vpRows, $vpCols);
 
-                // Build other cursors visible in viewport
                 $otherCursors = [];
                 foreach (self::$cursors as $cid => $cursor) {
                     if ($cid === $contextId) {
@@ -518,7 +509,6 @@ final class SpreadsheetExample {
                     }
                 }
 
-                // Selection range (server-side, per context)
                 $sel = self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1];
                 $sr1 = min($sel['r1'], $sel['r2']);
                 $sr2 = max($sel['r1'], $sel['r2']);
@@ -527,48 +517,7 @@ final class SpreadsheetExample {
 
                 $extent = self::getGridExtent($fr, $fc);
 
-                return $c->render('examples/spreadsheet.html.twig', [
-                    'title' => '📊 Spreadsheet',
-                    'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
-                    'summary' => [
-                        '<strong>SQLite persistence</strong> — cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
-                        '<strong>Virtual scrolling</strong> — only the visible cells are rendered at a time. Arrow keys, Page Up/Down, Home, mouse wheel, and Tab navigate the viewport. The server fetches only the visible range from SQLite on every render.',
-                        '<strong>Dynamic resize</strong> — drag the bottom-right handle to make the grid any size. A <code>ResizeObserver</code> dispatches a throttled event; the browser computes how many rows and columns fit, writes them into signals, and posts to a <code>resize</code> action that re-renders exactly the right number of cells.',
-                        '<strong>Jump to coordinate</strong> — type a cell reference like <code>AB2000</code> into the toolbar input and press Enter. The server parses column letters and row number, centers the viewport, and moves the cursor in one round-trip.',
-                        '<strong>Collaborative cursors</strong> — each user gets a hue derived from their session ID. Other users\' focused cells show a colored border in real time, broadcast via a custom <code>example:spreadsheet</code> scope.',
-                        '<strong>Copy & paste</strong> — Ctrl+C copies the selected range as tab-separated values to the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
-                        '<strong>Keyboard-first UX</strong> — a single <code>data-on:keydown__window</code> handler covers arrows, Tab, Enter, Escape, F2, Delete, Ctrl+C, and printable-character-to-edit, with an explicit guard so the jump input is never intercepted.',
-                        '<strong>Scope design</strong> — viewport position and editing state are TAB-scoped (private per tab). Cell data and cursor positions use a custom <code>example:spreadsheet</code> scope, so every connected user sees live updates without leaking private state.',
-                    ],
-                    'anatomy' => [
-                        'signals' => [
-                            ['name' => 'viewRow / viewCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Top-left corner of the visible viewport. Private per tab.'],
-                            ['name' => 'focusRow / focusCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Currently focused cell coordinates.'],
-                            ['name' => 'editing', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Whether the focused cell is in edit mode.'],
-                            ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '\"\"', 'desc' => 'Current cell editor input value.'],
-                            ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted — client-writable action parameters for keyboard and mouse events.'],
-                            ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20×10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
-                            ['name' => 'version', 'type' => 'int', 'scope' => 'Custom', 'desc' => 'Shared scope version counter. Bumped on every cursor/edit change to trigger broadcasts.'],
-                        ],
-                        'actions' => [
-                            ['name' => 'focusCell', 'desc' => 'Moves cursor to a cell. Commits pending edits, updates selection, broadcasts cursor position.'],
-                            ['name' => 'navigate', 'desc' => 'Keyboard navigation — arrows, Tab, Enter, Escape, PageUp/Down, Home. Auto-scrolls viewport.'],
-                            ['name' => 'startEdit', 'desc' => 'Enters edit mode on the focused cell. Prefills with typed character or current value.'],
-                            ['name' => 'commitEdit', 'desc' => 'Writes the edit value to SQLite and broadcasts the change.'],
-                            ['name' => 'scroll', 'desc' => 'Mouse wheel scrolling — moves viewport by delta rows/columns.'],
-                            ['name' => 'scrollTo', 'desc' => 'Absolute viewport positioning — used by scrollbar drag and track clicks.'],
-                            ['name' => 'clearCells', 'desc' => 'Deletes the selected range of cells.'],
-                            ['name' => 'paste', 'desc' => 'Pastes TSV clipboard data starting at the focused cell. Compatible with Excel/Sheets.'],
-                            ['name' => 'jumpTo', 'desc' => 'Parses a cell reference like AB2000, centers viewport, and moves cursor.'],
-                        ],
-                        'views' => [
-                            ['name' => 'spreadsheet.html.twig', 'desc' => 'Virtual viewport rendering with collaborative multi-user cursors. Keyboard-first UX with a single data-on:keydown handler. Only visible cells are rendered.'],
-                        ],
-                    ],
-                    'githubLinks' => [
-                        ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/SpreadsheetExample.php'],
-                        ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/spreadsheet.html.twig'],
-                    ],
+                $d = [
                     'vr' => $vr,
                     'vc' => $vc,
                     'fr' => $fr,
@@ -576,7 +525,6 @@ final class SpreadsheetExample {
                     'isEditing' => $isEditing,
                     'editingId' => $editing->id(),
                     'editValueId' => $editValue->id(),
-                    'editValueVal' => $editValue->string(),
                     'trId' => $targetRow->id(),
                     'tcId' => $targetCol->id(),
                     'keyId' => $key->id(),
@@ -611,12 +559,213 @@ final class SpreadsheetExample {
                     'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
                     'clientCount' => \count($app->getContextsByScope(self::SCOPE)),
-                ]);
-            }, block: 'spreadsheet_update', cacheUpdates: false);
+                    'title' => '📊 Spreadsheet (raw PHP)',
+                    'description' => 'Same as the Spreadsheet example but SSE updates are rendered with raw PHP string building instead of Twig — for benchmarking Twig overhead.',
+                ];
+
+                if ($isUpdate) {
+                    return self::renderDynamic($d);
+                }
+
+                return $c->render('examples/spreadsheet-raw.html.twig', array_merge($d, [
+                    'initialDynamic' => self::renderDynamic($d),
+                ]));
+            }, cacheUpdates: false);
         });
     }
 
-    private static function db(): \SQLite3 {
+    /**
+     * Render the dynamic inner content (<div id="ss-dynamic">) using raw PHP.
+     * This is the SSE update hot path — no Twig involved.
+     *
+     * @param array<string, mixed> $d
+     */
+    private static function renderDynamic(array $d): string
+    {
+        $vr = (int) $d['vr'];
+        $vc = (int) $d['vc'];
+        $fr = (int) $d['fr'];
+        $fc = (int) $d['fc'];
+        $maxRow = (int) $d['maxRow'];
+        $maxCol = (int) $d['maxCol'];
+        $vpRows = (int) $d['viewportRows'];
+        $vpCols = (int) $d['viewportCols'];
+        /** @var array<string, string> $cells */
+        $cells = $d['cells'];
+        /** @var array<string, int> $otherCursors */
+        $otherCursors = $d['otherCursors'];
+        /** @var array{r1: int, c1: int, r2: int, c2: int} $sel */
+        $sel = $d['selRange'];
+        $myHue = (int) $d['myHue'];
+        $isEditing = (bool) $d['isEditing'];
+        $clientCount = (int) $d['clientCount'];
+        /** @var array<int, string> $colNames */
+        $colNames = $d['colNames'];
+        $focusedCellValue = (string) $d['focusedCellValue'];
+        $editValueId = (string) $d['editValueId'];
+        $jumpId = (string) $d['jumpId'];
+        $jumpUrl = (string) $d['jumpUrl'];
+        $trId = (string) $d['trId'];
+        $tcId = (string) $d['tcId'];
+        $shiftId = (string) $d['shiftId'];
+        $editingId = (string) $d['editingId'];
+        $focusCellUrl = (string) $d['focusCellUrl'];
+        $startEditUrl = (string) $d['startEditUrl'];
+        $scrollToUrl = (string) $d['scrollToUrl'];
+        $scrollToRowId = (string) $d['scrollToRowId'];
+        $scrollToColId = (string) $d['scrollToColId'];
+
+        // Scroll geometry
+        $vScrollRange = $maxRow - $vpRows;
+        $hScrollRange = $maxCol - $vpCols;
+        $vThumbPct = $maxRow > 0 ? ($vpRows / $maxRow * 100) : 100.0;
+        $vPosPct = $vScrollRange > 0 ? ($vr / $vScrollRange * (100 - $vThumbPct)) : 0.0;
+        $hThumbPct = $maxCol > 0 ? ($vpCols / $maxCol * 100) : 100.0;
+        $hPosPct = $hScrollRange > 0 ? ($vc / $hScrollRange * (100 - $hThumbPct)) : 0.0;
+        $vMax = max(0, $vScrollRange);
+        $hMax = max(0, $hScrollRange);
+
+        // Focused column name within the visible range
+        $focusOffset = $fc - $vc;
+        $focusedColName = ($focusOffset >= 0 && isset($colNames[$focusOffset])) ? $colNames[$focusOffset] : '';
+        $colDisplay = $focusedColName !== '' ? $focusedColName : (string) ($fc + 1);
+
+        $h = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        // --- Toolbar ---
+        $out = '<div id="ss-dynamic">';
+        $out .= '<div id="ss-toolbar" class="ss-toolbar" data-ref="ssToolbar">';
+        $out .= '<div class="ss-cell-ref">' . $h($focusedColName) . ($fr + 1) . '</div>';
+        $out .= '<label class="ss-jump-label" for="ss-jump-input">Jump to</label>';
+        $out .= '<input type="text" id="ss-jump-input" class="ss-jump-input"'
+            . ' data-bind="' . $jumpId . '"'
+            . ' placeholder="B5"'
+            . ' data-on:keydown="if (evt.key === \'Enter\') { evt.preventDefault(); @post(\'' . $jumpUrl . '\') }"'
+            . ' data-on:blur="$' . $jumpId . ' !== \'\' && @post(\'' . $jumpUrl . '\')"'
+            . '>';
+        $out .= '<div class="ss-formula-bar">' . $h($focusedCellValue) . '</div>';
+        $out .= '<div class="ss-users">👥 ' . $clientCount . ' connected</div>';
+        $out .= '<div class="ss-pos">Row ' . ($fr + 1) . ', Col ' . $h($colDisplay)
+            . ' · Viewing from ' . $h(($colNames[0] ?? 'A') . ($vr + 1)) . '</div>';
+        $out .= '</div>';
+
+        // --- Grid ---
+        $out .= '<div class="ss-body"><div class="ss-grid-wrapper">';
+        $out .= '<table id="ss-grid-table" class="ss-grid">';
+
+        // thead
+        $out .= '<thead id="ss-thead" data-ref="ssThead"><tr><th class="ss-row-header">&nbsp;</th>';
+        foreach ($colNames as $ci => $colName) {
+            $absCol = $vc + $ci;
+            $isSelHeader = $absCol >= $sel['c1'] && $absCol <= $sel['c2'] && $sel['r1'] >= 0;
+            $out .= '<th class="ss-col-header' . ($isSelHeader ? ' ss-sel-header' : '') . '">' . $h($colName) . '</th>';
+        }
+        $out .= '</tr></thead>';
+
+        // tbody
+        $out .= '<tbody id="ss-tbody"'
+            . ' data-on:click="const td = evt.target.closest(\'td.ss-cell:not(.ss-focused)\'); if (!td) return;'
+            . ' $' . $shiftId . ' = evt.shiftKey; $' . $trId . ' = +td.dataset.row; $' . $tcId . ' = +td.dataset.col;'
+            . ' @post(\'' . $focusCellUrl . '\')"'
+            . ' data-on:dblclick="evt.target.closest(\'td.ss-cell\') && @post(\'' . $startEditUrl . '\')"'
+            . '>';
+
+        for ($ri = 0; $ri < $vpRows; ++$ri) {
+            $absRow = $vr + $ri;
+            $isRowSelHeader = $absRow >= $sel['r1'] && $absRow <= $sel['r2'] && $sel['c1'] >= 0;
+            $out .= '<tr><th class="ss-row-header' . ($isRowSelHeader ? ' ss-sel-header' : '') . '">' . ($absRow + 1) . '</th>';
+
+            for ($ci = 0; $ci < $vpCols; ++$ci) {
+                $absCol = $vc + $ci;
+                $cellKey = $absRow . ':' . $absCol;
+                $isFocused = ($absRow === $fr && $absCol === $fc);
+                $hasMultiSel = $sel['r1'] >= 0 && ($sel['r1'] !== $sel['r2'] || $sel['c1'] !== $sel['c2']);
+                $isSelected = $hasMultiSel
+                    && $absRow >= $sel['r1'] && $absRow <= $sel['r2']
+                    && $absCol >= $sel['c1'] && $absCol <= $sel['c2'];
+                $otherHue = $otherCursors[$cellKey] ?? null;
+
+                $cls = 'ss-cell';
+                if ($isFocused) {
+                    $cls .= ' ss-focused';
+                }
+                if ($isSelected) {
+                    $cls .= ' ss-selected';
+                }
+                if ($otherHue !== null) {
+                    $cls .= ' ss-other-cursor';
+                }
+
+                $style = '';
+                if ($isFocused) {
+                    $style = ' style="outline:2px solid hsl(' . $myHue . ',70%,50%);outline-offset:-1px;"';
+                } elseif ($otherHue !== null) {
+                    $style = ' style="box-shadow:inset 0 0 0 2px hsl(' . $otherHue . ',70%,50%);"';
+                }
+
+                $out .= '<td class="' . $cls . '" data-row="' . $absRow . '" data-col="' . $absCol . '"' . $style . '>';
+                if ($isFocused && $isEditing) {
+                    $out .= '<input type="text" data-init="el.focus()" id="ss-active-input" class="ss-edit-input" data-bind="' . $editValueId . '">';
+                } else {
+                    $out .= '<span class="ss-cell-text">' . $h($cells[$cellKey] ?? '') . '</span>';
+                }
+                $out .= '</td>';
+            }
+            $out .= '</tr>';
+        }
+
+        $out .= '</tbody></table></div>';
+
+        // Vertical scrollbar (inside ss-body, next to the grid)
+        $out .= '<div class="ss-scrollbar ss-scrollbar-v"'
+            . ' data-on:mousedown__prevent="'
+            . 'const rect = $ssTrackV.getBoundingClientRect();'
+            . ' if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {'
+            . ' el.closest(\'#spreadsheet\').__drag = \'v\'; document.body.style.userSelect = \'none\'; }'
+            . ' else { $' . $scrollToRowId . ' = Math.round(Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height)) * ' . $vMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . ' data-on:touchstart__prevent="'
+            . 'const rect = $ssTrackV.getBoundingClientRect(); const t = evt.touches[0];'
+            . ' if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {'
+            . ' el.closest(\'#spreadsheet\').__drag = \'v\'; }'
+            . ' else { $' . $scrollToRowId . ' = Math.round(Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)) * ' . $vMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . '>';
+        $out .= '<div class="ss-scrollbar-track" data-ref="ssTrackV">';
+        $out .= '<div id="ss-vthumb" class="ss-scrollbar-thumb" data-ref="ssThumbV"'
+            . ' style="top:' . number_format($vPosPct, 2) . '%;height:' . number_format($vThumbPct, 2) . '%">'
+            . '</div>';
+        $out .= '</div></div>'; // track + scrollbar-v
+
+        $out .= '</div>'; // ss-body
+
+        // Horizontal scrollbar row
+        $out .= '<div class="ss-scrollbar-bottom">';
+        $out .= '<div class="ss-scrollbar ss-scrollbar-h"'
+            . ' data-on:mousedown__prevent="'
+            . 'const rect = $ssTrackH.getBoundingClientRect();'
+            . ' if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {'
+            . ' el.closest(\'#spreadsheet\').__drag = \'h\'; document.body.style.userSelect = \'none\'; }'
+            . ' else { $' . $scrollToColId . ' = Math.round(Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) * ' . $hMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . ' data-on:touchstart__prevent="'
+            . 'const rect = $ssTrackH.getBoundingClientRect(); const t = evt.touches[0];'
+            . ' if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {'
+            . ' el.closest(\'#spreadsheet\').__drag = \'h\'; }'
+            . ' else { $' . $scrollToColId . ' = Math.round(Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width)) * ' . $hMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . '>';
+        $out .= '<div class="ss-scrollbar-track" data-ref="ssTrackH">';
+        $out .= '<div id="ss-hthumb" class="ss-scrollbar-thumb" data-ref="ssThumbH"'
+            . ' style="left:' . number_format($hPosPct, 2) . '%;width:' . number_format($hThumbPct, 2) . '%">'
+            . '</div>';
+        $out .= '</div></div>'; // track + scrollbar-h
+        $out .= '<div class="ss-scrollbar-corner"></div>';
+        $out .= '</div>'; // ss-scrollbar-bottom
+
+        $out .= '</div>'; // ss-dynamic
+
+        return $out;
+    }
+
+    private static function db(): \SQLite3
+    {
         if (self::$db === null) {
             self::$db = new \SQLite3(__DIR__ . '/../../spreadsheet.db');
             self::$db->exec('PRAGMA journal_mode=WAL');
@@ -634,7 +783,8 @@ final class SpreadsheetExample {
         return self::$db;
     }
 
-    private static function getCell(int $row, int $col): string {
+    private static function getCell(int $row, int $col): string
+    {
         $stmt = self::db()->prepare('SELECT value FROM cells WHERE row = :row AND col = :col');
         $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
         $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
@@ -645,9 +795,10 @@ final class SpreadsheetExample {
     }
 
     /**
-     * @return array<string, string> "row:col" => value
+     * @return array<string, string>
      */
-    private static function getCellRange(int $startRow, int $startCol, int $rows, int $cols): array {
+    private static function getCellRange(int $startRow, int $startCol, int $rows, int $cols): array
+    {
         $cells = [];
         $stmt = self::db()->prepare(
             'SELECT row, col, value FROM cells
@@ -667,7 +818,8 @@ final class SpreadsheetExample {
         return $cells;
     }
 
-    private static function setCell(int $row, int $col, string $value): void {
+    private static function setCell(int $row, int $col, string $value): void
+    {
         if ($value === '') {
             $stmt = self::db()->prepare('DELETE FROM cells WHERE row = :row AND col = :col');
             $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
@@ -700,11 +852,10 @@ final class SpreadsheetExample {
     }
 
     /**
-     * Write multiple cells at once (for paste).
-     *
      * @param array<int, array{row: int, col: int, value: string}> $cells
      */
-    private static function setCells(array $cells): void {
+    private static function setCells(array $cells): void
+    {
         self::db()->exec('BEGIN');
         foreach ($cells as $cell) {
             self::setCell($cell['row'], $cell['col'], $cell['value']);
@@ -712,7 +863,8 @@ final class SpreadsheetExample {
         self::db()->exec('COMMIT');
     }
 
-    private static function colNameToIndex(string $col): int {
+    private static function colNameToIndex(string $col): int
+    {
         $col = strtoupper($col);
         $result = 0;
         $len = \strlen($col);
@@ -720,12 +872,13 @@ final class SpreadsheetExample {
             $result = $result * 26 + (\ord($col[$i]) - 64);
         }
 
-        return $result - 1; // 0-indexed
+        return $result - 1;
     }
 
-    private static function colName(int $col): string {
+    private static function colName(int $col): string
+    {
         $name = '';
-        ++$col; // 0-indexed to 1-indexed
+        ++$col;
         while ($col > 0) {
             --$col;
             $name = \chr(65 + ($col % 26)) . $name;
@@ -735,14 +888,16 @@ final class SpreadsheetExample {
         return $name;
     }
 
-    private static function hueForSession(string $sessionId): int {
+    private static function hueForSession(string $sessionId): int
+    {
         return hexdec(substr(md5($sessionId), 0, 4)) % 360;
     }
 
     /**
      * @return array{maxRow: int, maxCol: int}
      */
-    private static function getGridExtent(int $focusRow, int $focusCol): array {
+    private static function getGridExtent(int $focusRow, int $focusCol): array
+    {
         if (self::$extentCache === null) {
             self::refreshExtentCache();
         }
@@ -753,7 +908,8 @@ final class SpreadsheetExample {
         ];
     }
 
-    private static function refreshExtentCache(): void {
+    private static function refreshExtentCache(): void
+    {
         $result = self::db()->querySingle(
             'SELECT COALESCE(MAX(row), 0) AS maxRow, COALESCE(MAX(col), 0) AS maxCol FROM cells',
             true
