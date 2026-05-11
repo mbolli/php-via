@@ -24,7 +24,6 @@ declare(strict_types=1);
  *
  * Referenced by the opcache-preload profile in bench_opcache.php.
  */
-
 if (!function_exists('opcache_compile_file')) {
     fwrite(STDERR, "bench_preload.php: opcache_compile_file() is not available — OPcache not loaded or disabled\n");
 
@@ -32,7 +31,7 @@ if (!function_exists('opcache_compile_file')) {
 }
 
 $vendorAutoload = realpath(__DIR__ . '/../../vendor/autoload.php');
-$srcDir         = realpath(__DIR__ . '/../../src');
+$srcDir = realpath(__DIR__ . '/../../src');
 
 if ($vendorAutoload === false) {
     fwrite(STDERR, "bench_preload.php: cannot resolve vendor/autoload.php — run composer install first\n");

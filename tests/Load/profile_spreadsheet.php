@@ -23,18 +23,18 @@
 
 declare(strict_types=1);
 
-$opts      = getopt('', ['actions:', 'spx-so:', 'port:', 'help']);
-$actions   = (int) ($opts['actions'] ?? 30);
-$spxSo     = (string) ($opts['spx-so'] ?? '/tmp/spx.so');
-$port      = (int) ($opts['port'] ?? 3099);
-$phpBin    = PHP_BINARY;
+$opts = getopt('', ['actions:', 'spx-so:', 'port:', 'help']);
+$actions = (int) ($opts['actions'] ?? 30);
+$spxSo = (string) ($opts['spx-so'] ?? '/tmp/spx.so');
+$port = (int) ($opts['port'] ?? 3099);
+$phpBin = PHP_BINARY;
 $websiteApp = (string) realpath(__DIR__ . '/../../website/app.php');
-$hammer    = __DIR__ . '/action_hammer.php';
-$spxData   = '/tmp/spx-data';
+$hammer = __DIR__ . '/action_hammer.php';
+$spxData = '/tmp/spx-data';
 $spxAssets = '/tmp/spx-assets/web-ui';
 
 if (isset($opts['help'])) {
-    echo <<<HELP
+    echo <<<'HELP'
     profile_spreadsheet.php — SPX profile of SpreadsheetExample navigate action
 
     Options:
@@ -49,6 +49,7 @@ if (isset($opts['help'])) {
       /tmp/spx-data/     — created automatically
 
     HELP;
+
     exit(0);
 }
 
@@ -59,12 +60,14 @@ if (!file_exists($spxSo)) {
     fwrite(STDERR, "Build it with:\n  cd /tmp && git clone https://github.com/NoiseByNorthwest/php-spx.git\n");
     fwrite(STDERR, "  cd php-spx && git checkout release/latest && phpize8.4 && ./configure --with-php-config=php-config8.4 && make\n");
     fwrite(STDERR, "  cp modules/spx.so /tmp/spx.so && cp -r assets/web-ui /tmp/spx-assets/\n");
+
     exit(1);
 }
 
 if (!file_exists($spxAssets . '/index.html')) {
     fwrite(STDERR, "ERROR: SPX web UI assets not found at {$spxAssets}\n");
     fwrite(STDERR, "Copy them with: cp -r /tmp/php-spx/assets/web-ui /tmp/spx-assets/\n");
+
     exit(1);
 }
 
@@ -95,27 +98,27 @@ function waitForReady(int $port, int $maxSeconds = 15): bool {
 echo "Starting website/app.php with SPX on port {$port} ...\n";
 
 $serverEnv = array_merge(getenv() ?: [], [
-    'VIA_PORT'        => (string) $port,
+    'VIA_PORT' => (string) $port,
     'VIA_DISABLE_HTTPS' => '1',
-    'APP_ENV'        => 'dev',
+    'APP_ENV' => 'dev',
     // SPX env for CLI (will be inherited by the server process)
     // Auto-start disabled — we control profiling via spx_profiler_start/stop
     'SPX_AUTO_START' => '0',
-    'SPX_ENABLED'    => '1',
-    'SPX_REPORT'     => 'full',
-    'SPX_BUILTINS'   => '1',  // Profile internal functions too (reveals SQLite, Twig internals)
-    'SPX_METRICS'    => 'wt,ct,zm', // Wall time, CPU time, ZE memory
+    'SPX_ENABLED' => '1',
+    'SPX_REPORT' => 'full',
+    'SPX_BUILTINS' => '1',  // Profile internal functions too (reveals SQLite, Twig internals)
+    'SPX_METRICS' => 'wt,ct,zm', // Wall time, CPU time, ZE memory
 ]);
 
 $serverCmd = [
     $phpBin,
-    "-d", "extension={$spxSo}",
-    "-d", "spx.http_enabled=1",
-    "-d", "spx.http_key=dev",
-    "-d", "spx.http_ip_whitelist=127.0.0.1",
-    "-d", "spx.data_dir={$spxData}",
-    "-d", "spx.http_ui_assets_dir={$spxAssets}",
-    "-d", "zlib.output_compression=0",
+    '-d', "extension={$spxSo}",
+    '-d', 'spx.http_enabled=1',
+    '-d', 'spx.http_key=dev',
+    '-d', 'spx.http_ip_whitelist=127.0.0.1',
+    '-d', "spx.data_dir={$spxData}",
+    '-d', "spx.http_ui_assets_dir={$spxAssets}",
+    '-d', 'zlib.output_compression=0',
     $websiteApp,
 ];
 
@@ -128,6 +131,7 @@ $serverProc = proc_open($serverCmd, $desc, $pipes, null, $serverEnv);
 
 if ($serverProc === false) {
     fwrite(STDERR, "ERROR: proc_open failed\n");
+
     exit(1);
 }
 
@@ -136,6 +140,7 @@ if (!waitForReady($port)) {
     fwrite(STDERR, "TIMEOUT: server did not start within 15 s\n");
     fwrite(STDERR, "Check /tmp/spx-server.log for errors\n");
     proc_terminate($serverProc);
+
     exit(1);
 }
 echo "  Server ready.\n\n";
@@ -156,13 +161,13 @@ $hammerCmd = [
     $phpBin,
     $hammer,
     "--url=http://127.0.0.1:{$port}",
-    "--route=/examples/spreadsheet",
-    "--action=navigate",
-    "--signal=focusRow",
+    '--route=/examples/spreadsheet',
+    '--action=navigate',
+    '--signal=focusRow',
     '--signals={"key":"ArrowDown","shift":false}',
     "--actions={$actions}",
-    "--concurrency=1",   // Serial — cleaner profile, one action at a time
-    "--timeout=10",
+    '--concurrency=1',   // Serial — cleaner profile, one action at a time
+    '--timeout=10',
 ];
 
 $hammerResult = '';
@@ -241,21 +246,21 @@ echo "Running standalone flat profile (CLI, no server) ...\n\n";
 $profileScript = createInlineProfileScript($port, $spxData);
 $profileCmd = [
     $phpBin,
-    "-d", "extension={$spxSo}",
-    "-d", "spx.data_dir={$spxData}",
-    "-d", "spx.http_ui_assets_dir={$spxAssets}",
-    "-d", "zlib.output_compression=0",
-    "-r", $profileScript,
+    '-d', "extension={$spxSo}",
+    '-d', "spx.data_dir={$spxData}",
+    '-d', "spx.http_ui_assets_dir={$spxAssets}",
+    '-d', 'zlib.output_compression=0',
+    '-r', $profileScript,
 ];
 
 $profEnv = array_merge(getenv() ?: [], [
-    'SPX_ENABLED'    => '1',
+    'SPX_ENABLED' => '1',
     'SPX_AUTO_START' => '1',
-    'SPX_REPORT'     => 'fp',
-    'SPX_BUILTINS'   => '1',
-    'SPX_METRICS'    => 'wt,ct,zm',
-    'SPX_FP_LIMIT'   => '20',
-    'SPX_FP_COLOR'   => '1',
+    'SPX_REPORT' => 'fp',
+    'SPX_BUILTINS' => '1',
+    'SPX_METRICS' => 'wt,ct,zm',
+    'SPX_FP_LIMIT' => '20',
+    'SPX_FP_COLOR' => '1',
 ]);
 
 $pp = proc_open($profileCmd, [0 => ['pipe', 'r'], 1 => STDOUT, 2 => STDOUT], $pp_pipes, __DIR__ . '/../../website', $profEnv);
@@ -267,8 +272,13 @@ if ($pp) {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function human_readable_size(int $bytes): string {
-    if ($bytes < 1024) return "{$bytes} B";
-    if ($bytes < 1024 * 1024) return round($bytes / 1024, 1) . ' KB';
+    if ($bytes < 1024) {
+        return "{$bytes} B";
+    }
+    if ($bytes < 1024 * 1024) {
+        return round($bytes / 1024, 1) . ' KB';
+    }
+
     return round($bytes / (1024 * 1024), 2) . ' MB';
 }
 

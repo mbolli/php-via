@@ -73,7 +73,6 @@ declare(strict_types=1);
  *  Server stdout/stderr is suppressed (/dev/null) to keep output clean.
  *  Pass VIA_BENCH_DEBUG=1 to redirect server stderr to this process's stderr.
  */
-
 if (!extension_loaded('openswoole')) {
     fwrite(STDERR, "Error: ext-openswoole is required in the CLI PHP binary.\n");
 
@@ -90,36 +89,36 @@ if (isset($opts['help'])) {
     exit(0);
 }
 
-$benchPort   = (int) ($opts['port']        ?? 3099);
-$hammActions = (int) ($opts['actions']     ?? 5000);
-$hammConc    = (int) ($opts['concurrency'] ?? 200);
-$hammTimeout = (int) ($opts['timeout']     ?? 5);
+$benchPort = (int) ($opts['port'] ?? 3099);
+$hammActions = (int) ($opts['actions'] ?? 5000);
+$hammConc = (int) ($opts['concurrency'] ?? 200);
+$hammTimeout = (int) ($opts['timeout'] ?? 5);
 $debugServer = (bool) (getenv('VIA_BENCH_DEBUG') ?: false);
 
-/** @var list<string>|null $filterProfiles */
+/** @var null|list<string> $filterProfiles */
 $filterProfiles = isset($opts['profile'])
     ? array_map('trim', explode(',', (string) $opts['profile']))
     : null;
 
-/** @var list<string>|null $filterWorkloads */
+/** @var null|list<string> $filterWorkloads */
 $filterWorkloads = isset($opts['workload'])
     ? array_map('trim', explode(',', (string) $opts['workload']))
     : null;
 
-$phpBin   = PHP_BINARY;
-$hammer   = __DIR__ . '/action_hammer.php';
+$phpBin = PHP_BINARY;
+$hammer = __DIR__ . '/action_hammer.php';
 
 // Resolve which app to benchmark.
 $appArg = (string) ($opts['app'] ?? '');
 if ($appArg === 'website') {
     $benchApp = (string) realpath(__DIR__ . '/../../website/app.php');
-    $baseEnv  = ['APP_ENV' => 'dev']; // devMode=true → no Origin header required
+    $baseEnv = ['APP_ENV' => 'dev']; // devMode=true → no Origin header required
 } elseif ($appArg === '' || $appArg === 'bench') {
     $benchApp = __DIR__ . '/bench_app.php';
-    $baseEnv  = [];
+    $baseEnv = [];
 } else {
     $benchApp = (string) realpath($appArg);
-    $baseEnv  = [];
+    $baseEnv = [];
 }
 $isWebsiteApp = str_ends_with($benchApp, 'website/app.php');
 
@@ -131,7 +130,7 @@ $preloadFile = (string) realpath(__DIR__ . '/bench_preload.php');
 $preloadUser = 'root';
 
 if (function_exists('posix_getuid') && posix_getuid() !== 0) {
-    $pwent       = posix_getpwuid(posix_getuid());
+    $pwent = posix_getpwuid(posix_getuid());
     $preloadUser = is_array($pwent) ? (string) $pwent['name'] : get_current_user();
 }
 
@@ -144,26 +143,26 @@ if (function_exists('posix_getuid') && posix_getuid() !== 0) {
 
 $profiles = [
     [
-        'name'    => 'no-opcache',
-        'flags'   => [
+        'name' => 'no-opcache',
+        'flags' => [
             'opcache.enable=0',
             'opcache.enable_cli=0',
         ],
-        'env'     => [],
+        'env' => [],
         'workers' => 1,
     ],
     [
-        'name'    => 'opcache-default-cli',
-        'flags'   => [
+        'name' => 'opcache-default-cli',
+        'flags' => [
             'opcache.enable=1',
             'opcache.enable_cli=1',
         ],
-        'env'     => [],
+        'env' => [],
         'workers' => 1,
     ],
     [
-        'name'    => 'opcache-tuned',
-        'flags'   => [
+        'name' => 'opcache-tuned',
+        'flags' => [
             'opcache.enable=1',
             'opcache.enable_cli=1',
             'opcache.memory_consumption=256',
@@ -171,12 +170,12 @@ $profiles = [
             'opcache.max_accelerated_files=100000',
             'opcache.validate_timestamps=0',
         ],
-        'env'     => [],
+        'env' => [],
         'workers' => 1,
     ],
     [
-        'name'    => 'jit-function',
-        'flags'   => [
+        'name' => 'jit-function',
+        'flags' => [
             'opcache.enable=1',
             'opcache.enable_cli=1',
             'opcache.memory_consumption=256',
@@ -186,12 +185,12 @@ $profiles = [
             'opcache.jit=function',
             'opcache.jit_buffer_size=128M',
         ],
-        'env'     => [],
+        'env' => [],
         'workers' => 1,
     ],
     [
-        'name'    => 'jit-tracing',
-        'flags'   => [
+        'name' => 'jit-tracing',
+        'flags' => [
             'opcache.enable=1',
             'opcache.enable_cli=1',
             'opcache.memory_consumption=256',
@@ -201,12 +200,12 @@ $profiles = [
             'opcache.jit=tracing',
             'opcache.jit_buffer_size=128M',
         ],
-        'env'     => [],
+        'env' => [],
         'workers' => 1,
     ],
     [
-        'name'    => 'opcache-preload',
-        'flags'   => [
+        'name' => 'opcache-preload',
+        'flags' => [
             'opcache.enable=1',
             'opcache.enable_cli=1',
             'opcache.memory_consumption=256',
@@ -216,12 +215,12 @@ $profiles = [
             'opcache.preload=' . $preloadFile,
             'opcache.preload_user=' . $preloadUser,
         ],
-        'env'     => [],
+        'env' => [],
         'workers' => 1,
     ],
     [
-        'name'    => 'multi-worker-4w',
-        'flags'   => [
+        'name' => 'multi-worker-4w',
+        'flags' => [
             'opcache.enable=1',
             'opcache.enable_cli=1',
             'opcache.memory_consumption=256',
@@ -232,7 +231,7 @@ $profiles = [
             'opcache.jit_buffer_size=128M',
         ],
         // VIA_BENCH_WORKERS triggers SwooleBroker + ROUTE scope in bench_app
-        'env'     => ['VIA_BENCH_WORKERS' => '4'],
+        'env' => ['VIA_BENCH_WORKERS' => '4'],
         'workers' => 4,
     ],
 ];
@@ -241,40 +240,40 @@ $profiles = [
 
 $workloads = [
     [
-        'name'    => 'counter',
-        'route'   => '/bench/counter',
-        'label'   => 'Counter (trivial increment)',
+        'name' => 'counter',
+        'route' => '/bench/counter',
+        'label' => 'Counter (trivial increment)',
     ],
     [
-        'name'    => 'cpu',
-        'route'   => '/bench/cpu',
-        'label'   => 'CPU (Mandelbrot 50×50)',
+        'name' => 'cpu',
+        'route' => '/bench/cpu',
+        'label' => 'CPU (Mandelbrot 50×50)',
     ],
     [
-        'name'    => 'io',
-        'route'   => '/bench/io',
-        'label'   => 'IO (Co::sleep 2 ms)',
+        'name' => 'io',
+        'route' => '/bench/io',
+        'label' => 'IO (Co::sleep 2 ms)',
     ],
     [
-        'name'    => 'spreadsheet',
-        'route'   => '/bench/spreadsheet',
-        'label'   => 'Spreadsheet (SQLite query + 20×10 viewport build)',
+        'name' => 'spreadsheet',
+        'route' => '/bench/spreadsheet',
+        'label' => 'Spreadsheet (SQLite query + 20×10 viewport build)',
     ],
     [
-        'name'    => 'spreadsheet-live',
-        'route'   => '/examples/spreadsheet',
-        'label'   => 'Spreadsheet live (full Twig + SQLite + virtual scroll)',
-        'action'  => 'navigate',
-        'signal'  => 'focusRow',
+        'name' => 'spreadsheet-live',
+        'route' => '/examples/spreadsheet',
+        'label' => 'Spreadsheet live (full Twig + SQLite + virtual scroll)',
+        'action' => 'navigate',
+        'signal' => 'focusRow',
         'signals' => '{"key":"ArrowDown","shift":false}',
         'appOnly' => 'website', // skipped when using bench_app
     ],
     [
-        'name'    => 'spreadsheet-raw-live',
-        'route'   => '/examples/spreadsheet-raw',
-        'label'   => 'Spreadsheet live — raw PHP SSE render (no Twig on hot path)',
-        'action'  => 'navigate',
-        'signal'  => 'focusRow',
+        'name' => 'spreadsheet-raw-live',
+        'route' => '/examples/spreadsheet-raw',
+        'label' => 'Spreadsheet live — raw PHP SSE render (no Twig on hot path)',
+        'action' => 'navigate',
+        'signal' => 'focusRow',
         'signals' => '{"key":"ArrowDown","shift":false}',
         'appOnly' => 'website', // skipped when using bench_app
     ],
@@ -285,12 +284,12 @@ $workloads = [
 /**
  * Start the bench_app server.
  *
- * @param list<string>         $flags   -d flag values ("key=value")
+ * @param list<string>         $flags    -d flag values ("key=value")
  * @param array<string,string> $extraEnv Extra env vars for the process
- * @param int                  $port    Listening port
- * @param bool                 $debug   Redirect server stderr to this process
+ * @param int                  $port     Listening port
+ * @param bool                 $debug    Redirect server stderr to this process
  *
- * @return resource|false proc_open handle or false on failure
+ * @return false|resource proc_open handle or false on failure
  */
 function startServer(array $flags, array $extraEnv, array $baseEnv, int $port, bool $debug, string $phpBin, string $benchApp): mixed {
     $cmd = [$phpBin];
@@ -425,10 +424,10 @@ function runHammer(
  */
 function parseHammerOutput(string $output): array {
     $result = [
-        'throughput'   => 0,
-        'http_ok_pct'  => 0.0,
-        'patch_pct'    => 0.0,
-        'wall_time'    => 0.0,
+        'throughput' => 0,
+        'http_ok_pct' => 0.0,
+        'patch_pct' => 0.0,
+        'wall_time' => 0.0,
     ];
 
     if (preg_match('/HTTP OK\s+:\s+\d+\s+\((\d+\.?\d*)%\)/', $output, $m)) {
@@ -487,12 +486,12 @@ printf("  App          : %s\n", basename($benchApp));
 printf("  Port         : %d\n", $benchPort);
 printf("  Actions/pass : %d\n", $hammActions);
 printf("  Concurrency  : %d\n", $hammConc);
-printf("  Profiles     : %d", count($profiles));
+printf('  Profiles     : %d', count($profiles));
 if ($filterProfiles !== null) {
     printf(' (filter: %s)', implode(', ', $filterProfiles));
 }
 echo "\n";
-printf("  Workloads    : %d", count($workloads));
+printf('  Workloads    : %d', count($workloads));
 if ($filterWorkloads !== null) {
     printf(' (filter: %s)', implode(', ', $filterWorkloads));
 }
@@ -505,14 +504,14 @@ echo "\n";
  * results[profile_name][workload_name] = [
  *   'cold' => ['throughput' => int, 'http_ok_pct' => float, ...],
  *   'warm' => [...],
- * ]
+ * ].
  *
  * @var array<string,array<string,array{cold:array<string,mixed>,warm:array<string,mixed>}>> $results
  */
 $results = [];
 
 foreach ($profiles as $profile) {
-    $pName   = $profile['name'];
+    $pName = $profile['name'];
     $workers = $profile['workers'];
 
     if ($filterProfiles !== null && !in_array($pName, $filterProfiles, true)) {
@@ -545,7 +544,7 @@ foreach ($profiles as $profile) {
     }
 
     // Wait for readiness (max 10 s)
-    echo "  Waiting for server to start ...";
+    echo '  Waiting for server to start ...';
 
     if (!waitForReady($benchPort)) {
         echo " TIMEOUT\n";
@@ -565,10 +564,10 @@ foreach ($profiles as $profile) {
     $results[$pName] = [];
 
     foreach ($workloads as $wl) {
-        $wName  = $wl['name'];
-        $route  = $wl['route'];
-        $action = $wl['action']  ?? 'increment';
-        $signal = $wl['signal']  ?? 'count';
+        $wName = $wl['name'];
+        $route = $wl['route'];
+        $action = $wl['action'] ?? 'increment';
+        $signal = $wl['signal'] ?? 'count';
         $signals = $wl['signals'] ?? '{}';
 
         if ($filterWorkloads !== null && !in_array($wName, $filterWorkloads, true)) {
@@ -583,20 +582,21 @@ foreach ($profiles as $profile) {
         echo "  {$wName}:";
 
         // ── Cold pass ────────────────────────────────────────────────────────
-        echo " cold...";
+        echo ' cold...';
         $cold = runHammer($benchPort, $route, $action, $signal, $signals, $hammActions, $hammConc, $hammTimeout, $phpBin, $hammer);
-        printf(" %5d req/s (OK: %.1f%%)", $cold['throughput'], $cold['http_ok_pct']);
+        printf(' %5d req/s (OK: %.1f%%)', $cold['throughput'], $cold['http_ok_pct']);
 
         if ($cold['http_ok_pct'] === 0.0) {
             echo "\n  SKIP: cold pass returned 0% HTTP OK — profile likely incompatible with this environment.\n";
             echo "        (OPcache preloading + OpenSwoole worker fork may SIGSEGV on WSL2/this host.)\n\n";
             stopServer($server);
             usleep(500_000);
+
             continue 2;
         }
 
         // ── Warm pass ────────────────────────────────────────────────────────
-        echo "  warm...";
+        echo '  warm...';
         $warm = runHammer($benchPort, $route, $action, $signal, $signals, $hammActions, $hammConc, $hammTimeout, $phpBin, $hammer);
         printf(" %5d req/s (OK: %.1f%%)\n", $warm['throughput'], $warm['http_ok_pct']);
 
@@ -604,6 +604,7 @@ foreach ($profiles as $profile) {
             echo "\n  SKIP: warm pass returned 0% HTTP OK — server may have crashed after cold pass.\n\n";
             stopServer($server);
             usleep(500_000);
+
             continue 2;
         }
 

@@ -44,14 +44,15 @@ use Mbolli\PhpVia\Via;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
-$port    = (int) (getenv('VIA_PORT')    ?: 3099);
+$port = (int) (getenv('VIA_PORT') ?: 3099);
 $workers = (int) (getenv('VIA_BENCH_WORKERS') ?: 1);
 
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort($port)
     ->withLogLevel('error')
-    ->withDevMode(true); // allows hammer's headerless tool requests (no Origin: header)
+    ->withDevMode(true) // allows hammer's headerless tool requests (no Origin: header)
+;
 
 if ($workers > 1) {
     // ROUTE scope is used when multi-worker so that actions registered by
@@ -109,17 +110,17 @@ $app->page('/bench/cpu', function (Context $c) use ($useRouteScope): void {
     $action = $c->action(function (Context $ctx): void {
         $sum = 0;
 
-        for ($px = 0; $px < 50; $px++) {
-            for ($py = 0; $py < 50; $py++) {
-                $cx   = ($px / 50.0) * 3.5 - 2.5; // real axis: [-2.5, 1.0]
-                $cy   = ($py / 50.0) * 2.0 - 1.0; // imaginary axis: [-1.0, 1.0]
-                $zx   = $zy = 0.0;
+        for ($px = 0; $px < 50; ++$px) {
+            for ($py = 0; $py < 50; ++$py) {
+                $cx = ($px / 50.0) * 3.5 - 2.5; // real axis: [-2.5, 1.0]
+                $cy = ($py / 50.0) * 2.0 - 1.0; // imaginary axis: [-1.0, 1.0]
+                $zx = $zy = 0.0;
                 $iter = 0;
 
                 while ($zx * $zx + $zy * $zy <= 4.0 && $iter < 100) {
                     $tmp = $zx * $zx - $zy * $zy + $cx;
-                    $zy  = 2.0 * $zx * $zy + $cy;
-                    $zx  = $tmp;
+                    $zy = 2.0 * $zx * $zy + $cy;
+                    $zx = $tmp;
                     ++$iter;
                 }
 
@@ -179,7 +180,7 @@ function benchColName(int $col): string {
     return $name;
 }
 
-function benchGetCellRange(\SQLite3 $db, int $startRow, int $startCol, int $rows, int $cols): array {
+function benchGetCellRange(SQLite3 $db, int $startRow, int $startCol, int $rows, int $cols): array {
     $stmt = $db->prepare(
         'SELECT row, col, value FROM cells
          WHERE row >= :sr AND row < :er AND col >= :sc AND col < :ec'
@@ -189,7 +190,7 @@ function benchGetCellRange(\SQLite3 $db, int $startRow, int $startCol, int $rows
     $stmt->bindValue(':sc', $startCol, SQLITE3_INTEGER);
     $stmt->bindValue(':ec', $startCol + $cols, SQLITE3_INTEGER);
     $result = $stmt->execute();
-    $cells  = [];
+    $cells = [];
 
     while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         $cells[$row['row'] . ':' . $row['col']] = (string) $row['value'];
@@ -198,10 +199,10 @@ function benchGetCellRange(\SQLite3 $db, int $startRow, int $startCol, int $rows
     return $cells;
 }
 
-$dbPath  = file_exists(__DIR__ . '/../../website/spreadsheet.db')
+$dbPath = file_exists(__DIR__ . '/../../website/spreadsheet.db')
     ? __DIR__ . '/../../website/spreadsheet.db'
     : ':memory:';
-$benchDb = new \SQLite3($dbPath);
+$benchDb = new SQLite3($dbPath);
 $benchDb->exec('PRAGMA journal_mode=WAL');
 $benchDb->exec('PRAGMA synchronous=NORMAL');
 $benchDb->exec(
@@ -237,7 +238,7 @@ $app->page('/bench/spreadsheet', function (Context $c) use ($useRouteScope, $ben
             for ($col = 0; $col < 10; ++$col) {
                 $absR = $vr + $r;
                 $absC = $vc + $col;
-                $val  = htmlspecialchars($cells[$absR . ':' . $absC] ?? '');
+                $val = htmlspecialchars($cells[$absR . ':' . $absC] ?? '');
                 $focused = ($absR === $fr && $absC === $fc) ? ' style="outline:2px solid #4f8ef7"' : '';
                 $html .= "<td{$focused}>{$val}</td>";
             }

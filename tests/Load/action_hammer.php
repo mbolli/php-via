@@ -79,7 +79,7 @@ if (!extension_loaded('openswoole')) {
 
 // ── CLI argument parsing ──────────────────────────────────────────────────────
 
-$opts = getopt('', ['url:', 'route:', 'action:', 'signal:', 'signals:', 'actions:', 'concurrency:', 'observers:', 'timeout:', 'help']);
+$opts = getopt('', ['url:', 'route:', 'action:', 'signal:', 'signals:', 'actions:', 'concurrency:', 'observers:', 'timeout:', 'no-tls-verify', 'help']);
 
 if (isset($opts['help'])) {
     echo file_get_contents(__FILE__);
@@ -96,6 +96,7 @@ $totalActions = (int) ($opts['actions'] ?? 10000);
 $concurrency = (int) ($opts['concurrency'] ?? 200);
 $numObservers = (int) ($opts['observers'] ?? 1);
 $timeoutSec = (float) ($opts['timeout'] ?? 5.0);
+$noTlsVerify = isset($opts['no-tls-verify']);
 
 $parsedUrl = parse_url($baseUrl);
 $host = $parsedUrl['host'] ?? '127.0.0.1';
@@ -125,11 +126,12 @@ Coroutine::run(function () use (
     $totalActions,
     $concurrency,
     $numObservers,
-    $timeoutSec
+    $timeoutSec,
+    $noTlsVerify
 ): void {
     // Step 1: Load the page once to discover the action URL.
     echo "Loading page {$route} ...\n";
-    [$ctxId, $initialSignals, $actionPath, $sessionCookies] = loadPage($host, $port, $ssl, $route, $actionName);
+    [$ctxId, $initialSignals, $actionPath, $sessionCookies] = loadPage($host, $port, $ssl, $route, $actionName, $noTlsVerify);
 
     if ($ctxId === null) {
         fwrite(STDERR, "ERROR: Could not find via_ctx in <meta data-signals> on {$route}.\n");
@@ -161,8 +163,8 @@ Coroutine::run(function () use (
         echo "Opening {$numObservers} observer SSE connections (loading page for each) ...\n";
         $loadChan = new Channel($numObservers - 1);
         for ($i = 1; $i < $numObservers; ++$i) {
-            Coroutine::create(function () use ($host, $port, $ssl, $route, $actionName, $loadChan): void {
-                [$c] = loadPage($host, $port, $ssl, $route, $actionName);
+            Coroutine::create(function () use ($host, $port, $ssl, $route, $actionName, $loadChan, $noTlsVerify): void {
+                [$c] = loadPage($host, $port, $ssl, $route, $actionName, $noTlsVerify);
                 $loadChan->push($c ?? '');
             });
         }
@@ -189,9 +191,10 @@ Coroutine::run(function () use (
             $sseQuery,
             $patchChan,
             $observerDone,
-            $signalName
+            $signalName,
+            $noTlsVerify
         ): void {
-            openSseObserver($host, $port, $ssl, $sseQuery, $patchChan, $observerDone, $signalName);
+            openSseObserver($host, $port, $ssl, $sseQuery, $patchChan, $observerDone, $signalName, $noTlsVerify);
         });
     }
 
@@ -250,9 +253,10 @@ Coroutine::run(function () use (
                 $baseBody,
                 $resultChan,
                 $timeoutSec,
-                $sessionCookies
+                $sessionCookies,
+                $noTlsVerify
             ): void {
-                $ok = fireAction($host, $port, $ssl, $actionPath, $baseBody, $timeoutSec, $sessionCookies);
+                $ok = fireAction($host, $port, $ssl, $actionPath, $baseBody, $timeoutSec, $sessionCookies, $noTlsVerify);
                 $resultChan->push($ok ? 1 : 0);
             });
         }
@@ -373,12 +377,14 @@ Coroutine::run(function () use (
  *
  * @return array{null|string, array<string, mixed>, null|string}
  */
-function loadPage(string $host, int $port, bool $ssl, string $route, string $actionName): array {
+function loadPage(string $host, int $port, bool $ssl, string $route, string $actionName, bool $noTlsVerify = false): array {
     $client = new Client($host, $port, $ssl);
-    $client->set(['timeout' => 10.0]);
+    $sslOpts = $noTlsVerify ? ['ssl_verify_peer' => false, 'ssl_host_name' => ''] : [];
+    $client->set(array_merge(['timeout' => 10.0], $sslOpts));
     $client->get($route);
 
     $html = $client->body ?? '';
+
     /** @var array<string,string> $sessionCookies */
     $sessionCookies = $client->cookies ?? [];
     $client->close();
@@ -429,11 +435,12 @@ function loadPage(string $host, int $port, bool $ssl, string $route, string $act
  */
 /**
  * @param array<string,string> $cookies
- * @param array<string,mixed> $signals
+ * @param array<string,mixed>  $signals
  */
-function fireAction(string $host, int $port, bool $ssl, string $actionPath, array $signals, float $timeout, array $cookies = []): bool {
+function fireAction(string $host, int $port, bool $ssl, string $actionPath, array $signals, float $timeout, array $cookies = [], bool $noTlsVerify = false): bool {
     $client = new Client($host, $port, $ssl);
-    $client->set(['timeout' => $timeout]);
+    $sslOpts = $noTlsVerify ? ['ssl_verify_peer' => false, 'ssl_host_name' => ''] : [];
+    $client->set(array_merge(['timeout' => $timeout], $sslOpts));
     if ($cookies !== []) {
         $client->setCookies($cookies);
     }
@@ -471,10 +478,14 @@ function openSseObserver(
     string $sseQuery,
     Channel $patchChan,
     Channel $observerDone,
-    string $signalName
+    string $signalName,
+    bool $noTlsVerify = false
 ): void {
     $sockType = $ssl ? SWOOLE_SOCK_TCP | SWOOLE_SSL : SWOOLE_SOCK_TCP;
     $client = new Coroutine\Client($sockType);
+    if ($noTlsVerify && $ssl) {
+        $client->set(['ssl_verify_peer' => false]);
+    }
 
     if (!$client->connect($host, $port, 5.0)) {
         fwrite(STDERR, "SSE observer: connect failed ({$client->errMsg})\n");
