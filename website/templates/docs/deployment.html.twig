@@ -58,10 +58,6 @@ myapp.example.com {
 
     # Proxy everything else to OpenSwoole
     reverse_proxy localhost:3000 {
-        # Required for SSE: disable buffering
-        flush_interval -1
-
-        # Optional: pass real IP to app
         header_up X-Real-IP {remote_host}
     }
 }
@@ -86,9 +82,7 @@ $config = (new Config())
     {% code 'caddy' %}{% verbatim %}
 example.com {
     handle /myapp/* {
-        reverse_proxy localhost:3000 {
-            flush_interval -1
-        }
+        reverse_proxy localhost:3000
     }
 }
     {% endverbatim %}{% endcode %}
@@ -128,7 +122,6 @@ $config = (new Config())
     {% code 'caddy' %}{% verbatim %}
 myapp.example.com {
     reverse_proxy h2c://localhost:3000 {
-        flush_interval -1
         header_up X-Real-IP {remote_host}
     }
     # No `encode` directive — php-via handles Brotli
@@ -318,7 +311,6 @@ $config = (new Config())
 myapp.example.com {
     reverse_proxy localhost:3001 localhost:3002 localhost:3003 localhost:3004 {
         lb_policy cookie caddy_lb   # sticky — correctness-critical, not optional
-        flush_interval -1           # required for SSE
         health_uri     /_health
         health_interval 5s
     }
@@ -326,35 +318,8 @@ myapp.example.com {
     {% endverbatim %}{% endcode %}
     <p>
         Start N copies via systemd template units or a process supervisor that varies
-        <code>VIA_PORT</code>. Each process contributes its full per-process throughput
-        independently.
-    </p>
-
-    <h3 id="scaling-measured">Measured throughput (this system)</h3>
-    <p class="note">
-        Results from PHP 8.4.20, OpenSwoole 25.2.0, <code>jit=tracing</code>,
-        single process, direct HTTP (no proxy). System: WSL2/x86-64. Absolute numbers vary by
-        hardware — treat deltas as directional guidance, not guarantees.
-    </p>
-    <table>
-        <thead><tr><th>Workload</th><th>req/s (single process)</th><th>Scales with N processes?</th></tr></thead>
-        <tbody>
-            <tr><td>Counter (in-memory increment)</td><td>~5,000</td><td>Yes — near-linear</td></tr>
-            <tr><td>IO (2 ms coroutine sleep per action)</td><td>~800–1,000</td><td>Yes — near-linear</td></tr>
-            <tr><td>CPU-bound (Mandelbrot 50×50 float)</td><td>~2,700</td><td>Yes — near-linear</td></tr>
-            <tr><td>SQLite-bound (range query + Twig render)</td><td>~250–350</td><td>Limited — blocking SQLite serialises concurrent coroutines; reduce query count with in-process caching</td></tr>
-        </tbody>
-    </table>
-    <p>
-        With N independent processes and cookie-sticky routing, total throughput scales
-        near-linearly up to CPU saturation. A 4-core server can sustain ~20,000 counter
-        req/s across 4 processes at 100% HTTP OK.
-    </p>
-    <p class="note">
-        <strong>Benchmarking behind a reverse proxy on WSL2:</strong> Docker containers accessing
-        the host via <code>host.docker.internal</code> (Hyper-V bridge) add ~5× latency overhead
-        at 200 concurrent connections. Benchmark your proxy on the same native Linux host as the
-        application to get representative numbers.
+        <code>VIA_PORT</code>. With cookie-sticky routing in place, throughput scales
+        near-linearly with the number of processes up to CPU saturation.
     </p>
 
     <h3 id="same-machine">Same machine — SwooleBroker</h3>
