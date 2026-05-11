@@ -32,9 +32,10 @@ All numbers measured on PHP 8.4.20, opcache-tuned (no JIT), `--actions=2000 --co
 | 5 — raw PHP renderer | **805–942 req/s** | **+397–481%** |
 
 > The step 5 range reflects different test parameters: 805 req/s was measured with
-> `--actions=2000 --concurrency=100, opcache-tuned`; 942 req/s with
-> `--actions=1000 --concurrency=50, no-opcache` (bench_opcache.php, May 2026).
-> With `jit-tracing` the raw path reaches **1,072 req/s** under the same conditions.
+> `profile_spreadsheet.php` + SPX profiling (which adds ~10–20% overhead), opcache-tuned;
+> 858–1,109 req/s from `bench_opcache.php` 2,000 actions, concurrency=100 (no-opcache
+> warm: 858; jit-tracing warm: 1,109). `opcache-tuned` warm is unreliable on the raw
+> path — see BENCHMARK_RESULTS.md for details.
 
 ### SSE payload size per action
 
