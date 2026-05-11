@@ -129,7 +129,7 @@ Coroutine::run(function () use (
 ): void {
     // Step 1: Load the page once to discover the action URL.
     echo "Loading page {$route} ...\n";
-    [$ctxId, $initialSignals, $actionPath] = loadPage($host, $port, $ssl, $route, $actionName);
+    [$ctxId, $initialSignals, $actionPath, $sessionCookies] = loadPage($host, $port, $ssl, $route, $actionName);
 
     if ($ctxId === null) {
         fwrite(STDERR, "ERROR: Could not find via_ctx in <meta data-signals> on {$route}.\n");
@@ -249,9 +249,10 @@ Coroutine::run(function () use (
                 $actionPath,
                 $baseBody,
                 $resultChan,
-                $timeoutSec
+                $timeoutSec,
+                $sessionCookies
             ): void {
-                $ok = fireAction($host, $port, $ssl, $actionPath, $baseBody, $timeoutSec);
+                $ok = fireAction($host, $port, $ssl, $actionPath, $baseBody, $timeoutSec, $sessionCookies);
                 $resultChan->push($ok ? 1 : 0);
             });
         }
@@ -378,6 +379,8 @@ function loadPage(string $host, int $port, bool $ssl, string $route, string $act
     $client->get($route);
 
     $html = $client->body ?? '';
+    /** @var array<string,string> $sessionCookies */
+    $sessionCookies = $client->cookies ?? [];
     $client->close();
 
     // The attribute uses single quotes so the JSON inside is unambiguous.
@@ -391,7 +394,7 @@ function loadPage(string $host, int $port, bool $ssl, string $route, string $act
     }
 
     if (!is_array($signals)) {
-        return [null, [], null];
+        return [null, [], null, []];
     }
 
     $ctxId = isset($signals['via_ctx']) ? (string) $signals['via_ctx'] : null;
@@ -415,7 +418,7 @@ function loadPage(string $host, int $port, bool $ssl, string $route, string $act
         }
     }
 
-    return [$ctxId, $signals, $actionPath];
+    return [$ctxId, $signals, $actionPath, $sessionCookies];
 }
 
 /**
@@ -424,9 +427,16 @@ function loadPage(string $host, int $port, bool $ssl, string $route, string $act
  *
  * @param array<string, mixed> $signals
  */
-function fireAction(string $host, int $port, bool $ssl, string $actionPath, array $signals, float $timeout): bool {
+/**
+ * @param array<string,string> $cookies
+ * @param array<string,mixed> $signals
+ */
+function fireAction(string $host, int $port, bool $ssl, string $actionPath, array $signals, float $timeout, array $cookies = []): bool {
     $client = new Client($host, $port, $ssl);
     $client->set(['timeout' => $timeout]);
+    if ($cookies !== []) {
+        $client->setCookies($cookies);
+    }
 
     $body = (string) json_encode($signals);
     $client->setHeaders([

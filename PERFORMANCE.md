@@ -345,3 +345,93 @@ latency is ~0.5ms; NATS is ~0.1ms.
 | Horizontal scaling (15 nodes) + broker | ~120,000 | High |
 
 The broker is already the hardest piece, and it's done.
+
+---
+
+## OPcache / JIT Tuning
+
+Measured May 2026. PHP 8.4.20, OpenSwoole 25.2.0, WSL2 Linux 6.6.87.2.  
+Test tool: `tests/Load/bench_opcache.php` — 5,000 actions × cold + warm pass (bench_app);
+1,000 actions × cold + warm pass (spreadsheet-live, website app).  
+Run with `--app=bench` or `--app=website`.  
+
+### What was tested
+
+Four workloads, seven profiles:
+
+| Workload | App | What it stresses |
+|----------|-----|------------------|
+| **Counter** | bench_app | Pure framework overhead: context lookup, signal mutation, SSE patch queue |
+| **CPU** | bench_app | Mandelbrot 50×50 grid, ~250k float ops/action. Canonical JIT target. |
+| **IO** | bench_app | `usleep(2_000)` per action. Bottleneck is coroutine scheduling, not bytecode. |
+| **Spreadsheet live** | website/app.php | Full Twig rendering + SQLite range query (20×10 viewport) + virtual scroll. Real-app baseline. |
+
+### Results summary (warm pass, req/s)
+
+#### bench_app workloads (5,000 actions, concurrency=200)
+
+| Profile | Counter | CPU | IO |
+|---------|---------|-----|-----|
+| no-opcache (baseline) | 4,016 | 349 | 4,055 |
+| opcache-default-cli | 3,952 | 766 | 4,351 |
+| opcache-tuned | 4,345 | 591 | 3,934 |
+| jit-function | 3,921 | 2,749 | **431** ⚠️ |
+| jit-tracing | **4,839** | **2,744** | 3,940 |
+| opcache-preload | SKIPPED† | | |
+| multi-worker-4w | — ‡ | — ‡ | — ‡ |
+
+† OPcache preloading causes SIGSEGV in OpenSwoole worker fork on this host (known incompatibility with POOL_MODE).  
+‡ Multi-worker results unreliable in bench_app due to benchmark design (context not pre-registered on all workers; ~83–90% 403 failures).
+
+#### Spreadsheet live workload (1,000 actions, concurrency=50, website/app.php)
+
+`navigate` action against `/examples/spreadsheet` — full Twig render, SQLite query, real SpreadsheetExample.php logic.
+
+| Profile | Cold req/s | Warm req/s | vs baseline | Cold OK% |
+|---------|------------|------------|-------------|----------|
+| no-opcache (baseline) | 101 | 101 | — | 100% |
+| opcache-default-cli | 101 | 111 | +9.9% | 100% |
+| opcache-tuned | 125 | 116 | **+14.9%** | 100% |
+| jit-function | 141 | 110 | +8.9% | 100% |
+| jit-tracing | 151 | 106 | +5.0% | 100% |
+| opcache-preload | SKIPPED† | | | |
+| multi-worker-4w | 49 | 46 | −54.5% ⚠️ | 100% |
+
+### Key findings
+
+**JIT is transformative for CPU-bound code.**  
+`jit=tracing` lifts the Mandelbrot workload from 349 → 2,744 req/s (**+686%**, ~7.9×). The tight float loop is exactly what tracing JIT compiles best. `jit=function` gives a nearly identical gain (+687%) for this pure-computation case.
+
+**`jit=function` breaks OpenSwoole's coroutine hooks — avoid it.**  
+IO throughput collapsed from 4,055 → 431 req/s (−89%) with `jit=function`. Root cause: function-mode JIT compiles `usleep()` as a regular function call, bypassing OpenSwoole's `SWOOLE_HOOK_ALL` coroutine hook that makes `usleep()` yield instead of blocking the thread. At 2ms blocking sleep, max throughput = 500 req/s — matching the observed 431. `jit=tracing` does not have this regression.
+
+**OPcache alone gives +120% on CPU-bound work, modest gains elsewhere.**  
+For applications without tight loops, opcache-tuned adds ~8% on the counter workload — within noise on a busy server, but free.
+
+**IO-bound workloads are unaffected by OPcache/JIT.**  
+All profiles hover within ±10% for the IO workload (except the `jit=function` anomaly above). If your bottleneck is database queries, external API calls, or network IO, OPcache/JIT won't help — invest in connection pooling and query optimisation instead.
+
+**Real-app (Twig + SQLite) gains are modest — SQLite is the ceiling.**  
+The spreadsheet-live workload processes full Twig rendering and a SQLite range query per action. OPcache-tuned gives the best return (+14.9% warm), with the cold-pass bonus higher still (opcache-tuned cold: 125 req/s, jit-tracing cold: 151 req/s) because the JIT compilation burst helps the first pass more than steady state. Warm-pass JIT tracing (+5%) offers little over plain opcache-tuned (+14.9%) because the dominant cost is SQLite I/O — not PHP bytecode. OPcache still helps by eliminating parse overhead on Twig's compiled templates. Multi-worker (4w) halved throughput (−54.5%): the hammer loads the page on one worker, then fires actions that land on random workers which don't own that session context, producing overhead from cross-worker coordination.
+
+### Recommendations
+
+| Use case | Recommended `php.ini` settings |
+|----------|-------------------------------|
+| Application with CPU-heavy actions (templates, data transformation, crypto) | `opcache.jit=tracing`<br>`opcache.jit_buffer_size=64M`<br>`opcache.enable_cli=1` |
+| Framework-heavy, mostly IO | `opcache.enable_cli=1`<br>`opcache.memory_consumption=128`<br>`opcache.validate_timestamps=0` (production only) |
+| **Never use** in an OpenSwoole app | `opcache.jit=function` — destroys `usleep()`/`sleep()` coroutine yields |
+
+Minimal production-safe config for a Via application:
+
+```ini
+opcache.enable=1
+opcache.enable_cli=1
+opcache.memory_consumption=128
+opcache.interned_strings_buffer=16
+opcache.max_accelerated_files=10000
+opcache.validate_timestamps=0   ; set to 1 during development
+opcache.jit=tracing             ; safe with OpenSwoole; skip if no CPU-bound work
+opcache.jit_buffer_size=32M
+```
+
