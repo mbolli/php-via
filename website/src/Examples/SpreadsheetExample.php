@@ -23,7 +23,7 @@ final class SpreadsheetExample {
 
     private static ?\SQLite3 $db = null;
 
-    /** @var array{maxRow: int, maxCol: int}|null Raw DB max (without padding), updated on writes */
+    /** @var null|array{maxRow: int, maxCol: int} Raw DB max (without padding), updated on writes */
     private static ?array $extentCache = null;
 
     public static function register(Via $app): void {
@@ -639,15 +639,19 @@ final class SpreadsheetExample {
         $maxCol = (int) $d['maxCol'];
         $vpRows = (int) $d['viewportRows'];
         $vpCols = (int) $d['viewportCols'];
+
         /** @var array<string, string> $cells */
         $cells = $d['cells'];
+
         /** @var array<string, int> $otherCursors */
         $otherCursors = $d['otherCursors'];
+
         /** @var array{r1: int, c1: int, r2: int, c2: int} $sel */
         $sel = $d['selRange'];
         $myHue = (int) $d['myHue'];
         $isEditing = (bool) $d['isEditing'];
         $clientCount = (int) $d['clientCount'];
+
         /** @var array<int, string> $colNames */
         $colNames = $d['colNames'];
         $focusedCellValue = (string) $d['focusedCellValue'];
@@ -955,6 +959,7 @@ final class SpreadsheetExample {
             'SELECT COALESCE(MAX(row), 0) AS maxRow, COALESCE(MAX(col), 0) AS maxCol FROM cells',
             true
         );
+
         /** @var array{maxRow: int, maxCol: int} $result */
         self::$extentCache = ['maxRow' => (int) $result['maxRow'], 'maxCol' => (int) $result['maxCol']];
     }

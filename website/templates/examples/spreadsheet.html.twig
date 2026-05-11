@@ -86,7 +86,7 @@
      "
      data-on:keyup__window="${{ keyId }} = ''; ${{ shiftId }} = false"
      data-on:paste__window="${{ pastedId }} = event.clipboardData.getData('text/plain'); ${{ pastedId }} && @post('{{ pasteUrl }}'); event.preventDefault();"
-     data-on:wheel__throttle.100ms__prevent="
+     data-on:wheel__throttle.50ms__prevent="
         ${{ drId }} = evt.deltaY > 0 ? 4 : evt.deltaY < 0 ? -4 : 0;
         ${{ dcId }} = evt.deltaX > 0 ? 4 : evt.deltaX < 0 ? -4 : 0;
         if (${{ drId }} !== 0 || ${{ dcId }} !== 0) @post('{{ scrollUrl }}');
