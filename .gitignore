@@ -1,6 +1,7 @@
 /vendor/
 /.idea/
 *.cache
+/bench/
 /website/node_modules/
 /website/vendor/
 website/*.db

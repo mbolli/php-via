@@ -22,9 +22,10 @@ $corsOrigin = getenv('CORS_ORIGIN') ?: '*';
 
 $config = (new Config())
     ->withHost('0.0.0.0')
-    ->withPort(3000)
+    ->withPort((int) (getenv('VIA_PORT') ?: 3000))
     ->withDevMode($isDev)
     ->withTemplateDir(__DIR__ . '/templates')
+    ->withTwigCacheDir(sys_get_temp_dir() . '/php-via-twig-cache')
     ->withStaticDir(__DIR__ . '/public')
     ->withLogLevel($isDev ? 'debug' : 'info')
 ;
@@ -41,11 +42,14 @@ if (!$isDev) {
 }
 
 if ($isDev) {
-    // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed)
-    $certFile = __DIR__ . '/../certs/dev.crt';
-    $keyFile = __DIR__ . '/../certs/dev.key';
-    if (file_exists($certFile) && file_exists($keyFile)) {
-        $config->withCertificate($certFile, $keyFile)->withBrotli();
+    // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed).
+    // Skip SSL when VIA_DISABLE_HTTPS is set so the benchmark hammer can connect via plain HTTP.
+    if (!getenv('VIA_DISABLE_HTTPS')) {
+        $certFile = __DIR__ . '/../certs/dev.crt';
+        $keyFile = __DIR__ . '/../certs/dev.key';
+        if (file_exists($certFile) && file_exists($keyFile)) {
+            $config->withCertificate($certFile, $keyFile)->withBrotli();
+        }
     }
 } else {
     // Prod: Caddy terminates TLS, php-via speaks h2c and handles Brotli
