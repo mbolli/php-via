@@ -158,8 +158,8 @@ $config = (new Config())
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
     ->withTemplateDir(__DIR__ . '/templates')
     ->withStaticDir(__DIR__ . '/public');
-    // Add ->withWorkerNum(swoole_cpu_num())->withBroker(new SwooleBroker())
-    // for multi-worker CPU parallelism (see above).
+    // For multi-worker CPU parallelism, see "Multi-worker scaling" below.
+    // Sticky routing is required in all multi-worker configurations.
     {% endverbatim %}{% endcode %}
 
     <h2 id="opcache-jit">OPcache &amp; JIT</h2>
@@ -197,6 +197,13 @@ opcache.jit_buffer_size=32M
             <strong>IO-bound workloads are unaffected.</strong> If your actions mostly wait on database
             queries, external APIs, or file IO, OPcache and JIT add &lt;10% — invest in connection
             pooling instead.
+        </li>
+        <li>
+            <strong>SQLite-bound actions see modest JIT gains (+3–8%).</strong> Synchronous SQLite
+            calls are blocking C-extension calls — the coroutine scheduler cannot yield during them,
+            so 100 concurrent coroutines still serialize on SQLite regardless of JIT profile.
+            Reduce query count with in-process caching (e.g. caching per-server-lifetime results
+            that only change on writes) rather than relying on JIT to compensate.
         </li>
         <li>
             <strong>Never use <code>opcache.jit=function</code> with OpenSwoole.</strong> Function-mode
@@ -273,10 +280,89 @@ kill -USR1 $(cat /var/run/myapp.pid)
         and need parallelism on a multi-core machine.
     </p>
 
+    <h3 id="context-ownership">Why sticky routing is mandatory</h3>
+    <p>
+        Each php-via context — the SSE connection, signals, and views for one browser tab — lives in
+        the <strong>worker process memory</strong> that handled the initial page <code>GET</code>. The
+        context ID is embedded in every subsequent action <code>POST</code>. If a proxy routes that
+        <code>POST</code> to a <em>different</em> worker, that worker has no record of the context and
+        returns <strong>400 Invalid context</strong>.
+    </p>
+    <p>
+        Sticky routing ensures that all requests for a given browser session always reach the same
+        upstream. Without stickiness, <strong>50–90% of action requests fail</strong> depending on the
+        number of workers — this is a correctness problem, not merely a performance one.
+        Verified by benchmark: at N=8 workers without stickiness, OK% collapses to ~50% regardless of
+        workload; with cookie-sticky Caddy and N=1, 2, or 4 workers: 100% OK.
+    </p>
+
+    <h3 id="independent-processes">Multiple independent processes (no broker)</h3>
+    <p>
+        The simplest multi-core approach: run <em>N</em> independent php-via processes on separate
+        ports, each with a single internal worker. A cookie-sticky load balancer routes each browser
+        session permanently to one upstream. Processes share nothing — no Redis, no broker, no
+        inter-process coordination.
+    </p>
+    <p>
+        <strong>Limitation:</strong> cross-process broadcasts (<code>Scope::ROUTE</code>,
+        <code>Scope::GLOBAL</code>, <code>Scope::SESSION</code> across processes) are not
+        supported. Use SwooleBroker or RedisBroker if you need those scopes.
+    </p>
+    {% code 'php' %}{% verbatim %}
+// app.php — run N copies with different VIA_PORT values
+$config = (new Config())
+    ->withPort((int) (getenv('VIA_PORT') ?: 3001))
+    ->withWorkerNum(1); // one worker per process — no broker needed
+    {% endverbatim %}{% endcode %}
+    {% code 'caddy' %}{% verbatim %}
+myapp.example.com {
+    reverse_proxy localhost:3001 localhost:3002 localhost:3003 localhost:3004 {
+        lb_policy cookie caddy_lb   # sticky — correctness-critical, not optional
+        flush_interval -1           # required for SSE
+        health_uri     /_health
+        health_interval 5s
+    }
+}
+    {% endverbatim %}{% endcode %}
+    <p>
+        Start N copies via systemd template units or a process supervisor that varies
+        <code>VIA_PORT</code>. Each process contributes its full per-process throughput
+        independently.
+    </p>
+
+    <h3 id="scaling-measured">Measured throughput (this system)</h3>
+    <p class="note">
+        Results from PHP 8.4.20, OpenSwoole 25.2.0, <code>jit=tracing</code>,
+        single process, direct HTTP (no proxy). System: WSL2/x86-64. Absolute numbers vary by
+        hardware — treat deltas as directional guidance, not guarantees.
+    </p>
+    <table>
+        <thead><tr><th>Workload</th><th>req/s (single process)</th><th>Scales with N processes?</th></tr></thead>
+        <tbody>
+            <tr><td>Counter (in-memory increment)</td><td>~5,000</td><td>Yes — near-linear</td></tr>
+            <tr><td>IO (2 ms coroutine sleep per action)</td><td>~800–1,000</td><td>Yes — near-linear</td></tr>
+            <tr><td>CPU-bound (Mandelbrot 50×50 float)</td><td>~2,700</td><td>Yes — near-linear</td></tr>
+            <tr><td>SQLite-bound (range query + Twig render)</td><td>~250–350</td><td>Limited — blocking SQLite serialises concurrent coroutines; reduce query count with in-process caching</td></tr>
+        </tbody>
+    </table>
+    <p>
+        With N independent processes and cookie-sticky routing, total throughput scales
+        near-linearly up to CPU saturation. A 4-core server can sustain ~20,000 counter
+        req/s across 4 processes at 100% HTTP OK.
+    </p>
+    <p class="note">
+        <strong>Benchmarking behind a reverse proxy on WSL2:</strong> Docker containers accessing
+        the host via <code>host.docker.internal</code> (Hyper-V bridge) add ~5× latency overhead
+        at 200 concurrent connections. Benchmark your proxy on the same native Linux host as the
+        application to get representative numbers.
+    </p>
+
     <h3 id="same-machine">Same machine — SwooleBroker</h3>
     <p>
         <a href="/docs/broker#swoolebbroker">SwooleBroker</a> uses OpenSwoole's built-in inter-worker
-        pipes and shared memory (<code>OpenSwoole\Table</code>). No external infrastructure required:
+        pipes and shared memory (<code>OpenSwoole\Table</code>). No external infrastructure required,
+        and cross-worker broadcasts (<code>Scope::GLOBAL</code>, <code>Scope::ROUTE</code>) work
+        automatically:
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Broker\SwooleBroker;
@@ -286,9 +372,10 @@ $config = (new Config())
     ->withBroker(new SwooleBroker());
     {% endverbatim %}{% endcode %}
     <p>
-        <strong>Sticky sessions required.</strong> Session data is per-worker. Configure your
-        load balancer to route each session to the same worker (e.g. Caddy <code>lb_policy cookie</code>
-        or nginx <code>ip_hash</code>). GlobalState and broadcasts work across workers without sticky sessions.
+        <strong>Sticky routing required</strong> — for the same context-ownership reason as above.
+        Configure Caddy with <code>lb_policy cookie</code> or nginx with <code>ip_hash</code>.
+        GlobalState and broadcasts still propagate across all workers correctly even without
+        the browser landing on the same worker, but action POSTs and SSE connections must be sticky.
     </p>
     <p>
         GlobalState is backed by an <code>OpenSwoole\Table</code> with capacity fixed at startup
@@ -303,7 +390,7 @@ $config = (new Config())
         <a href="/docs/broker#redisbroker">RedisBroker</a> or
         <a href="/docs/broker#natsbroker">NatsBroker</a>. These carry scope invalidations over
         the network so every server reacts to changes on any other server.
-        Session data still requires sticky sessions (same constraint as same-machine).
+        Session data still requires sticky routing (same constraint as same-machine).
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Broker\RedisBroker;
@@ -327,6 +414,7 @@ $config->withStaticDir(__DIR__ . '/public');
     <ul>
         <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
         <li><a href="/docs/actions#url">Actions → URL</a> — why <code>@post()</code> is required</li>
+        <li><a href="/docs/broker">Broker</a> — SwooleBroker, RedisBroker, NatsBroker</li>
         <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>)</li>
     </ul>
 </article>
