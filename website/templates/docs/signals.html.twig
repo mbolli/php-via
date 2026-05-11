@@ -62,7 +62,10 @@ $c->scope(Scope::ROUTE);  // equivalent shorthand
             <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
                 Open another browser tab with this page open, then increment both counters. The TAB counter is yours alone; the ROUTE counter is shared.
             </p>
-            {{ demo | raw }}
+            <div class="scope-split" id="scope-demo">
+                {{ tabDemo | raw }}
+                {{ routeDemo | raw }}
+            </div>
         </div>
     </div>
 

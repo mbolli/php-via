@@ -76,7 +76,10 @@ $app->broadcast('room:lobby');
             <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
                 Open a second tab, then increment both sides. One is private to you; one goes to everyone.
             </p>
-            {{ demo | raw }}
+            <div class="scope-split" id="scope-demo">
+                {{ tabDemo | raw }}
+                {{ routeDemo | raw }}
+            </div>
         </div>
     </div>
 

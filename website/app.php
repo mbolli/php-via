@@ -238,32 +238,57 @@ $homeSessionDemo = function (Context $c) use ($twig): void {
 /**
  * Scope comparison: TAB-scoped vs ROUTE-scoped side by side.
  * The TAB counter is independent per visitor; the ROUTE counter is shared.
+ * These are TWO separate components so a TAB sync never triggers a route broadcast.
  */
-$scopeComparisonDemo = function (Context $c) use ($app, $twig): void {
-    // TAB-scoped: default, each visitor has their own
+$tabScopeDemo = function (Context $c): void {
+    // TAB-scoped (default): each visitor has their own isolated counter
     $tabCount = $c->signal(0, 'tabCount');
     $incTab = $c->action(function (Context $c) use ($tabCount): void {
         $tabCount->setValue($tabCount->int() + 1);
-        $c->sync();
     }, 'incTab');
 
-    // ROUTE-scoped: shared across all visitors on this route
-    $c->addScope(Scope::routeScope($c->getRoute()));
-    $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount', Scope::routeScope($c->getRoute()));
+    $c->view(function () use ($tabCount, $incTab): string {
+        $id = $tabCount->id();
+        $val = $tabCount->int();
+        $url = $incTab->url();
+
+        return <<<HTML
+        <div class="scope-card tab-scoped">
+            <div class="scope-label">TAB scope</div>
+            <div class="scope-count" data-text="\${$id}">{$val}</div>
+            <div class="scope-description">Only you see this counter.</div>
+            <button class="btn btn-secondary" style="width: 100%"
+                    data-on:click="@post('{$url}')">+1 (just me)</button>
+        </div>
+        HTML;
+    });
+};
+
+$routeScopeDemo = function (Context $c) use ($app): void {
+    // ROUTE-scoped: shared counter for all visitors on the same route
+    $c->scope(Scope::routeScope($c->getRoute()));
+    $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount');
     $incRoute = $c->action(function (Context $c) use ($app, $routeCount): void {
         $newVal = ($app->globalState('scope_demo_count') ?? 0) + 1;
         $app->setGlobalState('scope_demo_count', $newVal);
-        $routeCount->setValue($newVal); // autoBroadcast triggers the route-scope broadcast
+        $routeCount->setValue($newVal);
     }, 'incRoute');
 
-    $c->view(fn () => $twig->render('components/scope-comparison.html.twig', [
-        'tab_count_id' => $tabCount->id(),
-        'tab_count_val' => $tabCount->int(),
-        'route_count_id' => $routeCount->id(),
-        'route_count_val' => $routeCount->int(),
-        'inc_tab_url' => $incTab->url(),
-        'inc_route_url' => $incRoute->url(),
-    ]), cacheUpdates: false);
+    $c->view(function () use ($routeCount, $incRoute): string {
+        $id = $routeCount->id();
+        $val = $routeCount->int();
+        $url = $incRoute->url();
+
+        return <<<HTML
+        <div class="scope-card route-scoped">
+            <div class="scope-label">ROUTE scope</div>
+            <div class="scope-count" data-text="\${$id}">{$val}</div>
+            <div class="scope-description">Everyone on this page shares this.</div>
+            <button class="btn btn-secondary" style="width: 100%; border-color: var(--violet-6);"
+                    data-on:click="@post('{$url}')">+1 (everyone)</button>
+        </div>
+        HTML;
+    });
 };
 
 /**
@@ -353,7 +378,7 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
 
 // ─── Docs routes ─────────────────────────────────────────────────────────────
 
-$app->group('/docs', function (Via $app) use ($codeResultDemo, $scopeComparisonDemo): void {
+$app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $routeScopeDemo): void {
     // Landing
     $app->page('/', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs'));
@@ -372,24 +397,28 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $scopeComparisonD
     });
 
     // Signals concept page
-    $app->page('/signals', function (Context $c) use ($scopeComparisonDemo): void {
+    $app->page('/signals', function (Context $c) use ($tabScopeDemo, $routeScopeDemo): void {
         $c->scope(Scope::routeScope('/docs/signals'));
 
-        $demo = $c->component($scopeComparisonDemo, 'scope-demo');
+        $tabDemo = $c->component($tabScopeDemo, 'scope-tab');
+        $routeDemo = $c->component($routeScopeDemo, 'scope-route');
 
         $c->view('docs/signals.html.twig', [
-            'demo' => $demo(),
+            'tabDemo' => $tabDemo(),
+            'routeDemo' => $routeDemo(),
         ]);
     });
 
     // Scopes concept page
-    $app->page('/scopes', function (Context $c) use ($scopeComparisonDemo): void {
+    $app->page('/scopes', function (Context $c) use ($tabScopeDemo, $routeScopeDemo): void {
         $c->scope(Scope::routeScope('/docs/scopes'));
 
-        $demo = $c->component($scopeComparisonDemo, 'scope-demo');
+        $tabDemo = $c->component($tabScopeDemo, 'scope-tab');
+        $routeDemo = $c->component($routeScopeDemo, 'scope-route');
 
         $c->view('docs/scopes.html.twig', [
-            'demo' => $demo(),
+            'tabDemo' => $tabDemo(),
+            'routeDemo' => $routeDemo(),
         ]);
     });
 
