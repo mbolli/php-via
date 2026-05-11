@@ -31,34 +31,12 @@ composer require mbolli/php-via
         php-via application — a counter:
     </p>
 
-    {% code 'php' %}{% verbatim %}
-<?php
-require __DIR__ . '/vendor/autoload.php';
-
-use Mbolli\PhpVia\Config;
-use Mbolli\PhpVia\Context;
-use Mbolli\PhpVia\Via;
-
-$app = new Via(new Config());
-
-$app->page('/', function (Context $c): void {
-    // 1. Declare a reactive signal
-    $count = $c->signal(0);
-
-    // 2. Define an action (server-side event handler)
-    $increment = $c->action(function () use ($count): void {
-        $count->setValue($count->int() + 1);
-    });
-
-    // 3. Render a view (the framework pushes updates via SSE)
-    $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="$count">{$count->int()}</strong></p>
-        <button data-on:click="@post('{$increment->url()}')"}>+1</button>
-    HTML);
-});
-
-$app->start();
-    {% endverbatim %}{% endcode %}
+    <div class="docs-demo">
+        <div class="docs-demo-header">▶ Complete source + live result</div>
+        <div class="docs-demo-body">
+            {{ demo | raw }}
+        </div>
+    </div>
 
     {% code 'bash' %}{% verbatim %}
 php app.php
@@ -66,13 +44,6 @@ php app.php
     {% endverbatim %}{% endcode %}
 
     <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. Then open a second tab — the counter stays independent. That's <strong>TAB scope</strong>, the default.</p>
-
-    <div class="docs-demo">
-        <div class="docs-demo-header">▶ Try it — interactive version of the code above</div>
-        <div class="docs-demo-body">
-            {{ demo | raw }}
-        </div>
-    </div>
 
     <h2 id="how-it-works">How it works</h2>
     <p>When the page loads, php-via:</p>
