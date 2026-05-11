@@ -253,6 +253,7 @@
   --text-3: var(--gray-6);
 
   --border: var(--gray-3);
+  --size-content-4: 85ch;
 
   --radius-sm: var(--radius-2);
   --radius-md: var(--radius-3);
@@ -290,6 +291,12 @@ html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-height) + var
 /* Cross-document View Transitions (MPA) — progressive enhancement */
 
 @view-transition { navigation: auto; }
+
+/* Open props default overrides */
+
+:where(li,dd,figcaption){max-inline-size:var(--size-content-3)}
+
+:where(p){text-wrap:pretty;max-inline-size:var(--size-content-4)}
 
 body {
   font-family: var(--font-sans);
