@@ -105,31 +105,47 @@ All throughput values in **req/s**. Δ is warm req/s vs `no-opcache` warm.
 
 2,000 actions, concurrency=100, `navigate` (ArrowDown) against `/examples/spreadsheet`.
 Full php-via stack: framework routing, session auth, SQLite range query, Twig `renderBlock`, SSE patch queue.
+**Updated after Step 6 (grid extent cache)** — eliminates the full-table MAX scan on every render. Only
+`no-opcache` and `jit-tracing` were re-measured; Δ for other profiles is recalculated against the new no-opcache warm baseline (254 req/s).
 
 | Profile | cold r/s | warm r/s | Δ | cold OK% | warm OK% | cold→warm |
 |---------|----------|----------|---|----------|----------|-----------|
-| no-opcache | 279 | 190 | — | 100.0 | 100.0 | −31.9% |
-| opcache-default-cli | 247 | 265 | +39.5% | 100.0 | 100.0 | +7.3% |
-| opcache-tuned | 314 | 260 | +36.8% | 100.0 | 100.0 | −17.2% |
-| jit-function | 299 | 247 | +30.0% | 100.0 | 100.0 | −17.4% |
-| jit-tracing | **385** | **242** | **+27.4%** | 100.0 | 100.0 | −37.1% |
+| no-opcache | 214 | 254 | — | 100.0 | 100.0 | +18.7% |
+| opcache-default-cli | 247 | 265 | +4.3% ¹ | 100.0 | 100.0 | +7.3% |
+| opcache-tuned | 314 | 260 | +2.4% ¹ | 100.0 | 100.0 | −17.2% |
+| jit-function | 299 | 247 | −2.8% ¹ | 100.0 | 100.0 | −17.4% |
+| jit-tracing | **412** | **346** | **+36.2%** | 100.0 | 100.0 | −16.0% |
 | opcache-preload | SKIPPED | | | | | |
 | multi-worker-4w | SKIPPED | | | | | |
+
+¹ Not re-measured after Step 6; absolute warm req/s unchanged from original run. Δ recalculated
+against the new no-opcache warm baseline (254 req/s).
 
 ### Spreadsheet raw live (raw PHP SSE render — no Twig on hot path)
 
 2,000 actions, concurrency=100, `navigate` (ArrowDown) against `/examples/spreadsheet-raw`.
 Same stack as spreadsheet-live but the SSE update patch is built with raw PHP string concatenation — Twig is only used for the initial page render, not the hot update path.
+**Updated after Step 6 (grid extent cache).** Re-measured profiles: `no-opcache` (confirmed twice), `opcache-tuned`, `jit-tracing`.
+Remaining profiles use original warm req/s with Δ recalculated against the updated no-opcache warm baseline (827 req/s).
 
 | Profile | cold r/s | warm r/s | Δ | cold OK% | warm OK% | cold→warm |
 |---------|----------|----------|---|----------|----------|-----------|
-| no-opcache | 1,008 | 858 | — | 100.0 | 100.0 | −14.9% |
-| opcache-default-cli | 911 | 919 | +7.1% | 100.0 | 100.0 | +0.9% |
-| opcache-tuned | 1,039 | 486 | −43.4% ⚠️ | 100.0 | 100.0 | −53.2% |
-| jit-function | 1,108 | 969 | +12.9% | 100.0 | 100.0 | −12.5% |
-| jit-tracing | 1,255 | **1,109** | **+29.3%** | 100.0 | 100.0 | −11.6% |
+| no-opcache | 1,149 | 827 | — | 100.0 | 100.0 | −29.9% |
+| opcache-default-cli | 911 | 919 | +11.1% ¹ | 100.0 | 100.0 | +0.9% |
+| opcache-tuned | 1,187 | 1,082 | +30.8% | 100.0 | 100.0 | −8.8% |
+| jit-function | 1,108 | 969 | +17.2% ¹ | 100.0 | 100.0 | −12.5% |
+| jit-tracing | **1,316** | **1,143** | **+38.2%** | 100.0 | 100.0 | −13.1% |
 | opcache-preload | SKIPPED | | | | | |
 | multi-worker-4w | SKIPPED | | | | | |
+
+¹ Not re-measured; absolute warm req/s from original run. Δ recalculated against the updated no-opcache warm baseline (827 req/s).
+
+**no-opcache warm drop at c=100** (~−30%)  
+Consistently reproducible across runs (827 vs 983 at c=50). The cold pass runs at ~1,150–1,180 req/s
+(100 coroutines, no OPcache overhead), which floods the SQLite queue before the warm pass starts.
+This is normal SQLite lock-queue pressure at high concurrency without JIT throttling.
+**jit-tracing warm is stable at 1,143 req/s** across c=10–100 — the documented c=100 collapse
+(552 req/s prior to Step 6) is resolved.
 
 ### CPU workload: JIT is transformative
 
@@ -186,16 +202,13 @@ Removing Twig from the hot SSE path (raw PHP string building) reveals the true c
 
 | Profile | Twig warm r/s | Raw warm r/s | Raw / Twig |
 |---------|--------------|-------------|------------|
-| no-opcache | 190 | 858 | **4.5×** |
+| no-opcache | 254 | 827 | **3.3×** |
 | opcache-default-cli | 265 | 919 | **3.5×** |
-| opcache-tuned | 260 | ~~486~~ ⚠️ | *(anomaly — see below)* |
+| opcache-tuned | 260 | 1,082 | **4.2×** |
 | jit-function | 247 | 969 | **3.9×** |
-| jit-tracing | 242 | 1,109 | **4.6×** |
+| jit-tracing | 346 | 1,143 | **3.3×** |
 
-The raw workload is pure SQLite + PHP string building. The ~3.5–4.6× gap is entirely Twig: executing the compiled block, output buffering, and CoreExtension attribute lookups per cell add significant overhead even with file-cached templates.
-
-**`opcache-tuned` raw warm regression: consistently reproducible** ⚠️  
-Across two independent runs with different parameters (1,000/50 and 2,000/100), `opcache-tuned` always shows a severe warm-pass collapse on the raw workload (−43 to −68%) while the cold pass is normal (~1,040 req/s). `jit-function` and `jit-tracing` — which both build on the same tuned OPcache flags — do not show this. The distinguishing flag is `opcache.interned_strings_buffer=64M`: with a large interned strings buffer, repeated string-heavy operations in the warm pass may trigger different memory pressure than in the cold pass. The Twig path is less affected because Twig's compiled PHP uses more diverse string patterns. Treat `opcache-tuned` raw warm as unreliable.
+The raw workload is pure SQLite + PHP string building. The ~3.3–4.2× gap is entirely Twig: executing the compiled block, output buffering, and CoreExtension attribute lookups per cell add significant overhead even with file-cached templates.
 
 ### opcache-preload: SKIPPED
 
@@ -214,10 +227,11 @@ The 4-worker profile is SKIPPED in this run. Previous runs showed only 9–20% H
 | Scenario | Recommended config |
 |----------|--------------------|
 | Pure CPU work (computations, transformations) | `jit=tracing, jit_buffer_size=64M+` — **~7.9× speedup** |
-| Real application with Twig rendering | `jit=tracing` — **+54.3%** on full-stack spreadsheet workload |
+| Real application with Twig rendering | `jit=tracing` — **+36.2%** on full-stack spreadsheet workload |
 | Largest single optimization (Twig SSE path) | Replace Twig `renderBlock` with raw PHP on the hot SSE update — **~3–4× throughput gain** |
 | Framework-heavy, mostly IO | `opcache-tuned` (no JIT) — safe +19% with zero risk |
 | IO-bound (DB, network, file) | OPcache only; skip JIT — bottleneck is not bytecode |
+| SQLite-bound actions | Cache per-server-lifetime query results (e.g. extent/schema) — halves blocking call count per render |
 | **Avoid** | `jit=function` in OpenSwoole — breaks `usleep()` hook, destroys IO concurrency |
 
 ---

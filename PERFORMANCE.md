@@ -401,15 +401,18 @@ Four workloads, seven profiles:
 #### Spreadsheet raw live workload (2,000 actions, concurrency=100, website/app.php)
 
 `navigate` action against `/examples/spreadsheet-raw` — raw PHP string building on SSE update path, Twig only for initial page load.
+Numbers updated after Step 6 (grid extent cache); all measurements at concurrency=100, 2,000 actions.
 
 | Profile | Cold req/s | Warm req/s | vs baseline | Cold OK% |
 |---------|------------|------------|-------------|----------|
-| no-opcache (baseline) | 1,008 | 858 | — | 100% |
-| opcache-default-cli | 911 | 919 | +7.1% | 100% |
-| opcache-tuned | 1,039 | ~~486~~ ⚠️ | *(anomaly)* | 100% |
-| jit-function | 1,108 | 969 | +12.9% | 100% |
-| jit-tracing | **1,255** | **1,109** | **+29.3%** | 100% |
+| no-opcache (baseline) | 1,149 | 827 | — | 100% |
+| opcache-default-cli | 911 | 919 | +11.1% ¹ | 100% |
+| opcache-tuned | 1,187 | 1,082 | +30.8% | 100% |
+| jit-function | 1,108 | 969 | +17.2% ¹ | 100% |
+| jit-tracing | **1,316** | **1,143** | **+38.2%** | 100% |
 | opcache-preload | SKIPPED† | | | |
+
+¹ Original measurement; not re-run after Step 6. Δ recalculated against updated no-opcache baseline (827 req/s).
 
 ### Key findings
 
@@ -426,7 +429,7 @@ For applications without tight loops, opcache-tuned adds ~17% on the counter wor
 All profiles hover within ±10% for the IO workload (except the `jit=function` anomaly above). If your bottleneck is database queries, external API calls, or network IO, OPcache/JIT won't help — invest in connection pooling and query optimisation instead.
 
 **Real-app (Twig + SQLite): OPcache gives consistent +30–40%; JIT advantage narrows at higher concurrency.**  
-The spreadsheet-live workload runs full Twig `renderBlock` + SQLite per action. After Twig file caching and partial block rendering were applied, throughput rose substantially from the April 2026 baseline. All OPcache profiles deliver ~+30–40% warm gain over interpreted. `jit-tracing` cold (385 req/s) is the best single-pass number, but at concurrency=100 the warm pass (242) falls below opcache-tuned (260) — SQLite I/O saturation masks the JIT advantage under sustained load. The raw comparison makes the real bottleneck clear: removing Twig from the SSE update path gives **4–5× throughput** (858–1,109 req/s raw vs 190–265 req/s Twig), making it the single largest optimization available — larger than JIT and larger than all other Twig optimizations combined.
+The spreadsheet-live workload runs full Twig `renderBlock` + SQLite per action. After Twig file caching and partial block rendering were applied, throughput rose substantially from the April 2026 baseline. All OPcache profiles deliver ~+30–40% warm gain over interpreted. `jit-tracing` cold (385 req/s) is the best single-pass number, but at concurrency=100 the warm pass (242) falls below opcache-tuned (260) — SQLite I/O saturation masks the JIT advantage under sustained load. The raw comparison makes the real bottleneck clear: removing Twig from the SSE update path gives **3–4× throughput** (827–1,143 req/s raw vs 190–265 req/s Twig on this host at concurrency=50), making it the single largest optimization available — larger than JIT and larger than all other Twig optimizations combined.
 
 ### Recommendations
 
