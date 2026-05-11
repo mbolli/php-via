@@ -100,8 +100,15 @@
      data-on:mouseup__window="el.__sbEnd(evt.clientX, evt.clientY)"
      data-on:touchend__window="el.__sbEnd(null, null)"
      >
-
-    <div class="ss-toolbar" data-ref="ssToolbar">
+{% block spreadsheet_update %}
+{% set vScrollRange = maxRow - viewportRows %}
+{% set hScrollRange = maxCol - viewportCols %}
+{% set vThumbPct = maxRow > 0 ? (viewportRows / maxRow * 100) : 100 %}
+{% set vPosPct = vScrollRange > 0 ? (vr / vScrollRange * (100 - vThumbPct)) : 0 %}
+{% set hThumbPct = maxCol > 0 ? (viewportCols / maxCol * 100) : 100 %}
+{% set hPosPct = hScrollRange > 0 ? (vc / hScrollRange * (100 - hThumbPct)) : 0 %}
+<div id="ss-dynamic">
+    <div id="ss-toolbar" class="ss-toolbar" data-ref="ssToolbar">
         <div class="ss-cell-ref">
             {{ colNames[fc - vc] is defined ? colNames[fc - vc] : '' }}{{ fr + 1 }}
         </div>
@@ -126,8 +133,8 @@
 
     <div class="ss-body">
         <div class="ss-grid-wrapper">
-            <table class="ss-grid">
-                <thead data-ref="ssThead">
+            <table id="ss-grid-table" class="ss-grid">
+                <thead id="ss-thead" data-ref="ssThead">
                     <tr>
                         <th class="ss-row-header">&nbsp;</th>
                         {% for colName in colNames %}
@@ -135,7 +142,10 @@
                         {% endfor %}
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="ss-tbody"
+                    data-on:click="const td = evt.target.closest('td.ss-cell:not(.ss-focused)'); if (!td) return; ${{ shiftId }} = evt.shiftKey; ${{ trId }} = +td.dataset.row; ${{ tcId }} = +td.dataset.col; @post('{{ focusCellUrl }}')"
+                    data-on:dblclick="evt.target.closest('td.ss-cell') && @post('{{ startEditUrl }}')"
+                >
                     {% for ri in 0..(viewportRows - 1) %}
                         {% set absRow = vr + ri %}
                         <tr>
@@ -148,12 +158,9 @@
                                 {% set isSelected = hasMultiSel and absRow >= selRange.r1 and absRow <= selRange.r2 and absCol >= selRange.c1 and absCol <= selRange.c2 %}
                                 {% set otherHue = otherCursors[cellKey] is defined ? otherCursors[cellKey] : null %}
                                 <td class="ss-cell{% if isFocused %} ss-focused{% endif %}{% if isSelected %} ss-selected{% endif %}{% if otherHue is not null %} ss-other-cursor{% endif %}"
+                                    data-row="{{ absRow }}" data-col="{{ absCol }}"
                                     {% if isFocused %}style="outline: 2px solid hsl({{ myHue }}, 70%, 50%); outline-offset: -1px;"{% endif %}
                                     {% if otherHue is not null and not isFocused %}style="box-shadow: inset 0 0 0 2px hsl({{ otherHue }}, 70%, 50%);"{% endif %}
-                                    {% if not isFocused %}
-                                        data-on:click="${{ shiftId }} = evt.shiftKey; ${{ trId }} = {{ absRow }}; ${{ tcId }} = {{ absCol }}; @post('{{ focusCellUrl }}')"
-                                    {% endif %}
-                                    data-on:dblclick="@post('{{ startEditUrl }}')"
                                 >
                                     {% if isFocused and isEditing %}
                                         <input type="text" data-init="el.focus()" id="ss-active-input" class="ss-edit-input" data-bind="{{ editValueId }}">
@@ -188,7 +195,7 @@
                 }
              ">
             <div class="ss-scrollbar-track" data-ref="ssTrackV">
-                <div class="ss-scrollbar-thumb" data-ref="ssThumbV" style="top: {{ vPosPct }}%; height: {{ vThumbPct }}%"></div>
+                <div id="ss-vthumb" class="ss-scrollbar-thumb" data-ref="ssThumbV" style="top: {{ vPosPct }}%; height: {{ vThumbPct }}%"></div>
             </div>
         </div>
     </div>
@@ -214,11 +221,13 @@
                 }
              ">
             <div class="ss-scrollbar-track" data-ref="ssTrackH">
-                <div class="ss-scrollbar-thumb" data-ref="ssThumbH" style="left: {{ hPosPct }}%; width: {{ hThumbPct }}%"></div>
+                <div id="ss-hthumb" class="ss-scrollbar-thumb" data-ref="ssThumbH" style="left: {{ hPosPct }}%; width: {{ hThumbPct }}%"></div>
             </div>
         </div>
         <div class="ss-scrollbar-corner"></div>
     </div>
+</div>
+{% endblock %}
 </div>
 {% endblock %}
 
@@ -477,6 +486,9 @@
         min-width: 320px;
         min-height: 160px;
         max-width: 100%;
+    }
+    #ss-dynamic {
+        display: contents;
     }
     #spreadsheet:focus-visible {
         outline: none;

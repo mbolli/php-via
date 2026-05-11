@@ -98,10 +98,7 @@ class ViewRenderer {
      */
     public function renderTemplate(string $template, array $data = [], ?string $block = null): string {
         if ($block !== null) {
-            // Render only the specified block
-            $twigTemplate = $this->twig->load($template);
-
-            return $twigTemplate->renderBlock($block, $data);
+            return $this->twig->load($template)->renderBlock($block, $data);
         }
 
         return $this->twig->render($template, $data);

@@ -615,7 +615,7 @@ final class SpreadsheetExample {
                     'myHue' => self::hueForSession($sessionId),
                     'clientCount' => \count($app->getContextsByScope(self::SCOPE)),
                 ]);
-            }, block: 'demo', cacheUpdates: false);
+            }, block: 'spreadsheet_update', cacheUpdates: false);
         });
     }
 
