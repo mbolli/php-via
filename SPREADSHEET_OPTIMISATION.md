@@ -311,3 +311,165 @@ $c->view(function (bool $isUpdate) use (...): string {
 At 0.60ms/action raw PHP (1,667 req/s single-core theoretical) and 805 req/s actual bench
 (48% efficiency), the remaining bottleneck is network/HTTP overhead and the two-sync-per-action
 cost from `ctx->sync() + app->broadcast()`. The framework layer itself is negligible (~0.2ms/action).
+
+---
+
+## SQLite bottleneck analysis and batching plan
+
+### Evidence
+
+Concurrency scaling measurements (2,000 actions, no-opcache and jit-tracing warm pass,
+`--app=website`):
+
+**Twig path (warm req/s):**
+
+| Concurrency | no-opcache | jit-tracing | jit Δ |
+|------------|-----------|------------|-------|
+| 10 | 231 | 329 | +42% |
+| 25 | 159 | 336 | +111% |
+| 50 | 230 | 323 | +40% |
+| 100 | 231 | 349 | +51% |
+
+**Raw PHP path (warm req/s):**
+
+| Concurrency | no-opcache | jit-tracing | jit Δ |
+|------------|-----------|------------|-------|
+| 10 | 802 | 1,000 | +25% |
+| 25 | 908 | 1,132 | +25% |
+| 50 | 908 | 1,145 | +26% |
+| 100 | 947 | 552 ⚠️ | −42% |
+
+### Observations
+
+1. **Twig warm throughput is flat across concurrency (159–349 req/s).**  
+   Adding more concurrent coroutines does not increase throughput — the bottleneck
+   is not PHP CPU and not SSE patch queuing. It's the SQLite round-trip latency
+   serialising all coroutines.
+
+2. **Raw warm throughput scales until concurrency=50, then stalls or collapses.**  
+   At concurrency=10–50, raw PHP delivers ~800–1,145 req/s warm. At concurrency=100,
+   `jit-tracing` warm collapses to 552 req/s while the cold pass reached 1,351 req/s.  
+   Root cause: the cold pass generates rapid bursts of 100 concurrent SQLite reads; the
+   warm pass starts immediately after with 100 coroutines already queued. SQLite WAL
+   mode serialises writes one at a time and has limited read-concurrency under `BUSY_TIMEOUT`.
+   The faster the PHP path (JIT cold), the harder it hits the SQLite lock queue in the
+   warm pass.
+
+3. **Twig overhead acts as accidental SQLite throttling.**  
+   Twig's template overhead (~1.65ms/action vs ~0.15ms for raw PHP string build)
+   naturally limits the rate at which coroutines arrive at the SQLite call. This keeps
+   contention manageable and produces the stable flat curve. The raw path has ~10× less
+   overhead, so it saturates the SQLite lock queue ~10× faster.
+
+4. **SQLite WAL mode is already enabled** (`PRAGMA journal_mode=WAL`) — readers don't
+   block writers, but concurrent writes still serialise on the WAL write lock. The
+   navigate action is read-only (`SELECT`), but `SpreadsheetExample` also writes
+   (`UPDATE cells`) on edit actions. Under hammer conditions all actions are navigates,
+   so write contention is not the immediate issue — it's **read-lock timeout queueing**
+   under high concurrent connection counts that causes the collapse.
+
+### Root cause: one SQLite query per SSE action, no connection pool
+
+Every `navigate` action:
+1. Opens (or reuses) a single `\SQLite3` connection (static `self::$db`)
+2. Runs `SELECT value FROM cells WHERE row BETWEEN ? AND ? AND col BETWEEN ? AND ?`
+3. Iterates `fetchArray()` for up to 200 rows
+4. Builds the HTML / Twig render
+5. Queues the SSE patch
+
+Steps 1–3 are synchronous blocking calls inside a coroutine. OpenSwoole cannot yield
+during a SQLite call — there is no async SQLite driver. All 100 concurrent coroutines
+block their threads on SQLite in sequence, and the scheduler overhead at high concurrency
+compounds with the lock queue wait.
+
+### Approaches to resolve
+
+#### Option A — SQLite read batching / prefetch cache (low risk)
+
+Cache the last-fetched viewport per context in memory. On navigate, check if the new
+viewport overlaps the cached one and only issue a SQLite query when the cursor moves
+outside the already-fetched range.
+
+```
+// Pseudocode in SpreadsheetExample::navigate()
+$cache = self::$viewportCache[$contextId] ?? null;
+if ($cache && $this->viewportCovers($cache, $newRow, $newCol)) {
+    $cells = $cache['cells'];   // no SQLite query
+} else {
+    $cells = $this->fetchViewport($newRow, $newCol);   // SQLite query
+    self::$viewportCache[$contextId] = ['r' => $newRow, 'c' => $newCol, 'cells' => $cells];
+}
+```
+
+Expected gain: eliminates SQLite query for small cursor moves (ArrowDown/Right by 1).
+Most navigation actions move the viewport by 1 row — only when the cursor crosses the
+viewport edge does a new query run. This could reduce SQLite calls by ~80% for typical
+navigation patterns.
+
+Caveats:
+- Cache must be invalidated on cell edit (any `UPDATE cells` in the same scope).
+- Cache is per-context (per-tab), so memory cost is `O(connections × viewport_size)`.
+  At 200 connections × 200 cells × ~50 bytes = ~2 MB — negligible.
+- Does not help if the user drags the selection aggressively.
+
+#### Option B — Async SQLite via ReactPHP / blocking coroutine pool
+
+Replace the synchronous `\SQLite3` calls with an async driver. Options:
+- `clue/reactphp-sqlite` (already in `vendor/` as a transitive dep) — runs SQLite
+  in a child process over IPC; adds ~0.5ms round-trip but fully async.
+- A Swoole coroutine blocking task pool: `Co\run(fn() => Co::executeInPool(fn() => $db->query(...)))`.
+  OpenSwoole 5+ supports `Coroutine\System::exec()` for blocking calls in a thread pool.
+
+This is the correct long-term fix for any blocking I/O inside coroutines, but it
+requires changing the query API surface in `SpreadsheetExample`.
+
+#### Option C — In-memory SQLite replica for reads
+
+Load the entire spreadsheet into an in-memory SQLite DB (`':memory:'`) on server start
+(or lazily on first request). All reads hit memory; writes go to the disk DB and
+replicate to memory. At `ROWS × COLS = 1000 × 26 = 26,000` cells × ~30 bytes each =
+~780 KB — trivially small.
+
+```php
+self::$memDb = new \SQLite3(':memory:');
+// ... CREATE TABLE + INSERT ... SELECT * FROM file_db
+```
+
+Reads then complete in ~0.02ms (no disk I/O) and cannot block on WAL. Writes must
+update both DBs atomically (or accept eventual consistency with a small replay queue).
+
+#### Option D — Batch multiple actions into one SQLite query cycle (server-side debounce)
+
+Buffer incoming navigate actions per scope/context for 5–10ms, then issue one SQLite
+query and broadcast one SSE patch for all buffered cursor moves. This is the classic
+server-side debounce / coalescing pattern.
+
+In php-via terms this would be a `ContextLifecycle` timer that flushes buffered
+navigations on each tick:
+
+```php
+$c->every(5, function() use ($c) {
+    if (isset(self::$pendingNav[$c->getId()])) {
+        $this->renderAndPush($c, self::$pendingNav[$c->getId()]);
+        unset(self::$pendingNav[$c->getId()]);
+    }
+});
+```
+
+The action handler would then only set `self::$pendingNav[$contextId] = $newPos`
+without querying SQLite. This is only appropriate if the UI can tolerate 5–10ms
+visual latency per keystroke, which is imperceptible at normal typing speeds.
+
+### Recommended plan
+
+| Priority | Approach | Effort | Expected gain |
+|----------|----------|--------|---------------|
+| 1 | **Option A** — viewport prefetch cache | 1–2 hours | −80% SQLite calls for typical nav |
+| 2 | **Option C** — in-memory SQLite replica for reads | 2–3 hours | Near-zero read latency, removes WAL contention entirely |
+| 3 | **Option D** — server-side debounce (5ms flush) | 1 hour | Flattens burst contention; useful regardless of DB approach |
+| 4 | **Option B** — async SQLite driver | 1–2 days | Correct for any blocking I/O; overkill for this scale |
+
+Start with Option A (no architectural change, pure in-process cache) + Option C
+(in-memory DB). Together they eliminate both the per-action query cost and the WAL
+lock contention, bringing the raw path ceiling back to its theoretical ~1,100–1,300 req/s
+across all concurrency levels.
