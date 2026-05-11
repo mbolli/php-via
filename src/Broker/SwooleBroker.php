@@ -33,9 +33,6 @@ use OpenSwoole\Http\Server;
 final class SwooleBroker implements MessageBroker, ServerAwareBroker {
     private readonly string $nodeId;
 
-    /** @var null|callable(string): void */
-    private $handler;
-
     private bool $connected = false;
 
     /** @var null|Server */
@@ -84,7 +81,8 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
     }
 
     public function subscribe(callable $handler): void {
-        $this->handler = $handler;
+        // SwooleBroker's receive path is handled by Via.php via Swoole's pipeMessage
+        // event — the callable is not invoked here. subscribe() satisfies the interface.
     }
 
     public function getNodeId(): string {
