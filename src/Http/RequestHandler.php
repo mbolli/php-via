@@ -187,6 +187,12 @@ class RequestHandler {
 
         // 404 Not Found
         $this->logRequest($method, $path, 404, $requestStart);
+        $notFoundHandler = $this->via->getNotFoundHandler();
+        if ($notFoundHandler !== null) {
+            ($notFoundHandler)($request, $response);
+
+            return;
+        }
         $response->status(404);
         $response->end('Not Found');
     }

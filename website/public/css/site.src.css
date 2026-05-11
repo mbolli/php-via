@@ -407,6 +407,41 @@ main { position: relative; }
   50%       { box-shadow: 0 0 0 6px color-mix(in srgb, var(--green-5) 10%, transparent); }
 }
 
+/* ─── Error page (404 etc.) ────────────────────────────── */
+.error-page {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in srgb, var(--red-5) 12%, transparent), transparent);
+  padding-block: var(--size-12) var(--size-10);
+  text-align: center;
+}
+
+.error-page-inner {
+  max-width: 56rem;
+  margin-inline: auto;
+  padding-inline: var(--size-4);
+}
+
+.error-code {
+  font-family: var(--font-mono);
+  font-size: clamp(5rem, 18vw, 10rem);
+  font-weight: var(--font-weight-9);
+  letter-spacing: -0.05em;
+  line-height: 1;
+  margin-block: var(--size-4) var(--size-3);
+  background: linear-gradient(135deg, var(--red-5), var(--orange-5));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.error-page h1 {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: var(--font-weight-9);
+  letter-spacing: -0.03em;
+  margin-block-end: var(--size-5);
+  color: var(--text-1);
+}
+
 /* ─── Demo containers ──────────────────────────────────── */
 .demo-box {
   background: var(--glass-bg);
@@ -1385,6 +1420,10 @@ docs-toc {
   border-radius: var(--radius-sm);
   font-size: 0.875em;
   color: var(--brand-secondary);
+}
+.docs-content .code-panel pre[data-lang] {
+  border-radius: unset;
+  margin-block: unset;
 }
 
 /* Tempest highlight token colours — catppuccin-mocha */

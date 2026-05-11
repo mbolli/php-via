@@ -105,6 +105,21 @@ $workerPath = __DIR__ . '/public/upload-worker.js';
 $twig->addGlobal('workerVersion', (string) (file_exists($workerPath) ? filemtime($workerPath) : time()));
 $twig->addGlobal('siteUrl', 'https://via.zweiundeins.gmbh/');
 
+// ─── 404 handler ─────────────────────────────────────────────────────────────
+
+$app->notFound(function ($request, $response) use ($twig, $cssPath): void {
+    $assetVersion = (string) (file_exists($cssPath) ? filemtime($cssPath) : time());
+    $requestedPath = $request->server['request_uri'] ?? '/';
+    $html = $twig->render('pages/404.html.twig', [
+        'basePath' => '/',
+        'assetVersion' => $assetVersion,
+        'requestedPath' => htmlspecialchars($requestedPath, ENT_QUOTES, 'UTF-8'),
+    ]);
+    $response->status(404);
+    $response->header('Content-Type', 'text/html; charset=utf-8');
+    $response->end($html);
+});
+
 // ─── Shared state ────────────────────────────────────────────────────────────
 
 // (Scoped signals handle shared counter state — no globalState needed)
@@ -238,8 +253,7 @@ $scopeComparisonDemo = function (Context $c) use ($app, $twig): void {
     $incRoute = $c->action(function (Context $c) use ($app, $routeCount): void {
         $newVal = ($app->globalState('scope_demo_count') ?? 0) + 1;
         $app->setGlobalState('scope_demo_count', $newVal);
-        $routeCount->setValue($newVal);
-        $app->broadcast(Scope::routeScope($c->getRoute()));
+        $routeCount->setValue($newVal); // autoBroadcast triggers the route-scope broadcast
     }, 'incRoute');
 
     $c->view(fn () => $twig->render('components/scope-comparison.html.twig', [
@@ -249,7 +263,7 @@ $scopeComparisonDemo = function (Context $c) use ($app, $twig): void {
         'route_count_val' => $routeCount->int(),
         'inc_tab_url' => $incTab->url(),
         'inc_route_url' => $incRoute->url(),
-    ]));
+    ]), cacheUpdates: false);
 };
 
 /**

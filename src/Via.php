@@ -83,6 +83,9 @@ class Via {
     /** @var array<callable(Context): void> Callbacks to run when a client disconnects from SSE */
     private array $clientDisconnectCallbacks = [];
 
+    /** @var null|callable(\OpenSwoole\Http\Request, \OpenSwoole\Http\Response): void Handler for unmatched routes (404) */
+    private $notFoundHandler = null;
+
     private bool $shuttingDown = false;
     private bool $signalsRegistered = false;
 
@@ -821,6 +824,26 @@ class Via {
      */
     public function setInterval(callable $callback, int $ms): void {
         $this->serverIntervals[] = [$callback, $ms];
+    }
+
+    /**
+     * Register a handler to call when no route matches (404).
+     * The handler receives the raw OpenSwoole Request and Response.
+     * It is responsible for setting the status code and ending the response.
+     *
+     * @param callable(\OpenSwoole\Http\Request, \OpenSwoole\Http\Response): void $handler
+     */
+    public function notFound(callable $handler): self {
+        $this->notFoundHandler = $handler;
+
+        return $this;
+    }
+
+    /**
+     * @return null|callable(\OpenSwoole\Http\Request, \OpenSwoole\Http\Response): void
+     */
+    public function getNotFoundHandler(): ?callable {
+        return $this->notFoundHandler;
     }
 
     /**

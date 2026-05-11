@@ -12,7 +12,7 @@
     0 1px 2px -5px hsl(var(--shadow-color) / var(--shadow-strength-3)),
     0 2px 5px -5px hsl(var(--shadow-color) / var(--shadow-strength-5)),
     0 4px 12px -5px hsl(var(--shadow-color) / var(--shadow-strength-6)),
-    0 12px 15px -5px hsl(var(--shadow-color) / var(--shadow-strength-8));--green-5:#51cf66;--size-6:1.75rem;--gray-5:#adb5bd;--radius-1:2px;--blue-4:#4dabf7;--orange-4:#ffa94d;--gray-10:#16191d;--shadow-4:
+    0 12px 15px -5px hsl(var(--shadow-color) / var(--shadow-strength-8));--green-5:#51cf66;--red-5:#ff6b6b;--size-6:1.75rem;--gray-5:#adb5bd;--radius-1:2px;--blue-4:#4dabf7;--orange-4:#ffa94d;--gray-10:#16191d;--shadow-4:
     0 -2px 5px 0 hsl(var(--shadow-color) / var(--shadow-strength-3)),
     0 1px 1px -2px hsl(var(--shadow-color) / var(--shadow-strength-4)),
     0 2px 2px -2px hsl(var(--shadow-color) / var(--shadow-strength-4)),
@@ -23,7 +23,7 @@
     1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%,
     1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%,
     0.997 69.8%, 1.003 76.9%, 1
-  );--green-6:#40c057;--red-5:#ff6b6b;--font-weight-4:400;--ease-out-3:cubic-bezier(0, 0, .3, 1);--font-weight-8:800;--ease-spring-2:linear(
+  );--green-6:#40c057;--font-weight-4:400;--ease-out-3:cubic-bezier(0, 0, .3, 1);--font-weight-8:800;--ease-spring-2:linear(
     0, 0.007, 0.029 2.2%, 0.118 4.7%, 0.625 14.4%, 0.826 19%, 0.902, 0.962,
     1.008 26.1%, 1.041 28.7%, 1.064 32.1%, 1.07 36%, 1.061 40.5%, 1.015 53.4%,
     0.999 61.6%, 0.995 71.2%, 1
@@ -663,6 +663,42 @@ main { position: relative; }
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-5) 25%, transparent); }
   50%       { box-shadow: 0 0 0 6px color-mix(in srgb, var(--green-5) 10%, transparent); }
+}
+
+/* ─── Error page (404 etc.) ────────────────────────────── */
+
+.error-page {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in srgb, var(--red-5) 12%, transparent), transparent);
+  padding-block: var(--size-12) var(--size-10);
+  text-align: center;
+}
+
+.error-page-inner {
+  max-width: 56rem;
+  margin-inline: auto;
+  padding-inline: var(--size-4);
+}
+
+.error-code {
+  font-family: var(--font-mono);
+  font-size: clamp(5rem, 18vw, 10rem);
+  font-weight: var(--font-weight-9);
+  letter-spacing: -0.05em;
+  line-height: 1;
+  margin-block: var(--size-4) var(--size-3);
+  background: linear-gradient(135deg, var(--red-5), var(--orange-5));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.error-page h1 {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: var(--font-weight-9);
+  letter-spacing: -0.03em;
+  margin-block-end: var(--size-5);
+  color: var(--text-1);
 }
 
 /* ─── Demo containers ──────────────────────────────────── */
@@ -1771,6 +1807,11 @@ docs-toc {
   border-radius: var(--radius-sm);
   font-size: 0.875em;
   color: var(--brand-secondary);
+}
+
+.docs-content .code-panel pre[data-lang] {
+  border-radius: unset;
+  margin-block: unset;
 }
 
 /* Tempest highlight token colours — catppuccin-mocha */
