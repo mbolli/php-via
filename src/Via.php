@@ -1234,6 +1234,7 @@ class Via {
             $this->log('info', 'Received SIGTERM, shutting down gracefully...');
             $this->shuttingDown = true;
             $this->executeShutdownCallbacks();
+
             exit(0);
         });
 
@@ -1243,6 +1244,7 @@ class Via {
             $this->log('info', 'Received SIGINT (Ctrl+C), shutting down gracefully...');
             $this->shuttingDown = true;
             $this->executeShutdownCallbacks();
+
             exit(0);
         });
 
@@ -1286,6 +1288,7 @@ class Via {
                 ++$count;
             }
         }
+
         return $count;
     }
 
