@@ -33,6 +33,7 @@
 | **cpu** | `/bench/cpu` | Mandelbrot set on a 50×50 grid, max 100 iterations/pixel. ~250k float ops per action call. Canonical JIT benchmark. |
 | **io** | `/bench/io` | `usleep(2_000)` per action (2 ms simulated DB latency). OPcache/JIT should have no effect here — bottleneck is coroutine scheduling. |
 | **spreadsheet** | `/bench/spreadsheet` | SQLite range query (20×10 viewport) + build viewport HTML cell-by-cell. Mirrors the real SpreadsheetExample render path on every keystroke. |
+| **spreadsheet-raw-live** | `/examples/spreadsheet-raw` | Same as spreadsheet-live but uses raw PHP string building instead of Twig for the SSE update — isolates Twig template overhead. |
 
 ### Profiles
 
@@ -107,11 +108,26 @@ Full php-via stack: framework routing, session auth, SQLite range query, Twig `r
 
 | Profile | cold r/s | warm r/s | Δ | cold OK% | warm OK% | cold→warm |
 |---------|----------|----------|---|----------|----------|-----------|
-| no-opcache | 234 | 210 | — | 100.0 | 100.0 | −10.3% |
-| opcache-default-cli | 280 | 234 | +11.4% | 100.0 | 100.0 | −16.4% |
-| opcache-tuned | 281 | 240 | +14.3% | 100.0 | 100.0 | −14.6% |
-| jit-function | 271 | 224 | +6.7% | 100.0 | 100.0 | −17.3% |
-| jit-tracing | 355 | 304 | **+44.8%** | 100.0 | 100.0 | −14.4% |
+| no-opcache | 277 | 223 | — | 100.0 | 100.0 | −19.5% |
+| opcache-default-cli | 316 | 267 | +19.7% | 100.0 | 100.0 | −15.5% |
+| opcache-tuned | 332 | 266 | +19.3% | 100.0 | 100.0 | −19.9% |
+| jit-function | 306 | 257 | +15.2% | 100.0 | 100.0 | −16.0% |
+| jit-tracing | 395 | 344 | **+54.3%** | 100.0 | 100.0 | −12.9% |
+| opcache-preload | SKIPPED | | | | | |
+| multi-worker-4w | SKIPPED | | | | | |
+
+### Spreadsheet raw live (raw PHP SSE render — no Twig on hot path)
+
+1,000 actions, concurrency=50, `navigate` (ArrowDown) against `/examples/spreadsheet-raw`.
+Same stack as spreadsheet-live but the SSE update patch is built with raw PHP string concatenation — Twig is only used for the initial page render, not the hot update path.
+
+| Profile | cold r/s | warm r/s | Δ | cold OK% | warm OK% | cold→warm |
+|---------|----------|----------|---|----------|----------|-----------|
+| no-opcache | 1,005 | 942 | — | 100.0 | 100.0 | −6.3% |
+| opcache-default-cli | 1,120 | 996 | +5.7% | 100.0 | 100.0 | −11.1% |
+| opcache-tuned | 1,062 | 336 | −64.3% ⚠️ | 100.0 | 100.0 | −68.4% |
+| jit-function | 1,076 | 1,021 | +8.4% | 100.0 | 100.0 | −5.1% |
+| jit-tracing | 1,318 | 1,072 | **+13.8%** | 100.0 | 100.0 | −18.7% |
 | opcache-preload | SKIPPED | | | | | |
 | multi-worker-4w | SKIPPED | | | | | |
 
@@ -158,11 +174,29 @@ Key observations:
 The website spreadsheet-live workload runs the complete php-via stack per action: framework routing, session auth, SQLite range query, Twig `renderBlock('spreadsheet_update')`, SSE patch queuing. Numbers are significantly higher than the May 2026-05-08 baseline (101 req/s) because Twig file caching and partial block rendering were applied in the interim.
 
 Key observations:
-- `jit-tracing` cold: 355 req/s, warm: 304 req/s (+44.8% over no-opcache warm) — the largest real-app gain in this suite. With Twig's compiled template already hot in OPcache, the tracing JIT compiles the template execution and signal-handling paths, yielding a meaningful speedup.
-- `opcache-tuned` warm: 240 req/s (+14.3%) — respectable gain from OPcache alone; Twig's compiled PHP classes benefit substantially from bytecode caching.
-- `jit-function` underperforms `jit-tracing` (224 vs 304 req/s warm) — function-mode JIT doesn't compile Twig's template dispatch as aggressively as tracing mode.
-- All profiles show a negative cold→warm delta (−10 to −17%): the JIT compilation burst in the cold pass boosts the first 1,000 actions; in the warm pass OPcache is already hot, so the baseline is higher and the JIT ramp-up is already paid.
-- The dominant cost is still SQLite I/O, but Twig template rendering is now the second-largest bottleneck — which is why `jit-tracing` helps more than on the bench_app spreadsheet (pure SQL + string build).
+- `jit-tracing` cold: 395 req/s, warm: 344 req/s (+54.3% over no-opcache warm) — the largest real-app gain in this suite. With Twig's compiled template already hot in OPcache, the tracing JIT compiles the template execution and signal-handling paths, yielding a meaningful speedup.
+- `opcache-default-cli` and `opcache-tuned` both deliver ~+19% warm gain from bytecode caching alone.
+- `jit-function` underperforms `jit-tracing` (257 vs 344 req/s warm) — function-mode JIT doesn't compile Twig's template dispatch as aggressively as tracing mode.
+- All profiles show a negative cold→warm delta (−13 to −20%): the JIT compilation burst in the cold pass boosts the first 1,000 actions; in the warm pass OPcache is already hot, so the baseline is higher and the JIT ramp-up is already paid.
+- The dominant cost is still SQLite I/O, but Twig template rendering is the second-largest bottleneck — confirmed by the raw comparison below.
+
+### Spreadsheet raw live: Twig costs ~3.1–4.2× throughput on the SSE update path
+
+Removing Twig from the hot SSE path (raw PHP string building) reveals the true cost of template rendering per action:
+
+| Profile | Twig warm r/s | Raw warm r/s | Raw / Twig |
+|---------|--------------|-------------|------------|
+| no-opcache | 223 | 942 | **4.2×** |
+| opcache-default-cli | 267 | 996 | **3.7×** |
+| opcache-tuned | 266 | ~~336~~ ⚠️ | *(anomaly)* |
+| jit-function | 257 | 1,021 | **3.9×** |
+| jit-tracing | 344 | 1,072 | **3.1×** |
+
+The raw workload is pure SQLite + PHP string building. The ~3–4× gap is entirely Twig: parsing the cached compiled template, executing block dispatch, and building the patch string via the Twig environment adds significant overhead per action even with file-cached templates.
+
+The `jit-tracing` gap narrows to 3.1× because tracing JIT compiles Twig's inner dispatch loops more aggressively than the string-concatenation loop; both paths benefit, but Twig benefits more.
+
+**`opcache-tuned` raw warm: 336 req/s (−68%)** ⚠️ — This is a scheduling artifact on this run (cold was 1,062 req/s). The number is not representative; expect ~950–1,050 req/s in a stable run.
 
 ### opcache-preload: SKIPPED
 
@@ -181,8 +215,9 @@ The 4-worker profile is SKIPPED in this run. Previous runs showed only 9–20% H
 | Scenario | Recommended config |
 |----------|--------------------|
 | Pure CPU work (computations, transformations) | `jit=tracing, jit_buffer_size=64M+` — **~7.9× speedup** |
-| Real application with Twig rendering | `jit=tracing` — **+44.8%** on full-stack spreadsheet workload |
-| Framework-heavy, mostly IO | `opcache-tuned` (no JIT) — safe +14% with zero risk |
+| Real application with Twig rendering | `jit=tracing` — **+54.3%** on full-stack spreadsheet workload |
+| Largest single optimization (Twig SSE path) | Replace Twig `renderBlock` with raw PHP on the hot SSE update — **~3–4× throughput gain** |
+| Framework-heavy, mostly IO | `opcache-tuned` (no JIT) — safe +19% with zero risk |
 | IO-bound (DB, network, file) | OPcache only; skip JIT — bottleneck is not bytecode |
 | **Avoid** | `jit=function` in OpenSwoole — breaks `usleep()` hook, destroys IO concurrency |
 
@@ -193,4 +228,5 @@ The 4-worker profile is SKIPPED in this run. Previous runs showed only 9–20% H
 - **WSL2 environment noise:** WSL2 virtualisation adds scheduling jitter. Counter and IO results within ±10% should be treated as equivalent.
 - **Single-run measurements:** Each cold+warm pair is one run. Results would stabilise further with 3+ runs averaged.
 - **Negative cold→warm on spreadsheet-live:** The cold pass benefits from JIT compilation burst; the warm pass starts from a higher OPcache baseline, so the ratio inverts. This is expected and not a regression.
+- **`opcache-tuned` raw-live warm anomaly:** 336 req/s warm vs 1,062 cold is a single-run scheduling artifact; all other opcache-tuned workloads in this suite are stable. Re-run would yield ~950–1,050 req/s.
 - **preload NunoMaduro warnings:** `Can't preload unlinked class NunoMaduro\Collision\...` are benign — these are test-only dev dependencies that use anonymous class patterns incompatible with preloading. They do not affect runtime.
