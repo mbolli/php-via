@@ -171,7 +171,9 @@ code, pre {
   }
 }
 
-main, .site-footer { position: relative; }
+main { position: relative; }
+/* z-index:0 keeps footer below the fixed FAB/overlay stacking layers */
+.site-footer { position: relative; z-index: 0; }
 
 .nav-links {
   display: flex;
@@ -900,10 +902,15 @@ main, .site-footer { position: relative; }
 /* ─── Docs layout ──────────────────────────────────────── */
 .docs-layout {
   display: grid;
-  grid-template-columns: 16rem 1fr;
-  max-width: 88rem;
+  grid-template-columns: 16rem 1fr 14rem;
+  max-width: 96rem;
   margin-inline: auto;
   min-height: calc(100dvh - var(--nav-height));
+}
+
+@media (max-width: 1100px) {
+  .docs-layout { grid-template-columns: 16rem 1fr; }
+  .docs-toc { display: none; }
 }
 
 @media (max-width: 768px) {
@@ -993,6 +1000,347 @@ main, .site-footer { position: relative; }
 .sidebar-nav a:hover { background: var(--surface-2); color: var(--text-1); }
 .sidebar-nav a.active { background: color-mix(in srgb, var(--brand) 10%, transparent); color: var(--brand); font-weight: var(--font-weight-6); }
 
+/* ─── Docs TOC sidebar (right column) ──────────────────── */
+
+docs-toc {
+  display: block;
+  width: 100%;
+}
+
+/* Entrance animation */
+@keyframes toc-slide-in {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.docs-toc-sidebar {
+  position: sticky;
+  top: var(--nav-height);
+  height: calc(100dvh - var(--nav-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--size-6) var(--size-4) var(--size-6) var(--size-5);
+  border-inline-start: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  /* opacity:0 before JS adds .is-ready */
+  opacity: 0;
+}
+.docs-toc-sidebar.is-ready {
+  animation: toc-slide-in 400ms var(--ease-out-2) forwards;
+}
+
+/* At ≤1100px the right column is gone. Collapse the aside out of grid flow
+   WITHOUT display:none (which would kill position:fixed descendants like the
+   progress bar, FAB, and overlay). Must come AFTER the base rules above so
+   the cascade actually wins. */
+@media (max-width: 1100px) {
+  .docs-toc-sidebar,
+  .docs-toc-sidebar.is-ready {
+    position: fixed;
+    width: 0;
+    height: 0;
+    overflow: visible;
+    padding: 0;
+    border: none;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    opacity: 1;       /* override the base opacity:0 */
+    animation: none;  /* stop the slide-in (its transform fill-mode creates a containing block) */
+    transform: none;  /* belt-and-suspenders */
+  }
+}
+
+/* ── Desktop TOC nav ── */
+.docs-toc__heading {
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-7);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+  margin-block: 0 var(--size-3);
+}
+
+.docs-toc__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.docs-toc__item {
+  position: relative;
+}
+
+/* Animated left accent bar */
+.docs-toc__item::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -var(--size-5);
+  left: calc(-1 * var(--size-5));
+  width: 2px;
+  background: var(--brand);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 200ms var(--ease-out-2);
+  pointer-events: none;
+}
+.docs-toc__item.is-active::before {
+  transform: scaleY(1);
+}
+
+.docs-toc__link {
+  display: block;
+  padding: var(--size-1) var(--size-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-0);
+  text-decoration: none;
+  color: var(--text-3);
+  line-height: var(--font-lineheight-3);
+  transition: color 150ms var(--ease-out-2),
+              background 150ms var(--ease-out-2),
+              transform 150ms var(--ease-out-2);
+  transform: translateX(0);
+}
+.docs-toc__link:hover {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--brand) 7%, transparent);
+  transform: translateX(3px);
+}
+.docs-toc__item.is-active > .docs-toc__link {
+  color: var(--brand);
+  font-weight: var(--font-weight-6);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+
+/* h3 items — indented + smaller */
+.docs-toc__item--h3 > .docs-toc__link {
+  padding-inline-start: var(--size-4);
+  font-size: calc(var(--font-size-0) * 0.95);
+  color: var(--text-3);
+  opacity: 0.85;
+}
+.docs-toc__item--h3.is-active > .docs-toc__link {
+  color: var(--brand);
+  opacity: 1;
+}
+
+/* ── Mobile progress bar ── */
+@keyframes toc-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes toc-menu-in {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.docs-toc-mobile {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .docs-toc-mobile {
+    display: block;
+  }
+}
+
+.docs-toc-progress {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 200;
+  pointer-events: none;
+  background: transparent;
+}
+.docs-toc-progress__bar {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(to right, var(--brand-light, var(--brand)), var(--brand));
+  transition: width 100ms linear;
+  border-radius: 0 var(--radius-round) var(--radius-round) 0;
+}
+
+/* ── FAB ── */
+.docs-toc-fab {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-round);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--shadow-4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 201;
+  transition:
+    transform 150ms var(--ease-spring-2),
+    box-shadow 150ms var(--ease-out-2);
+}
+.docs-toc-fab:hover {
+  transform: scale(1.08);
+  box-shadow: var(--shadow-5);
+}
+.docs-toc-fab:active {
+  transform: scale(0.95);
+}
+.docs-toc-fab__counter {
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-7);
+  font-variant-numeric: tabular-nums;
+  color: var(--brand);
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Mobile overlay backdrop ── */
+.docs-toc-mobile__backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 300;
+  animation: toc-overlay-in 200ms var(--ease-out-2) forwards;
+}
+.docs-toc-mobile__backdrop.is-open {
+  display: block;
+}
+
+/* ── Mobile menu panel ── */
+.docs-toc-mobile__menu {
+  /* Reset <dialog> defaults */
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text-1);
+  /* Positioning */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 70dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Glass */
+  background: color-mix(in srgb, var(--surface-1) 70%, transparent);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-block-start: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-5);
+  /* z + animation */
+  z-index: 301;
+  display: none;
+  will-change: transform;
+}
+.docs-toc-mobile__menu.is-open {
+  display: block;
+  animation: toc-menu-in 300ms var(--ease-spring-3) forwards;
+}
+
+.docs-toc-mobile__menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--size-3) var(--size-4);
+  border-block-end: 1px solid var(--glass-border);
+  position: sticky;
+  top: 0;
+  background: inherit;
+  backdrop-filter: inherit;
+  -webkit-backdrop-filter: inherit;
+  z-index: 1;
+}
+.docs-toc-mobile__menu-title {
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-7);
+  color: var(--text-1);
+}
+.docs-toc-mobile__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-round);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+.docs-toc-mobile__close:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.docs-toc-mobile__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--size-2) 0 var(--size-5);
+}
+.docs-toc-mobile__item {
+  position: relative;
+  border-inline-start: 2px solid transparent;
+  transition: border-color 200ms var(--ease-out-2);
+}
+.docs-toc-mobile__item.is-active {
+  border-inline-start-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+.docs-toc-mobile__link {
+  display: flex;
+  align-items: center;
+  gap: var(--size-3);
+  padding: var(--size-2) var(--size-4);
+  text-decoration: none;
+  color: var(--text-2);
+  font-size: var(--font-size-1);
+  transition: color 150ms;
+}
+.docs-toc-mobile__item.is-active > .docs-toc-mobile__link {
+  color: var(--brand);
+  font-weight: var(--font-weight-6);
+}
+.docs-toc-mobile__item--h3 > .docs-toc-mobile__link {
+  padding-inline-start: calc(var(--size-4) + var(--size-4));
+  font-size: var(--font-size-0);
+  opacity: 0.85;
+}
+.docs-toc-mobile__item--h3.is-active > .docs-toc-mobile__link {
+  opacity: 1;
+}
+.docs-toc-mobile__num {
+  flex-shrink: 0;
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-7);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  width: 1.4em;
+  text-align: right;
+}
+.docs-toc-mobile__item.is-active .docs-toc-mobile__num {
+  color: var(--brand);
+}
+
+/* ── Docs content area ─── */
 .docs-content {
   padding: var(--size-7) var(--size-6);
   min-width: 0;
