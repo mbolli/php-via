@@ -114,11 +114,11 @@ $appArg = (string) ($opts['app'] ?? '');
 if ($appArg === 'website') {
     $benchApp = (string) realpath(__DIR__ . '/../../website/app.php');
     $baseEnv  = ['APP_ENV' => 'dev']; // devMode=true → no Origin header required
-} elseif ($appArg !== '') {
-    $benchApp = (string) realpath($appArg);
+} elseif ($appArg === '' || $appArg === 'bench') {
+    $benchApp = __DIR__ . '/bench_app.php';
     $baseEnv  = [];
 } else {
-    $benchApp = __DIR__ . '/bench_app.php';
+    $benchApp = (string) realpath($appArg);
     $baseEnv  = [];
 }
 $isWebsiteApp = str_ends_with($benchApp, 'website/app.php');
