@@ -16,6 +16,7 @@ class Config {
     private bool $devMode = false;
     private string $logLevel = 'info';
     private ?string $templateDir = null;
+    private string|false $twigCacheDir = false;
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
@@ -136,6 +137,16 @@ class Config {
         $this->templateDir = $dir;
 
         return $this;
+    }
+
+    public function withTwigCacheDir(string $dir): self {
+        $this->twigCacheDir = $dir;
+
+        return $this;
+    }
+
+    public function getTwigCacheDir(): string|false {
+        return $this->twigCacheDir;
     }
 
     public function withStaticDir(string $dir): self {

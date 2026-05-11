@@ -386,7 +386,7 @@ class Application {
         }
 
         $this->twig = new Environment($loader, [
-            'cache' => false,
+            'cache' => $this->config->getTwigCacheDir(),
             'autoescape' => 'html',
             'strict_variables' => true,
         ]);
