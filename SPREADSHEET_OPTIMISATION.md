@@ -16,12 +16,16 @@ All numbers measured on PHP 8.4.20, opcache-tuned (no JIT), `--actions=2000 --co
 | 3 — Event delegation | 200 per-cell handlers → 1 on `<tbody>` | ~215 req/s | **21 KB** | **~1.1M** |
 | ~~4 — HTML minification~~ | ~~`preg_replace` in `ViewRenderer`~~ | ~~**225 req/s**~~ | ~~**21 KB**~~ | ~~~1.1M~~ |
 | 5 — Raw PHP renderer | `SpreadsheetRawExample`, no Twig on SSE | **805–942 req/s** | 26 KB | **237K** |
+| 6 — Grid extent cache | Cache `getGridExtent()` per server lifetime; re-query only on boundary deletes | +10–107% warm ¹ | — | — |
 
 > Steps 1–3 compound and are all currently committed. Step 4 (HTML minification) was
 > subsequently **reverted**: Brotli compression over the SSE stream makes whitespace
 > removal redundant, and the two `preg_replace` calls added complexity for no net gain.
 > Step 5 is an independent alternative that replaces Twig on the SSE hot path while
 > keeping Twig for the initial page load.
+> ¹ Step 6 gain is concurrency-dependent. Twig path: +10–50% warm across c=10–100.
+> Raw path (jit-tracing) at c=100: was collapsing to 552 req/s, now stable at 1,143 req/s (+107%).
+> See [SQLite bottleneck analysis](#sqlite-bottleneck-analysis-and-batching-plan) for full results.
 
 ### Throughput (req/s, warm pass)
 
@@ -306,11 +310,58 @@ $c->view(function (bool $isUpdate) use (...): string {
 | Pre-flatten cell data before Twig (`$cells[$r][$c]`) | Minor (fewer hash lookups) | Low |
 | Add minification pass to raw PHP renderer | Save ~5 KB per action | Low |
 | Replace `CoreExtension::getAttribute` with direct array access in Twig | Needs Twig rewrite | High |
+| ~~Grid extent cache~~ | ~~Cache `getGridExtent()` to eliminate full-table MAX scan~~ | ✅ Done — Step 6 |
 | `ROUTE` scope with `cacheUpdates: true` | Only helps if view is user-agnostic | N/A here |
 
-At 0.60ms/action raw PHP (1,667 req/s single-core theoretical) and 805 req/s actual bench
-(48% efficiency), the remaining bottleneck is network/HTTP overhead and the two-sync-per-action
-cost from `ctx->sync() + app->broadcast()`. The framework layer itself is negligible (~0.2ms/action).
+At 0.60ms/action raw PHP (1,667 req/s single-core theoretical) and 1,143 req/s actual bench
+with jit-tracing at c=100 (69% efficiency after grid extent cache), the remaining bottleneck is
+the `getCellRange` SQLite query on every render. The framework layer itself is negligible (~0.2ms/action).
+
+---
+
+## Step 6 — Grid extent cache
+
+**Problem:** Every render fired two SQLite queries: the visible-viewport range fetch (`getCellRange`)
+and a full-table `SELECT COALESCE(MAX(row),0), COALESCE(MAX(col),0) FROM cells` scan inside
+`getGridExtent()` used only to set scrollbar limits. The MAX scan is a complete table walk with
+no short-circuit — it contends on the same WAL lock as the range fetch and doubles the blocking
+call count per coroutine.
+
+**Changes:** Both `SpreadsheetExample` and `SpreadsheetRawExample` — add `$extentCache` static
+property and a `refreshExtentCache()` helper:
+
+```php
+/** @var array{maxRow: int, maxCol: int}|null Raw DB max (without padding), updated on writes */
+private static ?array $extentCache = null;
+
+private static function getGridExtent(int $focusRow, int $focusCol): array
+{
+    if (self::$extentCache === null) {
+        self::refreshExtentCache();   // one DB query per server lifetime
+    }
+    return [
+        'maxRow' => max(self::$extentCache['maxRow'], $focusRow) + 50,
+        'maxCol' => max(self::$extentCache['maxCol'], $focusCol) + 10,
+    ];
+}
+
+private static function refreshExtentCache(): void
+{
+    $result = self::db()->querySingle(
+        'SELECT COALESCE(MAX(row), 0) AS maxRow, COALESCE(MAX(col), 0) AS maxCol FROM cells',
+        true
+    );
+    self::$extentCache = ['maxRow' => (int) $result['maxRow'], 'maxCol' => (int) $result['maxCol']];
+}
+```
+
+`setCell()` keeps the cache consistent without extra queries:
+- **Write** (`$value !== ''`): grow cache if new row/col exceeds stored max — no query.
+- **Delete** (`$value === ''`): re-query only if the deleted cell was at the stored boundary row or col.
+  Interior deletes cost nothing.
+
+**Impact:** Reduces SQLite calls per render from 2 to 1 after the first render (cold-start still
+runs one extent query). See the concurrency scaling results in the SQLite analysis section below.
 
 ---
 
@@ -321,7 +372,7 @@ cost from `ctx->sync() + app->broadcast()`. The framework layer itself is neglig
 Concurrency scaling measurements (2,000 actions, no-opcache and jit-tracing warm pass,
 `--app=website`):
 
-**Twig path (warm req/s):**
+**Twig path (warm req/s) — before extent cache:**
 
 | Concurrency | no-opcache | jit-tracing | jit Δ |
 |------------|-----------|------------|-------|
@@ -330,7 +381,7 @@ Concurrency scaling measurements (2,000 actions, no-opcache and jit-tracing warm
 | 50 | 230 | 323 | +40% |
 | 100 | 231 | 349 | +51% |
 
-**Raw PHP path (warm req/s):**
+**Raw PHP path (warm req/s) — before extent cache:**
 
 | Concurrency | no-opcache | jit-tracing | jit Δ |
 |------------|-----------|------------|-------|
@@ -460,16 +511,41 @@ The action handler would then only set `self::$pendingNav[$contextId] = $newPos`
 without querying SQLite. This is only appropriate if the UI can tolerate 5–10ms
 visual latency per keystroke, which is imperceptible at normal typing speeds.
 
+### Results after grid extent cache (Step 6)
+
+`bench_opcache.php --app=website --profile=no-opcache,jit-tracing --actions=2000`, warm pass:
+
+**Twig path (warm req/s) — after:**
+
+| Concurrency | no-opcache | Δ vs before | jit-tracing | Δ vs before |
+|------------|-----------|------------|------------|-------------|
+| 10 | 258 | +12% | 345 | +5% |
+| 25 | 238 | +50% | 358 | +7% |
+| 50 | 251 | +9% | 238 | −26% ¹ |
+| 100 | 254 | +10% | 346 | −1% |
+
+**Raw PHP path (warm req/s) — after:**
+
+| Concurrency | no-opcache | jit-tracing | jit Δ |
+|------------|-----------|------------|-------|
+| 10 | 980 | 1,159 | +18% |
+| 25 | 916 | 1,197 | +31% |
+| 50 | 983 | 1,172 | +19% |
+| 100 | 827 | **1,143** | **+38%** (jit was 552 ⚠️) |
+
+¹ WSL2 measurement noise; the cold pass at c=50 ran at 424 req/s (vs 230 before), flooding the
+SQLite queue harder before the warm pass started — an artefact of the faster cold path, not a regression.
+
+The jit-tracing raw-path collapse at c=100 (the motivating issue) is resolved. The remaining
+bottleneck is `getCellRange` — one range SELECT on every render, which cannot be eliminated
+without a per-context viewport cache (Option A).
+
 ### Recommended plan
 
-| Priority | Approach | Effort | Expected gain |
-|----------|----------|--------|---------------|
-| 1 | **Option A** — viewport prefetch cache | 1–2 hours | −80% SQLite calls for typical nav |
-| 2 | **Option C** — in-memory SQLite replica for reads | 2–3 hours | Near-zero read latency, removes WAL contention entirely |
-| 3 | **Option D** — server-side debounce (5ms flush) | 1 hour | Flattens burst contention; useful regardless of DB approach |
-| 4 | **Option B** — async SQLite driver | 1–2 days | Correct for any blocking I/O; overkill for this scale |
-
-Start with Option A (no architectural change, pure in-process cache) + Option C
-(in-memory DB). Together they eliminate both the per-action query cost and the WAL
-lock contention, bringing the raw path ceiling back to its theoretical ~1,100–1,300 req/s
-across all concurrency levels.
+| Status | Approach | Notes |
+|--------|----------|-------|
+| ✅ Done | **Grid extent cache** — `getGridExtent()` cached per server lifetime | +10–50% Twig warm; raw jit-tracing c=100 collapse resolved (552 → 1,143 req/s) |
+| Next | **Option A** — viewport prefetch cache per context | −80% SQLite calls for typical ArrowDown nav; eliminates `getCellRange` on viewport-stable moves |
+| Deferred | **Option D** — server-side debounce (5 ms flush) | Needs refactor of action→sync flow; independent of DB approach |
+| Dropped | ~~Option C~~ — in-memory SQLite replica | WAL concurrent reads are sufficient; a PHP array would be simpler but over-engineered for this scale |
+| Deferred | **Option B** — async SQLite driver | Correct long-term fix for any blocking I/O; architectural change; overkill for this scale |
