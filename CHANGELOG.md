@@ -2,6 +2,30 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.9.0] - 2026-05-12
+
+### New Features
+
+- **`Via::notFound(callable $handler): self`**: register a custom handler invoked when no
+  route matches. The handler receives the raw `OpenSwoole\Http\Request` and
+  `OpenSwoole\Http\Response` and is responsible for setting the status code and ending the
+  response. Falls back to the previous plain-text `404 Not Found` response when unset.
+
+- **Twig `auto_reload`**: when a Twig file cache directory is configured via
+  `Config::withTwigCacheDir()`, compiled templates now automatically recompile when the
+  source file changes. Previously, cached templates were never invalidated during the same
+  server process lifetime, causing stale output after template edits.
+
+### Bug Fixes
+
+- **`SwooleBroker`**: removed a dead `$handler` field that was never used.
+
+### Documentation
+
+- Website improvements: branded 404 error page, docs table-of-contents component, expanded
+  deployment and scaling guides, spreadsheet example optimised from 162 to 805+ req/s (~5×)
+  via partial block rendering and removing Twig from the SSE hot path.
+
 ## [0.8.0] - 2026-05-04
 
 ### Breaking Changes
