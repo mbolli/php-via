@@ -245,6 +245,7 @@ $tabScopeDemo = function (Context $c): void {
     $tabCount = $c->signal(0, 'tabCount');
     $incTab = $c->action(function (Context $c) use ($tabCount): void {
         $tabCount->setValue($tabCount->int() + 1);
+        $c->sync(); // Push updated signal to SSE stream
     }, 'incTab');
 
     $c->view(function () use ($tabCount, $incTab): string {
@@ -403,10 +404,16 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         $tabDemo = $c->component($tabScopeDemo, 'scope-tab');
         $routeDemo = $c->component($routeScopeDemo, 'scope-route');
 
-        $c->view('docs/signals.html.twig', [
-            'tabDemo' => $tabDemo(),
-            'routeDemo' => $routeDemo(),
-        ]);
+        $c->view(function (bool $isUpdate) use ($c, $tabDemo, $routeDemo): string {
+            if ($isUpdate) {
+                return '';
+            }
+
+            return $c->render('docs/signals.html.twig', [
+                'tabDemo' => $tabDemo(),
+                'routeDemo' => $routeDemo(),
+            ]);
+        });
     });
 
     // Scopes concept page
@@ -416,10 +423,16 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         $tabDemo = $c->component($tabScopeDemo, 'scope-tab');
         $routeDemo = $c->component($routeScopeDemo, 'scope-route');
 
-        $c->view('docs/scopes.html.twig', [
-            'tabDemo' => $tabDemo(),
-            'routeDemo' => $routeDemo(),
-        ]);
+        $c->view(function (bool $isUpdate) use ($c, $tabDemo, $routeDemo): string {
+            if ($isUpdate) {
+                return '';
+            }
+
+            return $c->render('docs/scopes.html.twig', [
+                'tabDemo' => $tabDemo(),
+                'routeDemo' => $routeDemo(),
+            ]);
+        });
     });
 
     $app->page('/actions', function (Context $c): void {
