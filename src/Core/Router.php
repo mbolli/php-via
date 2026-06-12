@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Support\TypeCaster;
 
 /**
  * Router - Route registration and matching.
@@ -99,7 +100,7 @@ class Router {
                     // Non-builtin type, pass as string
                     $args[] = $value;
                 } elseif ($paramType instanceof \ReflectionNamedType) {
-                    $args[] = $this->castToType($value, $paramType->getName());
+                    $args[] = TypeCaster::cast($value, $paramType->getName());
                 } else {
                     // No type hint, pass as string
                     $args[] = $value;
@@ -172,7 +173,7 @@ class Router {
         return false;
     }
 
-    /**
+    /*
      * Cast a string value to the specified type.
      *
      * @param string $value The string value to cast
@@ -180,12 +181,4 @@ class Router {
      *
      * @return mixed The casted value
      */
-    private function castToType(string $value, string $type): mixed {
-        return match ($type) {
-            'int' => (int) $value,
-            'float' => (float) $value,
-            'bool' => filter_var($value, FILTER_VALIDATE_BOOLEAN),
-            default => $value,
-        };
-    }
 }
