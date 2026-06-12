@@ -66,8 +66,13 @@ class SignalFactory {
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
         // For TAB signals, use context ID to make them unique per context
         if ($scope !== null && $scope !== Scope::TAB) {
-            // Scoped signal: shared across contexts in this scope
-            $signalId = $scope . ':' . $baseName;
+            // Scoped signal: shared across contexts in this scope.
+            // When inside a named component (e.g. namespace="cats"), prefix the name so
+            // sibling component instances get independent counters (cats_votes vs dogs_votes)
+            // while still being globally shared across all users.
+            $namespace = $this->context->getNamespace();
+            $qualifiedName = $namespace !== null ? $namespace . '_' . $baseName : $baseName;
+            $signalId = $scope . ':' . $qualifiedName;
             // Sanitize signal ID - only alphanumeric and underscore allowed
             $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
 
