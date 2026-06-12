@@ -1,0 +1,6 @@
+<div class="card text-center">
+    <p class="counter-display">
+        <span data-text="${{ votes.id }}">{{ votes.int }}</span>
+    </p>
+    <button data-on:click="@post('{{ vote.url }}')">Vote</button>
+</div>

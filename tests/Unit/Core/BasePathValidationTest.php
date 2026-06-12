@@ -92,6 +92,7 @@ describe('Config::withBasePath()', function (): void {
 
     test('javascript: URI throws', function (): void {
         expect(fn () => (new Config())->withBasePath('javascript:alert(1)'))
-            ->toThrow(InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 });

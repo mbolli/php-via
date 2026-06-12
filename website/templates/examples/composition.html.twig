@@ -1,0 +1,51 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+<div class="flex flex-col gap-4">
+
+    {# ── Session name ─────────────────────────────────────────────────────── #}
+    <div class="card">
+        <h3 class="mt-1">Session Name <code class="anatomy-badge anatomy-badge--session">StateSess</code></h3>
+        <p>Hello, <strong data-text="${{ name.id }}">{{ name.string }}</strong>!</p>
+        <div class="flex gap-1 items-center mt-1">
+            <input type="text" data-bind="{{ nameInput.id }}" placeholder="Enter your name…" class="flex-1">
+            <button data-on:click="@post('{{ saveName.url }}')">Save Name</button>
+        </div>
+        <p class="anatomy-desc mt-1">Open another tab — saving here updates the greeting in both tabs instantly.</p>
+    </div>
+
+    {# ── Counter with StateTab multiplier ─────────────────────────────────── #}
+    <div class="card">
+        <h3 class="mt-1">Counter <code class="anatomy-badge anatomy-badge--statetab">StateTab</code></h3>
+        <p class="counter-display">
+            Count: <span data-text="${{ count.id }}">{{ count.int }}</span>
+        </p>
+        <p class="anatomy-desc">Each click adds +1, +2, +3… The multiplier is a server-only <code>#[StateTab]</code> property — it survives between action calls but is never sent to the client.</p>
+        <div class="flex gap-1 mt-1">
+            <button data-on:click="@post('{{ increment.url }}')">Increment</button>
+            <button class="danger" data-on:click="@post('{{ resetTab.url }}')">Reset Tab</button>
+        </div>
+    </div>
+
+    {# ── Global click counter ─────────────────────────────────────────────── #}
+    <div class="card">
+        <h3 class="mt-1">Global Clicks <code class="anatomy-badge anatomy-badge--global">StateApp</code></h3>
+        <p class="counter-display">
+            Total clicks (all users): <span data-text="${{ totalClicks.id }}">{{ totalClicks.int }}</span>
+        </p>
+        <p class="anatomy-desc">Every action on this page increments this counter. Open two browser sessions — clicking in either updates the counter in both.</p>
+    </div>
+
+    {# ── Vote widgets × 3 ─────────────────────────────────────────────────── #}
+    <div class="card">
+        <h3 class="mt-1">Vote Widgets <code class="anatomy-badge anatomy-badge--tab">Component × 3</code></h3>
+        <p class="anatomy-desc mb-2">Same <code>VoteWidget</code> class mounted three times. Signals auto-namespace: <code>cats.votes</code>, <code>dogs.votes</code>, <code>parrots.votes</code>. Clicking one widget never affects the others.</p>
+        <div class="flex gap-2">
+            <div class="flex-1">{{ cats | raw }}</div>
+            <div class="flex-1">{{ dogs | raw }}</div>
+            <div class="flex-1">{{ parrots | raw }}</div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

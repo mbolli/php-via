@@ -15,6 +15,7 @@ use PhpVia\Website\Examples\AllScopesExample;
 use PhpVia\Website\Examples\ChatRoomExample;
 use PhpVia\Website\Examples\ClientMonitorExample;
 use PhpVia\Website\Examples\ComponentsExample;
+use PhpVia\Website\Examples\CompositionDemo;
 use PhpVia\Website\Examples\ContactFormExample;
 use PhpVia\Website\Examples\CounterExample;
 use PhpVia\Website\Examples\FileUploadExample;
@@ -36,6 +37,7 @@ use PhpVia\Website\Examples\WizardExample;
 // ─── Examples: register routes ───────────────────────────────────────────────
 
 CounterExample::register($app);
+CompositionDemo::register($app);
 GreeterExample::register($app);
 TodoExample::register($app);
 ComponentsExample::register($app);
