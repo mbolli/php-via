@@ -50,7 +50,7 @@ class PatchManager {
      * For component contexts, patches are forwarded to the parent page context's
      * channel — the SSE loop only reads from the top-level page channel.
      *
-     * @param array<string, mixed> $patch
+     * @param array{type: string, content: mixed, selector?: string} $patch
      */
     public function queuePatch(array $patch): void {
         // Components don't have their own SSE reader — forward to the parent page.
@@ -94,7 +94,7 @@ class PatchManager {
      * Coroutine::sleep(), which is the only reliable way to yield a coroutine
      * in OpenSwoole regardless of channel state (closed, empty, etc.).
      *
-     * @return null|array<string, mixed>
+     * @return null|array{type: string, content: mixed, selector?: string}
      */
     public function getPatch(): ?array {
         if ($this->useArray) {
