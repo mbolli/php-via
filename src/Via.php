@@ -7,6 +7,8 @@ namespace Mbolli\PhpVia;
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Broker\ServerAwareBroker;
+use Mbolli\PhpVia\Composition\ClassMetadata;
+use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
@@ -83,8 +85,8 @@ class Via {
     /** @var array<callable(Context): void> Callbacks to run when a client disconnects from SSE */
     private array $clientDisconnectCallbacks = [];
 
-    /** @var null|callable(\OpenSwoole\Http\Request, \OpenSwoole\Http\Response): void Handler for unmatched routes (404) */
-    private $notFoundHandler = null;
+    /** @var null|callable(Request, Response): void Handler for unmatched routes (404) */
+    private $notFoundHandler;
 
     private bool $shuttingDown = false;
     private bool $signalsRegistered = false;
@@ -347,9 +349,29 @@ class Via {
      * $app->page('/admin', fn(Context $c) => ...)->middleware(new AuthMiddleware());
      * ```
      *
-     * @param string   $route   The route pattern (e.g., '/')
-     * @param callable $handler Function that receives a Context instance
+     * @param string $route The route pattern (e.g., '/')
      */
+    /**
+     * Mount a composition-pattern page class at a route.
+     *
+     * The class must have a public `view(Context $ctx)` method and may declare
+     * reactive properties with #[Signal], #[StateSess], #[StateApp], #[StateTab],
+     * and action methods with #[Action].
+     *
+     * @param class-string  $class   Page class name
+     * @param string        $route   URL pattern (may contain {params})
+     * @param null|callable $factory Optional factory — called instead of `new $class()` per connection.
+     *                               Use this to inject constructor dependencies.
+     *                               The factory should return an instance of $class.
+     *
+     * @throws \InvalidArgumentException if $class has no public view(Context) method
+     */
+    public function mount(string $class, string $route, ?callable $factory = null): RouteDefinition {
+        $meta = ClassMetadata::analyze($class);
+
+        return $this->page($route, PageMount::buildClosure($meta, $this, $factory));
+    }
+
     public function page(string $route, callable $handler): RouteDefinition {
         if ($this->groupPrefix !== '') {
             $base = rtrim($this->groupPrefix, '/');
@@ -831,7 +853,7 @@ class Via {
      * The handler receives the raw OpenSwoole Request and Response.
      * It is responsible for setting the status code and ending the response.
      *
-     * @param callable(\OpenSwoole\Http\Request, \OpenSwoole\Http\Response): void $handler
+     * @param callable(Request, Response): void $handler
      */
     public function notFound(callable $handler): self {
         $this->notFoundHandler = $handler;
@@ -840,7 +862,7 @@ class Via {
     }
 
     /**
-     * @return null|callable(\OpenSwoole\Http\Request, \OpenSwoole\Http\Response): void
+     * @return null|callable(Request, Response): void
      */
     public function getNotFoundHandler(): ?callable {
         return $this->notFoundHandler;

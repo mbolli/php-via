@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
+use Mbolli\PhpVia\Composition\ClassMetadata;
+use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
@@ -936,12 +938,20 @@ class Context {
     /**
      * Create a component (sub-context).
      *
-     * @param callable    $fn        Component initialization function
-     * @param null|string $namespace Optional namespace for component signals
+     * Accepts either a setup callable (existing API) or a composition-pattern
+     * class name string. When a class name is provided, the framework builds
+     * the setup closure from the class's #[Signal]/#[Action] metadata.
+     *
+     * @param callable|class-string $fn        Component setup function, or class name
+     * @param null|string           $namespace Optional namespace for component signals
      *
      * @return callable Returns a function that renders the component
      */
-    public function component(callable $fn, ?string $namespace = null): callable {
+    public function component(callable|string $fn, ?string $namespace = null): callable {
+        if (\is_string($fn)) {
+            $fn = PageMount::buildClosure(ClassMetadata::analyze($fn), $this->app);
+        }
+
         return $this->componentManager->createComponent($fn, $namespace);
     }
 
@@ -975,7 +985,7 @@ class Context {
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array<string, mixed> Next patch data or null if none available
+     * @return null|array{type: string, content: mixed, selector?: string} Next patch data or null if none available
      */
     public function getPatch(): ?array {
         return $this->patchManager->getPatch();
