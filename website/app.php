@@ -450,6 +450,11 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         $c->view('docs/components.html.twig');
     });
 
+    $app->page('/composition', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/composition'));
+        $c->view('docs/composition.html.twig');
+    });
+
     $app->page('/broadcasting', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/broadcasting'));
         $c->view('docs/broadcasting.html.twig');

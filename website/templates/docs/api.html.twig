@@ -31,6 +31,30 @@ $app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'))
     ->middleware(new AuthMiddleware());
     {% endverbatim %}{% endcode %}
 
+    <h3 id="via-mount"><code>mount(string $class, string $route, ?callable $factory = null): RouteDefinition</code></h3>
+    <p>
+        Register a class as a page using the composition API. The class must have a public
+        <code>view(Context $ctx): void</code> method. Reactive properties are declared with
+        <code>#[Signal]</code>, <code>#[StateSess]</code>, or <code>#[StateApp]</code> attributes;
+        action methods with <code>#[Action]</code>. Returns a <code>RouteDefinition</code> for fluent
+        middleware chaining. See <a href="/docs/composition">Composition</a>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+// Zero-arg constructor (default):
+$app->mount(Counter::class, '/counter');
+
+// Factory — called once per connecting tab, receives no arguments:
+$app->mount(
+    ChatPage::class,
+    '/chat/{room}',
+    fn(): ChatPage => new ChatPage($db, $app)
+);
+
+// Middleware chain:
+$app->mount(Dashboard::class, '/dashboard')
+    ->middleware(new AuthMiddleware());
+    {% endverbatim %}{% endcode %}
+
     <h3 id="via-middleware"><code>middleware(MiddlewareInterface ...$middleware): void</code></h3>
     <p>Register global PSR-15 middleware that runs on every page and action request. See <a href="/docs/middleware">Middleware</a>.</p>
     {% code 'php' %}{% verbatim %}
@@ -186,15 +210,22 @@ $c->view(fn() => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo
 $c->view('presence.html.twig', ['n' => count($app->getClients())], cacheUpdates: false);
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-component"><code>component(callable $fn, string $namespace): callable</code></h3>
-    <p>Create a reusable sub-context. See <a href="/docs/components">Components</a>.</p>
+    <h3 id="context-component"><code>component(callable|string $fn, string $namespace): callable</code></h3>
+    <p>
+        Create a reusable sub-context. Pass a callable for the closure API or a class name string for
+        the composition API — the class is analyzed once and its setup closure built automatically.
+        See <a href="/docs/components">Components</a> and <a href="/docs/composition">Composition</a>.
+    </p>
     {% code 'php' %}{% verbatim %}
+// Closure form:
 $counter = $c->component(function (Context $c): void {
     $n   = $c->signal(0, 'n');
     $inc = $c->action(fn() => $n->setValue($n->int() + 1), 'inc');
-    // n and inc are auto-injected into counter.html.twig
     $c->view('counter.html.twig');
 }, 'counter');
+
+// Class form (composition API):
+$counter = $c->component(Counter::class, 'counter');
 
 $c->view('page.html.twig', ['counter' => $counter()]);
     {% endverbatim %}{% endcode %}
@@ -384,12 +415,84 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         The basePath is exposed to every Twig template as <code>{{ basePath }}</code>.
         See <a href="/docs/deployment#sub-path">Deployment &rarr; Sub-path mounting</a> for a Caddy example.
     </p>
+    ---
+
+    <h2 id="attributes">Attributes</h2>
+    <p>PHP 8 attribute classes for the <a href="/docs/composition">composition API</a>. All live under
+    <code>Mbolli\PhpVia\Attributes\</code>.</p>
+
+    <h3 id="attr-signal"><code>#[Signal]</code></h3>
+    <p>Target: property. Creates a TAB-scoped reactive signal backed by the property's default value.
+    The property is client-writable (via <code>data-bind</code>) and auto-injected into Twig by name.</p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\Signal;
+
+#[Signal]
+public int $count = 0;
+
+#[Signal]
+public string $query = '';
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="attr-state-tab"><code>#[StateTab]</code></h3>
+    <p>Target: property. Marks a plain server-only instance property. No signal is created; the value is
+    never sent to the browser. Because the class instance lives for the tab connection lifetime, the value
+    persists across all action calls.</p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\StateTab;
+
+#[StateTab]
+public int $multiplier = 1; // invisible to client, persists per tab
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="attr-state-sess"><code>#[StateSess]</code></h3>
+    <p>Target: property. Creates a SESSION-scoped signal. Shared across all open tabs of the same browser
+    session. Changing the value inside an action auto-broadcasts to every other tab of that session — no
+    manual <code>broadcast()</code> call needed. Server-authoritative: clients cannot overwrite it.</p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\StateSess;
+
+#[StateSess]
+public string $username = 'Anonymous';
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="attr-state-app"><code>#[StateApp]</code></h3>
+    <p>Target: property. Creates a GLOBAL-scoped signal. Shared across every connected user. Changing the
+    value auto-broadcasts to all sessions. Server-authoritative. Component instances with the same property
+    name get independent signal IDs when the component namespace is set (e.g. <code>cats_votes</code>,
+    <code>dogs_votes</code>).</p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\StateApp;
+
+#[StateApp]
+public int $totalClicks = 0;
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="attr-action"><code>#[Action(name?: string, scope?: string)]</code></h3>
+    <p>Target: method. Marks a public method as a client-callable action. The method must accept
+    <code>Context $ctx</code> as its only parameter. The resolved name (method name by default, or
+    <code>name:</code> if provided) is used as the action URL slug and Twig variable name.
+    <code>scope:</code> is forwarded to <code>Context::action()</code>.</p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\Action;
+
+#[Action]
+public function increment(Context $ctx): void { }       // /_action/increment
+
+#[Action(name: 'reset-tab')]
+public function resetTab(Context $ctx): void { }        // /_action/reset-tab
+
+#[Action(scope: Scope::SESSION)]
+public function setTheme(Context $ctx): void { }        // session-scoped action
+    {% endverbatim %}{% endcode %}
+
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/signals">Signals</a> — reactive state in depth</li>
         <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
         <li><a href="/docs/scopes">Scopes</a> — sharing state across clients</li>
         <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, timers</li>
+        <li><a href="/docs/composition">Composition</a> — class-based pages with attributes</li>
     </ul>
 </article>
 

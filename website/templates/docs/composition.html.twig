@@ -1,0 +1,252 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Composition — php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Composition</h1>
+    <p>
+        The composition API lets you define reactive pages and components as plain PHP classes annotated
+        with attributes, instead of writing imperative closure-based setup code. It is fully additive —
+        the existing closure API is unchanged.
+    </p>
+    <p>
+        Five attribute classes cover all reactive shapes:
+    </p>
+    <table>
+        <thead><tr><th>Attribute</th><th>Scope</th><th>Client-writable</th><th>Auto-broadcasts</th></tr></thead>
+        <tbody>
+            <tr><td><code>#[Signal]</code></td><td>TAB</td><td>yes</td><td>—</td></tr>
+            <tr><td><code>#[StateTab]</code></td><td>none (instance property)</td><td>no</td><td>—</td></tr>
+            <tr><td><code>#[StateSess]</code></td><td>SESSION</td><td>no</td><td>yes → all user's tabs</td></tr>
+            <tr><td><code>#[StateApp]</code></td><td>GLOBAL</td><td>no</td><td>yes → all users</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="mount">Mounting a page</h2>
+    <p>
+        Define a class with reactive properties and annotated action methods, then register it with
+        <code>Via::mount()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\Action;
+use Mbolli\PhpVia\Attributes\Signal;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+final class Counter {
+    #[Signal]
+    public int $count = 0;
+
+    #[Signal]
+    public int $step = 1;
+
+    public function view(Context $ctx): void {
+        $ctx->view('counter.html.twig');
+    }
+
+    #[Action]
+    public function increment(Context $ctx): void {
+        $this->count += $this->step;
+    }
+
+    #[Action]
+    public function reset(Context $ctx): void {
+        $this->count = 0;
+    }
+}
+
+$app->mount(Counter::class, '/counter');
+    {% endverbatim %}{% endcode %}
+
+    <p>
+        The Twig template is identical to the closure API — named signals and actions are auto-injected
+        as variables:
+    </p>
+    {% code 'html' %}{% verbatim %}
+{# counter.html.twig #}
+<div id="counter">
+    <p>Count: <span data-text="${{ count.id }}">{{ count.int }}</span></p>
+    <label>Step: <input type="number" data-bind="{{ step.id }}"></label>
+    <button data-on:click="@post('{{ increment.url }}')">+</button>
+    <button data-on:click="@post('{{ reset.url }}')">Reset</button>
+</div>
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="components">Class-based components</h2>
+    <p>
+        Pass a class name string to <code>$ctx->component()</code> to use the same API for reusable
+        sub-contexts. Mounting the same class multiple times with different namespaces gives each instance
+        independent signal IDs:
+    </p>
+    {% code 'php' %}{% verbatim %}
+public function view(Context $ctx): void {
+    $cats    = $ctx->component(VoteWidget::class, 'cats');
+    $dogs    = $ctx->component(VoteWidget::class, 'dogs');
+    $parrots = $ctx->component(VoteWidget::class, 'parrots');
+
+    // cats_votes, dogs_votes, parrots_votes — independent signal IDs
+    $ctx->view('page.html.twig', [
+        'cats'    => $cats(),
+        'dogs'    => $dogs(),
+        'parrots' => $parrots(),
+    ]);
+}
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="reactive-shapes">Reactive shapes</h2>
+
+    <h3 id="signal"><code>#[Signal]</code></h3>
+    <p>
+        TAB-scoped reactive property. Creates a named signal visible to the browser and injectable into
+        Twig. Clients can write back via <code>data-bind</code>. The default value comes from the
+        property initializer.
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[Signal]
+public string $query = '';
+
+#[Signal]
+public int $page = 1;
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="state-tab"><code>#[StateTab]</code></h3>
+    <p>
+        Server-only instance property. No signal is created; the value never reaches the browser.
+        Because the class instance lives for the entire tab connection, the value persists across all
+        action calls. Use it for server-side accumulators, flags, or route params stored in
+        <code>view()</code>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[StateTab]
+public int $multiplier = 1;
+
+// In an action:
+$this->count += $this->multiplier; // grows +1, +2, +3… on each click
+++$this->multiplier;
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="state-sess"><code>#[StateSess]</code></h3>
+    <p>
+        SESSION-scoped signal. Shared across all open tabs of the same browser session. Changing the
+        value in one action automatically broadcasts to every other tab of that user — no manual
+        <code>$ctx->broadcast()</code> needed.
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[StateSess]
+public string $theme = 'light';
+
+#[Action]
+public function toggleTheme(Context $ctx): void {
+    $this->theme = $this->theme === 'light' ? 'dark' : 'light';
+    // auto-broadcasts to all tabs of this session
+}
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="state-app"><code>#[StateApp]</code></h3>
+    <p>
+        GLOBAL-scoped signal. Shared across every connected user. Changing the value auto-broadcasts
+        to all sessions. Use it for app-wide counters, announcements, or leaderboards.
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[StateApp]
+public int $totalVisitors = 0;
+
+#[Action]
+public function visit(Context $ctx): void {
+    ++$this->totalVisitors;
+    // auto-broadcasts to every connected client
+}
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="actions">Actions</h2>
+    <p>
+        <code>#[Action]</code> marks a public method as a client-callable action. The method name
+        becomes the URL slug as-is (<code>saveName</code> → <code>/_action/saveName</code>). Use the
+        optional <code>name:</code> parameter to override it:
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[Action]
+public function increment(Context $ctx): void { }       // /_action/increment
+
+#[Action(name: 'reset-tab')]
+public function resetTab(Context $ctx): void { }        // /_action/reset-tab
+
+#[Action(scope: Scope::SESSION)]
+public function setUsername(Context $ctx): void { }     // session-scoped action
+    {% endverbatim %}{% endcode %}
+    <p>
+        Each action method receives exactly one parameter: the <code>Context</code> for the current
+        tab. The framework re-hydrates all reactive properties from their current signal values before
+        calling the method, and syncs changed values back to signals afterwards.
+    </p>
+
+    <h2 id="factory">Dependency injection</h2>
+    <p>
+        <code>Via::mount()</code> accepts an optional third argument: a factory callable invoked once
+        per client connection. Use it to inject services that the zero-arg constructor cannot reach:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// Without factory — zero-arg constructor used:
+$app->mount(Counter::class, '/counter');
+
+// With factory — called once per connecting tab:
+$app->mount(
+    ChatPage::class,
+    '/chat/{room}',
+    fn(): ChatPage => new ChatPage($db, $mailer, $app)
+);
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="route-params">Route parameters</h2>
+    <p>
+        Declare route parameters as typed arguments on <code>view()</code> after <code>Context $ctx</code>.
+        The framework injects them automatically by name, using the same type-casting logic as
+        <code>$app->page()</code>. Store them on <code>$this</code> to make them available in all
+        action methods:
+    </p>
+    {% code 'php' %}{% verbatim %}
+class BlogPost {
+    #[Signal]
+    public int $likes = 0;
+
+    private string $slug = '';
+
+    public function view(Context $ctx, string $slug): void {
+        $this->slug = $slug; // store once, available in every action
+        $ctx->view('blog-post.html.twig');
+    }
+
+    #[Action]
+    public function like(Context $ctx): void {
+        ++$this->likes;
+        // $this->slug is available here from view()
+    }
+}
+
+$app->mount(BlogPost::class, '/blog/{slug}');
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="templates">Twig templates</h2>
+    <p>
+        Composition classes produce exactly the same named signals and actions as the closure API.
+        Template syntax is identical — <code>&#123;&#123; count.id &#125;&#125;</code>, <code>&#123;&#123; increment.url &#125;&#125;</code>,
+        <code>data-bind="&#123;&#123; step.id &#125;&#125;"</code>. No template changes are needed when converting a
+        closure-based page to a class.
+    </p>
+    <p>
+        Actions registered via <code>#[Action]</code> are injected under their resolved name
+        (the <code>name:</code> parameter if set, otherwise the method name). The method is
+        converted to camelCase in the template variable — <code>saveName</code> is available as
+        <code>&#123;&#123; saveName.url &#125;&#125;</code>.
+    </p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/examples/composition">Live demo</a> — CompositionDemo + VoteWidget, all four reactive shapes</li>
+        <li><a href="/docs/components">Components</a> — the closure-based component API</li>
+        <li><a href="/docs/scopes">Scopes</a> — TAB, SESSION, GLOBAL, and custom</li>
+        <li><a href="/docs/api#via-mount">API: mount()</a> — full method signature</li>
+        <li><a href="/docs/api#attributes">API: Attributes</a> — attribute class reference</li>
+    </ul>
+</article>
+
+{% endblock %}
