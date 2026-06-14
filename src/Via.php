@@ -355,8 +355,9 @@ class Via {
      * Mount a composition-pattern page class at a route.
      *
      * The class must have a public `view(Context $ctx)` method and may declare
-     * reactive properties with #[Signal], #[StateSess], #[StateApp], #[StateTab],
-     * and action methods with #[Action].
+     * reactive properties with #[Signal] (optionally scoped, e.g. #[Signal(Scope::SESSION)]),
+     * server-only state with #[Persist], a primary scope with #[Broadcast], action
+     * methods with #[Action], and lifecycle hooks with #[OnDisconnect] / #[OnCleanup].
      *
      * @param class-string  $class   Page class name
      * @param string        $route   URL pattern (may contain {params})

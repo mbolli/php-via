@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Composition;
 
 use Mbolli\PhpVia\Attributes\Action;
+use Mbolli\PhpVia\Attributes\Broadcast;
+use Mbolli\PhpVia\Attributes\OnCleanup;
+use Mbolli\PhpVia\Attributes\OnDisconnect;
+use Mbolli\PhpVia\Attributes\Persist;
 use Mbolli\PhpVia\Attributes\Signal;
-use Mbolli\PhpVia\Attributes\StateApp;
-use Mbolli\PhpVia\Attributes\StateSess;
-use Mbolli\PhpVia\Attributes\StateTab;
-use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 
 /**
  * Reflection metadata for a page/component class.
@@ -21,39 +22,27 @@ final class ClassMetadata {
     private static array $cache = [];
 
     /**
-     * @param array<string> $signals
-     * @param array<string> $stateTabs
-     * @param array<string> $stateSessions
-     * @param array<string> $stateApps
+     * @param array<string>                              $signals         Property names annotated #[Signal] with TAB scope
+     * @param array<array{prop: string, scope: string}>  $scopedSignals   #[Signal] properties with a non-TAB scope
+     * @param array<string>                              $persists        Property names annotated #[Persist]
      * @param array<array{method: string, name: string, scope: ?string}> $actions
-     * @param array<string, mixed> $defaults
-     * @param array<array{name: string, type: string}> $viewRouteParams
+     * @param array<string, mixed>                       $defaults        Default value per annotated property
+     * @param array<array{name: string, type: string}>  $viewRouteParams Route params declared on view() beyond Context
      */
     private function __construct(
         public readonly string $class,
-        /** Property names annotated #[Signal] */
         public readonly array $signals,
-        /** Property names annotated #[StateTab] (documentation-only, no Signal created) */
-        public readonly array $stateTabs,
-        /** Property names annotated #[StateSess] */
-        public readonly array $stateSessions,
-        /** Property names annotated #[StateApp] */
-        public readonly array $stateApps,
-        /**
-         * Actions: [['method' => string, 'name' => string, 'scope' => ?string], …].
-         *
-         * @var array<array{method: string, name: string, scope: ?string}>
-         */
+        public readonly array $scopedSignals,
+        public readonly array $persists,
         public readonly array $actions,
-        /** Default value for each annotated property */
         public readonly array $defaults,
-        /**
-         * Route params declared on view() beyond the first Context param.
-         * Each entry: ['name' => string, 'type' => string].
-         *
-         * @var array<array{name: string, type: string}>
-         */
         public readonly array $viewRouteParams,
+        /** Primary scope from #[Broadcast] on the class, or null. */
+        public readonly ?string $broadcastScope,
+        /** Method name annotated #[OnDisconnect], or null. */
+        public readonly ?string $onDisconnect,
+        /** Method name annotated #[OnCleanup], or null. */
+        public readonly ?string $onCleanup,
     ) {}
 
     /**
@@ -89,9 +78,8 @@ final class ClassMetadata {
 
         // Collect reactive properties
         $signals = [];
-        $stateTabs = [];
-        $stateSessions = [];
-        $stateApps = [];
+        $scopedSignals = [];
+        $persists = [];
         $defaults = [];
 
         foreach ($rc->getProperties() as $prop) {
@@ -100,35 +88,66 @@ final class ClassMetadata {
             }
 
             $name = $prop->getName();
+            $default = $prop->hasDefaultValue() ? $prop->getDefaultValue() : null;
 
-            if (self::getAttr($prop, Signal::class) !== null) {
-                $signals[] = $name;
-                $defaults[$name] = $prop->hasDefaultValue() ? $prop->getDefaultValue() : null;
-            } elseif (self::getAttr($prop, StateTab::class) !== null) {
-                $stateTabs[] = $name;
-                $defaults[$name] = $prop->hasDefaultValue() ? $prop->getDefaultValue() : null;
-            } elseif (self::getAttr($prop, StateSess::class) !== null) {
-                $stateSessions[] = $name;
-                $defaults[$name] = $prop->hasDefaultValue() ? $prop->getDefaultValue() : null;
-            } elseif (self::getAttr($prop, StateApp::class) !== null) {
-                $stateApps[] = $name;
-                $defaults[$name] = $prop->hasDefaultValue() ? $prop->getDefaultValue() : null;
+            $signalAttr = self::getAttr($prop, Signal::class);
+            if ($signalAttr instanceof Signal) {
+                if ($signalAttr->scope === Scope::TAB) {
+                    $signals[] = $name;
+                } else {
+                    $scopedSignals[] = ['prop' => $name, 'scope' => $signalAttr->scope];
+                }
+                $defaults[$name] = $default;
+
+                continue;
+            }
+
+            if (self::getAttr($prop, Persist::class) instanceof Persist) {
+                $persists[] = $name;
+                $defaults[$name] = $default;
             }
         }
 
-        // Collect #[Action] methods
+        // Collect #[Action], #[OnDisconnect], #[OnCleanup] methods
         $actions = [];
+        $onDisconnect = null;
+        $onCleanup = null;
         foreach ($rc->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
-            $attr = self::getMethodAttr($method, Action::class);
-            if (!$attr instanceof Action) {
-                continue;
+            $methodName = $method->getName();
+
+            $actionAttr = self::getMethodAttr($method, Action::class);
+            if ($actionAttr instanceof Action) {
+                $actions[] = [
+                    'method' => $methodName,
+                    'name'   => $actionAttr->name ?? $methodName,
+                    'scope'  => $actionAttr->scope,
+                ];
             }
-            $actionName = $attr->name ?? $method->getName();
-            $actions[] = [
-                'method' => $method->getName(),
-                'name'   => $actionName,
-                'scope'  => $attr->scope,
-            ];
+
+            if (self::getMethodAttr($method, OnDisconnect::class) instanceof OnDisconnect) {
+                if ($onDisconnect !== null) {
+                    throw new \InvalidArgumentException(
+                        "Class '{$class}' has more than one #[OnDisconnect] method."
+                    );
+                }
+                $onDisconnect = $methodName;
+            }
+
+            if (self::getMethodAttr($method, OnCleanup::class) instanceof OnCleanup) {
+                if ($onCleanup !== null) {
+                    throw new \InvalidArgumentException(
+                        "Class '{$class}' has more than one #[OnCleanup] method."
+                    );
+                }
+                $onCleanup = $methodName;
+            }
+        }
+
+        // Collect #[Broadcast] primary scope from the class
+        $broadcastScope = null;
+        $broadcastAttrs = $rc->getAttributes(Broadcast::class);
+        if ($broadcastAttrs !== []) {
+            $broadcastScope = $broadcastAttrs[0]->newInstance()->scope;
         }
 
         // Collect route params from view() beyond the first Context param
@@ -146,17 +165,19 @@ final class ClassMetadata {
         return self::$cache[$class] = new self(
             class: $class,
             signals: $signals,
-            stateTabs: $stateTabs,
-            stateSessions: $stateSessions,
-            stateApps: $stateApps,
+            scopedSignals: $scopedSignals,
+            persists: $persists,
             actions: $actions,
             defaults: $defaults,
             viewRouteParams: $viewRouteParams,
+            broadcastScope: $broadcastScope,
+            onDisconnect: $onDisconnect,
+            onCleanup: $onCleanup,
         );
     }
 
     private static function hasAnyReactiveAttribute(\ReflectionProperty $prop): bool {
-        foreach ([Signal::class, StateTab::class, StateSess::class, StateApp::class] as $attrClass) {
+        foreach ([Signal::class, Persist::class] as $attrClass) {
             if (self::getAttr($prop, $attrClass) !== null) {
                 return true;
             }

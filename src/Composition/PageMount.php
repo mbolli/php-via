@@ -30,38 +30,45 @@ final class PageMount {
             $class = $meta->class;
             $instance = $factory !== null ? ($factory)() : new $class();
 
-            // 2. Register signals for every reactive property
+            // 2. Register signals. #[Signal] (TAB) is created with an explicit TAB
+            //    scope so it never inherits a non-TAB primary scope set by #[Broadcast].
             foreach ($meta->signals as $prop) {
-                $ctx->signal($meta->defaults[$prop], $prop);
+                $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB);
             }
-            foreach ($meta->stateSessions as $prop) {
-                $ctx->signal($meta->defaults[$prop], $prop, Scope::SESSION);
+            // 3. Register scoped #[Signal(Scope::X)] signals. ROUTE is expanded to the
+            //    per-route scope here (SignalFactory resolves SESSION on its own).
+            foreach ($meta->scopedSignals as ['prop' => $prop, 'scope' => $scope]) {
+                $ctx->signal($meta->defaults[$prop], $prop, self::resolveScope($scope, $ctx));
             }
-            foreach ($meta->stateApps as $prop) {
-                $ctx->signal($meta->defaults[$prop], $prop, Scope::GLOBAL);
-            }
-            // #[StateTab] → no signal, pure instance property
+            // #[Persist] → no signal, pure instance property
 
-            // 2b. Register context in every scope used by its scoped signals so that:
-            //     - syncScopedSignals() includes these signals in patches
-            //     - broadcast() reaches this context via the scope registry
+            // 4. Register context in every scope used by its scoped signals so that:
+            //    - syncScopedSignals() includes these signals in patches
+            //    - broadcast() reaches this context via the scope registry
             $addedScopes = [];
-            foreach ([...$meta->stateSessions, ...$meta->stateApps] as $prop) {
+            foreach ($meta->scopedSignals as ['prop' => $prop]) {
                 $signal = $ctx->getSignal($prop);
                 if ($signal === null) {
                     continue;
                 }
-                $scope = $signal->getScope();
-                if ($scope !== null && !\in_array($scope, $addedScopes, true)) {
-                    $ctx->addScope($scope);
-                    $addedScopes[] = $scope;
+                $signalScope = $signal->getScope();
+                if ($signalScope !== null && !\in_array($signalScope, $addedScopes, true)) {
+                    $ctx->addScope($signalScope);
+                    $addedScopes[] = $signalScope;
                 }
             }
 
-            // 3. Hydrate instance from current signal values
+            // 5. Apply #[Broadcast] primary scope — AFTER signal registration so that
+            //    un-scoped #[Signal] properties are unaffected by it. This only sets
+            //    the target of $ctx->broadcast() (with no argument).
+            if ($meta->broadcastScope !== null) {
+                $ctx->scope($meta->broadcastScope);
+            }
+
+            // 6. Hydrate instance from current signal values
             self::hydrate($instance, $meta, $ctx);
 
-            // 4. Register #[Action] methods as named actions
+            // 7. Register #[Action] methods as named actions
             foreach ($meta->actions as $actionMeta) {
                 $method = $actionMeta['method'];
                 $name = $actionMeta['name'];
@@ -77,7 +84,7 @@ final class PageMount {
                         $instance->{$method}($ctx);
 
                         // Sync changed values back to signals
-                        // Signal::setValue() auto-broadcasts for SESSION/GLOBAL scoped signals
+                        // Signal::setValue() auto-broadcasts for scoped signals
                         self::syncBack($instance, $meta, $ctx);
 
                         // Flush TAB signal changes to the current client
@@ -88,7 +95,22 @@ final class PageMount {
                 );
             }
 
-            // 5. Set up view — inject route params if declared on view()
+            // 8. Register lifecycle hooks. Handlers are NOT re-hydrated first — they
+            //    do cleanup (presence updates, broadcasts) rather than read signals.
+            if ($meta->onDisconnect !== null) {
+                $method = $meta->onDisconnect;
+                $ctx->onDisconnect(static function (Context $ctx) use ($instance, $method): void {
+                    $instance->{$method}($ctx);
+                });
+            }
+            if ($meta->onCleanup !== null) {
+                $method = $meta->onCleanup;
+                $ctx->onCleanup(static function (Context $ctx) use ($instance, $method): void {
+                    $instance->{$method}($ctx);
+                });
+            }
+
+            // 9. Set up view — inject route params if declared on view()
             $viewArgs = [$ctx];
             foreach ($meta->viewRouteParams as ['name' => $paramName, 'type' => $paramType]) {
                 $raw = $ctx->getPathParam($paramName);
@@ -99,11 +121,35 @@ final class PageMount {
     }
 
     /**
+     * Resolve a declared signal scope to its concrete runtime scope.
+     * Scope::ROUTE is expanded to the per-route scope (matching Context::scope());
+     * Scope::SESSION is left for SignalFactory to resolve to session:{id}.
+     */
+    private static function resolveScope(string $scope, Context $ctx): string {
+        return $scope === Scope::ROUTE ? Scope::routeScope($ctx->getRoute()) : $scope;
+    }
+
+    /**
+     * Reactive property names: TAB #[Signal] plus scoped #[Signal(Scope::X)].
+     * #[Persist] properties are excluded — they live only on the instance.
+     *
+     * @return array<string>
+     */
+    private static function reactiveProps(ClassMetadata $meta): array {
+        $props = $meta->signals;
+        foreach ($meta->scopedSignals as ['prop' => $prop]) {
+            $props[] = $prop;
+        }
+
+        return $props;
+    }
+
+    /**
      * Copy current signal values onto the instance's reactive properties.
-     * #[StateTab] properties are intentionally skipped — they live on the instance.
+     * #[Persist] properties are intentionally skipped — they live on the instance.
      */
     private static function hydrate(object $instance, ClassMetadata $meta, Context $ctx): void {
-        foreach ([...$meta->signals, ...$meta->stateSessions, ...$meta->stateApps] as $prop) {
+        foreach (self::reactiveProps($meta) as $prop) {
             $signal = $ctx->getSignal($prop);
             if ($signal !== null) {
                 $instance->{$prop} = $signal->getValue();
@@ -116,7 +162,7 @@ final class PageMount {
      * Signal::setValue() handles auto-broadcast for scoped signals.
      */
     private static function syncBack(object $instance, ClassMetadata $meta, Context $ctx): void {
-        foreach ([...$meta->signals, ...$meta->stateSessions, ...$meta->stateApps] as $prop) {
+        foreach (self::reactiveProps($meta) as $prop) {
             $signal = $ctx->getSignal($prop);
             if ($signal !== null) {
                 $signal->setValue($instance->{$prop});
