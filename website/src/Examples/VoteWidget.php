@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace PhpVia\Website\Examples;
 
 use Mbolli\PhpVia\Attributes\Action;
-use Mbolli\PhpVia\Attributes\StateApp;
+use Mbolli\PhpVia\Attributes\Signal;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 
 /**
  * Minimal reusable component that demonstrates the composition API.
@@ -17,7 +18,7 @@ use Mbolli\PhpVia\Context;
  * has an independent counter that persists and syncs across all users.
  */
 final class VoteWidget {
-    #[StateApp]
+    #[Signal(Scope::GLOBAL)]
     public int $votes = 0;
 
     public function view(Context $ctx): void {

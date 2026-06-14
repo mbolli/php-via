@@ -35,9 +35,10 @@ $app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'))
     <p>
         Register a class as a page using the composition API. The class must have a public
         <code>view(Context $ctx): void</code> method. Reactive properties are declared with
-        <code>#[Signal]</code>, <code>#[StateSess]</code>, or <code>#[StateApp]</code> attributes;
-        action methods with <code>#[Action]</code>. Returns a <code>RouteDefinition</code> for fluent
-        middleware chaining. See <a href="/docs/composition">Composition</a>.
+        <code>#[Signal]</code> (optionally scoped, e.g. <code>#[Signal(Scope::SESSION)]</code>);
+        server-only state with <code>#[Persist]</code>; action methods with <code>#[Action]</code>.
+        Returns a <code>RouteDefinition</code> for fluent middleware chaining.
+        See <a href="/docs/composition">Composition</a>.
     </p>
     {% code 'php' %}{% verbatim %}
 // Zero-arg constructor (default):
@@ -421,51 +422,68 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     <p>PHP 8 attribute classes for the <a href="/docs/composition">composition API</a>. All live under
     <code>Mbolli\PhpVia\Attributes\</code>.</p>
 
-    <h3 id="attr-signal"><code>#[Signal]</code></h3>
-    <p>Target: property. Creates a TAB-scoped reactive signal backed by the property's default value.
-    The property is client-writable (via <code>data-bind</code>) and auto-injected into Twig by name.</p>
+    <h3 id="attr-signal"><code>#[Signal(string $scope = Scope::TAB)]</code></h3>
+    <p>Target: property. Creates a reactive signal backed by the property's default value, synced to the
+    browser and auto-injected into Twig by name. The scope is the first argument:</p>
+    <ul>
+        <li><code>Scope::TAB</code> (default) — isolated per tab, client-writable via <code>data-bind</code></li>
+        <li><code>Scope::ROUTE</code> — shared across all users on the same route</li>
+        <li><code>Scope::SESSION</code> — shared across all tabs of one browser session</li>
+        <li><code>Scope::GLOBAL</code> — shared across every connected user</li>
+        <li>custom string — shared across all contexts in that scope (e.g. <code>"room:lobby"</code>)</li>
+    </ul>
+    <p>Non-TAB scopes are server-authoritative (the client cannot write them) and auto-broadcast to every
+    context in the scope when the value changes. Component instances with the same property name get
+    independent signal IDs when a namespace is set (e.g. <code>cats_votes</code>, <code>dogs_votes</code>).</p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Attributes\Signal;
+use Mbolli\PhpVia\Scope;
 
-#[Signal]
+#[Signal]                       // TAB — private per tab, client-writable
 public int $count = 0;
 
-#[Signal]
-public string $query = '';
+#[Signal(Scope::ROUTE)]         // shared across all users on this route
+public int $sharedCounter = 0;
+
+#[Signal(Scope::SESSION)]       // shared across the user's tabs
+public string $username = 'Anonymous';
+
+#[Signal(Scope::GLOBAL)]        // shared across all users
+public int $totalClicks = 0;
     {% endverbatim %}{% endcode %}
 
-    <h3 id="attr-state-tab"><code>#[StateTab]</code></h3>
+    <h3 id="attr-persist"><code>#[Persist]</code></h3>
     <p>Target: property. Marks a plain server-only instance property. No signal is created; the value is
     never sent to the browser. Because the class instance lives for the tab connection lifetime, the value
-    persists across all action calls.</p>
+    persists across all action calls. Use it for accumulators, flags, or route params stored in
+    <code>view()</code>.</p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\StateTab;
+use Mbolli\PhpVia\Attributes\Persist;
 
-#[StateTab]
+#[Persist]
 public int $multiplier = 1; // invisible to client, persists per tab
     {% endverbatim %}{% endcode %}
 
-    <h3 id="attr-state-sess"><code>#[StateSess]</code></h3>
-    <p>Target: property. Creates a SESSION-scoped signal. Shared across all open tabs of the same browser
-    session. Changing the value inside an action auto-broadcasts to every other tab of that session — no
-    manual <code>broadcast()</code> call needed. Server-authoritative: clients cannot overwrite it.</p>
+    <h3 id="attr-broadcast"><code>#[Broadcast(string $scope)]</code></h3>
+    <p>Target: class. Sets the context's primary scope — the target of <code>$ctx->broadcast()</code>
+    with no argument. Use it when an action mutates non-signal state (a static array, a DB row) and needs
+    to re-render for everyone in the scope. It does <strong>not</strong> change the scope of
+    <code>#[Signal]</code> properties — each signal keeps its own declared scope.</p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\StateSess;
+use Mbolli\PhpVia\Attributes\Broadcast;
+use Mbolli\PhpVia\Scope;
 
-#[StateSess]
-public string $username = 'Anonymous';
-    {% endverbatim %}{% endcode %}
+#[Broadcast(Scope::ROUTE)]
+final class TodoList {
+    #[Signal]                  // still TAB-scoped — unaffected by #[Broadcast]
+    public string $draft = '';
 
-    <h3 id="attr-state-app"><code>#[StateApp]</code></h3>
-    <p>Target: property. Creates a GLOBAL-scoped signal. Shared across every connected user. Changing the
-    value auto-broadcasts to all sessions. Server-authoritative. Component instances with the same property
-    name get independent signal IDs when the component namespace is set (e.g. <code>cats_votes</code>,
-    <code>dogs_votes</code>).</p>
-    {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\StateApp;
-
-#[StateApp]
-public int $totalClicks = 0;
+    #[Action]
+    public function add(Context $ctx): void {
+        self::$todos[] = $this->draft;
+        $ctx->broadcast();     // reaches every context on this route
+    }
+}
     {% endverbatim %}{% endcode %}
 
     <h3 id="attr-action"><code>#[Action(name?: string, scope?: string)]</code></h3>
@@ -484,6 +502,21 @@ public function resetTab(Context $ctx): void { }        // /_action/reset-tab
 
 #[Action(scope: Scope::SESSION)]
 public function setTheme(Context $ctx): void { }        // session-scoped action
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="attr-lifecycle"><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></h3>
+    <p>Target: method. Registers the method as a disconnect/cleanup handler (via
+    <code>Context::onDisconnect()</code> / <code>Context::onCleanup()</code>). The method receives the
+    <code>Context</code>. At most one method per class may carry each attribute. Handlers are not
+    re-hydrated before running — they do cleanup rather than read live signals.</p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\OnDisconnect;
+
+#[OnDisconnect]
+public function leave(Context $ctx): void {
+    --Room::$members[$this->room];
+    $ctx->broadcast();
+}
     {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>

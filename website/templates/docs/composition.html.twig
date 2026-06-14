@@ -9,15 +9,21 @@
         the existing closure API is unchanged.
     </p>
     <p>
-        Five attribute classes cover all reactive shapes:
+        Reactive state is declared with a single <code>#[Signal]</code> attribute whose scope is a
+        parameter. Server-only state, the page broadcast scope, actions, and lifecycle hooks each have
+        their own attribute:
     </p>
     <table>
-        <thead><tr><th>Attribute</th><th>Scope</th><th>Client-writable</th><th>Auto-broadcasts</th></tr></thead>
+        <thead><tr><th>Attribute</th><th>Kind</th><th>Client-writable</th><th>Auto-broadcasts</th></tr></thead>
         <tbody>
-            <tr><td><code>#[Signal]</code></td><td>TAB</td><td>yes</td><td>—</td></tr>
-            <tr><td><code>#[StateTab]</code></td><td>none (instance property)</td><td>no</td><td>—</td></tr>
-            <tr><td><code>#[StateSess]</code></td><td>SESSION</td><td>no</td><td>yes → all user's tabs</td></tr>
-            <tr><td><code>#[StateApp]</code></td><td>GLOBAL</td><td>no</td><td>yes → all users</td></tr>
+            <tr><td><code>#[Signal]</code></td><td>TAB signal</td><td>yes</td><td>—</td></tr>
+            <tr><td><code>#[Signal(Scope::ROUTE)]</code></td><td>ROUTE signal</td><td>no</td><td>yes → same route</td></tr>
+            <tr><td><code>#[Signal(Scope::SESSION)]</code></td><td>SESSION signal</td><td>no</td><td>yes → user's tabs</td></tr>
+            <tr><td><code>#[Signal(Scope::GLOBAL)]</code></td><td>GLOBAL signal</td><td>no</td><td>yes → all users</td></tr>
+            <tr><td><code>#[Persist]</code></td><td>server-only property</td><td>no</td><td>—</td></tr>
+            <tr><td><code>#[Broadcast(Scope::X)]</code></td><td>class — primary scope</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[Action]</code></td><td>method — action</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></td><td>method — lifecycle</td><td>—</td><td>—</td></tr>
         </tbody>
     </table>
 
@@ -92,76 +98,105 @@ public function view(Context $ctx): void {
 }
     {% endverbatim %}{% endcode %}
 
-    <h2 id="reactive-shapes">Reactive shapes</h2>
-
-    <h3 id="signal"><code>#[Signal]</code></h3>
+    <h2 id="signals">Signals and scope</h2>
     <p>
-        TAB-scoped reactive property. Creates a named signal visible to the browser and injectable into
-        Twig. Clients can write back via <code>data-bind</code>. The default value comes from the
-        property initializer.
+        <code>#[Signal]</code> declares a reactive property that is synced to the browser and injected
+        into Twig. The scope is the attribute's first argument and defaults to <code>Scope::TAB</code>:
     </p>
     {% code 'php' %}{% verbatim %}
-#[Signal]
+use Mbolli\PhpVia\Attributes\Signal;
+use Mbolli\PhpVia\Scope;
+
+#[Signal]                       // TAB (default) — private per tab, client-writable
 public string $query = '';
 
-#[Signal]
-public int $page = 1;
-    {% endverbatim %}{% endcode %}
+#[Signal(Scope::ROUTE)]         // shared across all users on this route
+public int $sharedCounter = 0;
 
-    <h3 id="state-tab"><code>#[StateTab]</code></h3>
+#[Signal(Scope::SESSION)]       // shared across all tabs of one browser session
+public string $username = 'Anonymous';
+
+#[Signal(Scope::GLOBAL)]        // shared across every connected user
+public int $totalVisitors = 0;
+    {% endverbatim %}{% endcode %}
     <p>
-        Server-only instance property. No signal is created; the value never reaches the browser.
-        Because the class instance lives for the entire tab connection, the value persists across all
-        action calls. Use it for server-side accumulators, flags, or route params stored in
-        <code>view()</code>.
+        TAB signals are client-writable via <code>data-bind</code>. Non-TAB scopes are
+        server-authoritative — the client cannot overwrite them — and they auto-broadcast to every
+        context in the scope whenever an action changes the value. No manual
+        <code>$ctx->broadcast()</code> is needed for scoped-signal changes.
+    </p>
+
+    <h2 id="persist">Server-only state</h2>
+    <p>
+        <code>#[Persist]</code> marks a server-only instance property. No signal is created; the value
+        never reaches the browser. Because the class instance lives for the entire tab connection, the
+        value persists across all action calls. Use it for accumulators, flags, or route params stored
+        in <code>view()</code>.
     </p>
     {% code 'php' %}{% verbatim %}
-#[StateTab]
+use Mbolli\PhpVia\Attributes\Persist;
+
+#[Persist]
 public int $multiplier = 1;
 
-// In an action:
-$this->count += $this->multiplier; // grows +1, +2, +3… on each click
-++$this->multiplier;
-    {% endverbatim %}{% endcode %}
-
-    <h3 id="state-sess"><code>#[StateSess]</code></h3>
-    <p>
-        SESSION-scoped signal. Shared across all open tabs of the same browser session. Changing the
-        value in one action automatically broadcasts to every other tab of that user — no manual
-        <code>$ctx->broadcast()</code> needed.
-    </p>
-    {% code 'php' %}{% verbatim %}
-#[StateSess]
-public string $theme = 'light';
-
 #[Action]
-public function toggleTheme(Context $ctx): void {
-    $this->theme = $this->theme === 'light' ? 'dark' : 'light';
-    // auto-broadcasts to all tabs of this session
+public function increment(Context $ctx): void {
+    $this->count += $this->multiplier; // grows +1, +2, +3… across clicks
+    ++$this->multiplier;               // survives between actions, invisible to client
 }
     {% endverbatim %}{% endcode %}
-
-    <h3 id="state-app"><code>#[StateApp]</code></h3>
     <p>
-        GLOBAL-scoped signal. Shared across every connected user. Changing the value auto-broadcasts
-        to all sessions. Use it for app-wide counters, announcements, or leaderboards.
+        Plain <code>static</code> class properties also work without any attribute — the framework
+        ignores them. They are process-global (shared across every instance and tab). After mutating
+        static data in an action, call <code>$ctx->broadcast()</code> to push a fresh render (see below).
+    </p>
+
+    <h2 id="broadcast">Primary scope with #[Broadcast]</h2>
+    <p>
+        <code>#[Broadcast(Scope::X)]</code> on the class sets the context's primary scope — the target
+        of <code>$ctx->broadcast()</code> when called with no argument. Use it when an action mutates
+        non-signal state (a static array, a database row) and needs to push a re-render to everyone in
+        the scope:
     </p>
     {% code 'php' %}{% verbatim %}
-#[StateApp]
-public int $totalVisitors = 0;
+use Mbolli\PhpVia\Attributes\Broadcast;
+use Mbolli\PhpVia\Scope;
 
-#[Action]
-public function visit(Context $ctx): void {
-    ++$this->totalVisitors;
-    // auto-broadcasts to every connected client
+#[Broadcast(Scope::ROUTE)]
+final class TodoList {
+    #[Signal]                          // still TAB-scoped — unaffected by #[Broadcast]
+    public string $draft = '';
+
+    /** @var array<int, array{text: string, done: bool}> */
+    private static array $todos = [];
+
+    public function view(Context $ctx): void {
+        $ctx->view('todo.html.twig', ['todos' => self::$todos], cacheUpdates: false);
+    }
+
+    #[Action]
+    public function add(Context $ctx): void {
+        if ($this->draft !== '') {
+            self::$todos[] = ['text' => $this->draft, 'done' => false];
+            $this->draft = '';
+            $ctx->broadcast();         // re-renders the list for everyone on this route
+        }
+    }
 }
     {% endverbatim %}{% endcode %}
+    <p>
+        <strong>Important:</strong> <code>#[Broadcast]</code> only controls the broadcast target. It does
+        <em>not</em> change the scope of <code>#[Signal]</code> properties — each signal keeps the scope
+        it declares. A <code>#[Signal]</code> with no scope stays TAB-private even on a
+        <code>#[Broadcast(Scope::ROUTE)]</code> class.
+    </p>
 
     <h2 id="actions">Actions</h2>
     <p>
         <code>#[Action]</code> marks a public method as a client-callable action. The method name
         becomes the URL slug as-is (<code>saveName</code> → <code>/_action/saveName</code>). Use the
-        optional <code>name:</code> parameter to override it:
+        optional <code>name:</code> parameter to override it, and <code>scope:</code> to register a
+        scoped action:
     </p>
     {% code 'php' %}{% verbatim %}
 #[Action]
@@ -178,6 +213,23 @@ public function setUsername(Context $ctx): void { }     // session-scoped action
         tab. The framework re-hydrates all reactive properties from their current signal values before
         calling the method, and syncs changed values back to signals afterwards.
     </p>
+
+    <h2 id="lifecycle">Lifecycle hooks</h2>
+    <p>
+        Annotate a method with <code>#[OnDisconnect]</code> or <code>#[OnCleanup]</code> to run cleanup
+        when the connection closes. The method receives the <code>Context</code>. At most one method per
+        class may carry each attribute. Handlers are not re-hydrated first — they typically broadcast
+        presence changes or release resources rather than read live signals:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Attributes\OnDisconnect;
+
+#[OnDisconnect]
+public function leave(Context $ctx): void {
+    --Room::$members[$this->room];
+    $ctx->broadcast();
+}
+    {% endverbatim %}{% endcode %}
 
     <h2 id="factory">Dependency injection</h2>
     <p>
@@ -200,18 +252,19 @@ $app->mount(
     <p>
         Declare route parameters as typed arguments on <code>view()</code> after <code>Context $ctx</code>.
         The framework injects them automatically by name, using the same type-casting logic as
-        <code>$app->page()</code>. Store them on <code>$this</code> to make them available in all
-        action methods:
+        <code>$app->page()</code>. Store them on a <code>#[Persist]</code> property to make them
+        available in all action methods:
     </p>
     {% code 'php' %}{% verbatim %}
 class BlogPost {
     #[Signal]
     public int $likes = 0;
 
-    private string $slug = '';
+    #[Persist]
+    public string $slug = '';
 
     public function view(Context $ctx, string $slug): void {
-        $this->slug = $slug; // store once, available in every action
+        $this->slug = $slug; // stored once, available in every action
         $ctx->view('blog-post.html.twig');
     }
 
@@ -241,9 +294,9 @@ $app->mount(BlogPost::class, '/blog/{slug}');
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/examples/composition">Live demo</a> — CompositionDemo + VoteWidget, all four reactive shapes</li>
+        <li><a href="/examples/composition">Live demo</a> — CompositionDemo + VoteWidget, all reactive shapes</li>
         <li><a href="/docs/components">Components</a> — the closure-based component API</li>
-        <li><a href="/docs/scopes">Scopes</a> — TAB, SESSION, GLOBAL, and custom</li>
+        <li><a href="/docs/scopes">Scopes</a> — TAB, ROUTE, SESSION, GLOBAL, and custom</li>
         <li><a href="/docs/api#via-mount">API: mount()</a> — full method signature</li>
         <li><a href="/docs/api#attributes">API: Attributes</a> — attribute class reference</li>
     </ul>
