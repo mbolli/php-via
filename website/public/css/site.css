@@ -12,7 +12,7 @@
     0 1px 2px -5px hsl(var(--shadow-color) / var(--shadow-strength-3)),
     0 2px 5px -5px hsl(var(--shadow-color) / var(--shadow-strength-5)),
     0 4px 12px -5px hsl(var(--shadow-color) / var(--shadow-strength-6)),
-    0 12px 15px -5px hsl(var(--shadow-color) / var(--shadow-strength-8));--green-5:#51cf66;--red-5:#ff6b6b;--size-6:1.75rem;--gray-5:#adb5bd;--radius-1:2px;--blue-4:#4dabf7;--orange-4:#ffa94d;--gray-10:#16191d;--shadow-4:
+    0 12px 15px -5px hsl(var(--shadow-color) / var(--shadow-strength-8));--green-5:#51cf66;--red-5:#ff6b6b;--size-6:1.75rem;--gray-5:#adb5bd;--gray-10:#16191d;--radius-1:2px;--blue-4:#4dabf7;--orange-4:#ffa94d;--shadow-4:
     0 -2px 5px 0 hsl(var(--shadow-color) / var(--shadow-strength-3)),
     0 1px 1px -2px hsl(var(--shadow-color) / var(--shadow-strength-4)),
     0 2px 2px -2px hsl(var(--shadow-color) / var(--shadow-strength-4)),
@@ -789,8 +789,10 @@ main { position: relative; }
   transition-behavior: allow-discrete;
 }
 
-.code-panel:has(#home-tab-private:checked) .tab-pane-private,
-.code-panel:has(#home-tab-global:checked)  .tab-pane-global {
+.code-panel:has(#home-tab-private:checked):has(#home-api-closure:checked)     .tab-pane.scope-private.api-closure,
+.code-panel:has(#home-tab-global:checked):has(#home-api-closure:checked)      .tab-pane.scope-global.api-closure,
+.code-panel:has(#home-tab-private:checked):has(#home-api-composition:checked) .tab-pane.scope-private.api-composition,
+.code-panel:has(#home-tab-global:checked):has(#home-api-composition:checked)  .tab-pane.scope-global.api-composition {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -810,6 +812,13 @@ main { position: relative; }
   padding-block: 0;
   padding-inline: var(--size-2);
   gap: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.code-tab-group {
+  display: inline-flex;
   align-items: stretch;
 }
 
@@ -831,6 +840,37 @@ main { position: relative; }
 .code-panel:has(#home-tab-global:checked)  label[for="home-tab-global"] {
   color: white;
   background: color-mix(in srgb, var(--brand) 20%, transparent);
+}
+
+/* Closure ↔ Composition API segmented toggle */
+
+.code-api-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  align-self: center;
+  background: var(--gray-10);
+  border-radius: var(--radius-2);
+}
+
+.code-api-label {
+  font-size: 0.7rem;
+  font-weight: var(--font-weight-6);
+  letter-spacing: 0.02em;
+  padding: 0.25em 0.7em;
+  border-radius: var(--radius-1);
+  color: var(--gray-5);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--ease-out-2) 150ms, background var(--ease-out-2) 150ms;
+}
+
+.code-api-label:hover { color: var(--gray-2); }
+
+.code-panel:has(#home-api-closure:checked)     label[for="home-api-closure"],
+.code-panel:has(#home-api-composition:checked) label[for="home-api-composition"] {
+  color: white;
+  background: color-mix(in srgb, var(--brand) 35%, transparent);
 }
 
 /* Scope badge chips inside tab labels */
@@ -1888,13 +1928,13 @@ docs-toc {
 
 /* Restart animation each time the pane becomes active */
 
-.code-panel:has(#home-tab-private:checked) .tab-pane-private .hl-addition,
-.code-panel:has(#home-tab-global:checked)  .tab-pane-global  .hl-addition {
+.code-panel:has(#home-tab-global:checked):has(#home-api-closure:checked)     .tab-pane.scope-global.api-closure     .hl-addition,
+.code-panel:has(#home-tab-global:checked):has(#home-api-composition:checked) .tab-pane.scope-global.api-composition .hl-addition {
   animation: hl-grow-add 500ms ease forwards;
 }
 
-.code-panel:has(#home-tab-private:checked) .tab-pane-private .hl-deletion,
-.code-panel:has(#home-tab-global:checked)  .tab-pane-global  .hl-deletion {
+.code-panel:has(#home-tab-global:checked):has(#home-api-closure:checked)     .tab-pane.scope-global.api-closure     .hl-deletion,
+.code-panel:has(#home-tab-global:checked):has(#home-api-composition:checked) .tab-pane.scope-global.api-composition .hl-deletion {
   animation: hl-grow-del 500ms ease forwards;
 }
 

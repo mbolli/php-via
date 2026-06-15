@@ -64,23 +64,32 @@
     <div class="section-label">Minimal API</div>
     <h2 class="section-title">This is all the code.</h2>
     <p class="section-lead">
-        A counter in ~15 lines of PHP. Switch the tab to see the only change needed to make it
-        multiplayer — one line sets the scope. No JavaScript. No WebSockets. No API glue.
+        A counter in ~15 lines of PHP. Switch the scope tab to see the only change needed to make it
+        multiplayer — one line. Flip the API toggle to compare the closure handler with the
+        class-based <a href="/docs/composition">composition API</a>. No JavaScript. No WebSockets. No API glue.
     </p>
     <div class="code-examples-split">
         <div class="code-panel">
             <input type="radio" name="home-code-tab" id="home-tab-private" class="tab-radio" checked>
             <input type="radio" name="home-code-tab" id="home-tab-global" class="tab-radio">
+            <input type="radio" name="home-code-api" id="home-api-closure" class="tab-radio" checked>
+            <input type="radio" name="home-code-api" id="home-api-composition" class="tab-radio">
             <div class="code-panel-header code-panel-tabs">
-                <label for="home-tab-private" class="code-tab-label">
-                    <span class="scope-badge scope-tab">TAB</span> Private counter
-                </label>
-                <label for="home-tab-global" class="code-tab-label">
-                    <span class="scope-badge scope-global">GLOBAL</span> Shared counter
-                </label>
+                <div class="code-tab-group">
+                    <label for="home-tab-private" class="code-tab-label">
+                        <span class="scope-badge scope-tab">TAB</span> Private counter
+                    </label>
+                    <label for="home-tab-global" class="code-tab-label">
+                        <span class="scope-badge scope-global">GLOBAL</span> Shared counter
+                    </label>
+                </div>
+                <div class="code-api-toggle" role="group" aria-label="API style">
+                    <label for="home-api-closure" class="code-api-label">Closure</label>
+                    <label for="home-api-composition" class="code-api-label">Composition</label>
+                </div>
             </div>
             <div class="tab-panes-wrapper">
-            <div class="tab-pane tab-pane-private">
+            <div class="tab-pane scope-private api-closure">
                 {% code 'php' gutter %}{% verbatim %}
 <?php
 require __DIR__ . '/vendor/autoload.php';
@@ -100,7 +109,7 @@ $app->page('/', function (Context $c): void {
     );
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="$count">
+        <p>Count: <strong data-text="\${$count->id()}">
             {$count->int()}
         </strong></p>
         <button data-on:click="@post('{$increment->url()}')">
@@ -112,7 +121,7 @@ $app->page('/', function (Context $c): void {
 $app->start();
                 {% endverbatim %}{% endcode %}
             </div>
-            <div class="tab-pane tab-pane-global">
+            <div class="tab-pane scope-global api-closure">
                 {% code 'php' gutter %}{% verbatim %}
 <?php
 require __DIR__ . '/vendor/autoload.php';
@@ -135,7 +144,7 @@ $app->page('/', function (Context $c): void {
     );
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="$count">
+        <p>Count: <strong data-text="\${$count->id()}">
             {$count->int()}
         </strong></p>
         <button data-on:click="@post('{$increment->url()}')">
@@ -144,6 +153,91 @@ $app->page('/', function (Context $c): void {
     HTML);
 });
 
+$app->start();
+                {% endverbatim %}{% endcode %}
+            </div>
+            <div class="tab-pane scope-private api-composition">
+                {% code 'php' gutter %}{% verbatim %}
+<?php
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Attributes\Action;
+use Mbolli\PhpVia\Attributes\Signal;
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+final class Counter {
+    // TAB scope (default) — each visitor has their own counter
+    #[Signal]
+    public int $count = 0;
+
+    #[Action]
+    public function increment(): void {
+        $this->count++;
+    }
+
+    public function view(Context $c): void {
+        $count = $c->getSignal('count');
+        $increment = $c->getAction('increment');
+
+        $c->view(fn() => <<<HTML
+            <p>Count: <strong data-text="\${$count->id()}">
+                {$count->int()}
+            </strong></p>
+            <button data-on:click="@post('{$increment->url()}')">
+                +1
+            </button>
+        HTML);
+    }
+}
+
+$app = new Via(new Config());
+$app->mount(Counter::class, '/');
+$app->start();
+                {% endverbatim %}{% endcode %}
+            </div>
+            <div class="tab-pane scope-global api-composition">
+                {% code 'php' gutter %}{% verbatim %}
+<?php
+require __DIR__ . '/vendor/autoload.php';
+
+use Mbolli\PhpVia\Attributes\Action;
+use Mbolli\PhpVia\Attributes\Signal;
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+{+use Mbolli\PhpVia\Scope;+}
+use Mbolli\PhpVia\Via;
+
+final class Counter {
+{-    // TAB scope (default) — each visitor has their own counter
+    #[Signal]-}
+{+    // GLOBAL scope — one shared counter for every visitor
+    #[Signal(Scope::GLOBAL)]+}
+    public int $count = 0;
+
+    #[Action]
+    public function increment(): void {
+        $this->count++;
+    }
+
+    public function view(Context $c): void {
+        $count = $c->getSignal('count');
+        $increment = $c->getAction('increment');
+
+        $c->view(fn() => <<<HTML
+            <p>Count: <strong data-text="\${$count->id()}">
+                {$count->int()}
+            </strong></p>
+            <button data-on:click="@post('{$increment->url()}')">
+                +1
+            </button>
+        HTML);
+    }
+}
+
+$app = new Via(new Config());
+$app->mount(Counter::class, '/');
 $app->start();
                 {% endverbatim %}{% endcode %}
             </div>
@@ -157,25 +251,30 @@ $app->start();
 </section>
 <script>
 (function () {
-    function paneFor(panel, radioId) {
-        return panel.querySelector(radioId === 'home-tab-private' ? '.tab-pane-private' : '.tab-pane-global');
+    function activePane(panel) {
+        var scope = panel.querySelector('input[name="home-code-tab"]:checked');
+        var api = panel.querySelector('input[name="home-code-api"]:checked');
+        if (!scope || !api) return null;
+        var s = scope.id === 'home-tab-global' ? 'scope-global' : 'scope-private';
+        var a = api.id === 'home-api-composition' ? 'api-composition' : 'api-closure';
+        return panel.querySelector('.tab-pane.' + s + '.' + a);
     }
     function syncHeight(panel) {
-        var checked = panel.querySelector('.tab-radio:checked');
-        if (!checked) return;
-        var pane = paneFor(panel, checked.id);
+        var pane = activePane(panel);
         if (pane) panel.querySelector('.tab-panes-wrapper').style.height = pane.scrollHeight + 'px';
     }
     document.querySelectorAll('.code-panel').forEach(syncHeight);
-    document.querySelectorAll('.code-tab-label').forEach(function (label) {
+    document.querySelectorAll('.code-panel label[for]').forEach(function (label) {
         label.addEventListener('click', function () {
             var radio = document.getElementById(label.htmlFor);
             if (!radio || radio.checked) return;
             var panel = label.closest('.code-panel');
-            var wrapper = panel.querySelector('.tab-panes-wrapper');
-            wrapper.style.height = paneFor(panel, radio.id).scrollHeight + 'px';
             radio.checked = true;
+            syncHeight(panel);
         });
+    });
+    window.addEventListener('resize', function () {
+        document.querySelectorAll('.code-panel').forEach(syncHeight);
     });
 }());
 </script>

@@ -517,8 +517,10 @@ main { position: relative; }
   transition: opacity 200ms ease, visibility 200ms ease;
   transition-behavior: allow-discrete;
 }
-.code-panel:has(#home-tab-private:checked) .tab-pane-private,
-.code-panel:has(#home-tab-global:checked)  .tab-pane-global {
+.code-panel:has(#home-tab-private:checked):has(#home-api-closure:checked)     .tab-pane.scope-private.api-closure,
+.code-panel:has(#home-tab-global:checked):has(#home-api-closure:checked)      .tab-pane.scope-global.api-closure,
+.code-panel:has(#home-tab-private:checked):has(#home-api-composition:checked) .tab-pane.scope-private.api-composition,
+.code-panel:has(#home-tab-global:checked):has(#home-api-composition:checked)  .tab-pane.scope-global.api-composition {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -534,6 +536,12 @@ main { position: relative; }
   padding-block: 0;
   padding-inline: var(--size-2);
   gap: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.code-tab-group {
+  display: inline-flex;
   align-items: stretch;
 }
 .code-tab-label {
@@ -553,6 +561,33 @@ main { position: relative; }
 .code-panel:has(#home-tab-global:checked)  label[for="home-tab-global"] {
   color: white;
   background: color-mix(in srgb, var(--brand) 20%, transparent);
+}
+
+/* Closure ↔ Composition API segmented toggle */
+.code-api-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  align-self: center;
+  background: var(--gray-10);
+  border-radius: var(--radius-2);
+}
+.code-api-label {
+  font-size: 0.7rem;
+  font-weight: var(--font-weight-6);
+  letter-spacing: 0.02em;
+  padding: 0.25em 0.7em;
+  border-radius: var(--radius-1);
+  color: var(--gray-5);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--ease-out-2) 150ms, background var(--ease-out-2) 150ms;
+}
+.code-api-label:hover { color: var(--gray-2); }
+.code-panel:has(#home-api-closure:checked)     label[for="home-api-closure"],
+.code-panel:has(#home-api-composition:checked) label[for="home-api-composition"] {
+  color: white;
+  background: color-mix(in srgb, var(--brand) 35%, transparent);
 }
 
 /* Scope badge chips inside tab labels */
@@ -1479,12 +1514,12 @@ docs-toc {
 }
 
 /* Restart animation each time the pane becomes active */
-.code-panel:has(#home-tab-private:checked) .tab-pane-private .hl-addition,
-.code-panel:has(#home-tab-global:checked)  .tab-pane-global  .hl-addition {
+.code-panel:has(#home-tab-global:checked):has(#home-api-closure:checked)     .tab-pane.scope-global.api-closure     .hl-addition,
+.code-panel:has(#home-tab-global:checked):has(#home-api-composition:checked) .tab-pane.scope-global.api-composition .hl-addition {
   animation: hl-grow-add 500ms ease forwards;
 }
-.code-panel:has(#home-tab-private:checked) .tab-pane-private .hl-deletion,
-.code-panel:has(#home-tab-global:checked)  .tab-pane-global  .hl-deletion {
+.code-panel:has(#home-tab-global:checked):has(#home-api-closure:checked)     .tab-pane.scope-global.api-closure     .hl-deletion,
+.code-panel:has(#home-tab-global:checked):has(#home-api-composition:checked) .tab-pane.scope-global.api-composition .hl-deletion {
   animation: hl-grow-del 500ms ease forwards;
 }
 @keyframes hl-grow-add {
