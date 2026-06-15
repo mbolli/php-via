@@ -1,0 +1,166 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Dev Bar — php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Dev Bar</h1>
+    <p>
+        The <strong>Via Dev Bar</strong> is a built-in, dev-gated debug overlay — like the Symfony
+        Web Debug Toolbar or Laravel Debugbar, but tuned to php-via's signals, scopes, and SSE model.
+        It streams live over the framework's own SSE connection and injects into any page with zero
+        configuration.
+    </p>
+    <p class="note">
+        It's running on this page right now. Look for the <code>via</code> pill in the bottom-right
+        corner and click it open — every panel below describes what you're looking at.
+    </p>
+
+    <h2 id="enabling">Enabling it</h2>
+    <p>
+        The Dev Bar follows <code>devMode</code> by default: on in development, off (and 404-ing all
+        its endpoints) in production. Override it explicitly with <code>withTracing()</code> — that's
+        how this public site demos it.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withDevMode($isDev)
+    ->withTracing(true)          // force on even in prod (read-only — see below)
+    ->withTraceBufferSize(100);  // optional: ring-buffer depth (default 100)
+{% endverbatim %}{% endcode %}
+    <p>
+        When tracing is off, <code>Tracer::current()</code> is <code>null</code> and every capture
+        call site is a no-op — there is no measurable overhead in production.
+    </p>
+
+    <h2 id="panels">The six panels</h2>
+    <table>
+        <thead>
+            <tr><th>Panel</th><th>Shows</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Traces</strong></td><td>A waterfall of every request, action, and broadcast — nested spans with proportional bars, durations, and attributes.</td></tr>
+            <tr><td><strong>Signals</strong></td><td>This context's named signals grouped by scope, with their live values. Editable when writes are enabled.</td></tr>
+            <tr><td><strong>SSE</strong></td><td>The wire: every <code>datastar-fetch</code> event, with the real patch payload (elements / signals) expandable inline.</td></tr>
+            <tr><td><strong>Request</strong></td><td>Route, context id, and the request span's attributes (method, status, byte size).</td></tr>
+            <tr><td><strong>Scopes</strong></td><td>Active scopes, contexts per scope, and connection counts — the php-via-specific view of who shares what.</td></tr>
+            <tr><td><strong>Logs</strong></td><td>Server-side log records (level-filtered) plus client errors. See <a href="{{ basePath }}docs/dev-bar#logs">Server logs</a>.</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="spans">Adding your own spans</h2>
+    <p>
+        The framework auto-instruments the request → action → render → broadcast path. To time your
+        own work — a DB query, an HTTP call, an expensive computation — wrap it in
+        <code>$c-&gt;span()</code>. The name's prefix before the first dot becomes its colour category.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$issues = $c->span('db.list_issues', fn () => $repo->all(), ['limit' => 50]);
+
+// Annotate the currently open span from anywhere in the action:
+$c->traceAttribute('cache.hit', false);
+{% endverbatim %}{% endcode %}
+    <p>
+        For a static data layer with no <code>Context</code> in scope, reach the ambient tracer
+        directly — it participates in whatever trace is open on the current coroutine:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Tracing\Tracer;
+
+private static function getCell(int $row, int $col): string {
+    $tracer = Tracer::current();
+    $run = fn () => /* … the SQLite query … */;
+
+    return $tracer === null ? $run() : $tracer->span('db.get_cell', $run, ['row' => $row, 'col' => $col]);
+}
+{% endverbatim %}{% endcode %}
+    <p>
+        The <a href="{{ basePath }}examples/spreadsheet">Spreadsheet</a> and
+        <a href="{{ basePath }}examples/chat-room">Chat Room</a> examples both emit real
+        <code>db.*</code> spans this way. Categories map to colours:
+    </p>
+    <table>
+        <thead>
+            <tr><th>Category</th><th>Source</th><th>Colour</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>request</code></td><td>page / action root spans</td><td>gray</td></tr>
+            <tr><td><code>render</code></td><td><code>render.regions</code>, <code>render.component</code></td><td>green</td></tr>
+            <tr><td><code>cache</code></td><td>view-cache hits</td><td>yellow</td></tr>
+            <tr><td><code>db</code></td><td>your <code>db.*</code> spans</td><td>blue</td></tr>
+            <tr><td><code>sse</code></td><td>broadcast fan-out</td><td>violet</td></tr>
+            <tr><td>anything else</td><td>your custom spans</td><td>teal</td></tr>
+        </tbody>
+    </table>
+    <p>
+        Component renders are recorded as <code>render.component</code> spans tagged with the
+        component namespace, so you can see exactly which sub-context re-rendered.
+    </p>
+
+    <h2 id="logs">Server logs</h2>
+    <p>
+        Anything that goes through the framework logger — <code>$app-&gt;log()</code>, the per-context
+        logger, broker errors, action failures — is teed into the <strong>Logs</strong> panel and
+        streamed live. The level filter defaults to <code>info</code>; switch to <code>debug</code>
+        to see the firehose, or <code>error</code> to focus on failures. Client-side
+        <code>window.onerror</code> events land here too.
+    </p>
+    <p class="note">
+        Only logs routed through the framework logger are captured. Raw <code>error_log()</code> or
+        <code>echo</code> from application code bypass it — route those through
+        <code>$app-&gt;log()</code> if you want them in the panel.
+    </p>
+
+    <h2 id="editing">Editing signals</h2>
+    <p>
+        The Signals panel can write values back to the server, the way Livewire / React DevTools let
+        you poke at state. This is gated separately and <strong>hard-disabled outside devMode</strong>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config
+    ->withDevMode(true)
+    ->withTracingWrites(true);   // or set VIA_DEVBAR_WRITES=1
+{% endverbatim %}{% endcode %}
+    <div class="callout callout--warn">
+        <strong>Writes can never be enabled in production.</strong>
+        <code>isTracingWritesEnabled()</code> begins with a <code>devMode</code> check, so even an
+        explicit <code>withTracingWrites(true)</code> is ignored when devMode is off —
+        <code>withTracing(true)</code> on a public site is always read-only. Any visitor who could
+        reach an editable panel could mutate shared <code>ROUTE</code>/<code>SESSION</code>/<code>GLOBAL</code>
+        state, so never enable writes on untrusted traffic.
+    </div>
+
+    <h2 id="endpoints">Endpoints &amp; the console</h2>
+    <p>
+        With tracing on, the server exposes these under <code>/_via/*</code>; with tracing off they
+        all 404, so production never advertises the surface.
+    </p>
+    <table>
+        <thead>
+            <tr><th>Endpoint</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>GET /_via</code></td><td>Standalone full-screen Dev Console</td></tr>
+            <tr><td><code>GET /_via/stream</code></td><td>SSE stream multiplexing <code>trace</code> + <code>log</code> events</td></tr>
+            <tr><td><code>GET /_via/scopes</code></td><td>JSON snapshot for the Scopes panel</td></tr>
+            <tr><td><code>POST /_via/signal</code></td><td>Signal write (refused unless writes are enabled)</td></tr>
+            <tr><td><code>GET /_via/devbar.js</code>, <code>.css</code></td><td>Overlay assets</td></tr>
+        </tbody>
+    </table>
+    <p>
+        The overlay is a Shadow-DOM web component, fully isolated from your page's CSS and Datastar
+        runtime, and it survives full-page morphs. Open <a href="{{ basePath }}_via"><code>/_via</code></a>
+        for the console view.
+    </p>
+    <p class="note">
+        The trace and log buffers live in the worker process, so under <code>worker_num &gt; 1</code> a
+        console stream sees one worker's activity. That's fine for a development tool — production runs
+        with tracing off.
+    </p>
+
+    <h2 id="see-also">See also</h2>
+    <ul role="list">
+        <li><a href="{{ basePath }}docs/development">Development workflow</a> — hot reload and the dev loop</li>
+        <li><a href="{{ basePath }}docs/deployment">Deployment</a> — why tracing stays off in production</li>
+        <li><a href="{{ basePath }}docs/design">Design decisions</a> — the runtime model the traces reflect</li>
+    </ul>
+</article>
+{% endblock %}
