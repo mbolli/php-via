@@ -2,6 +2,18 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.10.1] - 2026-06-15
+
+### Fixed
+
+- Added the one missing parameter type (`Context` on a `DevBarController` closure) so the
+  full-project PHPStan `type_coverage` run passes again. No runtime change.
+
+### Documentation & Website
+
+- Homepage: new feature cards for the Dev Bar and the closure/composition API choice, plus a
+  "Built-in debugging / observability" row in the comparison table.
+
 ## [0.10.0] - 2026-06-15
 
 ### New Features
