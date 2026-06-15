@@ -3,19 +3,19 @@
 {% block demo %}
 <div id="wizard">
     <div class="wizard-progress-bar-wrap">
-        <div class="wizard-progress-bar" style="width: {{ (step.int / 3 * 100)|round }}%"></div>
+        <div class="wizard-progress-bar" style="width: {{ (step / 3 * 100)|round }}%"></div>
     </div>
     <div class="wizard-steps-label">
-        <span class="{{ step.int >= 1 ? 'active' : '' }}">1 Basics</span>
-        <span class="{{ step.int >= 2 ? 'active' : '' }}">2 Stack</span>
-        <span class="{{ step.int >= 3 ? 'active' : '' }}">3 Preview</span>
+        <span class="{{ step >= 1 ? 'active' : '' }}">1 Basics</span>
+        <span class="{{ step >= 2 ? 'active' : '' }}">2 Stack</span>
+        <span class="{{ step >= 3 ? 'active' : '' }}">3 Preview</span>
     </div>
 
-    {% if error.string != '' %}
-    <div class="wizard-error">{{ error.string|e }}</div>
+    {% if error != '' %}
+    <div class="wizard-error">{{ error|e }}</div>
     {% endif %}
 
-    {% if step.int == 1 %}
+    {% if step == 1 %}
     <div class="wizard-step">
         <h3 class="wizard-step-title">Step 1: The Basics</h3>
 
@@ -46,7 +46,7 @@
         </div>
     </div>
 
-    {% elseif step.int == 2 %}
+    {% elseif step == 2 %}
     <div class="wizard-step">
         <h3 class="wizard-step-title">Step 2: Your Stack</h3>
 
@@ -109,13 +109,13 @@
     {% endif %}
 
     <div class="wizard-nav">
-        {% if step.int > 1 %}
+        {% if step > 1 %}
         <button class="secondary" data-on:click="@post('{{ back.url }}')">← Back</button>
         {% else %}
         <span></span>
         {% endif %}
 
-        {% if step.int < 3 %}
+        {% if step < 3 %}
         <button data-on:click="@post('{{ next.url }}')">Next →</button>
         {% else %}
         <button class="secondary" data-on:click="@post('{{ restart.url }}')">↺ Start over</button>
