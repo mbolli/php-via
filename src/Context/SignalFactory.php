@@ -244,7 +244,10 @@ class SignalFactory {
         $flat = [];
 
         foreach ($nested as $key => $value) {
-            $fullKey = $prefix ? $prefix . '.' . $key : $key;
+            // Cast to string: a numeric top-level key (e.g. from a JSON array)
+            // would otherwise be an int and violate the recursive $prefix type.
+            $key = (string) $key;
+            $fullKey = $prefix !== '' ? $prefix . '.' . $key : $key;
 
             if (\is_array($value) && !$this->isAssocArray($value)) {
                 // It's a regular array value, not an object
