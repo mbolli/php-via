@@ -88,6 +88,7 @@ final class WizardExample {
             $ctx->getSignal('role')?->setValue((string) ($saved['role'] ?? 'Backend Dev'));
             $ctx->getSignal('years')?->setValue((int) ($saved['years'] ?? 3));
             $ctx->getSignal('editor')?->setValue((string) ($saved['editor'] ?? 'VS Code'));
+
             /** @var array<string, bool> $savedStack */
             $savedStack = \is_array($saved['stack'] ?? null) ? $saved['stack'] : [];
             foreach (self::STACK_OPTIONS as $opt) {
@@ -196,6 +197,10 @@ final class WizardExample {
         $ctx->sync();
     }
 
+    public static function register(Via $app): void {
+        $app->mount(self::class, '/examples/wizard');
+    }
+
     /**
      * Persist the current form state to the session so it survives page navigations.
      * A plain private helper — not an #[Action], so it is never exposed as a route.
@@ -214,9 +219,5 @@ final class WizardExample {
             'editor' => $this->editor,
             'stack' => $stack,
         ]);
-    }
-
-    public static function register(Via $app): void {
-        $app->mount(self::class, '/examples/wizard');
     }
 }

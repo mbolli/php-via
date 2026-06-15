@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\DevBar;
 
+use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
@@ -92,7 +93,7 @@ final class DevBarController {
             $scopes[] = [
                 'scope' => $scope,
                 'contextCount' => \count($contexts),
-                'contextIds' => array_map(static fn ($c) => $c->getId(), $contexts),
+                'contextIds' => array_map(static fn (Context $c) => $c->getId(), $contexts),
             ];
         }
 

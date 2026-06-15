@@ -24,6 +24,10 @@ use Mbolli\PhpVia\Via;
  */
 #[Broadcast(Scope::ROUTE)]
 final class TodoExample {
+    /** Draft input text — TAB-scoped so your typing doesn't leak to other viewers. */
+    #[Signal]
+    public string $newTodo = '';
+
     /** @var array<int, array{id: int, text: string, completed: bool}> */
     private static array $todos = [
         ['id' => 1, 'text' => 'Buy milk', 'completed' => false],
@@ -32,10 +36,6 @@ final class TodoExample {
     ];
 
     private static int $nextId = 4;
-
-    /** Draft input text — TAB-scoped so your typing doesn't leak to other viewers. */
-    #[Signal]
-    public string $newTodo = '';
 
     public function view(Context $ctx): void {
         $ctx->view(fn (): string => $ctx->render('examples/todo.html.twig', [

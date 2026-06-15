@@ -161,6 +161,7 @@ describe('ClassMetadata validation', function (): void {
 
     test('duplicate lifecycle hook throws', function (): void {
         expect(fn () => ClassMetadata::analyze(CompositionDoubleDisconnectFixture::class))
-            ->toThrow(InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 });
