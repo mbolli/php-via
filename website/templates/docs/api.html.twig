@@ -389,6 +389,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
+    ->withEmbeddable('https://parent.example')  // SameSite=None; Secure; Partitioned + frame-ancestors
     ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP
     // HTTPS / HTTP2 / Brotli compression (requires ext-brotli)
     ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
@@ -408,7 +409,17 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         (proxy with Caddy/Nginx handling TLS). A hard error is thrown at <code>start()</code> if <code>ext-brotli</code>
         is missing or neither HTTPS mode is configured.
         See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
-    </p>    <p>
+    </p>
+    <p>
+        <code>withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true)</code> makes the
+        app safe to embed in a cross-origin <code>&lt;iframe&gt;</code>: it sets the session cookie to
+        <code>SameSite=None; Secure; Partitioned</code> (so the browser sends it inside a cross-site frame, which
+        the SSE session-auth gate needs) and emits <code>Content-Security-Policy: frame-ancestors</code> when given
+        origins. It implies <code>withSecureCookie(true)</code> and requires HTTPS or <code>withH2c()</code>;
+        <code>start()</code> hard-errors otherwise. It is unrelated to <code>withTrustedOrigins()</code>.
+        See <a href="/docs/deployment#security-embedding">Deployment → Embedding in a cross-origin iframe</a>.
+    </p>
+    <p>
         <code>withBasePath(string $basePath)</code> sets the URL prefix when the app is mounted at a sub-path
         (e.g. <code>example.com/myapp/</code>). The value must be a relative path such as <code>/</code>,
         <code>/myapp</code>, or <code>/sub/path</code>. An <code>\InvalidArgumentException</code> is thrown

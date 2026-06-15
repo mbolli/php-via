@@ -35,6 +35,26 @@ class Config {
     private bool $secureCookie = false;
 
     /**
+     * SameSite attribute for the session cookie ('Lax' default, 'None' when embeddable).
+     * 'None' is required for the cookie to be sent inside a cross-origin <iframe>.
+     */
+    private string $sessionCookieSameSite = 'Lax';
+
+    /**
+     * Whether to partition the session cookie per top-level site (CHIPS).
+     * Lets a SameSite=None cookie survive third-party-cookie phase-out in a cross-site frame.
+     */
+    private bool $sessionCookiePartitioned = false;
+
+    /**
+     * Origins allowed to frame this app (Content-Security-Policy: frame-ancestors).
+     * Null means no frame-ancestors restriction is emitted.
+     *
+     * @var null|list<string>
+     */
+    private ?array $frameAncestors = null;
+
+    /**
      * Allowed origins for action requests.
      * Null means no Origin restriction (dev default).
      * Set to a list of allowed origins in production, e.g. ['https://example.com'].
@@ -277,6 +297,49 @@ class Config {
 
     public function getSecureCookie(): bool {
         return $this->secureCookie;
+    }
+
+    /**
+     * Make this app safe to embed in a cross-origin <iframe>.
+     *
+     * Sets the session cookie to SameSite=None; Secure (+ Partitioned/CHIPS) so the browser
+     * sends it inside a cross-site frame — required for the SSE session-auth gate to pass.
+     * Optionally emits Content-Security-Policy: frame-ancestors to restrict who may frame the app.
+     *
+     * Implies withSecureCookie(true). Requires HTTPS (withCertificate) or h2c (withH2c): a
+     * SameSite=None cookie without Secure is dropped by browsers, so start() hard-errors otherwise.
+     *
+     * Note: $frameAncestors restricts who may FRAME the app (CSP). It is unrelated to
+     * withTrustedOrigins(), which allowlists the action POST Origin (always the app's own origin).
+     *
+     * @param null|array<string>|string $frameAncestors origins allowed to frame this app,
+     *                                                  e.g. 'https://mbolli.github.io'. null = do not emit a frame-ancestors restriction.
+     * @param bool                      $partitioned    partition the cookie per top-level site (CHIPS). Recommended true.
+     */
+    public function withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true): self {
+        $this->sessionCookieSameSite = 'None';
+        $this->secureCookie = true;              // SameSite=None requires Secure
+        $this->sessionCookiePartitioned = $partitioned;
+        if ($frameAncestors !== null) {
+            $this->frameAncestors = array_values(array_map(strval(...), (array) $frameAncestors));
+        }
+
+        return $this;
+    }
+
+    public function getSessionCookieSameSite(): string {
+        return $this->sessionCookieSameSite;
+    }
+
+    public function isSessionCookiePartitioned(): bool {
+        return $this->sessionCookiePartitioned;
+    }
+
+    /**
+     * @return null|list<string>
+     */
+    public function getFrameAncestors(): ?array {
+        return $this->frameAncestors;
     }
 
     /**

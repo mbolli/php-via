@@ -242,6 +242,29 @@ $config->withSecureCookie(true);
     {% endverbatim %}{% endcode %}
     <p>Do not enable this in local HTTP development — the browser will silently drop the cookie.</p>
 
+    <h3 id="security-embedding">Embedding in a cross-origin iframe</h3>
+    <p>
+        A browser judges a cookie's same-site status against the <em>top-level</em> page, so the
+        default <code>SameSite=Lax</code> session cookie is withheld when your app runs inside an
+        <code>&lt;iframe&gt;</code> on a different origin. The live SSE stream is gated on that cookie,
+        so the connection never attaches. <code>withEmbeddable()</code> fixes this in one call:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withEmbeddable('https://parent.example');   // origins allowed to frame you (optional)
+    {% endverbatim %}{% endcode %}
+    <p>It sets the session cookie to <code>SameSite=None; Secure; Partitioned</code> (CHIPS, so it
+        survives third-party-cookie phase-out) and, when you pass one or more origins, emits
+        <code>Content-Security-Policy: frame-ancestors</code> on page responses to restrict who may
+        frame the app. It implies <code>withSecureCookie(true)</code> and <strong>requires HTTPS</strong>
+        (<code>withCertificate()</code>) or h2c (<code>withH2c()</code>) — <code>start()</code> hard-errors
+        otherwise, because a <code>SameSite=None</code> cookie without <code>Secure</code> is dropped.</p>
+    <p>
+        <code>frame-ancestors</code> (who may <em>frame</em> you) is unrelated to
+        <code>withTrustedOrigins()</code> (which allowlists the action POST <code>Origin</code>, always
+        your app's own origin). Do not conflate them: an embedded action POST still passes the CSRF
+        check unchanged.
+    </p>
+
     <h3 id="security-checklist">Quick checklist</h3>
     <ul>
         <li>Set <code>withTrustedOrigins([…])</code> to your production domain(s).</li>
@@ -380,7 +403,7 @@ $config->withStaticDir(__DIR__ . '/public');
         <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
         <li><a href="/docs/actions#url">Actions → URL</a> — why <code>@post()</code> is required</li>
         <li><a href="/docs/broker">Broker</a> — SwooleBroker, RedisBroker, NatsBroker</li>
-        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>)</li>
+        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>, <code>withEmbeddable</code>)</li>
     </ul>
 </article>
 

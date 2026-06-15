@@ -81,24 +81,64 @@ class SessionManager {
 
     /**
      * Set session cookie in response.
+     *
+     * @param string $sameSite    SameSite attribute ('Lax' default; 'None' for cross-origin embedding)
+     * @param bool   $partitioned partition per top-level site (CHIPS). OpenSwoole's cookie() cannot
+     *                            emit Partitioned, so this path writes a raw Set-Cookie header.
      */
-    public function setSessionCookie(Response $response, string $sessionId, bool $secure = false): void {
+    public function setSessionCookie(
+        Response $response,
+        string $sessionId,
+        bool $secure = false,
+        string $sameSite = 'Lax',
+        bool $partitioned = false,
+    ): void {
         // __Host- prefix: browsers enforce Secure + Path=/ + no Domain, preventing
         // cookie injection from subdomains. Only used when secureCookie is enabled.
         $cookieName = $secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME;
+        $maxAge = 30 * 24 * 60 * 60;
+
+        if ($partitioned) {
+            // OpenSwoole's cookie() can't emit Partitioned (CHIPS); write the header by hand.
+            $response->header('Set-Cookie', self::buildCookieHeader($cookieName, $sessionId, $maxAge, $secure, $sameSite, true));
+
+            return;
+        }
 
         // Set cookie with 30 day expiration
-        $expires = time() + (30 * 24 * 60 * 60);
         $result = $response->cookie(
             $cookieName,
             $sessionId,
-            $expires,
+            time() + $maxAge,
             '/',
             '',
-            $secure,  // Secure — set via Config::withSecureCookie(true) for HTTPS deployments
-            true,     // HttpOnly
-            'Lax',    // SameSite — blocks cross-site POST requests carrying the session cookie
+            $secure,    // Secure — set via Config::withSecureCookie(true) for HTTPS deployments
+            true,       // HttpOnly
+            $sameSite,  // SameSite — 'Lax' blocks cross-site POSTs carrying the session cookie
         );
         $this->logger->log('debug', "Set session cookie: {$sessionId}, result: " . ($result ? 'success' : 'failed'));
+    }
+
+    /**
+     * Build a Set-Cookie header value. Pure (no Response) so it is directly unit-testable.
+     * __Host- names require Path=/, Secure, and no Domain — all satisfied here.
+     */
+    public static function buildCookieHeader(
+        string $name,
+        string $value,
+        int $maxAge,
+        bool $secure,
+        string $sameSite,
+        bool $partitioned,
+    ): string {
+        $parts = [$name . '=' . $value, 'Path=/', 'Max-Age=' . $maxAge, 'HttpOnly', 'SameSite=' . $sameSite];
+        if ($secure) {
+            $parts[] = 'Secure';
+        }
+        if ($partitioned) {
+            $parts[] = 'Partitioned';
+        }
+
+        return implode('; ', $parts);
     }
 }

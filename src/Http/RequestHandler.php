@@ -337,6 +337,14 @@ class RequestHandler {
         $tracer?->setAttribute('html.bytes', \strlen($html));
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
+
+        // Restrict who may frame this app, when configured via Config::withEmbeddable().
+        // Document responses only — not SSE/action/static responses.
+        $ancestors = $this->via->getConfig()->getFrameAncestors();
+        if ($ancestors !== null) {
+            $response->header('Content-Security-Policy', 'frame-ancestors ' . implode(' ', $ancestors));
+        }
+
         $this->sendCompressedPage($requestAttributes, $response, $html);
     }
 

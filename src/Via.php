@@ -618,6 +618,23 @@ class Via {
                 array_unshift($this->globalMiddleware, new BrotliMiddleware($this->config->getBrotliDynamicLevel()));
             }
 
+            // Validate embeddable (SameSite=None) requirements before binding any socket.
+            // A SameSite=None cookie without Secure is silently dropped by browsers, and Secure
+            // cookies are only honoured over HTTPS (direct TLS or TLS-terminating proxy via h2c).
+            if ($this->config->getSessionCookieSameSite() === 'None') {
+                if (!$this->config->getSecureCookie()) {
+                    throw new \RuntimeException(
+                        'withEmbeddable() requires Secure cookies; do not call withSecureCookie(false) after it.'
+                    );
+                }
+                if (!$this->config->isHttps() && !$this->config->isH2c()) {
+                    throw new \RuntimeException(
+                        'withEmbeddable() sets SameSite=None, which requires Secure cookies: '
+                        . 'enable withCertificate() (HTTPS) or withH2c() (TLS-terminating proxy).'
+                    );
+                }
+            }
+
             $socketType = $this->config->isHttps()
                 ? (SWOOLE_SOCK_TCP | SWOOLE_SSL)
                 : SWOOLE_SOCK_TCP;
@@ -1096,7 +1113,14 @@ class Via {
      * @internal Used by HTTP handlers
      */
     public function setSessionCookie(Response $response, string $sessionId): void {
-        $this->sessionManager->setSessionCookie($response, $sessionId, $this->app->getConfig()->getSecureCookie());
+        $config = $this->app->getConfig();
+        $this->sessionManager->setSessionCookie(
+            $response,
+            $sessionId,
+            $config->getSecureCookie(),
+            $config->getSessionCookieSameSite(),
+            $config->isSessionCookiePartitioned(),
+        );
     }
 
     /**
