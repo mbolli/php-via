@@ -2,6 +2,49 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.10.0] - 2026-06-15
+
+### New Features
+
+- **Composition API (class-based pages & components)**: a declarative alternative to the
+  closure API, built entirely on top of the existing infrastructure. Annotate a class with
+  PHP attributes and mount it with `Via::mount(SomeClass::class, '/route')`;
+  `Context::component()` now also accepts a class-name string. The closure API is unchanged —
+  composition is purely additive.
+  - `#[Signal]` — TAB-scoped, client-writable reactive property.
+  - `#[Signal(Scope::ROUTE|SESSION|GLOBAL|"custom")]` — scoped reactive signal that
+    auto-broadcasts to its scope.
+  - `#[Persist]` — server-only instance state that survives between action calls.
+  - `#[Broadcast(Scope::X)]` — sets the context's primary broadcast scope.
+  - `#[Action(name?, scope?)]` — marks a public method as a client-callable action.
+  - `#[OnDisconnect]` / `#[OnCleanup]` — lifecycle hooks (max one each).
+
+- **Dev Bar**: an opt-in in-page debug overlay with a request-trace waterfall and a
+  multi-panel inspector (signals, logs, connections), enabled via `Config::withTracing()`.
+  `Config::withTracingWrites()` additionally allows editing signal values from the overlay
+  (dev only). `Context::span()` records custom spans in the trace.
+
+- **`Config::withEmbeddable()`**: relaxes framing/CORS headers so a php-via app can be
+  embedded in a cross-origin iframe.
+
+### Bug Fixes
+
+- **Signals**: cast nested signal keys to string in `nestedToFlat()`, fixing type errors with
+  numeric-keyed nested signal structures.
+
+### Documentation & Website
+
+- New composition API docs page, plus a live `CompositionDemo` + `VoteWidget` example.
+- Migrated the Greeter, Todo, Wizard, and Theme Builder examples to the composition API
+  (CounterExample stays on the closure API as the canonical reference).
+- Homepage code viewer gained a Closure ↔ Composition toggle alongside the TAB/GLOBAL tabs.
+- Added a Dev Bar guide page.
+
+### Internal
+
+- Extracted `castToType` from `Router` into a reusable `TypeCaster`.
+- Tightened patch array type annotations for PHPStan.
+
 ## [0.9.0] - 2026-05-12
 
 ### New Features
