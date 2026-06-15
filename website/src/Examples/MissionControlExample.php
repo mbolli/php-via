@@ -300,16 +300,16 @@ final class MissionControlExample {
 
     private static function init(Via $app): void {
         try {
-            error_log('[MissionControl] init() starting, connecting to NATS...');
+            $app->log('info', '[MissionControl] init() starting, connecting to NATS...');
             $nats = new NatsClient();
             $nats->connect();
-            error_log('[MissionControl] TCP connected, starting read loop...');
+            $app->log('info', '[MissionControl] TCP connected, starting read loop...');
             $nats->startReadLoop();
-            error_log('[MissionControl] Read loop running, setting up JetStream stream...');
+            $app->log('info', '[MissionControl] Read loop running, setting up JetStream stream...');
             $nats->ensureStream('VIAEVENTS', 'via.events.>', 500);
-            error_log('[MissionControl] Stream ready, setting up KV bucket...');
+            $app->log('info', '[MissionControl] Stream ready, setting up KV bucket...');
             $nats->ensureKvBucket('viahealth');
-            error_log('[MissionControl] KV ready — fully connected.');
+            $app->log('info', '[MissionControl] KV ready — fully connected.');
 
             self::$nats = $nats;
             self::$connected = true;
@@ -397,7 +397,7 @@ final class MissionControlExample {
                 $app->broadcast(self::SCOPE);
             });
         } catch (\Throwable $e) {
-            error_log('[MissionControl] init() FAILED: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+            $app->log('error', '[MissionControl] init() FAILED: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
             self::$initializing = false;
             self::$connected = false;
         }

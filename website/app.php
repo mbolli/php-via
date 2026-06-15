@@ -28,6 +28,10 @@ $config = (new Config())
     ->withTwigCacheDir(sys_get_temp_dir() . '/php-via-twig-cache')
     ->withStaticDir(__DIR__ . '/public')
     ->withLogLevel($isDev ? 'debug' : 'info')
+    // Force the Via Dev Bar on even in production so the live site demos it.
+    // Signal editing stays hard-disabled here (devMode is off in prod); it is
+    // re-enabled below for local dev only.
+    ->withTracing(true)
 ;
 
 if (!$isDev) {
@@ -42,6 +46,9 @@ if (!$isDev) {
 }
 
 if ($isDev) {
+    // Local dev only: let the Dev Bar's Signals panel write values back.
+    $config->withTracingWrites(true);
+
     // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed).
     // Skip SSL when VIA_DISABLE_HTTPS is set so the benchmark hammer can connect via plain HTTP.
     if (!getenv('VIA_DISABLE_HTTPS')) {
@@ -61,9 +68,12 @@ $app = new Via($config);
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
 $corsLogger = $config->getDevMode()
-    ? new class extends AbstractLogger {
+    ? new class($app) extends AbstractLogger {
+        public function __construct(private Via $app) {}
+
         public function log($level, string|Stringable $message, array $context = []): void {
-            echo '[DEBUG] [CORS] ' . $message . "\n";
+            // Route through the framework logger so it also lands in the Dev Bar Logs panel.
+            $this->app->log('debug', '[CORS] ' . $message);
         }
     }
 : null;
@@ -448,6 +458,11 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
     $app->page('/components', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/components'));
         $c->view('docs/components.html.twig');
+    });
+
+    $app->page('/dev-bar', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/dev-bar'));
+        $c->view('docs/dev-bar.html.twig');
     });
 
     $app->page('/composition', function (Context $c): void {

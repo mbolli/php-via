@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Action;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
+use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
 
 final class SpreadsheetExample {
@@ -817,6 +818,26 @@ final class SpreadsheetExample {
         return $out;
     }
 
+    /**
+     * Time a DB operation as a `db.*` span when the Dev Bar tracer is active.
+     *
+     * These helpers are static and have no Context, so they reach the ambient
+     * tracer directly instead of going through $c->span(). Zero overhead when
+     * tracing is off.
+     *
+     * @template T
+     *
+     * @param callable(): T        $fn
+     * @param array<string, mixed> $attributes
+     *
+     * @return T
+     */
+    private static function traced(string $name, callable $fn, array $attributes = []): mixed {
+        $tracer = Tracer::current();
+
+        return $tracer === null ? $fn() : $tracer->span($name, $fn, $attributes);
+    }
+
     private static function db(): \SQLite3 {
         if (self::$db === null) {
             self::$db = new \SQLite3(__DIR__ . '/../../spreadsheet.db');
@@ -836,68 +857,74 @@ final class SpreadsheetExample {
     }
 
     private static function getCell(int $row, int $col): string {
-        $stmt = self::db()->prepare('SELECT value FROM cells WHERE row = :row AND col = :col');
-        $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
-        $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-        $data = $result->fetchArray(SQLITE3_ASSOC);
+        return self::traced('db.get_cell', static function () use ($row, $col): string {
+            $stmt = self::db()->prepare('SELECT value FROM cells WHERE row = :row AND col = :col');
+            $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
+            $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
+            $result = $stmt->execute();
+            $data = $result->fetchArray(SQLITE3_ASSOC);
 
-        return $data !== false ? (string) $data['value'] : '';
+            return $data !== false ? (string) $data['value'] : '';
+        }, ['row' => $row, 'col' => $col]);
     }
 
     /**
      * @return array<string, string> "row:col" => value
      */
     private static function getCellRange(int $startRow, int $startCol, int $rows, int $cols): array {
-        $cells = [];
-        $stmt = self::db()->prepare(
-            'SELECT row, col, value FROM cells
-             WHERE row >= :startRow AND row < :endRow
-             AND col >= :startCol AND col < :endCol'
-        );
-        $stmt->bindValue(':startRow', $startRow, SQLITE3_INTEGER);
-        $stmt->bindValue(':endRow', $startRow + $rows, SQLITE3_INTEGER);
-        $stmt->bindValue(':startCol', $startCol, SQLITE3_INTEGER);
-        $stmt->bindValue(':endCol', $startCol + $cols, SQLITE3_INTEGER);
-        $result = $stmt->execute();
+        return self::traced('db.get_cell_range', static function () use ($startRow, $startCol, $rows, $cols): array {
+            $cells = [];
+            $stmt = self::db()->prepare(
+                'SELECT row, col, value FROM cells
+                 WHERE row >= :startRow AND row < :endRow
+                 AND col >= :startCol AND col < :endCol'
+            );
+            $stmt->bindValue(':startRow', $startRow, SQLITE3_INTEGER);
+            $stmt->bindValue(':endRow', $startRow + $rows, SQLITE3_INTEGER);
+            $stmt->bindValue(':startCol', $startCol, SQLITE3_INTEGER);
+            $stmt->bindValue(':endCol', $startCol + $cols, SQLITE3_INTEGER);
+            $result = $stmt->execute();
 
-        while ($data = $result->fetchArray(SQLITE3_ASSOC)) {
-            $cells[$data['row'] . ':' . $data['col']] = (string) $data['value'];
-        }
+            while ($data = $result->fetchArray(SQLITE3_ASSOC)) {
+                $cells[$data['row'] . ':' . $data['col']] = (string) $data['value'];
+            }
 
-        return $cells;
+            return $cells;
+        }, ['startRow' => $startRow, 'startCol' => $startCol, 'rows' => $rows, 'cols' => $cols]);
     }
 
     private static function setCell(int $row, int $col, string $value): void {
-        if ($value === '') {
-            $stmt = self::db()->prepare('DELETE FROM cells WHERE row = :row AND col = :col');
-            $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
-            $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-            $stmt->execute();
-            // Shrink extent cache if the deleted cell was at the boundary.
-            if (self::$extentCache !== null
-                && ($row >= self::$extentCache['maxRow'] || $col >= self::$extentCache['maxCol'])) {
-                self::refreshExtentCache();
-            }
-        } else {
-            $stmt = self::db()->prepare(
-                'INSERT INTO cells (row, col, value) VALUES (:row, :col, :value)
-                 ON CONFLICT(row, col) DO UPDATE SET value = excluded.value'
-            );
-            $stmt->bindValue(':value', $value, SQLITE3_TEXT);
-            $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
-            $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-            $stmt->execute();
-            // Grow extent cache if the new cell exceeds the known boundary.
-            if (self::$extentCache !== null) {
-                if ($row > self::$extentCache['maxRow']) {
-                    self::$extentCache['maxRow'] = $row;
+        self::traced('db.set_cell', static function () use ($row, $col, $value): void {
+            if ($value === '') {
+                $stmt = self::db()->prepare('DELETE FROM cells WHERE row = :row AND col = :col');
+                $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
+                $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
+                $stmt->execute();
+                // Shrink extent cache if the deleted cell was at the boundary.
+                if (self::$extentCache !== null
+                    && ($row >= self::$extentCache['maxRow'] || $col >= self::$extentCache['maxCol'])) {
+                    self::refreshExtentCache();
                 }
-                if ($col > self::$extentCache['maxCol']) {
-                    self::$extentCache['maxCol'] = $col;
+            } else {
+                $stmt = self::db()->prepare(
+                    'INSERT INTO cells (row, col, value) VALUES (:row, :col, :value)
+                     ON CONFLICT(row, col) DO UPDATE SET value = excluded.value'
+                );
+                $stmt->bindValue(':value', $value, SQLITE3_TEXT);
+                $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
+                $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
+                $stmt->execute();
+                // Grow extent cache if the new cell exceeds the known boundary.
+                if (self::$extentCache !== null) {
+                    if ($row > self::$extentCache['maxRow']) {
+                        self::$extentCache['maxRow'] = $row;
+                    }
+                    if ($col > self::$extentCache['maxCol']) {
+                        self::$extentCache['maxCol'] = $col;
+                    }
                 }
             }
-        }
+        }, ['row' => $row, 'col' => $col, 'op' => $value === '' ? 'delete' : 'upsert']);
     }
 
     /**
@@ -906,11 +933,15 @@ final class SpreadsheetExample {
      * @param array<int, array{row: int, col: int, value: string}> $cells
      */
     private static function setCells(array $cells): void {
-        self::db()->exec('BEGIN');
-        foreach ($cells as $cell) {
-            self::setCell($cell['row'], $cell['col'], $cell['value']);
-        }
-        self::db()->exec('COMMIT');
+        // The batch is one span; each inner setCell nests as a child, so a paste
+        // visibly shows its N writes in the trace waterfall.
+        self::traced('db.set_cells', static function () use ($cells): void {
+            self::db()->exec('BEGIN');
+            foreach ($cells as $cell) {
+                self::setCell($cell['row'], $cell['col'], $cell['value']);
+            }
+            self::db()->exec('COMMIT');
+        }, ['count' => \count($cells)]);
     }
 
     private static function colNameToIndex(string $col): int {
@@ -955,10 +986,10 @@ final class SpreadsheetExample {
     }
 
     private static function refreshExtentCache(): void {
-        $result = self::db()->querySingle(
+        $result = self::traced('db.grid_extent', static fn (): array => (array) self::db()->querySingle(
             'SELECT COALESCE(MAX(row), 0) AS maxRow, COALESCE(MAX(col), 0) AS maxCol FROM cells',
             true
-        );
+        ));
 
         /** @var array{maxRow: int, maxCol: int} $result */
         self::$extentCache = ['maxRow' => (int) $result['maxRow'], 'maxCol' => (int) $result['maxCol']];

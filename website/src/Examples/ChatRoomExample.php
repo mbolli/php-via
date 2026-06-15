@@ -102,7 +102,8 @@ final class ChatRoomExample {
                 return;
             }
 
-            self::addMessage($room, $username, $message);
+            // Time the INSERT as a `db.*` span in the Dev Bar trace.
+            $ctx->span('db.insert_message', fn () => self::addMessage($room, $username, $message), ['room' => $room]);
 
             $ctx->getSignal('messageInput')->setValue('');
             $ctx->getSignal('typingIndicator')->setValue('');
@@ -140,7 +141,7 @@ final class ChatRoomExample {
             'roomName' => self::$rooms[$room]['name'],
             'username' => $username,
             'contextId' => $contextId,
-            'messages' => self::getMessages($room),
+            'messages' => $c->span('db.select_messages', fn () => self::getMessages($room), ['room' => $room, 'limit' => 50]),
             'messageInputId' => $messageInput->id(),
             'typingIndicatorId' => $typingIndicator->id(),
             'users' => array_values(array_unique(self::$roomUsers[$room] ?? [])),
