@@ -82,6 +82,16 @@ class ActionHandler {
             return;
         }
 
+        // Open a Dev Bar trace for this action. render.regions spans from any
+        // $c->sync()/broadcast() and user $c->span() calls nest under it.
+        $tracer = $this->via->getTracer();
+        $traceStarted = $tracer !== null && $tracer->startTrace('POST ' . $actionId, 'request');
+        if ($traceStarted) {
+            $tracer->setAttribute('action.id', $actionId);
+            $tracer->setAttribute('context.id', $contextId);
+            $tracer->setAttribute('context.route', $context->getRoute());
+        }
+
         try {
             // Inject HTTP request params so action callbacks can use $c->input() / $c->file() / $c->cookie()
             $context->setRequestInput($request->get ?? [], $request->post ?? [], $request->files ?? []);
@@ -114,12 +124,17 @@ class ActionHandler {
             $response->end();
         } catch (\Exception $e) {
             $this->via->log('error', "Action {$actionId} failed: " . $e->getMessage());
+            $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, false);
 
             $response->status(500);
             $response->end('Action failed');
+        } finally {
+            if ($traceStarted) {
+                $tracer->endTrace();
+            }
         }
     }
 

@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
 use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
 use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\RequestLogger;
+use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
 use Nyholm\Psr7\Response as Psr7Response;
 use OpenSwoole\Http\Request;
@@ -33,6 +35,7 @@ class RequestHandler {
     private ?RequestLogger $requestLogger = null;
     private PsrRequestFactory $psrRequestFactory;
     private PsrResponseEmitter $psrResponseEmitter;
+    private ?DevBarController $devBar = null;
 
     /**
      * Lazy brotli-compressed cache for static assets.
@@ -171,6 +174,36 @@ class RequestHandler {
             return;
         }
 
+        // Dev Bar endpoints (/_via/*, /_traces) — gated on tracing being enabled.
+        // 404 when disabled so production never advertises the surface.
+        if ($path === '/_via' || $path === '/_traces' || str_starts_with($path, '/_via/')) {
+            if (!$this->via->getConfig()->isTracingEnabled()) {
+                $response->status(404);
+                $response->end('Not Found');
+
+                return;
+            }
+
+            // Mutating endpoints are POST; everything else is GET.
+            $expectsPost = $path === '/_via/signal' || $path === '/_via/reset';
+            if ($expectsPost ? $method !== 'POST' : $method !== 'GET') {
+                $response->status(405);
+                $response->header('Allow', $expectsPost ? 'POST' : 'GET');
+                $response->end('Method Not Allowed');
+
+                return;
+            }
+
+            $this->devBar ??= new DevBarController($this->via);
+            $this->devBar->handle($path, $request, $response);
+            // The SSE stream logs its own lifecycle; log the rest here.
+            if ($path !== '/_via/stream') {
+                $this->logRequest($method, $path, 200, $requestStart);
+            }
+
+            return;
+        }
+
         // Handle page routes
         $params = [];
         $handler = $this->via->getRouter()->matchRoute($path, $params);
@@ -206,6 +239,32 @@ class RequestHandler {
      * @param array<string, mixed>  $requestAttributes PSR-7 request attributes from middleware
      */
     public function handlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart, array $requestAttributes = []): void {
+        // Open a Dev Bar trace for this page request (no-op when tracing is off).
+        // render.regions spans nest under it automatically via the ambient tracer.
+        $tracer = $this->via->getTracer();
+        $traceStarted = $tracer !== null && $tracer->startTrace($method . ' ' . $route, 'request');
+        if ($traceStarted) {
+            $tracer->setAttribute('http.method', $method);
+            $tracer->setAttribute('http.route', $route);
+            $tracer->setAttribute('http.target', $path);
+        }
+
+        try {
+            $this->doHandlePage($request, $response, $route, $handler, $params, $method, $path, $requestStart, $requestAttributes, $tracer);
+        } finally {
+            if ($traceStarted) {
+                $tracer->endTrace();
+            }
+        }
+    }
+
+    /**
+     * Core page handling, wrapped by {@see handlePage()} for tracing.
+     *
+     * @param array<string, string> $params            Route parameters
+     * @param array<string, mixed>  $requestAttributes PSR-7 request attributes from middleware
+     */
+    private function doHandlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart, array $requestAttributes, ?Tracer $tracer): void {
         // Get or create session ID
         $sessionId = $this->via->getSessionId($request);
 
@@ -237,6 +296,8 @@ class RequestHandler {
                 'Page handler exception on ' . $route . ': ' . \get_class($e) . ': ' . $e->getMessage()
                 . "\n" . $e->getTraceAsString()
             );
+            $tracer?->setAttribute('http.status_code', 500);
+            $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
             $this->logRequest($method, $path, 500, $requestStart);
             $response->status(500);
             $response->end('Internal Server Error');
@@ -271,6 +332,9 @@ class RequestHandler {
                 $cookie['sameSite'],
             );
         }
+
+        $tracer?->setAttribute('http.status_code', 200);
+        $tracer?->setAttribute('html.bytes', \strlen($html));
 
         $response->header('Content-Type', 'text/html; charset=utf-8');
         $this->sendCompressedPage($requestAttributes, $response, $html);

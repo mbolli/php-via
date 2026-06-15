@@ -109,6 +109,25 @@ class Config {
      */
     private int $gcIntervalMs = 30_000;
 
+    /**
+     * Whether the Via Dev Bar (tracing overlay + /_via endpoints) is enabled.
+     * null = follow devMode; true/false = explicit override.
+     */
+    private ?bool $tracing = null;
+
+    /**
+     * Whether the Dev Bar may write signal state back from the browser.
+     * null = follow the VIA_DEVBAR_WRITES env var; true/false = explicit override.
+     * Writes are ALWAYS gated behind devMode in addition to this flag.
+     */
+    private ?bool $tracingWrites = null;
+
+    /** Maximum number of traces retained in the in-process ring buffer. */
+    private int $traceBufferSize = 100;
+
+    /** Soft cap on a single serialized trace's byte size (display guard). */
+    private int $traceMaxBytes = 16_384;
+
     public function withHost(string $host): self {
         $this->host = $host;
 
@@ -508,5 +527,84 @@ class Config {
 
     public function getGlobalStateTableValueBytes(): int {
         return $this->globalStateTableValueBytes;
+    }
+
+    /**
+     * Enable the Via Dev Bar: a tabbed debug overlay (traces, signals, SSE
+     * patches, request, scopes, errors) injected into every page, plus the
+     * `/_via/*` endpoints and standalone console.
+     *
+     * Like `/_stats`, the Dev Bar exposes timings, routes, and live signal
+     * state — it is for development. It defaults to `getDevMode()`, but you may
+     * force it on (e.g. to demo it on a public site) by passing `true`, or off
+     * with `false`. Even when forced on, signal *editing* stays disabled unless
+     * devMode is also on (see {@see withTracingWrites()}).
+     *
+     * @param null|bool $enabled true/false to force, null to follow devMode
+     */
+    public function withTracing(?bool $enabled = true): self {
+        $this->tracing = $enabled;
+
+        return $this;
+    }
+
+    public function isTracingEnabled(): bool {
+        return $this->tracing ?? $this->devMode;
+    }
+
+    /**
+     * Allow the Dev Bar's Signals panel to write values back to the server.
+     *
+     * **Hard production guard:** writes require `devMode` *in addition to* this
+     * flag and tracing being enabled. The leading devMode check means an
+     * explicit `withTracingWrites(true)` is ignored when devMode is off — so
+     * `withTracing(true)` on a public site is always read-only. Editing is
+     * opt-in for local dev via this call or the `VIA_DEVBAR_WRITES=1` env var.
+     *
+     * The abuse surface is real: any visitor who can reach the page could
+     * mutate ROUTE/SESSION/GLOBAL scope state shared with other users. Never
+     * enable this on a deployment exposed to untrusted traffic.
+     *
+     * @param null|bool $enabled true/false to force, null to follow VIA_DEVBAR_WRITES
+     */
+    public function withTracingWrites(?bool $enabled = null): self {
+        $this->tracingWrites = $enabled;
+
+        return $this;
+    }
+
+    public function isTracingWritesEnabled(): bool {
+        if (!$this->devMode || !$this->isTracingEnabled()) {
+            return false;
+        }
+
+        if ($this->tracingWrites !== null) {
+            return $this->tracingWrites;
+        }
+
+        $env = getenv('VIA_DEVBAR_WRITES');
+
+        return $env === '1' || $env === 'true';
+    }
+
+    /**
+     * Tune the trace ring buffer.
+     *
+     * @param int $traces        Maximum traces retained (default 100)
+     * @param int $maxTraceBytes Soft cap on a serialized trace's size (default 16384)
+     */
+    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): self {
+        $this->traceBufferSize = max(1, $traces);
+        $this->traceMaxBytes = max(1024, $maxTraceBytes);
+
+        return $this;
+    }
+
+    public function getTraceBufferSize(): int {
+        return $this->traceBufferSize;
+    }
+
+    public function getTraceMaxBytes(): int {
+        return $this->traceMaxBytes;
     }
 }

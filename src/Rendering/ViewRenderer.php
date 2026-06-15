@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
+use Mbolli\PhpVia\Tracing\Tracer;
 use Twig\Environment;
 
 /**
@@ -53,6 +54,7 @@ class ViewRenderer {
                 $cached = $this->cache->get($scope, true);
                 if ($cached !== null) {
                     $this->logger->debug("Using cached update view for scope: {$scope}", $context);
+                    $this->recordCacheHit($scope, $context);
 
                     return $cached;
                 }
@@ -61,10 +63,7 @@ class ViewRenderer {
             // Render fresh (either no cache, or cacheUpdates=false)
             $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
 
-            $startTime = microtime(true);
-            $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
-            $duration = microtime(true) - $startTime;
-            $this->stats->trackRender($duration);
+            $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
 
             // Cache the result if updates are cacheable
             if ($context->shouldCacheUpdates()) {
@@ -79,12 +78,7 @@ class ViewRenderer {
         $logContext = $scope === Scope::TAB ? 'TAB-scoped' : 'initial page load';
         $this->logger->debug("Rendering {$logContext} view for {$route} (no cache)", $context);
 
-        $startTime = microtime(true);
-        $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
-        $duration = microtime(true) - $startTime;
-        $this->stats->trackRender($duration);
-
-        return $result;
+        return $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
     }
 
     /**
@@ -121,5 +115,56 @@ class ViewRenderer {
      */
     public function getTwig(): Environment {
         return $this->twig;
+    }
+
+    /**
+     * Invoke a view function, tracking render time and (when tracing is on)
+     * recording a `render.regions` span. Zero-overhead when tracing is off.
+     */
+    private function renderTraced(callable $viewFn, bool $isUpdate, Context $context, string $scope, bool $cacheHit): string {
+        $run = function () use ($viewFn, $isUpdate, $context): string {
+            $startTime = microtime(true);
+            $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
+            $this->stats->trackRender(microtime(true) - $startTime);
+
+            return $result;
+        };
+
+        $tracer = Tracer::current();
+        if ($tracer === null) {
+            return $run();
+        }
+
+        $isComponent = $context->getComponentManager()->isComponent();
+        $attributes = [
+            'render.scope' => $scope,
+            'render.update' => $isUpdate,
+            'cache.hit' => $cacheHit,
+        ];
+        if ($isComponent) {
+            $attributes['component'] = $context->getNamespace() ?? $context->getId();
+        }
+
+        // Distinct span name for components so they stand out in the waterfall.
+        return $tracer->span($isComponent ? 'render.component' : 'render.regions', $run, $attributes);
+    }
+
+    /**
+     * Record a zero-duration render span flagged as a cache hit so the waterfall
+     * shows that a render was served from the view cache.
+     */
+    private function recordCacheHit(string $scope, Context $context): void {
+        $tracer = Tracer::current();
+        if ($tracer === null) {
+            return;
+        }
+
+        $isComponent = $context->getComponentManager()->isComponent();
+        $attributes = ['render.scope' => $scope, 'cache.hit' => true];
+        if ($isComponent) {
+            $attributes['component'] = $context->getNamespace() ?? $context->getId();
+        }
+
+        $tracer->span($isComponent ? 'render.component' : 'render.regions', static fn () => null, $attributes, 'cache');
     }
 }

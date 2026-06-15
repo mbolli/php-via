@@ -129,6 +129,10 @@ class PatchManager {
         // Sync view with proper selector for components
         $viewHtml = $this->context->renderView(isUpdate: true);
 
+        // Keep the Dev Bar overlay alive across full-page morphs (no-op for
+        // fragment updates and components, and when tracing is off).
+        $viewHtml = $this->app->decorateDevBarUpdate($viewHtml, $this->context);
+
         if (!empty(trim($viewHtml))) {
             if ($this->componentManager->isComponent()) {
                 // Create valid CSS ID by replacing slashes and prefixing with 'c-'

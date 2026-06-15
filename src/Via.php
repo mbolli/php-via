@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
 use Mbolli\PhpVia\Http\RequestHandler;
@@ -26,9 +27,12 @@ use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
+use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\Stats;
+use Mbolli\PhpVia\Tracing\Tracer;
+use Mbolli\PhpVia\Tracing\TraceStore;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
@@ -98,6 +102,10 @@ class Via {
     private Logger $logger;
     private RequestLogger $requestLogger;
     private Stats $stats;
+    private ?TraceStore $traceStore = null;
+    private ?Tracer $tracer = null;
+    private ?LogBuffer $logBuffer = null;
+    private ?Injector $devBarInjector = null;
     private ViewCache $viewCache;
     private ViewRenderer $viewRenderer;
     private HtmlBuilder $htmlBuilder;
@@ -121,6 +129,19 @@ class Via {
         $this->requestLogger = new RequestLogger($this->config->getDevMode());
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
+
+        // Dev Bar tracing substrate. Allocated here (master process, before fork)
+        // so the per-worker tracer + buffer are inherited cleanly. When tracing
+        // is off, Tracer::current() stays null and span call sites are no-ops.
+        if ($this->config->isTracingEnabled()) {
+            $this->traceStore = new TraceStore($this->config->getTraceBufferSize());
+            $this->tracer = new Tracer($this->traceStore);
+            Tracer::setCurrent($this->tracer);
+            $this->logBuffer = new LogBuffer();
+            $this->logger->setBuffer($this->logBuffer);
+            $this->devBarInjector = new Injector($this->config);
+        }
+
         $this->viewCache = new ViewCache();
         $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate());
         $this->scopeRegistry = new ScopeRegistry();
@@ -957,6 +978,33 @@ class Via {
     }
 
     /**
+     * Get the trace ring buffer, or null when tracing is disabled.
+     *
+     * @internal Used by the Dev Bar endpoints
+     */
+    public function getTraceStore(): ?TraceStore {
+        return $this->traceStore;
+    }
+
+    /**
+     * Get the ambient tracer, or null when tracing is disabled.
+     *
+     * @internal Used by HTTP handlers to open request/action traces
+     */
+    public function getTracer(): ?Tracer {
+        return $this->tracer;
+    }
+
+    /**
+     * Get the Dev Bar log buffer, or null when tracing is disabled.
+     *
+     * @internal Used by the Dev Bar stream
+     */
+    public function getLogBuffer(): ?LogBuffer {
+        return $this->logBuffer;
+    }
+
+    /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
      * Called by the GC timer (configurable via Config::withGcInterval()) and
@@ -1149,7 +1197,33 @@ class Via {
     public function buildHtmlDocument(Context $context): string {
         $content = $context->renderView();
 
-        return $this->htmlBuilder->buildDocument($content, $context, $context->getId(), $this->config->getBasePath());
+        $html = $this->htmlBuilder->buildDocument($content, $context, $context->getId(), $this->config->getBasePath());
+
+        // Inject the Dev Bar overlay before </body> when tracing is enabled.
+        if ($this->devBarInjector !== null) {
+            $html = $this->devBarInjector->inject($html, $context);
+        }
+
+        return $html;
+    }
+
+    /**
+     * Re-assert the Dev Bar overlay in a full-document SSE update render.
+     *
+     * Pages that re-render their whole `<html>` document on update (the simple,
+     * intended model — Brotli shrinks the diff) would otherwise have the overlay
+     * dropped when the morph reconciles `<body>`. This re-injects it (idempotent)
+     * so it survives; idiomorph matches it by id and preserves the live element.
+     * Fragment updates (no `</body>`) are returned untouched.
+     *
+     * @internal Used by PatchManager during sync
+     */
+    public function decorateDevBarUpdate(string $html, Context $context): string {
+        if ($this->devBarInjector === null || stripos($html, '</body>') === false) {
+            return $html;
+        }
+
+        return $this->devBarInjector->inject($html, $context);
     }
 
     /**
@@ -1204,6 +1278,23 @@ class Via {
      * callback (foreign node invalidations).
      */
     private function syncLocally(string $scope): void {
+        // Wrap fan-out in a "broadcast {scope}" root trace. When called
+        // synchronously inside an action this is a no-op (the action trace is
+        // already open and the render spans nest under it); for timer/broker
+        // driven broadcasts it opens its own trace so those renders are visible.
+        $tracer = $this->tracer;
+        $traceStarted = $tracer !== null && $tracer->startTrace('broadcast ' . $scope, 'sse');
+
+        try {
+            $this->doSyncLocally($scope);
+        } finally {
+            if ($traceStarted) {
+                $tracer->endTrace();
+            }
+        }
+    }
+
+    private function doSyncLocally(string $scope): void {
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
             $this->invalidateViewCache($scope);

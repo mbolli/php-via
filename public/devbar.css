@@ -1,0 +1,17 @@
+/* Via Dev Bar — host-page styles.
+ *
+ * The bar itself renders inside a Shadow DOM (see devbar.js) so the host page's
+ * CSS and the app's Datastar runtime can't bleed in. These rules only cover the
+ * custom element before/while it upgrades and the standalone /_via console page. */
+
+via-dev-bar:not(:defined) {
+    display: none;
+}
+
+/* Standalone console page: dark full-bleed canvas. */
+html:has(via-dev-bar[data-mode="page"]),
+body:has(via-dev-bar[data-mode="page"]) {
+    margin: 0;
+    height: 100%;
+    background: #0d1117;
+}

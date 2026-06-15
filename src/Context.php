@@ -10,6 +10,7 @@ use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
+use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
 
 /**
@@ -608,6 +609,45 @@ class Context {
      */
     public function broadcast(): void {
         $this->app->broadcast($this->getPrimaryScope());
+    }
+
+    /**
+     * Time a block of work as a span in the Dev Bar's current trace.
+     *
+     * Wrap any operation worth seeing in the waterfall — a DB query, an HTTP
+     * call, an expensive computation. The name's prefix before the first dot
+     * (e.g. "db" in "db.list_issues") becomes the colour category. When tracing
+     * is disabled the callable simply runs with zero overhead.
+     *
+     * ```php
+     * $issues = $c->span('db.list_issues', fn () => $repo->all(), ['limit' => 50]);
+     * ```
+     *
+     * @template T
+     *
+     * @param string               $name       Dotted span name
+     * @param callable(): T        $fn         Work to time
+     * @param array<string, mixed> $attributes Annotations shown under the span
+     *
+     * @return T
+     */
+    public function span(string $name, callable $fn, array $attributes = []): mixed {
+        $tracer = Tracer::current();
+        if ($tracer === null) {
+            return $fn();
+        }
+
+        return $tracer->span($name, $fn, $attributes);
+    }
+
+    /**
+     * Annotate the currently open span with a key/value pair.
+     *
+     * No-op when tracing is disabled or no span is open. Useful to record
+     * decisions inside an action, e.g. `$c->traceAttribute('cache.hit', false)`.
+     */
+    public function traceAttribute(string $key, mixed $value): void {
+        Tracer::current()?->setAttribute($key, $value);
     }
 
     /**

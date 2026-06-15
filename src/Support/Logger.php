@@ -21,6 +21,7 @@ class Logger {
 
     private int $minLevel;
     private ?RequestLogger $requestLogger = null;
+    private ?LogBuffer $buffer = null;
 
     public function __construct(string $logLevel = 'info') {
         $this->minLevel = self::LEVELS[$logLevel] ?? self::LEVELS['info'];
@@ -31,6 +32,14 @@ class Logger {
      */
     public function setRequestLogger(RequestLogger $requestLogger): void {
         $this->requestLogger = $requestLogger;
+    }
+
+    /**
+     * Tee log records into a ring buffer for the Dev Bar's Logs panel.
+     * Null (the default) disables capture.
+     */
+    public function setBuffer(?LogBuffer $buffer): void {
+        $this->buffer = $buffer;
     }
 
     /**
@@ -47,6 +56,11 @@ class Logger {
             return;
         }
 
+        $prefix = $context ? "[{$context->getId()}] " : '';
+
+        // Tee into the Dev Bar buffer (all levels, before the TUI early-return).
+        $this->buffer?->push($level, $prefix . $message);
+
         // When TUI logger is active, buffer debug messages for structured output
         if ($level === 'debug' && $this->requestLogger?->isEnabled()) {
             $this->requestLogger->bufferDebug($message);
@@ -54,7 +68,6 @@ class Logger {
             return;
         }
 
-        $prefix = $context ? "[{$context->getId()}] " : '';
         echo '[' . mb_strtoupper($level) . "] {$prefix}{$message}\n";
     }
 
@@ -94,6 +107,7 @@ class Logger {
         $ts = date('Y-m-d H:i:s');
         $mem = round(memory_get_usage(true) / 1024 / 1024, 1);
         $peak = round(memory_get_peak_usage(true) / 1024 / 1024, 1);
+        $this->buffer?->push('fatal', "[mem {$mem}MB peak {$peak}MB] {$message}");
         echo "[FATAL] [{$ts}] [mem {$mem}MB peak {$peak}MB] {$message}\n";
     }
 }
