@@ -22,7 +22,7 @@ final class PageMount {
      *
      * @param ClassMetadata             $meta    Reflection metadata for the page/component class
      * @param Via                       $app     Via application instance
-     * @param (callable(): object)|null $factory Optional factory: called instead of new $class() per connection
+     * @param null|(callable(): object) $factory Optional factory: called instead of new $class() per connection
      */
     public static function buildClosure(ClassMetadata $meta, Via $app, ?callable $factory = null): \Closure {
         return static function (Context $ctx) use ($meta, $factory): void {

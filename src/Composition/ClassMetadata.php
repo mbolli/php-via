@@ -22,12 +22,12 @@ final class ClassMetadata {
     private static array $cache = [];
 
     /**
-     * @param array<string>                              $signals         Property names annotated #[Signal] with TAB scope
-     * @param array<array{prop: string, scope: string}>  $scopedSignals   #[Signal] properties with a non-TAB scope
-     * @param array<string>                              $persists        Property names annotated #[Persist]
+     * @param array<string>                                              $signals         Property names annotated #[Signal] with TAB scope
+     * @param array<array{prop: string, scope: string}>                  $scopedSignals   #[Signal] properties with a non-TAB scope
+     * @param array<string>                                              $persists        Property names annotated #[Persist]
      * @param array<array{method: string, name: string, scope: ?string}> $actions
-     * @param array<string, mixed>                       $defaults        Default value per annotated property
-     * @param array<array{name: string, type: string}>  $viewRouteParams Route params declared on view() beyond Context
+     * @param array<string, mixed>                                       $defaults        Default value per annotated property
+     * @param array<array{name: string, type: string}>                   $viewRouteParams Route params declared on view() beyond Context
      */
     private function __construct(
         public readonly string $class,
@@ -119,8 +119,8 @@ final class ClassMetadata {
             if ($actionAttr instanceof Action) {
                 $actions[] = [
                     'method' => $methodName,
-                    'name'   => $actionAttr->name ?? $methodName,
-                    'scope'  => $actionAttr->scope,
+                    'name' => $actionAttr->name ?? $methodName,
+                    'scope' => $actionAttr->scope,
                 ];
             }
 

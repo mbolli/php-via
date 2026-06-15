@@ -79,7 +79,8 @@ describe('ClassMetadata signal scopes', function (): void {
 
     test('scoped #[Signal(...)] goes into scopedSignals with raw scope', function () use ($meta): void {
         expect($meta->scopedSignals)->toContain(['prop' => 'name', 'scope' => Scope::SESSION])
-            ->and($meta->scopedSignals)->toContain(['prop' => 'clicks', 'scope' => Scope::GLOBAL]);
+            ->and($meta->scopedSignals)->toContain(['prop' => 'clicks', 'scope' => Scope::GLOBAL])
+        ;
     });
 
     test('#[Broadcast] does not move #[Signal] out of TAB', function () use ($meta): void {
@@ -90,20 +91,23 @@ describe('ClassMetadata signal scopes', function (): void {
 
     test('#[Persist] goes into persists, not signals', function () use ($meta): void {
         expect($meta->persists)->toBe(['multiplier'])
-            ->and($meta->signals)->not->toContain('multiplier');
+            ->and($meta->signals)->not->toContain('multiplier')
+        ;
     });
 
     test('static property is ignored', function () use ($meta): void {
         $scopedProps = array_column($meta->scopedSignals, 'prop');
         expect($meta->signals)->not->toContain('items')
             ->and($meta->persists)->not->toContain('items')
-            ->and($scopedProps)->not->toContain('items');
+            ->and($scopedProps)->not->toContain('items')
+        ;
     });
 
     test('defaults are captured per property', function () use ($meta): void {
         expect($meta->defaults['count'])->toBe(0)
             ->and($meta->defaults['name'])->toBe('Anon')
-            ->and($meta->defaults['multiplier'])->toBe(1);
+            ->and($meta->defaults['multiplier'])->toBe(1)
+        ;
     });
 });
 
@@ -115,19 +119,22 @@ describe('ClassMetadata actions and lifecycle', function (): void {
         expect($names)->toContain('increment')
             ->and($names)->toContain('reset-it')
             ->and($names)->not->toContain('helper')
-            ->and($names)->not->toContain('view');
+            ->and($names)->not->toContain('view')
+        ;
     });
 
     test('action name and scope overrides are read', function () use ($meta): void {
         $byMethod = array_column($meta->actions, null, 'method');
         expect($byMethod['reset']['name'])->toBe('reset-it')
-            ->and($byMethod['reset']['scope'])->toBe(Scope::SESSION);
+            ->and($byMethod['reset']['scope'])->toBe(Scope::SESSION)
+        ;
     });
 
     test('plain #[Action] defaults name to method and scope to null', function () use ($meta): void {
         $byMethod = array_column($meta->actions, null, 'method');
         expect($byMethod['increment']['name'])->toBe('increment')
-            ->and($byMethod['increment']['scope'])->toBeNull();
+            ->and($byMethod['increment']['scope'])->toBeNull()
+        ;
     });
 
     test('#[Broadcast] scope is captured', function () use ($meta): void {
@@ -136,7 +143,8 @@ describe('ClassMetadata actions and lifecycle', function (): void {
 
     test('lifecycle hooks are captured', function () use ($meta): void {
         expect($meta->onDisconnect)->toBe('leave')
-            ->and($meta->onCleanup)->toBe('dispose');
+            ->and($meta->onCleanup)->toBe('dispose')
+        ;
     });
 
     test('view route params beyond Context are captured', function () use ($meta): void {
@@ -147,7 +155,8 @@ describe('ClassMetadata actions and lifecycle', function (): void {
 describe('ClassMetadata validation', function (): void {
     test('class without view() throws', function (): void {
         expect(fn () => ClassMetadata::analyze(CompositionNoViewFixture::class))
-            ->toThrow(InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class)
+        ;
     });
 
     test('duplicate lifecycle hook throws', function (): void {
