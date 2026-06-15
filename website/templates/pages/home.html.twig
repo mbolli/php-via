@@ -500,6 +500,14 @@ $app->start();
                     <td><span class="check">✓</span></td>
                 </tr>
                 <tr>
+                    <td>Built-in debugging / observability</td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-via"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-via">Zero-config Dev Bar ships with the framework: an in-page request-trace waterfall plus live signal, log, and connection inspectors. Toggled with Config::withTracing().</span></span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-lw"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-lw">No built-in overlay; relies on Laravel Telescope and Debugbar (separate packages) plus community browser DevTools extensions.</span></span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-htmx"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-htmx">htmx.logAll() console logging plus third-party htmx and Alpine.js browser DevTools extensions; no built-in in-page inspector.</span></span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-inertia"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-inertia">Leans on Laravel Telescope server-side, Vue/React DevTools client-side, and a community Inertia.js DevTools extension.</span></span></td>
+                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-lv"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-lv">First-party Phoenix LiveDashboard (real-time metrics, requests, processes) plus HEEx debug annotations.</span></span></td>
+                </tr>
+                <tr>
                     <td>Ecosystem &amp; community</td>
                     <td>Early</td>
                     <td>Large</td>
