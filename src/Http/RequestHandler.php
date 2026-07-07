@@ -11,6 +11,7 @@ use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
 use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Support\ConditionalGet;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
@@ -642,10 +643,7 @@ class RequestHandler {
      * Serve Datastar JavaScript file.
      */
     private function serveDatastarJs(Request $request, Response $response): void {
-        $datastarJs = file_get_contents(__DIR__ . '/../../public/datastar.js');
-
-        $response->header('Content-Type', 'application/javascript');
-        $this->sendCompressedStatic($request, $response, $datastarJs, 'datastar.js', true);
+        $this->sendStaticFile(__DIR__ . '/../../public/datastar.js', 'application/javascript', true, $request, $response);
     }
 
     /**
@@ -671,26 +669,54 @@ class RequestHandler {
             default => false,
         };
 
-        $response->header('Content-Type', $contentType);
-        // 1 hour cache for static assets
-        $response->header('Cache-Control', 'public, max-age=3600');
-
-        $body = file_get_contents($filePath);
-        if ($compressible) {
-            $this->sendCompressedStatic($request, $response, $body, $filePath, true);
-        } else {
-            $response->end($body);
-        }
+        $this->sendStaticFile($filePath, $contentType, $compressible, $request, $response);
     }
 
     /**
      * Serve Via CSS file.
      */
     private function serveViaCss(Request $request, Response $response): void {
-        $viaCss = file_get_contents(__DIR__ . '/../../public/via.css');
+        $this->sendStaticFile(__DIR__ . '/../../public/via.css', 'text/css; charset=utf-8', true, $request, $response);
+    }
 
-        $response->header('Content-Type', 'text/css; charset=utf-8');
-        $this->sendCompressedStatic($request, $response, $viaCss, 'via.css', true);
+    /**
+     * Serve a file-backed static response with ETag/Last-Modified conditional-GET
+     * support and the configured Cache-Control policy.
+     *
+     * Shared by /datastar.js, /via.css, and files served via Config::withStaticDir().
+     */
+    private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response): void {
+        $mtime = filemtime($filePath);
+        $size = filesize($filePath);
+        $etag = ConditionalGet::etag($mtime, $size);
+
+        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl());
+        $response->header('ETag', $etag);
+        $response->header('Last-Modified', ConditionalGet::lastModified($mtime));
+        if ($compressible && $this->via->getConfig()->getBrotli()) {
+            $response->header('Vary', 'Accept-Encoding');
+        }
+
+        $ifNoneMatch = $request->header['if-none-match'] ?? null;
+        $ifModifiedSince = $request->header['if-modified-since'] ?? null;
+
+        if (ConditionalGet::isNotModified($ifNoneMatch, $ifModifiedSince, $etag, $mtime)) {
+            $response->status(304);
+            $response->end();
+
+            return;
+        }
+
+        $response->header('Content-Type', $contentType);
+
+        $body = file_get_contents($filePath);
+        if ($compressible) {
+            // Cache key includes mtime so an edited file invalidates the in-memory
+            // brotli cache instead of serving stale compressed bytes until restart.
+            $this->sendCompressedStatic($request, $response, $body, $filePath . ':' . $mtime, true);
+        } else {
+            $response->end($body);
+        }
     }
 
     /**

@@ -20,6 +20,7 @@ class Config {
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
+    private ?string $staticCacheControl = null;
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -196,6 +197,33 @@ class Config {
 
     public function getStaticDir(): ?string {
         return $this->staticDir;
+    }
+
+    /**
+     * Cache-Control header value for file-backed static responses: files served via
+     * withStaticDir(), plus the framework's own /datastar.js and /via.css. All three
+     * emit ETag/Last-Modified with conditional-GET (304) support regardless of this
+     * setting — this only controls the expiry policy on top of that.
+     *
+     * null (default) = auto: 'no-cache' in devMode (always revalidate, so edits to a
+     * withStaticDir() file are visible on the next refresh instead of waiting out a
+     * cached max-age), else 'public, max-age=3600, must-revalidate'.
+     *
+     * Pass a full Cache-Control value to override, e.g. 'public, max-age=31536000,
+     * immutable' if you fingerprint filenames yourself.
+     */
+    public function withStaticCacheControl(?string $value): self {
+        $this->staticCacheControl = $value;
+
+        return $this;
+    }
+
+    public function getStaticCacheControl(): string {
+        if ($this->staticCacheControl !== null) {
+            return $this->staticCacheControl;
+        }
+
+        return $this->devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate';
     }
 
     public function withShellTemplate(string $path): self {

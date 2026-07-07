@@ -2,6 +2,31 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **`Config::withStaticCacheControl()`**: sets the `Cache-Control` header for `/datastar.js`,
+  `/via.css`, and files served via `withStaticDir()`. Defaults to `no-cache` in devMode (so
+  edits to a `withStaticDir()` file are visible on the next reload) or
+  `public, max-age=3600, must-revalidate` otherwise; pass any Cache-Control value to override,
+  e.g. `public, max-age=31536000, immutable` for fingerprinted filenames.
+
+### Bug Fixes
+
+- **Static asset caching**: `/datastar.js`, `/via.css`, and `withStaticDir()` responses now emit
+  `ETag`/`Last-Modified` and honor `If-None-Match`/`If-Modified-Since` with a `304`. Previously
+  `Cache-Control` was hardcoded to `public, max-age=3600` with no revalidation support, and
+  `/datastar.js`/`/via.css` sent no cache headers at all.
+- **Static file Brotli cache**: the in-memory compressed-body cache is now keyed by file path
+  *and* mtime. Previously, editing a `withStaticDir()` file without restarting the worker kept
+  serving the stale pre-edit compressed bytes indefinitely.
+
+### Internal
+
+- Extracted static-file conditional-GET logic into `Support\ConditionalGet` — free of OpenSwoole
+  types so it's unit tested independently of a running server.
+
 ## [0.10.1] - 2026-06-15
 
 ### Fixed
