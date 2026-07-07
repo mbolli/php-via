@@ -2,7 +2,7 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [Unreleased]
+## [0.11.0] - 2026-07-07
 
 ### New Features
 
