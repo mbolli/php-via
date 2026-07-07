@@ -397,6 +397,18 @@ $config->withStaticDir(__DIR__ . '/public');
     {% endverbatim %}{% endcode %}
 
     <p>In production, serve static files from Caddy (or nginx) directly — it's faster and avoids passing binary content through PHP.</p>
+    <p>
+        If you do serve <code>withStaticDir()</code> files through php-via itself (no reverse proxy, or a
+        proxy that isn't handling <code>/public/*</code>), every response — including the framework's own
+        <code>/datastar.js</code> and <code>/via.css</code> — carries an <code>ETag</code> and
+        <code>Last-Modified</code>, and honors <code>If-None-Match</code> / <code>If-Modified-Since</code>
+        with a <code>304</code>. The <code>Cache-Control</code> policy on top of that follows
+        <code>devMode</code> by default (<code>no-cache</code> in dev, so edits show up on the next reload;
+        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. if you fingerprint filenames yourself
+    {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
