@@ -689,8 +689,9 @@ class RequestHandler {
         $mtime = filemtime($filePath);
         $size = filesize($filePath);
         $etag = ConditionalGet::etag($mtime, $size);
+        $mimeType = explode(';', $contentType, 2)[0];
 
-        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl());
+        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType));
         $response->header('ETag', $etag);
         $response->header('Last-Modified', ConditionalGet::lastModified($mtime));
         if ($compressible && $this->via->getConfig()->getBrotli()) {

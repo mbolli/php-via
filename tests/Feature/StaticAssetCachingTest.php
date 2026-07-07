@@ -141,6 +141,36 @@ describe('Config::getStaticCacheControl() wired into withStaticDir() responses',
         expect($response->headers['Cache-Control'])->toBe('public, max-age=31536000, immutable');
     });
 
+    test('a callable is invoked with the resolved file path and bare MIME type (no charset)', function () use (&$dir): void {
+        file_put_contents($dir . '/app.js', 'console.log(1);');
+        $seen = [];
+
+        $config = (new Config())->withStaticDir($dir)->withStaticCacheControl(
+            function (string $filePath, string $mimeType) use (&$seen): string {
+                $seen[] = [$filePath, $mimeType];
+
+                return $mimeType === 'application/javascript'
+                    ? 'public, max-age=100'
+                    : 'public, max-age=200';
+            }
+        );
+        $handler = requestHandlerFor(createVia($config));
+
+        $cssResponse = new FakeStaticResponse();
+        $handler->handleRequest(fakeStaticRequest('/app.css'), $cssResponse);
+        $jsResponse = new FakeStaticResponse();
+        $handler->handleRequest(fakeStaticRequest('/app.js'), $jsResponse);
+
+        expect($cssResponse->headers['Cache-Control'])->toBe('public, max-age=200');
+        expect($jsResponse->headers['Cache-Control'])->toBe('public, max-age=100');
+        expect($seen)->toBe([
+            [realpath($dir . '/app.css'), 'text/css'],
+            [realpath($dir . '/app.js'), 'application/javascript'],
+        ]);
+
+        @unlink($dir . '/app.js');
+    });
+
     test('a changed file is served fresh, not stale brotli-compressed bytes from an earlier request', function () use (&$dir): void {
         $via = createVia((new Config())->withStaticDir($dir)->withBrotli());
         $handler = requestHandlerFor($via);

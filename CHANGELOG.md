@@ -9,8 +9,11 @@ All notable changes to php-via will be documented in this file.
 - **`Config::withStaticCacheControl()`**: sets the `Cache-Control` header for `/datastar.js`,
   `/via.css`, and files served via `withStaticDir()`. Defaults to `no-cache` in devMode (so
   edits to a `withStaticDir()` file are visible on the next reload) or
-  `public, max-age=3600, must-revalidate` otherwise; pass any Cache-Control value to override,
-  e.g. `public, max-age=31536000, immutable` for fingerprinted filenames.
+  `public, max-age=3600, must-revalidate` otherwise. Pass a string to apply one value to every
+  static response, e.g. `public, max-age=31536000, immutable` for fingerprinted filenames — or a
+  closure `(string $filePath, string $mimeType): string` to fine-tune the value per file (e.g.
+  long-cache fonts and fingerprinted assets, short-cache everything else). A string is always
+  taken literally, never invoked as a function name.
 
 ### Bug Fixes
 

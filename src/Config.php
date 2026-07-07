@@ -20,7 +20,9 @@ class Config {
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
-    private ?string $staticCacheControl = null;
+
+    /** @var null|\Closure(string, string): string|string */
+    private \Closure|string|null $staticCacheControl = null;
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -209,16 +211,43 @@ class Config {
      * withStaticDir() file are visible on the next refresh instead of waiting out a
      * cached max-age), else 'public, max-age=3600, must-revalidate'.
      *
-     * Pass a full Cache-Control value to override, e.g. 'public, max-age=31536000,
-     * immutable' if you fingerprint filenames yourself.
+     * Pass a string to apply one Cache-Control value to every static response, e.g.
+     * 'public, max-age=31536000, immutable' if you fingerprint filenames yourself.
+     *
+     * Pass a closure(string $filePath, string $mimeType): string to fine-tune per file —
+     * $filePath is the absolute path being served, $mimeType is the resolved MIME type
+     * without a charset suffix (e.g. 'text/css', 'image/png'). A string is always taken
+     * literally (never invoked as a function name); use first-class callable syntax
+     * (`$obj->method(...)`, `SomeClass::method(...)`) to pass an existing method. For
+     * example, long-cache fingerprinted assets and fonts, short-cache everything else:
+     *
+     * ```php
+     * $config->withStaticCacheControl(function (string $filePath, string $mimeType): string {
+     *     if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
+     *         return 'public, max-age=31536000, immutable';
+     *     }
+     *
+     *     return 'public, max-age=3600, must-revalidate';
+     * });
+     * ```
+     *
+     * @param null|\Closure(string, string): string|string $value
      */
-    public function withStaticCacheControl(?string $value): self {
+    public function withStaticCacheControl(\Closure|string|null $value): self {
         $this->staticCacheControl = $value;
 
         return $this;
     }
 
-    public function getStaticCacheControl(): string {
+    /**
+     * @param string $filePath absolute path of the file being served
+     * @param string $mimeType resolved MIME type without a charset suffix, e.g. 'text/css'
+     */
+    public function getStaticCacheControl(string $filePath, string $mimeType): string {
+        if ($this->staticCacheControl instanceof \Closure) {
+            return ($this->staticCacheControl)($filePath, $mimeType);
+        }
+
         if ($this->staticCacheControl !== null) {
             return $this->staticCacheControl;
         }

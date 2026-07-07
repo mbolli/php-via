@@ -409,6 +409,23 @@ $config->withStaticDir(__DIR__ . '/public');
     {% code 'php' %}{% verbatim %}
 $config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. if you fingerprint filenames yourself
     {% endverbatim %}{% endcode %}
+    <p>
+        Or pass a closure to fine-tune the value per file — it receives the absolute file path and the
+        resolved MIME type (no charset suffix, e.g. <code>text/css</code>):
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withStaticCacheControl(function (string $filePath, string $mimeType): string {
+    if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
+        return 'public, max-age=31536000, immutable'; // fingerprinted assets and fonts
+    }
+
+    return 'public, max-age=3600, must-revalidate';
+});
+    {% endverbatim %}{% endcode %}
+    <p>
+        A string is always taken literally, never invoked as a function name — pass a closure, or
+        first-class callable syntax (<code>$obj->method(...)</code>) for an existing method.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
