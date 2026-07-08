@@ -1188,9 +1188,12 @@ class Via {
      * Schedule context cleanup after a delay.
      * Allows time for reconnection or navigation between pages.
      *
+     * @param null|int $delayMs Grace period in milliseconds. Null uses
+     *                          Config::getContextCleanupDelayMs().
+     *
      * @internal Used by HTTP handlers
      */
-    public function scheduleContextCleanup(string $contextId, int $delayMs = 5000): void {
+    public function scheduleContextCleanup(string $contextId, ?int $delayMs = null): void {
         // Register a cleanup callback so Via::$contexts is also cleared when Application fires the cleanup.
         // Application::unregisterContext only removes from its own map; Via::$contexts is separate and must
         // be cleared here, otherwise zombie contexts (no viewFn) survive and break SSE reconnection.
@@ -1211,6 +1214,98 @@ class Via {
             $delayMs,
             fn (): bool => ($this->activeSseCount[$contextId] ?? 0) > 0,
         );
+    }
+
+    /**
+     * Rebuild a destroyed context so a returning tab keeps its view instead of hard-reloading.
+     *
+     * When an SSE reconnect names a context that was already cleaned up, this re-creates it with
+     * the *same* ID (so signal IDs regenerate byte-identical and the already-loaded DOM — bindings,
+     * action URLs, via_ctx — keeps working), re-runs the page handler, and re-seeds TAB signal
+     * values from what the client still holds (sent with the reconnect). Returns null — and the
+     * caller falls back to a full reload — when revival is disabled, no record exists, it expired,
+     * the requester's session doesn't own the context, or the route is no longer registered.
+     *
+     * @internal used by SseHandler on reconnect to a missing context
+     */
+    public function reviveContext(string $contextId, Request $request): ?Context {
+        return $this->reviveContextFromClient(
+            $contextId,
+            $this->getSessionId($request),
+            self::readSignals($request),
+            $request->cookie ?? [],
+        );
+    }
+
+    /**
+     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types (mirrors the
+     * readSignals/parseSignals split so it can be exercised without a live server).
+     *
+     * @param string                $requesterSession Session ID of the reconnecting client
+     * @param array<string, mixed>  $clientSignals    Signal values the client still holds
+     * @param array<string, string> $cookies          Request cookies (forwarded to the context)
+     *
+     * @internal
+     */
+    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = []): ?Context {
+        if ($this->config->getContextRevivalWindowMs() <= 0) {
+            return null;
+        }
+
+        $record = $this->app->getRevivable($contextId);
+        if ($record === null) {
+            return null;
+        }
+
+        // Session-ownership gate: only the session that owned the context may revive it.
+        if ($record['sessionId'] !== null && $record['sessionId'] !== $requesterSession) {
+            $this->log('warning', "Revival denied (session mismatch) for context {$contextId}");
+
+            return null;
+        }
+
+        $route = $record['route'];
+        $handler = $this->router->getRoutes()[$route] ?? null;
+        if ($handler === null) {
+            // Route no longer registered (e.g. after a code change) — fall back to reload.
+            $this->app->forgetRevivable($contextId);
+
+            return null;
+        }
+
+        $sessionId = $record['sessionId'] ?? $requesterSession;
+
+        // Rebuild with the SAME id so the DOM's existing signal/action/via_ctx references resolve.
+        $context = new Context($contextId, $route, $this, null, $sessionId);
+        $this->contextSessions[$contextId] = $sessionId;
+        $context->injectRouteParams($record['params']);
+        $context->setRequestCookies($cookies);
+
+        try {
+            $this->invokeHandlerWithParams($handler, $context, $record['params']);
+        } catch (\Throwable $e) {
+            $this->log('error', "Revival handler exception on {$route}: " . \get_class($e) . ': ' . $e->getMessage());
+
+            return null;
+        }
+
+        // Register the rebuilt context exactly as an initial page load would.
+        $this->contexts[$contextId] = $context;
+        $this->app->registerContext($context);
+        $this->app->setContextSession($contextId, $sessionId);
+        $this->registerContextInScope($context, Scope::TAB);
+
+        // Seed TAB signal values the client still holds (sent with the /_sse reconnect).
+        // injectSignals matches by signal ID — identical because the context ID was reused — and
+        // only TAB signals are client-writable, so shared/scoped state stays server-authoritative.
+        $context->injectSignals($clientSignals);
+
+        // Record consumed — drop it so the map never holds already-rebuilt contexts.
+        $this->app->forgetRevivable($contextId);
+
+        $this->log('info', "Revived context {$contextId} on route {$route}", $context);
+
+        return $context;
     }
 
     /**

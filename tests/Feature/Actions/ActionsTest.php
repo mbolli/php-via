@@ -154,8 +154,23 @@ describe('Action URL Format', function (): void {
 
         $action = $context->action(function (): void {}, 'myAction');
 
-        // URL format is /_action/{name}-{hexId} for TAB-scoped named actions
-        expect($action->url())->toMatch('#^/_action/myAction-[a-f0-9]+$#');
+        // TAB-scoped named actions use a deterministic ID (the name) so a revived context
+        // regenerates byte-identical URLs and the already-loaded DOM keeps working.
+        expect($action->url())->toBe('/_action/myAction');
+    });
+
+    test('named TAB action IDs are deterministic across contexts (revival-stable)', function (): void {
+        $app = createVia();
+
+        $ctxA = new Context('ctxA', '/test', $app);
+        $idA = $ctxA->action(function (): void {}, 'increment')->id();
+
+        // A revived context re-runs the same handler; the action ID must match byte-for-byte.
+        $ctxB = new Context('ctxA', '/test', $app);
+        $idB = $ctxB->action(function (): void {}, 'increment')->id();
+
+        expect($idA)->toBe('increment');
+        expect($idB)->toBe('increment');
     });
 
     test('different actions have different URLs', function (): void {

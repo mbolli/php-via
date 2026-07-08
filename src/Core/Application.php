@@ -37,6 +37,12 @@ class Application {
      */
     private const int MAX_SESSIONS = 10_000;
 
+    /**
+     * Maximum number of revival records kept in memory. Each is a few strings for a
+     * recently-destroyed context; the soonest-expiring are evicted past this cap.
+     */
+    private const int MAX_REVIVABLE = 10_000;
+
     /** @var array<string, Context> */
     private array $contexts = [];
 
@@ -63,6 +69,16 @@ class Application {
 
     /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
     private array $contextSessions = [];
+
+    /**
+     * Revival records for recently-destroyed contexts, keyed by context ID. Lets a returning
+     * tab whose context was cleaned up rebuild an equivalent one (same ID → same signal IDs)
+     * instead of hard-reloading. Populated at cleanup time only, so this holds recently-gone
+     * contexts, not live ones.
+     *
+     * @var array<string, array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}>
+     */
+    private array $revivableContexts = [];
 
     private Environment $twig;
 
@@ -303,11 +319,15 @@ class Application {
      * Schedule context cleanup after a delay.
      * Allows time for reconnection or navigation between pages.
      *
+     * @param null|int              $delayMs       Grace period in milliseconds. Null uses
+     *                                             Config::getContextCleanupDelayMs().
      * @param null|callable(): bool $isActiveCheck If provided, called when the timer fires.
      *                                             Returns true if an SSE connection is active —
      *                                             the timer reschedules itself instead of destroying.
      */
-    public function scheduleContextCleanup(string $contextId, int $delayMs = 5000, ?callable $isActiveCheck = null): void {
+    public function scheduleContextCleanup(string $contextId, ?int $delayMs = null, ?callable $isActiveCheck = null): void {
+        $delayMs ??= $this->config->getContextCleanupDelayMs();
+
         // Cancel any existing cleanup timer
         if (isset($this->cleanupTimers[$contextId])) {
             Timer::clear($this->cleanupTimers[$contextId]);
@@ -324,15 +344,30 @@ class Application {
                 return;
             }
 
-            if (isset($this->contexts[$contextId])) {
-                $this->logger->log('debug', "Cleaning up inactive context: {$contextId}");
-                $context = $this->contexts[$contextId];
-                $context->cleanup();
-                $this->unregisterContext($contextId);
-            }
+            $this->destroyContext($contextId);
         });
 
         $this->cleanupTimers[$contextId] = $timerId;
+    }
+
+    /**
+     * Capture a revival snapshot, then tear the context down. Runs when the cleanup timer fires.
+     *
+     * The revival record is taken *before* destruction so a returning tab can rebuild an
+     * equivalent context (same ID) instead of hard-reloading.
+     *
+     * @internal invoked by the cleanup timer (and directly by tests, since timers don't fire under VIA_TEST_MODE)
+     */
+    public function destroyContext(string $contextId): void {
+        if (!isset($this->contexts[$contextId])) {
+            return;
+        }
+
+        $this->logger->log('debug', "Cleaning up inactive context: {$contextId}");
+        $context = $this->contexts[$contextId];
+        $this->recordRevivable($context);
+        $context->cleanup();
+        $this->unregisterContext($contextId);
     }
 
     /**
@@ -350,6 +385,81 @@ class Application {
      */
     public function getLogger(): Logger {
         return $this->logger;
+    }
+
+    /**
+     * Look up a revival record by context ID, or null if absent or expired.
+     *
+     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}
+     */
+    public function getRevivable(string $contextId): ?array {
+        $record = $this->revivableContexts[$contextId] ?? null;
+        if ($record === null) {
+            return null;
+        }
+
+        if ($record['expiresAt'] <= time()) {
+            unset($this->revivableContexts[$contextId]);
+
+            return null;
+        }
+
+        return $record;
+    }
+
+    /**
+     * Drop a revival record once the context has been rebuilt (or is otherwise no longer revivable).
+     */
+    public function forgetRevivable(string $contextId): void {
+        unset($this->revivableContexts[$contextId]);
+    }
+
+    /**
+     * Store a revival record for a context about to be destroyed.
+     *
+     * No-op when the revival window is 0 (feature disabled). Called from the cleanup timer.
+     */
+    private function recordRevivable(Context $context): void {
+        $windowMs = $this->config->getContextRevivalWindowMs();
+        if ($windowMs <= 0) {
+            return;
+        }
+
+        $this->revivableContexts[$context->getId()] = [
+            'route' => $context->getRoute(),
+            'params' => $context->getRouteParams(),
+            'sessionId' => $context->getSessionId(),
+            'expiresAt' => time() + (int) ceil($windowMs / 1000),
+        ];
+
+        $this->pruneRevivableIfNeeded();
+    }
+
+    /**
+     * Evict expired revival records, then the soonest-expiring ones if still over the cap.
+     * Called only from recordRevivable, so the overhead is paid only on cleanup.
+     */
+    private function pruneRevivableIfNeeded(): void {
+        $now = time();
+        foreach ($this->revivableContexts as $id => $record) {
+            if ($record['expiresAt'] <= $now) {
+                unset($this->revivableContexts[$id]);
+            }
+        }
+
+        if (\count($this->revivableContexts) <= self::MAX_REVIVABLE) {
+            return;
+        }
+
+        uasort($this->revivableContexts, static fn (array $a, array $b): int => $a['expiresAt'] <=> $b['expiresAt']);
+        $evictCount = max(1, (int) (self::MAX_REVIVABLE * 0.01));
+        $toEvict = \array_slice(array_keys($this->revivableContexts), 0, $evictCount);
+
+        foreach ($toEvict as $id) {
+            unset($this->revivableContexts[$id]);
+        }
+
+        $this->logger->log('warning', "Revival record LRU eviction: removed {$evictCount} records (cap: " . self::MAX_REVIVABLE . ')');
     }
 
     /**

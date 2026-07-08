@@ -2,6 +2,26 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **Context revival**: a tab backgrounded long enough that its context is destroyed now rebuilds an
+  equivalent context on reconnect — same context ID, so the already-loaded DOM keeps working — and
+  re-seeds signal values the client still holds, **instead of hard-reloading the page**. This
+  preserves local (`_`-prefixed) signals, scroll position, and focus that a reload would wipe. It is
+  on by default (10-minute window) and needs no app code; tune or disable it with
+  `Config::withContextRevivalWindow()` (`0` = fall back to the previous reload behavior). Revival
+  re-runs the page handler, so — exactly as on a reload — server-only state (`#[Persist]`) resets and
+  `onDisconnect`/connect hooks re-fire. Named components survive; anonymous components (no explicit
+  name) reset. As part of this, TAB-scoped action IDs are now deterministic (previously random per
+  registration) so a revived context's action URLs match the ones already in the DOM.
+- **`Config::withContextCleanupDelay()`**: configures the grace period (default: 5 seconds) before
+  an inactive context — one whose SSE connection has closed — is destroyed, allowing time for page
+  navigation or a brief reconnect. Previously hardcoded; mirrors the existing
+  `Config::withGcInterval()` pattern. Pass `0` to disable the grace period and clean up immediately
+  on disconnect.
+
 ## [0.11.0] - 2026-07-07
 
 ### New Features

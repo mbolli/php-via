@@ -153,6 +153,16 @@ $app->onClientConnect(fn(string $id) => /* ... */);
 $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide timer
 ```
 
+> `onDisconnect` fires after a grace period (default: 5 seconds) that tolerates page navigation
+> and brief reconnects without tearing down state. Tune it with `Config::withContextCleanupDelay()`.
+>
+> If a tab is backgrounded long enough that its context is destroyed, the returning tab **revives**
+> — the server rebuilds an equivalent context (same ID) and re-seeds the signal values the client
+> still holds, instead of hard-reloading and losing local signals, scroll, and focus. On by default
+> (10-minute window); tune or disable with `Config::withContextRevivalWindow()`. Revival re-runs the
+> page handler, so server-only `#[Persist]` state resets and lifecycle hooks re-fire, just as on a
+> reload.
+
 ### Route Groups: shared prefix and/or middleware
 
 ```php

@@ -133,6 +133,20 @@ class Config {
     private int $gcIntervalMs = 30_000;
 
     /**
+     * Grace period in milliseconds before an inactive context (no live SSE connection) is
+     * destroyed, allowing time for page navigation or a brief reconnect. 0 disables the
+     * grace period, destroying the context immediately on disconnect.
+     */
+    private int $contextCleanupDelayMs = 5000;
+
+    /**
+     * How long (milliseconds) after a context is destroyed a returning tab may rebuild an
+     * equivalent one (same ID, handler re-run, signals re-seeded from the client) instead of
+     * hard-reloading. 0 disables revival, falling back to a full page reload on reconnect.
+     */
+    private int $contextRevivalWindowMs = 600_000;
+
+    /**
      * Whether the Via Dev Bar (tracing overlay + /_via endpoints) is enabled.
      * null = follow devMode; true/false = explicit override.
      */
@@ -459,6 +473,49 @@ class Config {
 
     public function getGcIntervalMs(): int {
         return $this->gcIntervalMs;
+    }
+
+    /**
+     * Configure the context cleanup grace period.
+     *
+     * When an SSE stream disconnects, php-via doesn't destroy the context immediately —
+     * it waits this long for a page navigation or reconnect before tearing it down. Longer
+     * delays tolerate flakier clients at the cost of holding idle contexts (and their
+     * in-memory view payloads) in memory for longer under concurrent disconnects.
+     *
+     * @param int $ms Grace period in milliseconds. Pass 0 to disable (cleanup is immediate).
+     */
+    public function withContextCleanupDelay(int $ms): self {
+        $this->contextCleanupDelayMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getContextCleanupDelayMs(): int {
+        return $this->contextCleanupDelayMs;
+    }
+
+    /**
+     * Configure the context revival window.
+     *
+     * When a tab is backgrounded long enough that its context is destroyed (past
+     * {@see withContextCleanupDelay()}), a returning tab normally hard-reloads. With revival
+     * enabled, the server instead rebuilds an equivalent context — same ID, so the already-loaded
+     * DOM keeps working — by re-running the page handler and re-seeding signal values the client
+     * still holds. This preserves local (underscore) signals, scroll, and focus that a reload
+     * would destroy. Revival re-runs the page handler, so it is not lossless: server-only state
+     * (e.g. #[Persist]) resets and onDisconnect/connect hooks re-fire, exactly as on a reload.
+     *
+     * @param int $ms Window in milliseconds. Pass 0 to disable (reconnect falls back to a reload).
+     */
+    public function withContextRevivalWindow(int $ms): self {
+        $this->contextRevivalWindowMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getContextRevivalWindowMs(): int {
+        return $this->contextRevivalWindowMs;
     }
 
     /**

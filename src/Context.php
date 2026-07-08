@@ -29,6 +29,9 @@ class Context {
     /** @var array<string, callable> */
     private array $actionRegistry = [];
 
+    /** Monotonic counter for generating deterministic IDs for anonymous (unnamed) TAB actions. */
+    private int $anonActionSeq = 0;
+
     /** @var array<string, Action> Named actions keyed by user-supplied name (raw, not camelCased) */
     private array $namedActions = [];
 
@@ -222,6 +225,17 @@ class Context {
      */
     public function injectRouteParams(array $params): void {
         $this->routeParams = $params;
+    }
+
+    /**
+     * Get the route parameters injected into this context.
+     *
+     * @internal used by the revival path to reconstruct a destroyed context
+     *
+     * @return array<string, string>
+     */
+    public function getRouteParams(): array {
+        return $this->routeParams;
     }
 
     /**
@@ -880,8 +894,20 @@ class Context {
 
             $this->app->registerScopedAction($actionScope, $actionId, $fn);
         } else {
-            // TAB scope: generate unique random ID, prefixed with name for debuggability
-            $actionId = $name !== null ? $name . '-' . $this->app->generateId() : $this->app->generateId();
+            // TAB scope: deterministic ID so a destroyed context that is later revived
+            // (re-created with the same context ID, handler re-run) regenerates byte-identical
+            // action URLs — the already-loaded DOM's buttons keep working without a reload.
+            // Keyed on the stable namespace (not the random component context ID): a component's
+            // namespace disambiguates its actions from the parent page's (e.g. `a-increment` vs
+            // `increment`), which keeps executeAction()'s parent-first lookup unambiguous.
+            $base = $name ?? 'action' . $this->anonActionSeq++;
+            $namespace = $this->getNamespace();
+            $actionId = $namespace !== null ? $namespace . '-' . $base : $base;
+
+            if (isset($this->actionRegistry[$actionId])) {
+                $this->app->log('debug', "[{$this->getId()}] Duplicate TAB action id {$actionId}; overwriting previous registration", $this);
+            }
+
             $this->actionRegistry[$actionId] = $fn;
         }
 

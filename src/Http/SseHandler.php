@@ -61,31 +61,37 @@ class SseHandler {
             $response->header($name, $value);
         }
 
-        // If context doesn't exist, it was cleaned up.
-        // Send a reload on the FIRST reconnect from this dead context so active tabs
+        // If context doesn't exist, it was cleaned up. First try to rebuild it (same ID) so the
+        // tab keeps its view without a reload; on success we fall through to normal SSE handling.
+        // Otherwise send a reload on the FIRST reconnect from this dead context so active tabs
         // recover. Subsequent reconnects (backgrounded/throttled tabs that can't execute
         // the JS) are closed silently — no log noise, no retransmitting a useless event.
-        // NOTE: brotli headers are intentionally NOT set here — we write raw SSE and close
-        // immediately, so compression is pointless and would corrupt the payload.
+        // NOTE: brotli headers are intentionally NOT set on the reload path — we write raw SSE and
+        // close immediately, so compression is pointless and would corrupt the payload.
         if (!isset($this->via->contexts[$contextId])) {
-            if (isset($this->reloadedContextIds[$contextId])) {
-                // Already told this context to reload; just close cleanly.
+            if ($this->via->reviveContext($contextId, $request) !== null) {
+                // Rebuilt — clear any stale reload marker and continue with the revived context.
+                unset($this->reloadedContextIds[$contextId]);
+            } else {
+                if (isset($this->reloadedContextIds[$contextId])) {
+                    // Already told this context to reload; just close cleanly.
+                    $response->end();
+
+                    return;
+                }
+
+                $this->reloadedContextIds[$contextId] = true;
+                // Evict after 5 minutes so the set doesn't grow unbounded.
+                Timer::after(300_000, function () use ($contextId): void {
+                    unset($this->reloadedContextIds[$contextId]);
+                });
+
+                $this->via->log('info', "Context expired, sending reload: {$contextId}");
+                $response->write($sse->executeScript('window.location.reload()'));
                 $response->end();
 
                 return;
             }
-
-            $this->reloadedContextIds[$contextId] = true;
-            // Evict after 5 minutes so the set doesn't grow unbounded.
-            Timer::after(300_000, function () use ($contextId): void {
-                unset($this->reloadedContextIds[$contextId]);
-            });
-
-            $this->via->log('info', "Context expired, sending reload: {$contextId}");
-            $response->write($sse->executeScript('window.location.reload()'));
-            $response->end();
-
-            return;
         }
 
         if ($brotliWrite !== null) {

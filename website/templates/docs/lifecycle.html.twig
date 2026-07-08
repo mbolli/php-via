@@ -20,7 +20,35 @@
     <p>
         If the browser reconnects within the cleanup timeout (default: 5 seconds), the context is reused
         and cleanup is cancelled — you won't see a spurious disconnect/reconnect for normal page refreshes.
+        Configure the timeout with <code>Config::withContextCleanupDelay()</code> — a longer delay
+        tolerates flakier clients at the cost of holding idle contexts (and their in-memory view
+        payloads) in memory longer under concurrent disconnects; pass <code>0</code> to clean up
+        immediately with no reconnect grace period:
     </p>
+    {% code 'php' %}{% verbatim %}
+$config->withContextCleanupDelay(60_000); // 60 seconds
+{% endverbatim %}{% endcode %}
+
+    <h3 id="revival">Revival: reconnecting after cleanup, without a reload</h3>
+    <p>
+        When a tab is backgrounded, Datastar closes the <code>/_sse</code> stream (the right thing for
+        battery and data on mobile). If it stays hidden past the cleanup timeout, the context is
+        destroyed. Rather than hard-reloading the returning tab — which wipes local
+        (<code>_</code>-prefixed) signals the server never saw, scroll position, and focus — php-via
+        <strong>revives</strong> it: the server rebuilds an equivalent context with the
+        <em>same</em> context ID (so the already-loaded DOM's bindings and action URLs keep working)
+        and re-seeds the signal values the client still holds and sends on reconnect.
+    </p>
+    <p>
+        This is on by default (10-minute window) and needs no application code. Because revival re-runs
+        the page handler, it is not lossless — server-only state (<code>#[Persist]</code>) resets and
+        <code>onDisconnect</code>/connect hooks re-fire, exactly as they would on a reload. Named
+        components survive; anonymous components (created without an explicit name) reset. Tune the
+        window, or disable revival entirely (falling back to a reload on reconnect), with:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withContextRevivalWindow(600_000); // 10 minutes (default); pass 0 to disable
+{% endverbatim %}{% endcode %}
 
     <h2 id="on-client-connect">onClientConnect (app-level)</h2>
     <p>
