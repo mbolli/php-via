@@ -97,6 +97,7 @@ describe('Config::getStaticCacheControl() — callable', function (): void {
             ->withStaticCacheControl(null)
         ;
         expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
-            ->toBe('public, max-age=3600, must-revalidate');
+            ->toBe('public, max-age=3600, must-revalidate')
+        ;
     });
 });
