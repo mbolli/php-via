@@ -21,7 +21,7 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: ${{ matrix.php-version }}
-        extensions: openswoole
+        extensions: openswoole, brotli
         coverage: none
     
     - name: Validate composer.json and composer.lock
