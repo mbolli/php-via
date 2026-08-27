@@ -60,6 +60,35 @@ $c->addScope('room:lobby');
         So on <code>/blog/post-1</code>, it becomes <code>route:/blog/post-1</code>.
     </p>
 
+    <h3 id="scope-and-the-view-cache">Scope and the view cache</h3>
+    <p>
+        Update renders are cached per <strong>primary</strong> scope &mdash; the one set by
+        <code>scope()</code>, which is <code>Scope::TAB</code> unless you change it. One render is
+        then shared by every client in that scope.
+    </p>
+    <p>
+        <code>addScope()</code> joins a broadcast channel but does <em>not</em> change the primary
+        scope. A context that only calls <code>addScope()</code> stays TAB-primary, so it never uses
+        the update cache and <strong>every client in the shared scope re-renders on each
+        broadcast</strong>.
+    </p>
+    <p>
+        That is usually what you want: if the view embeds anything client-specific &mdash; a
+        username, a per-tab signal ID, a personal viewport &mdash; a shared cache entry would serve
+        one client's HTML to another. Say so explicitly with <code>cacheUpdates: false</code> so the
+        per-client render is a decision rather than a side effect of scope ordering:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->addScope($roomScope);
+
+// Renders per client — the view embeds this user's name and TAB signal IDs.
+$c->view(fn () => $c->render('room.html.twig', [...]), cacheUpdates: false);
+{% endverbatim %}{% endcode %}
+    <p>
+        If the view really is identical for every client, promote the shared scope with
+        <code>$c-&gt;scope($roomScope)</code> instead and get one render for all of them.
+    </p>
+
     <h2 id="broadcasting">Broadcasting</h2>
     <p>When signals change inside an action, clients in the same scope get updated automatically. To push updates from outside an action (e.g., a timer):</p>
     {% code 'php' %}{% verbatim %}

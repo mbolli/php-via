@@ -122,6 +122,10 @@ final class ChatRoomExample {
             }
         });
 
+        // Per-client render, declared: the view embeds this user's name, their context ID and
+        // their TAB signal IDs, so one client's HTML must never be served to another. Today the
+        // TAB primary scope already disables the update cache and this is a no-op — the point is
+        // that promoting $roomScope with scope() can no longer silently start sharing it.
         $c->view(fn (): string => $c->render('examples/chat_room.html.twig', [
             'title' => '💬 Chat Room',
             'description' => 'Chat: ' . self::$rooms[$room]['name'],
@@ -147,7 +151,7 @@ final class ChatRoomExample {
             'users' => array_values(array_unique(self::$roomUsers[$room] ?? [])),
             'sendMessageUrl' => $sendMessage->url(),
             'updateTypingUrl' => $updateTyping->url(),
-        ]), block: 'demo');
+        ]), block: 'demo', cacheUpdates: false);
 
         if ($wasNewUser) {
             $app->broadcast($roomScope);

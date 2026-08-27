@@ -48,6 +48,9 @@ final class CompositionDemo {
         $dogs = $ctx->component(VoteWidget::class, 'dogs');
         $parrots = $ctx->component(VoteWidget::class, 'parrots');
 
+        // Per-client render, declared: `count` and `nameInput` are TAB-scoped, so the output
+        // differs per tab. The SESSION and GLOBAL signals put this context in shared scopes, which
+        // is what makes the declaration worth making explicit rather than leaving to scope order.
         $ctx->view('examples/composition.html.twig', [
             'title' => '🏗️ Composition API',
             'description' => 'Class-based page and component API using PHP attributes: <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code>, and <code>#[Action]</code>.',
@@ -88,7 +91,7 @@ final class CompositionDemo {
             'cats' => $cats(),
             'dogs' => $dogs(),
             'parrots' => $parrots(),
-        ]);
+        ], cacheUpdates: false);
     }
 
     #[Action]

@@ -27,6 +27,23 @@ final class SpreadsheetExample {
     /** @var null|array{maxRow: int, maxCol: int} Raw DB max (without padding), updated on writes */
     private static ?array $extentCache = null;
 
+    /**
+     * Viewport query results, keyed by "startRow:startCol:rows:cols".
+     *
+     * A broadcast renders once per client (their viewports, cursors and selections all differ), but
+     * the CELL data behind identical viewports is identical — and clients overwhelmingly share one,
+     * since everyone starts at 0,0. Without this the fan-out repeats the same blocking SQLite range
+     * query once per client, stalling the worker each time. Cursor-only broadcasts, the common case,
+     * touch no cell data at all, so the repeat spans broadcasts as well.
+     *
+     * setCell() is the only writer and clears the whole map, so an entry can only be stale if
+     * another process writes this database. That is the same single-writer assumption $extentCache
+     * already makes.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private static array $rangeCache = [];
+
     public static function register(Via $app): void {
         self::db(); // initialize on registration
 
@@ -872,7 +889,12 @@ final class SpreadsheetExample {
      * @return array<string, string> "row:col" => value
      */
     private static function getCellRange(int $startRow, int $startCol, int $rows, int $cols): array {
-        return self::traced('db.get_cell_range', static function () use ($startRow, $startCol, $rows, $cols): array {
+        $key = $startRow . ':' . $startCol . ':' . $rows . ':' . $cols;
+        if (isset(self::$rangeCache[$key])) {
+            return self::$rangeCache[$key];
+        }
+
+        return self::$rangeCache[$key] = self::traced('db.get_cell_range', static function () use ($startRow, $startCol, $rows, $cols): array {
             $cells = [];
             $stmt = self::db()->prepare(
                 'SELECT row, col, value FROM cells
@@ -894,6 +916,10 @@ final class SpreadsheetExample {
     }
 
     private static function setCell(int $row, int $col, string $value): void {
+        // Any write can land inside any cached viewport; the ranges overlap arbitrarily, so
+        // there is nothing cheaper to invalidate than all of it.
+        self::$rangeCache = [];
+
         self::traced('db.set_cell', static function () use ($row, $col, $value): void {
             if ($value === '') {
                 $stmt = self::db()->prepare('DELETE FROM cells WHERE row = :row AND col = :col');
