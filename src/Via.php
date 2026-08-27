@@ -617,6 +617,19 @@ class Via {
                 );
             }
 
+            // Multi-worker is not yet usable for anything stateful, and the failure modes are
+            // quiet enough that an operator will not connect them to worker_num on their own.
+            // Warn rather than refuse: stateless routes do scale across workers.
+            if ($this->config->getWorkerNum() > 1) {
+                $this->log(
+                    'warn',
+                    'worker_num > 1 is not yet supported for stateful routes. A context lives only on the '
+                    . 'worker that served its page, so action success tracks 1/worker_num (HTTP 400 "Invalid '
+                    . 'context" otherwise), and ROUTE/SESSION/GLOBAL signal VALUES are per-worker. Stateless '
+                    . 'routes are unaffected. See PERFORMANCE.md "Re-measured on the real multi-worker path".'
+                );
+            }
+
             // Validate Brotli requirements before binding any socket
             if ($this->config->getBrotli()) {
                 if (!\function_exists('brotli_compress_init')) {

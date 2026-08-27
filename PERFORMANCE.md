@@ -3,6 +3,10 @@
 Measured April 2026 on a single-process dev build (`APP_ENV=dev php website/app.php`),
 OpenSwoole 22.13.0, PHP 8.4.19, port 3000 (HTTPS/TLS, self-signed cert).
 
+> **Runtime note.** php-via now requires `ext-openswoole ^26`. Everything below except the
+> explicitly re-measured multi-worker section was recorded on OpenSwoole 22.13.0 and has not
+> been re-run since.
+
 ---
 
 ## Test Scripts
@@ -132,6 +136,11 @@ OS client-side limit.
 
 ## Multi-worker Comparison (16 workers + RedisBroker, localhost Redis)
 
+> **⚠ This section does not measure what its title says.** See
+> [Correction](#correction-what-the-16-worker-run-actually-measured) below before
+> using these numbers. The results are left in place because they are real; only the
+> attribution was wrong.
+
 To test the multi-worker path, the website was configured with:
 
 ```php
@@ -192,6 +201,54 @@ connections to be refused before the queue drains.
 **Latency improved significantly: 760ms vs 1,188ms.** With 16 workers, each event loop
 is less saturated. The SSE push from the action handler to the observer happens on a
 different worker's loop, still fast because Redis pub/sub is sub-millisecond on localhost.
+
+### Correction: what the 16-worker run actually measured
+
+`worker_num` was set through `withSwooleSettings()`, which writes the OpenSwoole setting
+directly and never touches `Config::getWorkerNum()`. Everything php-via gates on that
+accessor therefore stayed switched off:
+
+| gated on `getWorkerNum() > 1` | state during the run |
+|---|---|
+| session-affinity dispatch (`dispatch_mode`, `dispatch_func`) | never configured |
+| `SharedTable` allocation (`Via.php`) | never allocated — `GlobalState` stayed per-worker |
+| the multi-worker broker guard | never armed |
+
+So the run measured **16 workers on OpenSwoole's default fd-based dispatch with per-worker
+global state** — not php-via's multi-worker path. fd dispatch is per-connection sticky, so
+a keep-alive client stays on one worker; that is why the numbers look as good as they do.
+
+This also means the Analysis above misattributes the cause. The 99.9% → 89.7% drop is
+consistent with the section's own explanation (broker round-trips pushing responses past
+client timeouts) and with the concurrency=500 collapse (17.8% → 6.7%), which is
+latency-shaped. It is *not* evidence about session affinity, which never ran.
+
+### Re-measured on the real multi-worker path
+
+Different machine and runtime from the run above — 20 cores, PHP 8.5.9,
+**ext-openswoole 26.2.0**, no Redis available, so `SwooleBroker` (the same-machine
+broker) instead of `RedisBroker`. Absolute numbers are therefore not comparable with the
+tables above; the shape across worker counts is the finding.
+
+`tests/Load/bench_app.php` uses `withWorkerNum($n)`, so this is the path the section
+above was meant to exercise. 1,000 actions, concurrency 100, `/bench/counter`:
+
+| workers | HTTP OK | 1/N |
+|---|---|---|
+| 1 | 1000 (100.0%) | 100% |
+| 2 | 510 (51.0%) | 50% |
+| 4 | 262 (26.2%) | 25% |
+| 8 | 130 (13.0%) | 12.5% |
+| 16 | 69 (6.9%) | 6.25% |
+
+**Action success tracks `1/worker_num` exactly.** Every failure is
+`HTTP 400 "Invalid context"`: a context is created on the worker that served the page,
+and `ActionHandler` — unlike `SseHandler` — makes no attempt to revive one it has not
+seen, so an action only succeeds when it happens to land back on the originating worker.
+
+This is the live consequence of the two changes tracked as item 6 in `PERFORMANCE_TODO.md`
+(share the revival records, give `ActionHandler` the revival fallback). Until those land,
+**multi-worker is not usable for actions** regardless of broker.
 
 ### When multi-worker helps (and when it doesn't)
 
@@ -279,8 +336,14 @@ With 8 workers on an 8-core machine: ~1600 concurrent connections.
 **Caveat for Via**: ROUTE/SESSION/GLOBAL scoped signals and the SSE broadcast
 channel currently live in shared memory within a single process. With multiple
 workers, cross-worker broadcast requires the pluggable `MessageBroker` system
-(already implemented: `RedisBroker`, `NatsBroker`). TAB-scoped routes work
-without any broker.
+(already implemented: `SwooleBroker`, `RedisBroker`, `NatsBroker`). TAB-scoped
+routes work without any broker.
+
+> **Not yet, though.** As re-measured above, action success currently tracks
+> `1/worker_num` — a context lives on the worker that served its page and
+> `ActionHandler` cannot revive one it has not seen. Scoped signal VALUES are also
+> still per-worker. Until both are addressed, `worker_num > 1` is not a scaling
+> option for anything beyond stateless routes.
 
 ### 3. Connection multiplexing / HTTP/2 (reduces connection count)
 
