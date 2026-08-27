@@ -162,8 +162,16 @@ class PatchManager {
                 // Skip components with no dirty signals whose view is a pure function
                 // of those signals (cacheUpdates=true). Components with cacheUpdates=false
                 // may read external state (e.g. globalState), so always sync them.
+                //
+                // A component that declares NO signals must never be skipped: an empty
+                // set makes hasChangedSignals() permanently false, so the component would
+                // be skipped on every sync for the life of the process and the client
+                // would freeze on its first-render value. No signals means we cannot prove
+                // the view is a pure function of signals, so fall back to syncing.
+                $componentSignals = $component->getSignalFactory();
                 if ($component->shouldCacheUpdates()
-                    && !$component->getSignalFactory()->hasChangedSignals()) {
+                    && $componentSignals->hasSignals()
+                    && !$componentSignals->hasChangedSignals()) {
                     continue;
                 }
                 $component->sync();

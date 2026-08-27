@@ -190,7 +190,7 @@ describe('Selective Component Sync', function (): void {
         expect($renders['y'])->toBe(1);
     });
 
-    test('component with no signals and cacheUpdates=true is skipped', function (): void {
+    test('component with no signals and cacheUpdates=true is NOT skipped', function (): void {
         $app = createVia();
         $page = new Context('page1', '/test', $app);
 
@@ -210,7 +210,87 @@ describe('Selective Component Sync', function (): void {
 
         $page->sync();
 
-        // No signals means hasChangedSignals()=false, cacheUpdates=true → skip
-        expect($compRenders)->toBe(0, 'Static component (no signals, cacheable) should be skipped');
+        // This test previously asserted the opposite. An empty signal set makes
+        // hasChangedSignals() permanently false, so skipping on it froze any
+        // signal-less component that read external state (a PHP static, GlobalState)
+        // on its first-render value for the life of the process — silently, with
+        // nothing above debug level, and cacheUpdates=true is the DEFAULT, so authors
+        // opted in without declaring anything.
+        //
+        // The framework cannot tell a genuinely static component from one reading
+        // external state, and the costs are asymmetric: skipping wrongly freezes the
+        // UI permanently, while syncing wrongly costs one render of a component whose
+        // output is constant (and a client-side morph that is a no-op). Correctness wins.
+        // The skip still applies whenever a component declares signals and none are dirty.
+        expect($compRenders)->toBe(1, 'Signal-less component must sync — purity cannot be proven');
+    });
+});
+
+describe('Components with no signals', function (): void {
+    /*
+     * Regression: a component declaring no signals at all was skipped forever.
+     *
+     * The skip condition is `shouldCacheUpdates() && !hasChangedSignals()`.
+     * hasChangedSignals() iterates the component's own signals and returns false
+     * for an EMPTY set, so a signal-less component satisfied the skip on every
+     * broadcast for the life of the process — silently freezing the client on its
+     * first-render value, with no exception and nothing above debug level.
+     *
+     * An empty signal set means "cannot prove this view is a pure function of
+     * signals", which must fall back to syncing, not to skipping.
+     */
+    test('a component with no signals is re-rendered on every page sync', function (): void {
+        $app = createVia();
+        $page = new Context('page-nosig', '/test', $app);
+        $page->view(fn (): string => '<div>page</div>');
+
+        // Reads external state, declares no signals, and does NOT opt out of
+        // update caching — the shape an author writing a stateless component
+        // that reads GlobalState would naturally produce.
+        $external = 'first';
+        $renders = 0;
+        $page->component(function (Context $c) use (&$renders, &$external): void {
+            $c->view(function () use (&$renders, &$external): string {
+                ++$renders;
+
+                return '<span>' . $external . '</span>';
+            });
+        }, 'stateless');
+
+        $page->sync();
+        $rendersAfterFirstSync = $renders;
+        expect($rendersAfterFirstSync)->toBeGreaterThan(0);
+
+        $external = 'second';
+        $page->sync();
+        $page->sync();
+
+        expect($renders)->toBeGreaterThan($rendersAfterFirstSync);
+    });
+
+    test('the skip still applies to a component whose signals are all clean', function (): void {
+        $app = createVia();
+        $page = new Context('page-clean', '/test', $app);
+        $page->view(fn (): string => '<div>page</div>');
+
+        $renders = 0;
+        $page->component(function (Context $c) use (&$renders): void {
+            $label = $c->signal('hello', 'label');
+            $label->markSynced();
+            $c->view(function () use ($label, &$renders): string {
+                ++$renders;
+
+                return '<span>' . $label->getValue() . '</span>';
+            });
+        }, 'pure');
+
+        $page->sync();
+        $baseline = $renders;
+
+        $page->sync();
+        $page->sync();
+
+        // Declared signals, none dirty — the optimisation must still fire.
+        expect($renders)->toBe($baseline);
     });
 });

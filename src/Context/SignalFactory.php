@@ -54,6 +54,16 @@ class SignalFactory {
             }
         }
 
+        // Resolve ROUTE scope to the route-qualified scope ("route:/path").
+        // Without this an explicit Scope::ROUTE stays the literal string "route",
+        // which no context ever belongs to — so syncScopedSignals() (which walks the
+        // context's own scopes) never finds the signal and no patch is ever emitted.
+        // The literal bucket is also shared across every route, so two routes using
+        // this form collide on signal ids.
+        if ($scope === Scope::ROUTE) {
+            $scope = Scope::routeScope($this->context->getRoute());
+        }
+
         // Resolve SESSION scope to actual session ID
         if ($scope === Scope::SESSION) {
             $sessionId = $this->context->getSessionId();
@@ -176,6 +186,17 @@ class SignalFactory {
      */
     public function getTabSignals(): array {
         return $this->signals;
+    }
+
+    /**
+     * Whether this context declares any TAB-scoped signal at all.
+     *
+     * Callers use this to distinguish "all signals are clean" (a real skip
+     * opportunity) from "there are no signals", which proves nothing about
+     * whether the view's output can change.
+     */
+    public function hasSignals(): bool {
+        return $this->signals !== [];
     }
 
     /**

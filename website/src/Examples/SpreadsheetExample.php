@@ -936,11 +936,25 @@ final class SpreadsheetExample {
         // The batch is one span; each inner setCell nests as a child, so a paste
         // visibly shows its N writes in the trace waterfall.
         self::traced('db.set_cells', static function () use ($cells): void {
-            self::db()->exec('BEGIN');
-            foreach ($cells as $cell) {
-                self::setCell($cell['row'], $cell['col'], $cell['value']);
+            // IMMEDIATE, not deferred: setCell()'s delete path calls refreshExtentCache(),
+            // which reads inside this transaction. A deferred transaction takes its read
+            // snapshot at that first SELECT, and if another connection commits before our
+            // first write the upgrade fails with SQLITE_BUSY_SNAPSHOT — which bypasses the
+            // busy handler, so busy_timeout offers no protection and a writer can starve
+            // indefinitely. Taking the write lock up front keeps read and write on one
+            // snapshot. See tests/Feature/SqliteTransactionSafetyTest.php.
+            self::db()->exec('BEGIN IMMEDIATE');
+
+            try {
+                foreach ($cells as $cell) {
+                    self::setCell($cell['row'], $cell['col'], $cell['value']);
+                }
+                self::db()->exec('COMMIT');
+            } catch (\Throwable $e) {
+                self::db()->exec('ROLLBACK');
+
+                throw $e;
             }
-            self::db()->exec('COMMIT');
         }, ['count' => \count($cells)]);
     }
 
