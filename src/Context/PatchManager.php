@@ -29,6 +29,12 @@ class PatchManager {
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
 
+    /** Blocking-pop timeout in seconds; bounds how long an idle SSE loop parks. */
+    private float $pollTimeout = 0.1;
+
+    /** Whether the last getPatch() found the channel closed rather than merely idle. */
+    private bool $channelClosed = false;
+
     public function __construct(
         private Context $context,
         private Via $app,
@@ -37,6 +43,8 @@ class PatchManager {
     ) {
         // In test mode (no OpenSwoole server running), use array instead of Channel
         $inTestMode = getenv('VIA_TEST_MODE') === '1';
+
+        $this->pollTimeout = max(1, $app->getConfig()->getSsePollIntervalMs()) / 1000;
 
         if ($inTestMode) {
             $this->patchChannel = [];
@@ -97,15 +105,26 @@ class PatchManager {
     }
 
     /**
-     * Get next patch from the queue.
+     * Get next patch from the queue, parking for at most the poll timeout.
      *
-     * Uses a non-blocking pop so the SSE loop can sleep explicitly via
-     * Coroutine::sleep(), which is the only reliable way to yield a coroutine
-     * in OpenSwoole regardless of channel state (closed, empty, etc.).
+     * This loop has failed in both directions historically, so the contract is
+     * deliberate. `pop(0)` does NOT mean "non-blocking": in OpenSwoole a timeout of
+     * 0 means *no* timeout, so it parks until a push or close — which is why the
+     * caller's liveness checks stopped running (idle connections were measured
+     * stranded 61s past a 6s deadline). Conversely `pop($timeout)` returns instantly
+     * on a CLOSED channel, which spun the loop at 100% CPU after context cleanup
+     * (0c05bc7 introduced it, fcab883 reverted it two days later).
+     *
+     * Neither attempt discriminated the error code, which is what makes both safe:
+     * a bounded park restores liveness, and callers use wasChannelClosed() to exit
+     * instead of spinning. A closed channel still drains its buffer first
+     * (errCode 0), so pending patches are delivered before the close is reported.
      *
      * @return null|QueuedPatch
      */
     public function getPatch(): ?array {
+        $this->channelClosed = false;
+
         if ($this->useArray) {
             // Array-based queue for tests
             if (empty($this->patchChannel)) {
@@ -115,11 +134,28 @@ class PatchManager {
             return array_shift($this->patchChannel);
         }
 
-        // Non-blocking pop: return immediately if data is available, null otherwise.
-        // The caller (SseHandler) is responsible for sleeping when null is returned.
-        $result = $this->patchChannel->pop(0);
+        $result = $this->patchChannel->pop($this->pollTimeout);
 
-        return $result !== false ? $result : null;
+        if ($result === false) {
+            $this->channelClosed = $this->patchChannel->errCode === Channel::CHANNEL_CLOSED;
+
+            return null;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Whether the last getPatch() returned null because the channel was closed
+     * (cleanup, or replacement by recreatePatchChannel()) rather than merely idle.
+     *
+     * Callers must stop consuming when this is true. Continuing would spin — a
+     * closed channel returns immediately regardless of timeout — and re-reading the
+     * channel property would let a superseded SSE coroutine steal patches from the
+     * live one.
+     */
+    public function wasChannelClosed(): bool {
+        return $this->channelClosed;
     }
 
     /**

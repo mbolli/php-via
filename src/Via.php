@@ -50,6 +50,9 @@ use Twig\Environment;
 class Via {
     public const string VERSION = '0.12.0';
 
+    /** Safety bound on coalesced fan-out re-runs for a single scope. */
+    private const int MAX_SYNC_PASSES = 8;
+
     // Legacy public properties for HTTP handlers (will be phased out)
     /** @var array<string, Context> */
     public array $contexts = [];
@@ -94,6 +97,12 @@ class Via {
 
     private bool $shuttingDown = false;
     private bool $signalsRegistered = false;
+
+    /** @var array<string, true> Scopes whose fan-out is currently running */
+    private array $syncInFlight = [];
+
+    /** @var array<string, true> Scopes that were broadcast while their fan-out was running */
+    private array $syncPending = [];
 
     private Application $app;
     private Router $router;
@@ -1401,6 +1410,15 @@ class Via {
     }
 
     /**
+     * The running OpenSwoole server, or null before start() / in test mode.
+     *
+     * @internal Used by SseHandler to read per-connection send backlog
+     */
+    public function getServer(): ?Server {
+        return $this->server;
+    }
+
+    /**
      * Resolve a running server's worker count.
      *
      * ext-openswoole 26 exposes this as `$server->setting['worker_num']` and has no
@@ -1454,6 +1472,32 @@ class Via {
      * callback (foreign node invalidations).
      */
     private function syncLocally(string $scope): void {
+        // Serialize fan-outs per scope.
+        //
+        // doSyncLocally() renders each context in a loop, and a render can suspend —
+        // a first-ever Twig compile, or any hooked file I/O in a view, yields under
+        // SWOOLE_HOOK_ALL. A second broadcast could then run its ENTIRE fan-out before
+        // the first resumed, so the first loop's remaining contexts rendered against
+        // newer state and some clients never saw the intervening frame at all.
+        //
+        // This cannot be solved by rendering once and pushing that value to every
+        // context: cacheUpdates=false exists precisely because those views may differ
+        // per context (LoginExample renders per-user session state), so sharing one
+        // render across contexts would leak one user's view to another.
+        //
+        // A broadcast that arrives mid-fan-out is therefore folded into a single
+        // re-run afterwards, which also collapses broadcast storms into one extra
+        // pass. Note this bounds interleaving between fan-outs, not mutation of
+        // application state during one — a view reading a PHP static that an action
+        // changes mid-loop is beyond what the framework can snapshot.
+        if (isset($this->syncInFlight[$scope])) {
+            $this->syncPending[$scope] = true;
+
+            return;
+        }
+
+        $this->syncInFlight[$scope] = true;
+
         // Wrap fan-out in a "broadcast {scope}" root trace. When called
         // synchronously inside an action this is a no-op (the action trace is
         // already open and the render spans nest under it); for timer/broker
@@ -1462,8 +1506,22 @@ class Via {
         $traceStarted = $tracer !== null && $tracer->startTrace('broadcast ' . $scope, 'sse');
 
         try {
-            $this->doSyncLocally($scope);
+            $passes = 0;
+
+            do {
+                unset($this->syncPending[$scope]);
+                $this->doSyncLocally($scope);
+                ++$passes;
+            } while (isset($this->syncPending[$scope]) && $passes < self::MAX_SYNC_PASSES);
+
+            if (isset($this->syncPending[$scope])) {
+                // A view that broadcasts its own scope on every render would loop
+                // forever. Stop and say so rather than wedging the worker.
+                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\" — check for a view that broadcasts its own scope");
+            }
         } finally {
+            unset($this->syncInFlight[$scope], $this->syncPending[$scope]);
+
             if ($traceStarted) {
                 $tracer->endTrace();
             }

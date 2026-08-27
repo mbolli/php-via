@@ -31,6 +31,13 @@ class Config {
     private int $ssePollIntervalMs = 100;
 
     /**
+     * Unsent backlog per SSE connection, in bytes, above which idempotent element
+     * frames are dropped for that client instead of parking the coroutine in write().
+     * Matches the default socket_buffer_size. 0 disables dropping.
+     */
+    private int $sseMaxQueuedBytes = 1048576;
+
+    /**
      * Whether to set the Secure flag on the session cookie (required for HTTPS).
      * Defaults to false so local HTTP dev works out of the box.
      * Set to true in production behind HTTPS.
@@ -310,6 +317,26 @@ class Config {
 
     public function getSsePollIntervalMs(): int {
         return $this->ssePollIntervalMs;
+    }
+
+    /**
+     * Set the per-connection unsent-backlog threshold for dropping element frames.
+     *
+     * A slow client otherwise parks its SSE coroutine inside write() until it drains
+     * or disconnects — measured at 20s — during which that connection stops observing
+     * shutdown and disconnect. Element patches are idempotent, so a backed-up client
+     * catches up on the next broadcast. Signals and scripts are never dropped.
+     *
+     * @param int $bytes threshold in bytes; 0 or less disables dropping entirely
+     */
+    public function withSseMaxQueuedBytes(int $bytes): self {
+        $this->sseMaxQueuedBytes = $bytes;
+
+        return $this;
+    }
+
+    public function getSseMaxQueuedBytes(): int {
+        return $this->sseMaxQueuedBytes;
     }
 
     /**

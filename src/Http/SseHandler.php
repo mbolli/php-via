@@ -178,6 +178,11 @@ class SseHandler {
         // Notify app-level onClientConnect callbacks
         $this->via->triggerClientConnect($context);
 
+        // Slow-consumer bookkeeping: $backedUp tracks the stall episode so the log
+        // records transitions rather than every dropped frame.
+        $backedUp = false;
+        $droppedFrames = 0;
+
         // Keep connection alive and listen for patches
         while (true) {
             // Exit immediately if server is shutting down
@@ -194,6 +199,23 @@ class SseHandler {
             // Check for patches from the context
             $patch = $context->getPatch();
             if ($patch) {
+                // Drop this frame rather than parking in write() behind a client that
+                // is not draining its socket. See shouldDropFrame().
+                if ($this->isBackedUp($response, $patch['type'])) {
+                    ++$droppedFrames;
+
+                    // Log the transition only. A stalled client can drop thousands of
+                    // frames, and one line per frame would bury everything else.
+                    if (!$backedUp) {
+                        $backedUp = true;
+                        $this->via->log('debug', "Client backlog exceeded, dropping element frames: {$contextId}", $context);
+                    }
+
+                    continue;
+                }
+
+                $backedUp = false;
+
                 try {
                     $output = $this->sendSSEPatch($sse, $patch);
 
@@ -223,11 +245,21 @@ class SseHandler {
 
                     break;
                 }
+            } elseif ($context->getPatchManager()->wasChannelClosed()) {
+                // The channel was closed by cleanup, or replaced by recreatePatchChannel()
+                // on a reconnect. Stop consuming: a closed channel returns immediately
+                // regardless of timeout, so continuing would spin at 100% CPU (the
+                // regression fcab883 was written to fix), and re-reading the channel
+                // property would let this superseded coroutine steal patches from the
+                // live one. The replacement coroutine already owns the new channel, and
+                // recreatePatchChannel() carried any pending patches across to it.
+                $this->via->log('debug', 'Patch channel closed, ending SSE loop', $context);
+
+                break;
             } else {
-                // No patch available — yield the coroutine for the poll interval.
-                // usleep() is coroutine-safe because SWOOLE_HOOK_ALL is set on the server;
-                // the hook intercepts it and yields the current coroutine non-blocking.
-                usleep($this->via->getConfig()->getSsePollIntervalMs() * 1000);
+                // Idle: getPatch() already parked for the poll interval, so the loop is
+                // paced without a separate sleep. Reaching here at all is the point —
+                // while pop() blocked unboundedly these liveness checks never ran.
 
                 // Safety valve: if context was destroyed externally (e.g. cleanup race),
                 // send a reload so the client reinitialises instead of hanging silently.
@@ -261,6 +293,10 @@ class SseHandler {
             }
         }
 
+        if ($droppedFrames > 0) {
+            $this->via->log('debug', "Dropped {$droppedFrames} element frames for slow client: {$contextId}", $context);
+        }
+
         $this->requestLogger?->logSseDisconnect($contextId);
 
         // Decrement active SSE counter. Only perform cleanup when this is the last
@@ -292,6 +328,59 @@ class SseHandler {
         } else {
             $this->via->log('debug', "Old SSE coroutine exited; {$this->via->activeSseCount[$contextId]} still active, skipping cleanup: {$contextId}", $context);
         }
+    }
+
+    /**
+     * Whether a patch should be dropped because the connection cannot keep up.
+     *
+     * `send_yield` already applies backpressure, but as an unbounded park: measured
+     * against a client that never reads, writes 0-100 returned in ~0.05ms each
+     * (~6.4MB buffered) and write 101 then parked for 20s, returning false only when
+     * the client disconnected. `isWritable()` stayed true the whole time, so it is no
+     * use as a backpressure signal. A coroutine parked in write() also stops observing
+     * shutdown and disconnect, which undoes the loop's liveness guarantees.
+     *
+     * Only `elements` patches may be dropped. They are idempotent full-fragment morphs
+     * where the latest supersedes the rest, so a backed-up client simply catches up on
+     * the next broadcast. `signals` are deltas — self-healing only because delivery is
+     * acknowledged — and `script` patches are one-shot side effects with no resend
+     * path, so neither is ever sacrificed here.
+     *
+     * @param string $type           patch type
+     * @param int    $queuedBytes    `send_queued_bytes` for the connection
+     * @param int    $maxQueuedBytes threshold; 0 or less disables dropping
+     */
+    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes): bool {
+        if ($maxQueuedBytes <= 0 || $type !== 'elements') {
+            return false;
+        }
+
+        return $queuedBytes > $maxQueuedBytes;
+    }
+
+    /**
+     * Check the connection's unsent backlog before writing.
+     *
+     * getClientInfo() costs ~0.32us, negligible against a patch write.
+     */
+    private function isBackedUp(Response $response, string $patchType): bool {
+        $maxQueued = $this->via->getConfig()->getSseMaxQueuedBytes();
+
+        if ($maxQueued <= 0 || $patchType !== 'elements') {
+            return false;
+        }
+
+        $server = $this->via->getServer();
+        if ($server === null) {
+            return false;
+        }
+
+        $info = $server->getClientInfo($response->fd);
+        if (!\is_array($info)) {
+            return false;
+        }
+
+        return self::shouldDropFrame($patchType, (int) ($info['send_queued_bytes'] ?? 0), $maxQueued);
     }
 
     /**
