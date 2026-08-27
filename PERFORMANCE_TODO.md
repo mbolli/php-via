@@ -10,6 +10,60 @@ long-lived Brotli SSE stream) and beats it on shared-view render cost
 per connection). What php-via lacks is the *engine*: the clock, the coalescing, and
 the lock step.
 
+## Status (2026-08-26)
+
+**Closed: 0a-0g, 1, 3, 4, 5, 6, 7, 8, 12, 13, 14.** 28 commits on `fix/correctness-backlog`.
+Multi-worker went from non-functional to usable for stateful routes over the course of this work.
+
+| # | Item | Status |
+|---|---|---|
+| 0a-0d | Multi-worker blockers (dispatch, worker_num, nodeId) | `DONE` `b4c3525` `692e334` `c5725cb` |
+| 0e | `setInterval()` in every worker | `DONE` `f388526` |
+| 0f | Rate limiter per-worker (`limit x worker_num`) | `DONE` `1ab7230` |
+| 0g | Client registry per-worker | `DONE` `ed4f7dd` |
+| 1 | Non-idempotent patches destroyed | `DONE` `c88a8d5` `025bfc5` |
+| 2 | Brotli window size | **`UNVERIFIED`** — needs a machine with ext-brotli |
+| 3 | Coalesce broadcasts / split frame | `DONE` `e739186` |
+| 4 | SSE loop liveness | `DONE` `1af5888` |
+| 5 | Slow-consumer frame drop | `DONE` `964676f` |
+| 6 | Cross-worker actions | `DONE` `f26604d` |
+| 7 | Shared scoped signal values | `DONE` `d063820` (stage 1) `e2a506b` (stage 2) |
+| 8 | `SharedTable` capacity + key length | `DONE` `2ece0a7` `7a79667` |
+| 9 | SQLite instead of `SharedTable` | `EXPLORE` — verdict: add a tier, do not replace |
+| 10 | First-class single-writer API | `UNBLOCKED` — the checkpoint blocker's premise was refuted |
+| 11 | HTML caching in shared storage | **CLOSED — gate failed, do not build** |
+| 12 | `Scope::ROUTE` never expanded | `DONE` `9e4e621` |
+| 13 | `addScope()` disables the view cache | `DONE` `2163721` `18e20d2` `e7d0e83` |
+| 14 | Signal-less component frozen | `DONE` `f1a3270` |
+
+### What multi-worker does and does not do now
+
+Works: actions land on any worker; scoped signal values are shared; `Signal::increment()` and
+`Signal::mutate()` are race-free; server timers fire once; one rate limit; one client list.
+
+Does not: mutating a scoped signal by reading it and calling `setValue()` loses updates under
+concurrency (use `increment()`/`mutate()`), and PHP statics in user handlers stay per-process, so
+a simulation kept in one diverges per worker. Both are logged at start-up when `worker_num > 1`.
+
+### Prescriptions in this document that measurement refuted
+
+Recorded because each looked obviously right and would have shipped a regression.
+
+| Item | The plan said | What was true |
+|---|---|---|
+| 13 | Give the seven `addScope()` routes a real primary scope | Would have served one client's HTML to another; six of the seven already opt out via `cacheUpdates: false`, so it was also a no-op for them |
+| 6 | Move `$revivableContexts` into `SharedTable` | Revival records only exist AFTER `destroyContext()`. A context alive on another worker has no record, so the directory had to be written at CREATION |
+| 6 before 7 | Fix routing first, then shared values | Backwards. Routing alone turns a loud `400` into a silent wrong answer; 7 is a prerequisite |
+| 7 | `SharedTable` has no atomic incr, so RMW needs an owner worker + broker | True of php-via's wrapper, not of `OpenSwoole\Table`. `incr()` is atomic (100% vs 31% under 8-way contention). Numeric RMW needed no bus at all |
+| 7 | Non-numeric RMW needs the single-writer design | A ticket lock built from `incr()` was enough, because the callback stays on the calling worker and no closure crosses a process boundary |
+| 8 | `Table::set()` returns false at capacity | It throws. And `incr()` neither throws nor returns a usable value — it warns and returns `false` |
+| 8 | Capacity is `maxRows` | 1.6-2.0x `maxRows`, and rejection is intermittent by key hash |
+| 4 | There is a 100 ms poll to optimise | No such poll in production; the defect was liveness, not latency |
+| 3 | The fan-out is atomic by accident | It is not; a split frame was reproduced |
+| — | `PERFORMANCE.md`'s 16-worker run measured php-via's multi-worker path | It used `withSwooleSettings`, so `getWorkerNum()` stayed 1 — no affinity, no `SharedTable`, no broker guard |
+
+---
+
 ## Verification environment (baseline, 2026-08-24)
 
 All empirical claims below are being validated against this environment. Anything marked
@@ -37,7 +91,7 @@ Status legend: `BUG` = correctness defect, ship a fix. `OPT` = optional improvem
 
 ---
 
-## 0. Multi-worker mode is non-functional today — `BUG` x4, **gates items 6, 7, 8**
+## 0. Multi-worker mode is non-functional today — `DONE` (all of 0a-0g)
 
 > **0a-0g are DONE**, along with items 6, 7 (stage 1) and 8. Multi-worker now routes actions to
 > any worker, shares scoped signal values, arms server timers once, enforces one rate limit, and
@@ -175,7 +229,7 @@ regenerate.
 
 ---
 
-## 1. Non-idempotent patches are silently destroyed — `BUG` — **VERIFIED, worse than first described**
+## 1. Non-idempotent patches are silently destroyed — `DONE` (`c88a8d5`, `025bfc5`)
 
 **Files:** `src/Context/PatchManager.php:68-88` (eviction), `:270-283` (`markSynced`),
 `:228` (`recreatePatchChannel`), `src/Http/ActionHandler.php:101`
@@ -299,7 +353,7 @@ dropping the patch with no signal to the caller. Same class, same fix location.
 
 ---
 
-## 2. Brotli window size is untuned — `OPT`, but measure memory first
+## 2. Brotli window size is untuned — **`UNVERIFIED`, the only item still open on its own merits**
 
 **File:** `src/Http/Middleware/BrotliMiddleware.php:40`
 
@@ -339,7 +393,7 @@ ring buffers never grew near the cap. A Game-of-Life-shaped connection (~15 MB r
 
 ---
 
-## 3. Coalesce broadcasts behind a server tick — `BUG` (was `OPT`) — **SPLIT FRAME REPRODUCED**
+## 3. Coalesce broadcasts behind a server tick — `DONE` (`e739186`) — **SPLIT FRAME REPRODUCED**
 
 **Files:** `src/Via.php:471` (`broadcast`), `:1416` (`doSyncLocally`)
 
@@ -421,7 +475,7 @@ back the full poll latency. Not recommended — hoist the render instead.
 
 ---
 
-## 4. SSE loop liveness — `BUG`, **not the latency optimization previously described**
+## 4. SSE loop liveness — `DONE` (`1af5888`), **not the latency optimization previously described**
 
 **Files:** `src/Http/SseHandler.php:180-250`, `src/Context/PatchManager.php:93-115`
 
@@ -555,7 +609,7 @@ and are what caused both items to misdiagnose the system.
 
 ---
 
-## 5. Slow-consumer frame drop — `OPT`, do after 3
+## 5. Slow-consumer frame drop — `DONE` (`964676f`)
 
 **File:** `src/Http/SseHandler.php` (patch pop -> `$response->write()`)
 
@@ -569,43 +623,36 @@ Blocked on item 3: dropping a *frame* requires a frame boundary to drop against.
 
 ---
 
-## 6. Multicore — use the process model OpenSwoole already gives you — `BLOCKED ON 7`
+## 6. Multicore — use the process model OpenSwoole already gives you — `DONE` (`f26604d`)
 
-> **⚠ SEQUENCING INVERTED — verified `80239c4`.** This item must NOT ship before item 7.
-> Its two changes (share the revival records, give `ActionHandler` the revival fallback) fix the
-> *symptom* — `HTTP 400 "Invalid context"`, action success at `1/worker_num`. But a revived
-> context re-runs the route handler on the receiving worker, re-initialising its signals from
-> their declared defaults in **that** worker's `SignalManager`. Demonstrated with two Via
-> instances standing in for two workers (`tests/Feature/MultiWorkerStateTest.php`):
->
-> | | count |
-> |---|---|
-> | worker A — holds the client's SSE stream | **0** |
-> | worker B — served three actions | **3** |
->
-> So the fallback alone turns a loud 400 into a **silent wrong answer**: HTTP 200, mutation
-> applied to a copy nobody is watching, client's view unchanged, nothing logged. Strictly worse
-> than the 400. **Item 7 is a prerequisite for item 6, not a follow-up.**
->
-> Also note the revival record only exists **after** `destroyContext()`. A context that is alive
-> on another worker has no record at all, so "move `$revivableContexts` into `SharedTable`" is not
-> sufficient either — the directory has to be written at context **creation**, not destruction.
+**Shipped:** `SharedContextDirectory` plus the `ActionHandler` revival fallback.
 
+| workers | before | after |
+|---|---|---|
+| 1 | 100.0% | 100% |
+| 2 | 51.0% | 100% |
+| 4 | 26.2% | 100% |
+| 8 | 13.0% | 100% |
+| 16 | **6.9%** | **100%** (1000/1000 at concurrency 100) |
 
-**Revised.** An earlier draft of this file framed real threads (ZTS PHP + Swoole 6
-`SWOOLE_THREAD`) as the goal. That was wrong. OpenSwoole's documented multicore story is
-*processes*, and it ships the sharing primitives to go with them: `OpenSwoole\Table` for
-in-memory KV, `OpenSwoole\Atomic` for counters, `OpenSwoole\Lock` for synchronisation
-(with the caveat that process-level sync must not be used inside coroutine context).
-No `Thread` class is needed, and leaving OpenSwoole is off the table.
+**Two corrections to the plan below.**
 
-php-via already has the process half: `withWorkerNum()` + `dispatch_func`. And per-connection
-render parallelism — the original motivation for wanting a pool — is already solved by it,
-because `workerForRequest()` spreads distinct sessions across workers. N `Scope::TAB`
-renders become N/W per worker. **The thread-pool item is closed; there is nothing to spike.**
+1. **The record must be written at context CREATION, not destruction.** Revival records existed
+   only after `destroyContext()` — a returning tab whose context had been cleaned up. A context
+   *alive* on another worker has no revival record at all, so "move `$revivableContexts` into
+   `SharedTable`" would not have fixed cross-worker actions. Entries are heartbeated from the SSE
+   loop's idle branch; without that a long-lived stream outlives its own record.
+2. **Item 7 was a prerequisite, not a follow-up.** Verified before building: a revived context
+   re-runs the route handler on the receiving worker, so without shared scoped values it mutates
+   a copy nobody is watching — a silent wrong answer instead of a loud 400. Confirmed end to end
+   after both landed: 200 actions across 4 workers leave the shared counter at exactly 200.
 
-What remains is not parallelism. It is that the process model's *sharing boundary* is
-currently in the wrong place.
+Keys are hashed (a context ID is its route plus 18 characters against a 63-char limit, which
+would otherwise cap routes at 45). Records are shape-checked on read, since rows outlive a deploy
+and a record written by an older build must mean "cannot revive" rather than a TypeError in the
+action path. Directory overflow is logged, not thrown.
+
+The original analysis below is kept for the reasoning about rebuild-vs-share, which held up.
 
 ### The hard constraint: contexts cannot cross a process boundary
 
@@ -691,7 +738,50 @@ explicitly documented as resetting them.
 
 ---
 
-## 7. Shared-scope signal values are per-worker — `BUG` (multi-worker only)
+## 7. Shared-scope signal values are per-worker — `DONE` (`d063820` stage 1, `e2a506b` stage 2)
+
+**Shipped in two stages, and the design came out much smaller than sketched below.**
+
+`SharedSignalStore` backs the VALUE only. The `Signal` object stays per-process — identity,
+scope, client-writable flag and dirty tracking are all per-worker concerns, since each worker
+tracks what *it* still owes its own clients. Null when `worker_num` is 1, so single-worker is
+untouched.
+
+**Stage 1 — integers, no bus needed.** `OpenSwoole\Table::incr()` on a `TYPE_INT` column is
+atomic across processes: 160,000 increments from 8 racing processes, **100% retained** against
+31% for `get()`+`set()`. `Signal::increment()` uses it. Over 4 forked workers x 500 mutations:
+
+| | kept |
+|---|---|
+| `increment()` | 2000 / 2000 |
+| `setValue($signal->int() + 1)` | 802 / 2000 |
+
+**Stage 2 — everything else, a ticket lock rather than an owner worker.** `Signal::mutate()`
+takes a ticket lock on the value's own row, runs the callback on the calling worker, writes back.
+A ticket lock because `incr()` is the only cross-process atomic available — `OpenSwoole\Lock`
+must not be used inside coroutine context and `Table` has no CAS. **Keeping the callback local is
+what made this small**: no closure crosses a process boundary, so the broker-forwarding design
+below was unnecessary. Over 4 forked workers appending to one list, 60 each:
+
+| | kept |
+|---|---|
+| `mutate()` | 240 / 240 (and 800/800 at 8x100, 1600/1600 at 16x100) |
+| `setValue($signal->array() + [...])` | 116-184 / 240 |
+
+Crash safety: the callback runs between acquire and release, so waiters break an overdue lease
+after 2 s, each at most once. A burst can over-advance and skip tickets; those waiters proceed,
+so mutual exclusion degrades to the unlocked behaviour rather than deadlocking. Verified by
+SIGKILLing a process from inside its own callback — recovery in ~2 s with the right value.
+
+**Do not mix `mutate()` and `increment()` on one signal.** `increment()` deliberately skips the
+lock, so a `mutate()` beside it can write back over an increment.
+
+**Value size.** A growing collection hits the serialized cap; at the original 4 KB that was
+~241 short entries. Measurement showed the cap bought nothing — OpenSwoole maps the table lazily,
+so a 1024-row table costs a flat ~8 MB whether the value column is 4 KB or 64 KB, and grows only
+as large values are written. Default raised to 32 KB (`7a79667`), admitting ~1,900 short entries.
+Scoped signals still suit bounded values; an unbounded collection does not belong in one.
+
 
 **Files:** `src/State/SignalManager.php:17`, `src/Context/PatchManager.php:225-247`,
 `src/Core/Application.php:56-63, 244-263`
@@ -816,7 +906,7 @@ logs a warning that stateful routes are unsupported.
 
 ---
 
-## 8. `SharedTable` capacity — `DONE` (`2ece0a7`)
+## 8. `SharedTable` capacity — `DONE` (`2ece0a7`, `7a79667`)
 
 Both premises of the earliest draft were already refuted (`set()` throws rather than returning
 false; capacity is not `maxRows`). Re-measured on ext-openswoole 26.2.0 while fixing:
@@ -979,7 +1069,7 @@ even the revival-record use needs a second look.
 
 ---
 
-## 10. A first-class single-writer API for users — `EXPLORE`
+## 10. A first-class single-writer API for users — `EXPLORE` (10(b) unblocked, see the refutation below)
 
 Anders: *"I have a single writer process. It doesn't even have an event loop. All it does
 is drain queues on a fixed tick rate in one giant transaction and do the writes."*
@@ -1100,7 +1190,7 @@ So the design is two layers, neither of which is prevention:
    With `BEGIN IMMEDIATE` the single-writer invariant does hold: 3158 transactions, `bt=0`, zero
    BUSY with no contender. That part of the design is sound.
 
-3. **THE CASE THAT ACTUALLY BREAKS THE DESIGN — it is the checkpoint, not BUSY.**
+3. **~~THE CASE THAT ACTUALLY BREAKS THE DESIGN~~ — premise REFUTED, see the box below.**
    php-via *always* has long-lived readers, because every SSE connection is one. Under a
    sustained reader, `wal_checkpoint` never completes and **returns no error** — it returns a row
    with `busy=1`. Measured over four seconds of writes:
@@ -1115,6 +1205,38 @@ So the design is two layers, neither of which is prevention:
    The runtime layer would see zero BUSY and report healthy while the WAL grew to **200 MB in
    four seconds**. Adding `busy_timeout` to make the checkpoint wait is strictly worse: a
    **4.95-second total event-loop freeze**.
+
+   > ### ⚠ REFUTED — the premise, not the measurement (`tests/Feature/WalCheckpointReadersTest.php`)
+   >
+   > *"php-via always has long-lived readers, because every SSE connection is one"* is false. An
+   > SSE connection is a **coroutine**, not an open SQLite snapshot. What pins the WAL is a
+   > statement left **mid-scan**, or an explicit read transaction — not the existence of a
+   > connection. Re-measured, churning writes between each reader state then attempting TRUNCATE:
+   >
+   > | reader state | busy | WAL after |
+   > |---|---|---|
+   > | range query drained to EOF | 0 | truncated |
+   > | single row, one `fetchArray`, **not drained** | **1** | held at 17 MB |
+   > | the same plus explicit `finalize()` | 0 | truncated |
+   > | `querySingle()`, either form | 0 | truncated |
+   > | partial scan, loop broken early | **1** | held |
+   > | `INSERT` via `execute()`, result discarded | 0 | truncated |
+   > | idle connection | 0 | truncated |
+   > | inside explicit `BEGIN` | **1** | held |
+   >
+   > **And php-via's own read helpers are safe.** `SpreadsheetExample::getCell()` fetches one row
+   > and never steps the statement to DONE, which looks like the failing shape — but PHP frees
+   > `SQLite3Result` by **refcount**, so a result held only in a local is finalised the moment the
+   > function returns. Deterministic, not at the mercy of the cycle collector. Verified directly:
+   > the same query blocks only when the result is kept alive in an outer scope. (An earlier draft
+   > of this correction claimed `getCell()` was buggy and "fixed" it — it was not; the change was
+   > reverted.)
+   >
+   > **So 10(b) is not blocked by a property the design cannot provide.** The requirement is
+   > reader hygiene — never hold a partially consumed cursor or an open read transaction across a
+   > checkpoint — which is enforceable and already satisfied everywhere in this codebase. The
+   > health signal below (WAL size + checkpoint-blocked count) is still the right one, and
+   > `busy_timeout` on a checkpoint is still strictly worse than not checkpointing.
 
    **So the health signal is WAL file size and checkpoint-blocked count, not `SQLITE_BUSY`** —
    and the writer needs a reader-quiescent window it can actually checkpoint in, which nothing in
@@ -1246,7 +1368,7 @@ in-process fixes come first and need neither a writer process nor a storage tier
 
 ---
 
-## 12. `Scope::ROUTE` is never expanded in `createSignal()` — `BUG` (single-worker too)
+## 12. `Scope::ROUTE` is never expanded in `createSignal()` — `DONE` (`9e4e621`)
 
 **File:** `src/Context/SignalFactory.php:52-68`
 
@@ -1353,7 +1475,7 @@ is reproduced exactly by the corrected model as `0.154 + 15 x 0.066`.
 
 ---
 
-## 14. A component with no signals is frozen forever — `BUG`
+## 14. A component with no signals is frozen forever — `DONE` (`f1a3270`)
 
 **Files:** `src/Context/PatchManager.php:162-168`, `src/Context/SignalFactory.php:184-192`
 
@@ -1382,44 +1504,26 @@ nothing for components that do declare signals.
 
 ---
 
-## Suggested order
+## Outcome
 
-Rewritten after empirical verification. Nine of the fourteen items are now `BUG`; two of the
-`EXPLORE` items had their premises refuted; one is closed.
+Everything in Tiers 1-3 below landed except item 2. The ordering held up with one exception,
+recorded in the status table at the top: item 7 had to precede item 6, not follow it.
 
-**Tier 1 — correctness, independent of any design work**
-1. **#0a-0d** — multi-worker does not function. `dispatch_mode` 7->6 *plus* the PHP 8.4 stack-limit
-   handling (must ship together), `$server->setting['worker_num']`, per-worker nodeId. #0c is a
-   fresh regression from `e604545`.
-2. **#12** — explicit `Scope::ROUTE` emits no signal patches at all. Single-worker. Trivial fix.
-3. **#10.1** — `exec('BEGIN')` -> `BEGIN IMMEDIATE` in `SpreadsheetExample::setCells()`. One word;
-   prevents total writer starvation the instant `worker_num > 1`.
-4. **#14** — empty signal set must mean "always sync", not "skip forever".
-5. **#1** — ship fix (a), plus type-aware eviction, plus a `script` policy.
+**Still open**
 
-**Tier 2 — the SSE/broadcast core, strictly ordered**
-6. **#4** — fix the `pop(0)` docblocks first, then the liveness fix: `pop($timeout)`, capture the
-   channel once, exit on `CHANNEL_CLOSED`, **never retry without a yield**. Do not remove
-   `close()` before the timeout is in place.
-7. **#3** — hoist the render out of the fan-out loop (fixes the reproduced split), and guard the
-   tick against both overlap and drop.
-8. **#5** — needs #3's frame boundary.
-
-**Tier 3 — measurement before design**
-9. ~~**#13** — give the seven `addScope()`-only routes a real primary scope~~ — **DONE, but the
-   prescribed fix was refuted**: it would have leaked one client's HTML to another, and six of the
-   seven routes already opt out via `cacheUpdates: false`. Shipped a narrowed diagnostic, explicit
-   declarations on the two cacheable routes (including `/examples/composition`, which the original
-   audit missed), and the query memo that was the actual recoverable cost.
-10. **#0e-0g, #6, #7, #8** — only meaningful once Tier 1 lands. Re-run and re-label
-    `PERFORMANCE.md:135-155` first; as written it measured something other than what it claims.
-11. **#2** — still `UNVERIFIED`. Needs a machine with ext-brotli.
-
-**Closed / do not build**
-- **#11** — gate failed on measurement. Every broadcasting route is too cheap to cache;
+- **#2** — brotli window size. `UNVERIFIED`; needs a machine with ext-brotli. The memory
+  consequence of `LGWIN` is the thing to measure first.
+- **#9 / #10** — SQLite tiering and the single-writer API. **10(b) is no longer blocked.** The
+  recorded blocker rested on "every SSE connection is a long-lived reader", which is false: what
+  pins the WAL is a cursor left mid-scan or an explicit read transaction, and php-via has
+  neither (PHP frees `SQLite3Result` by refcount, so a result local to a helper is finalised on
+  return). Requirement becomes reader hygiene, already satisfied — see
+  `tests/Feature/WalCheckpointReadersTest.php`. The remaining work on #10(b) is the design
+  itself, not an unsolved constraint.
+- **#11** — closed. Gate failed on measurement: every broadcasting route is too cheap to cache,
   every expensive route never broadcasts.
 - **#6c** (real threads) — closed. OpenSwoole's multicore story is processes.
-- **#9/#10** — viable in shape, but **#10(b) has one unsolved problem**: under php-via's
-  permanently-live SSE readers, `wal_checkpoint` never completes, reports no error, and the WAL
-  grew to 200 MB in 4 s. The writer needs a reader-quiescent checkpoint window that nothing in the
-  design provides. Do not start #10(b) until that has an answer.
+
+The original ordering is kept below for the reasoning.
+
+## Suggested order (original)
