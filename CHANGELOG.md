@@ -6,6 +6,16 @@ All notable changes to php-via will be documented in this file.
 
 ### New Features
 
+- **`#[Signal(Scope::GLOBAL, atomic: true)]`:** atomic counters for the composition API.
+  PageMount hydrates each `#[Signal]` property before an `#[Action]` and assigns it back after, so
+  `++$this->votes` on a shared signal was a read-modify-write with the whole action body in the
+  gap — and the attribute API had no way to reach `Signal::increment()`. With `atomic: true`,
+  syncBack applies the action's net *change* through `increment()` instead. Measured over 6 worker
+  processes doing 500 actions each on one signal, the plain property retained 2410–2514 of 3000
+  and `atomic: true` retains all 3000. Rejected at mount on a non-integer property.
+  The trade-off: assignment to an atomic property becomes an adjustment, so `$this->votes = 0` is a
+  decrement-by-current rather than a reset. Use `$ctx->getSignal('votes')->setValue(0)` to mean SET.
+
 - **`Via::incrementGlobalState()` and `Via::mutateGlobalState()`:** atomic read-modify-write for
   GlobalState, closing the last cross-worker store that had no race-free mutation path.
   `Signal` gained `increment()`/`mutate()` when scoped signal values started crossing workers, but
@@ -19,6 +29,18 @@ All notable changes to php-via will be documented in this file.
   snapshot, so a persisted counter comes back on the atomic path after a restart rather than as an
   opaque blob that reads correctly and then throws on its next increment.
   Single-worker behaviour is unchanged, and existing `setGlobalState()` calls keep working.
+
+### Fixed
+
+- **A `#[Signal]` written directly inside an `#[Action]` is no longer discarded.** `syncBack()`
+  assigned every reactive property back to its signal unconditionally, so an action whose body was
+  `$ctx->getSignal('votes')->increment()` ended each round exactly where it started — the untouched
+  property still held the pre-increment value and was written straight back over the increment
+  (measured: 0 after five increments). Properties the action did not change are now left alone.
+  This also stops a shared signal being clobbered with a stale hydrated value when another worker
+  wrote it while the action was running. Where an action both writes the signal directly and
+  changes the property, the direct write wins, which makes
+  `$this->votes = $ctx->getSignal('votes')->increment()` correct rather than double-counting.
 
 ### Breaking Changes
 
