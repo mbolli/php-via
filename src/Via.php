@@ -641,43 +641,7 @@ class Via {
             $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::POOL_MODE, $socketType);
 
             // Configure OpenSwoole for SSE streaming
-            $defaultSettings = [
-                'open_http2_protocol' => $this->config->isHttps() || $this->config->isH2c(),
-                'http_compression' => false,
-                // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
-                // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
-                // ERRNO 1203 on every send. 2MB is the OpenSwoole default; send_yield=true
-                // handles backpressure without stalling. SSE events are flushed per-chunk by
-                // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
-                'socket_buffer_size' => 1024 * 1024,
-                'max_coroutine' => 100000,
-                'worker_num' => $this->config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
-                'send_yield' => true,
-                'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
-                'reload_async' => true,  // Enable async reload
-                'enable_reuse_port' => true,  // Allow immediate rebind on restart
-                'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
-                'log_level' => 4,  // SWOOLE_LOG_WARNING — suppress NOTICE about sending to closed connections
-                // Connection limits: prevent a burst of SSE connections from exhausting the
-                // accept queue and making the server unresponsive. Callers can override via
-                // Config::withSwooleSettings(). 10k connections is generous for single-worker.
-                'max_conn' => 10000,
-                'backlog' => 4096,  // OS accept queue depth (needs net.core.somaxconn ≥ this)
-            ];
-
-            // Session-affinity dispatch: route each request to the worker that owns the
-            // session, so that Context lookup and sessionData() always hit the right process.
-            // Only enabled for multi-worker — single-worker doesn't need it.
-            if ($this->config->getWorkerNum() > 1) {
-                $workerNum = $this->config->getWorkerNum();
-                $defaultSettings['dispatch_mode'] = 7; // custom dispatch_func
-                $defaultSettings['dispatch_func'] = static fn (object $server, int $fd, int $type, string $data): int => SessionManager::workerForRequest($server, $fd, $type, $data, $workerNum);
-            }
-
-            $this->server->set(array_merge($defaultSettings, $this->config->getSwooleSettings(), array_filter([
-                'ssl_cert_file' => $this->config->getSslCertFile(),
-                'ssl_key_file' => $this->config->getSslKeyFile(),
-            ])));
+            $this->server->set(self::serverSettings($this->config));
 
             $this->requestHandler->setRoutes($this->router->getRoutes());
 
@@ -1369,6 +1333,71 @@ class Via {
      */
     public function generateId(): string {
         return IdGenerator::generate();
+    }
+
+    /**
+     * Build the default OpenSwoole server settings for a config.
+     *
+     * Extracted from start() so the values are reachable from tests. The
+     * dispatch settings that used to live here were wrong and untestable, which is
+     * precisely how they survived: `SessionManager::workerForRequest()` was well
+     * covered, but nothing ever asserted that it was wired up correctly.
+     *
+     * NOTE — no `dispatch_mode` / `dispatch_func` is set, deliberately.
+     * Multi-worker previously set `dispatch_mode = 7` with a `dispatch_func`, but
+     * `SW_DISPATCH_USERFUNC` is 6; 7 is stream mode and ignores `dispatch_func`
+     * entirely, so session affinity never ran — and mode 7 scatters per REQUEST
+     * where OpenSwoole's default is sticky per CONNECTION, making the feature
+     * measurably worse than its absence (56.5% vs 100% OK for a keep-alive client
+     * at 16 workers).
+     *
+     * Correcting it to 6 is not shippable either: on PHP 8.3+ a `dispatch_func`
+     * runs on the master reactor thread, where the stack-limit check mis-detects
+     * the stack base and fatals on every dispatch ("Maximum call stack size ...
+     * reached. Infinite recursion?"). Only `zend.max_allowed_stack_size=-1` clears
+     * it, and that ini is not settable at runtime — so this cannot be fixed from
+     * PHP, and PHP 8.4 is this project's minimum.
+     *
+     * OpenSwoole's default dispatch is therefore left in place; it is sticky per
+     * connection, which is what browser clients need. Cross-connection session
+     * affinity belongs at the L7 proxy, as the deployment docs already require.
+     * An operator who has set the ini can still opt in via
+     * Config::withSwooleSettings(), which is merged over these defaults.
+     *
+     * @return array<string, mixed>
+     *
+     * @internal
+     */
+    public static function serverSettings(Config $config): array {
+        $defaults = [
+            'open_http2_protocol' => $config->isHttps() || $config->isH2c(),
+            'http_compression' => false,
+            // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
+            // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
+            // ERRNO 1203 on every send. 2MB is the OpenSwoole default; send_yield=true
+            // handles backpressure without stalling. SSE events are flushed per-chunk by
+            // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
+            'socket_buffer_size' => 1024 * 1024,
+            'max_coroutine' => 100000,
+            'worker_num' => $config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
+            'send_yield' => true,
+            'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
+            'reload_async' => true,  // Enable async reload
+            'enable_reuse_port' => true,  // Allow immediate rebind on restart
+            'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
+            'log_level' => 4,  // SWOOLE_LOG_WARNING — suppress NOTICE about sending to closed connections
+            // Connection limits: prevent a burst of SSE connections from exhausting the
+            // accept queue and making the server unresponsive. Callers can override via
+            // Config::withSwooleSettings(). 10k connections is generous for single-worker.
+            'max_conn' => 10000,
+            'backlog' => 4096,  // OS accept queue depth (needs net.core.somaxconn ≥ this)
+        ];
+
+        // Caller overrides win over the defaults; explicit SSL paths win over both.
+        return array_merge($defaults, $config->getSwooleSettings(), array_filter([
+            'ssl_cert_file' => $config->getSslCertFile(),
+            'ssl_key_file' => $config->getSslKeyFile(),
+        ]));
     }
 
     /**

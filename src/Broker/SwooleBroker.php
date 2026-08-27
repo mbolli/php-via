@@ -18,7 +18,8 @@ use OpenSwoole\Http\Server;
  * `syncLocally($scope)` on each receiving worker, identical to Redis/NATS.
  *
  * Lifecycle:
- *   1. Constructor: generates nodeId.
+ *   1. nodeId: generated lazily per process (see NodeIdentity) so forked
+ *      workers do not share one and discard each other's messages.
  *   2. subscribe($handler): stores handler — Via wires syncLocally() here.
  *   3. connect(): marks connected. No coroutine loop needed (receive is event-driven).
  *   4. setServer(): called by Via in workerStart; injects server ref + worker identity.
@@ -31,7 +32,7 @@ use OpenSwoole\Http\Server;
  *   are possible during hot reload. Acceptable for most use cases.
  */
 final class SwooleBroker implements MessageBroker, ServerAwareBroker {
-    private readonly string $nodeId;
+    use NodeIdentity;
 
     private bool $connected = false;
 
@@ -39,10 +40,6 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
     private ?object $server = null;
     private int $workerId = 0;
     private int $workerNum = 1;
-
-    public function __construct() {
-        $this->nodeId = bin2hex(random_bytes(8));
-    }
 
     public function connect(): void {
         $this->connected = true;
@@ -65,7 +62,7 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
             return;
         }
 
-        $payload = json_encode(['scope' => $scope, 'nodeId' => $this->nodeId]);
+        $payload = json_encode(['scope' => $scope, 'nodeId' => $this->getNodeId()]);
 
         if ($payload === false) {
             return;
@@ -83,10 +80,6 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
     public function subscribe(callable $handler): void {
         // SwooleBroker's receive path is handled by Via.php via Swoole's pipeMessage
         // event — the callable is not invoked here. subscribe() satisfies the interface.
-    }
-
-    public function getNodeId(): string {
-        return $this->nodeId;
     }
 
     public function isConnected(): bool {

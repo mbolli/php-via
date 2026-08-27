@@ -12,12 +12,9 @@ namespace Mbolli\PhpVia\Broker;
  * require zero configuration and have zero broker overhead.
  */
 final class InMemoryBroker implements MessageBroker {
-    private readonly string $nodeId;
-    private bool $connected = false;
+    use NodeIdentity;
 
-    public function __construct() {
-        $this->nodeId = bin2hex(random_bytes(8));
-    }
+    private bool $connected = false;
 
     public function connect(): void {
         $this->connected = true;
@@ -35,10 +32,6 @@ final class InMemoryBroker implements MessageBroker {
 
     public function subscribe(callable $handler): void {
         // No-op: no foreign messages will ever arrive.
-    }
-
-    public function getNodeId(): string {
-        return $this->nodeId;
     }
 
     public function isConnected(): bool {

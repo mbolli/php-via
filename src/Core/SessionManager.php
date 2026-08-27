@@ -27,10 +27,25 @@ class SessionManager {
     /**
      * Determine which worker should handle a request based on session cookie.
      *
-     * Used as OpenSwoole's `dispatch_func` when `worker_num > 1`. Runs in the
-     * master reactor process (not a worker coroutine), so it must be allocation-free
-     * and never use coroutine APIs. The raw HTTP header bytes for the first packet of
-     * each new connection are passed in `$data`.
+     * NOT WIRED BY DEFAULT. This was installed as OpenSwoole's `dispatch_func` when
+     * `worker_num > 1`, alongside `dispatch_mode = 7` — but `SW_DISPATCH_USERFUNC` is
+     * 6, and 7 is stream mode, which ignores `dispatch_func` entirely. The affinity
+     * therefore never ran, and mode 7 scatters per request where OpenSwoole's default
+     * is sticky per connection, so it was worse than its own absence.
+     *
+     * Setting mode 6 is not shippable either: on PHP 8.3+ a `dispatch_func` runs on
+     * the master reactor thread, where the stack-limit check mis-detects the stack
+     * base and fatals on every dispatch. Only `zend.max_allowed_stack_size=-1` clears
+     * that, and the ini is not settable at runtime.
+     *
+     * Prefer sticky routing at the L7 proxy (Caddy `lb_policy cookie`, nginx
+     * `ip_hash`), which the deployment docs already require. An operator who has set
+     * the ini can wire this manually via `Config::withSwooleSettings()` with
+     * `dispatch_mode => 6`.
+     *
+     * Runs in the master reactor process (not a worker coroutine), so it must be
+     * allocation-free and never use coroutine APIs. The raw HTTP header bytes for the
+     * first packet of each new connection are passed in `$data`.
      *
      * Both cookie names are checked so that requests survive a HTTP→HTTPS migration.
      *

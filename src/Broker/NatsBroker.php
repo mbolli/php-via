@@ -36,9 +36,9 @@ use OpenSwoole\Coroutine\Client;
  * node subscribes are lost. Use NATS JetStream for durable delivery.
  */
 final class NatsBroker implements MessageBroker {
-    private const int MAX_BACKOFF = 30;
+    use NodeIdentity;
 
-    private readonly string $nodeId;
+    private const int MAX_BACKOFF = 30;
 
     private ?Client $client = null;
     private string $buf = '';
@@ -60,9 +60,7 @@ final class NatsBroker implements MessageBroker {
         private readonly string $subject = 'via.broadcast',
         private readonly bool $tls = false,
         private readonly ?string $tlsCaFile = null,
-    ) {
-        $this->nodeId = bin2hex(random_bytes(8));
-    }
+    ) {}
 
     public function connect(): void {
         $this->doConnect();
@@ -86,7 +84,7 @@ final class NatsBroker implements MessageBroker {
             return;
         }
 
-        $payload = json_encode(['scope' => $scope, 'nodeId' => $this->nodeId]);
+        $payload = json_encode(['scope' => $scope, 'nodeId' => $this->getNodeId()]);
         $bytes = \strlen($payload);
         $this->send('PUB ' . $this->subject . " {$bytes}\r\n{$payload}\r\n");
     }
@@ -97,10 +95,6 @@ final class NatsBroker implements MessageBroker {
 
     public function setErrorHandler(callable $handler): void {
         $this->errorHandler = $handler;
-    }
-
-    public function getNodeId(): string {
-        return $this->nodeId;
     }
 
     public function isConnected(): bool {
@@ -143,7 +137,7 @@ final class NatsBroker implements MessageBroker {
         $connectOpts = [
             'verbose' => false,
             'pedantic' => false,
-            'name' => 'php-via-broker-' . $this->nodeId,
+            'name' => 'php-via-broker-' . $this->getNodeId(),
         ];
 
         if ($this->authToken !== null) {
@@ -284,7 +278,7 @@ final class NatsBroker implements MessageBroker {
                         continue;
                     }
 
-                    if ($data['nodeId'] === $this->nodeId) {
+                    if ($data['nodeId'] === $this->getNodeId()) {
                         continue; // Skip own messages — loop prevention.
                     }
 

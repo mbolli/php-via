@@ -43,9 +43,9 @@ use OpenSwoole\Coroutine;
  * a node subscribes are lost. Use NatsBroker with JetStream for durability.
  */
 final class RedisBroker implements MessageBroker {
-    private const int MAX_BACKOFF = 30;
+    use NodeIdentity;
 
-    private readonly string $nodeId;
+    private const int MAX_BACKOFF = 30;
 
     private ?\Redis $pubConn = null;
     private ?\Redis $subConn = null;
@@ -68,9 +68,7 @@ final class RedisBroker implements MessageBroker {
         private readonly string $channel = 'via:broadcast',
         private readonly bool $tls = false,
         private readonly ?string $tlsCaFile = null,
-    ) {
-        $this->nodeId = bin2hex(random_bytes(8));
-    }
+    ) {}
 
     public function connect(): void {
         $this->pubConn = $this->createRedisConnection();
@@ -110,7 +108,7 @@ final class RedisBroker implements MessageBroker {
             return;
         }
 
-        $payload = (string) json_encode(['scope' => $scope, 'nodeId' => $this->nodeId]);
+        $payload = (string) json_encode(['scope' => $scope, 'nodeId' => $this->getNodeId()]);
 
         try {
             $this->pubConn->publish($this->channel, $payload);
@@ -137,10 +135,6 @@ final class RedisBroker implements MessageBroker {
 
     public function setErrorHandler(callable $handler): void {
         $this->errorHandler = $handler;
-    }
-
-    public function getNodeId(): string {
-        return $this->nodeId;
     }
 
     public function isConnected(): bool {
@@ -189,7 +183,7 @@ final class RedisBroker implements MessageBroker {
                         }
 
                         // Skip own messages — loop prevention.
-                        if ($data['nodeId'] === $this->nodeId) {
+                        if ($data['nodeId'] === $this->getNodeId()) {
                             return;
                         }
 
