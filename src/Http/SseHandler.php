@@ -209,6 +209,15 @@ class SseHandler {
                     } elseif (!$response->write($output)) {
                         break;
                     }
+
+                    // Delivery acknowledgement. Signal patches carry deltas and are only
+                    // marked synced here, once the bytes are actually on the wire — a patch
+                    // that dies in the queue therefore leaves its signals dirty and is
+                    // resent by the next sync instead of silently stranding the client.
+                    // Note write() returning true means "buffered", not "received".
+                    if (isset($patch['confirm'])) {
+                        ($patch['confirm'])();
+                    }
                 } catch (\Throwable $e) {
                     $this->via->log('debug', 'Patch write exception, client disconnected: ' . $e->getMessage(), $context);
 
@@ -288,7 +297,7 @@ class SseHandler {
     /**
      * Send SSE patch to client using Datastar SDK.
      *
-     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode} $patch
+     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode, confirm?: callable(): void} $patch
      */
     private function sendSSEPatch(SwooleSSEGenerator $sse, array $patch): string {
         $type = $patch['type'];

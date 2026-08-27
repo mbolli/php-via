@@ -1051,7 +1051,11 @@ class Context {
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array{type: string, content: mixed, selector?: string} Next patch data or null if none available
+     * @return null|array{type: string, content: mixed, selector?: string, confirm?: callable(): void} Next patch data
+     *                                                                                                 or null if none available.
+     *                                                                                                 `confirm` must be invoked
+     *                                                                                                 only after the patch has
+     *                                                                                                 actually been written.
      */
     public function getPatch(): ?array {
         return $this->patchManager->getPatch();

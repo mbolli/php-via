@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine\Channel;
 
@@ -18,11 +19,13 @@ use OpenSwoole\Coroutine\Channel;
  * - View syncing
  * - Script execution
  * - Signal nesting/flattening
+ *
+ * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, confirm?: callable(): void}
  */
 class PatchManager {
     private const int CHANNEL_CAPACITY = 50;
 
-    /** @var null|array<string, mixed>|Channel */
+    /** @var null|Channel|list<QueuedPatch> */
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
 
@@ -50,7 +53,7 @@ class PatchManager {
      * For component contexts, patches are forwarded to the parent page context's
      * channel — the SSE loop only reads from the top-level page channel.
      *
-     * @param array{type: string, content: mixed, selector?: string} $patch
+     * @param QueuedPatch $patch
      */
     public function queuePatch(array $patch): void {
         // Components don't have their own SSE reader — forward to the parent page.
@@ -66,24 +69,30 @@ class PatchManager {
         if ($this->useArray) {
             // Array-based queue for tests
             if (\count($this->patchChannel) >= self::CHANNEL_CAPACITY) {
-                array_shift($this->patchChannel); // Drop oldest
-                $this->app->log('debug', "Dropped old patch for context {$this->context->getId()} - queue full");
+                $this->patchChannel = $this->evictOne($this->patchChannel);
             }
             $this->patchChannel[] = $patch;
         } else {
             // OpenSwoole Channel for production
             $channel = $this->getPatchChannel();
 
-            while ($channel->isFull()) {
-                $dropped = $channel->pop(0);
-                if ($dropped !== false) {
-                    $this->app->log('debug', "Dropped old patch for context {$this->context->getId()} - channel full");
-                } else {
-                    break;
-                }
+            if ($channel->isFull()) {
+                // A Channel is FIFO with no random access, so choosing a victim other
+                // than the head means draining and refilling. Bounded at CHANNEL_CAPACITY
+                // and only on overflow.
+                $queued = $this->drainChannel($channel);
+                $this->refillChannel($channel, $this->evictOne($queued));
             }
 
-            $channel->push($patch);
+            if (!$channel->push($patch)) {
+                // push() returns false on a closed channel — and isFull() still reports
+                // true there while data remains, so without this check the patch was
+                // dropped with no signal to the caller at all.
+                $this->app->log(
+                    'debug',
+                    "Patch rejected (channel closed) for context {$this->context->getId()}"
+                );
+            }
         }
     }
 
@@ -94,7 +103,7 @@ class PatchManager {
      * Coroutine::sleep(), which is the only reliable way to yield a coroutine
      * in OpenSwoole regardless of channel state (closed, empty, etc.).
      *
-     * @return null|array{type: string, content: mixed, selector?: string}
+     * @return null|QueuedPatch
      */
     public function getPatch(): ?array {
         if ($this->useArray) {
@@ -183,12 +192,28 @@ class PatchManager {
      * Sync only signals to the browser.
      */
     public function syncSignals(): void {
-        $updatedSignals = $this->prepareSignalsForPatch();
+        /** @var list<Signal> $pending */
+        $pending = [];
+        $updatedSignals = $this->prepareSignalsForPatch($pending);
 
         if (!empty($updatedSignals)) {
+            // Acknowledgement is deferred to delivery. Marking these synced here —
+            // at queue time — meant that any patch destroyed before transmission
+            // (evicted when the queue filled, or discarded wholesale by
+            // recreatePatchChannel() on an SSE reconnect) was never resent, leaving
+            // the client permanently stale on a delta it never received.
+            //
+            // Because the confirm callback only runs after a successful write, a
+            // patch that dies in the queue leaves its signals dirty and the next
+            // syncSignals() re-includes them. Loss becomes self-healing.
             $this->queuePatch([
                 'type' => 'signals',
                 'content' => $updatedSignals,
+                'confirm' => static function () use ($pending): void {
+                    foreach ($pending as $signal) {
+                        $signal->markSynced();
+                    }
+                },
             ]);
         }
 
@@ -226,6 +251,13 @@ class PatchManager {
      */
     public function recreatePatchChannel(): void {
         if (!$this->useArray) {
+            // Carry pending work across the reconnect. Discarding it destroyed every
+            // queued patch on every reconnect — network blip, mobile handoff,
+            // sleep/wake, proxy timeout — and contexts survive contextCleanupDelayMs,
+            // so up to 5s of broadcasts could be thrown away. Signals now self-heal,
+            // but one-shot scripts had no way back.
+            $carried = $this->drainChannel($this->patchChannel);
+
             try {
                 $this->patchChannel->close();
             } catch (\Throwable $e) {
@@ -234,10 +266,97 @@ class PatchManager {
 
             // Create new channel for the current coroutine
             $this->patchChannel = new Channel(self::CHANNEL_CAPACITY);
-            $this->app->log('debug', "Recreated patch channel for context {$this->context->getId()}");
+            $this->refillChannel($this->patchChannel, $carried);
+
+            $this->app->log(
+                'debug',
+                "Recreated patch channel for context {$this->context->getId()} (carried " . \count($carried) . ' pending)'
+            );
         } else {
-            // In test mode, just clear the array
-            $this->patchChannel = [];
+            // In test mode the queue is a plain array; carry it across unchanged.
+            $this->patchChannel = array_values($this->patchChannel);
+        }
+    }
+
+    /**
+     * Choose and remove one victim from a full queue.
+     *
+     * Drop-oldest used to be type-blind. 'elements' patches are idempotent
+     * full-fragment morphs where the latest supersedes the rest, so evicting one is
+     * harmless. 'script' patches are one-shot side effects with no re-send path — a
+     * dropped redirect is a broken login flow (LoginExample uses execScript for
+     * post-login navigation) — so they are evicted only as a last resort, when the
+     * queue holds nothing else.
+     *
+     * 'signals' patches are safe to drop since acknowledgement moved to delivery
+     * (see syncSignals()): an undelivered signal stays dirty and is resent. They are
+     * still preferred over scripts, which cannot self-heal.
+     *
+     * @param list<QueuedPatch> $patches
+     *
+     * @return list<QueuedPatch>
+     */
+    private function evictOne(array $patches): array {
+        foreach (['elements', 'signals'] as $preferredType) {
+            foreach ($patches as $i => $patch) {
+                if ($patch['type'] === $preferredType) {
+                    unset($patches[$i]);
+                    $this->app->log(
+                        'debug',
+                        "Evicted oldest {$preferredType} patch for context {$this->context->getId()} - queue full"
+                    );
+
+                    return array_values($patches);
+                }
+            }
+        }
+
+        // Nothing idempotent left to sacrifice: the queue is entirely scripts.
+        array_shift($patches);
+        $this->app->log(
+            'warning',
+            "Queue full of script patches for context {$this->context->getId()} - dropped the oldest side effect"
+        );
+
+        return $patches;
+    }
+
+    /**
+     * Drain every currently-queued patch without blocking.
+     *
+     * Uses a positive timeout rather than pop(0): in OpenSwoole a timeout of 0 means
+     * "no timeout" and parks the coroutine, so a consumer taking the last item between
+     * our isEmpty() check and the pop would hang the producer forever.
+     *
+     * @return list<QueuedPatch>
+     */
+    private function drainChannel(Channel $channel): array {
+        $drained = [];
+
+        while (!$channel->isEmpty()) {
+            $patch = $channel->pop(0.001);
+            if ($patch === false) {
+                break;
+            }
+            $drained[] = $patch;
+        }
+
+        return $drained;
+    }
+
+    /**
+     * Push previously drained patches back, preserving order.
+     *
+     * @param list<QueuedPatch> $patches
+     */
+    private function refillChannel(Channel $channel, array $patches): void {
+        foreach ($patches as $patch) {
+            if ($channel->isFull() || !$channel->push($patch)) {
+                $this->app->log(
+                    'warning',
+                    "Lost a patch refilling the queue for context {$this->context->getId()}"
+                );
+            }
         }
     }
 
@@ -272,9 +391,14 @@ class PatchManager {
     /**
      * Prepare signals for patching.
      *
+     * Collects the changed signals but deliberately does NOT mark them synced —
+     * see syncSignals() for why acknowledgement is deferred until delivery.
+     *
+     * @param list<Signal> $pending filled with the signals this patch carries
+     *
      * @return array<string, mixed> Nested structure of changed signals
      */
-    private function prepareSignalsForPatch(): array {
+    private function prepareSignalsForPatch(array &$pending = []): array {
         // Components use their own signals
         $signalsToCheck = $this->signalFactory->getTabSignals();
 
@@ -283,7 +407,7 @@ class PatchManager {
         foreach ($signalsToCheck as $id => $signal) {
             if ($signal->hasChanged()) {
                 $flat[$id] = $signal->getValue();
-                $signal->markSynced();
+                $pending[] = $signal;
             }
         }
 
@@ -332,7 +456,7 @@ class PatchManager {
     /**
      * Get the patch channel (for components, use parent's channel).
      *
-     * @return array<string, mixed>|Channel
+     * @return Channel|list<QueuedPatch>
      */
     private function getPatchChannel(): array|Channel {
         if ($this->componentManager->isComponent()) {
