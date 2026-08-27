@@ -19,12 +19,23 @@ class Logger {
         'error' => 3,
     ];
 
+    /**
+     * Accepted spellings that are not the canonical level name.
+     *
+     * 'warning' is used at eight call sites. Without this it fell through to the info default,
+     * so those messages printed a "[WARNING]" label while being filtered as info — and
+     * withLogLevel('warn'), the setting that exists to show warnings, suppressed every one.
+     */
+    private const array LEVEL_ALIASES = [
+        'warning' => 'warn',
+    ];
+
     private int $minLevel;
     private ?RequestLogger $requestLogger = null;
     private ?LogBuffer $buffer = null;
 
     public function __construct(string $logLevel = 'info') {
-        $this->minLevel = self::LEVELS[$logLevel] ?? self::LEVELS['info'];
+        $this->minLevel = self::LEVELS[self::normalizeLevel($logLevel)] ?? self::LEVELS['info'];
     }
 
     /**
@@ -50,6 +61,7 @@ class Logger {
      * @param null|Context $context Optional context for prefixing
      */
     public function log(string $level, string $message, ?Context $context = null): void {
+        $level = self::normalizeLevel($level);
         $levelValue = self::LEVELS[$level] ?? self::LEVELS['info'];
 
         if ($levelValue < $this->minLevel) {
@@ -109,5 +121,10 @@ class Logger {
         $peak = round(memory_get_peak_usage(true) / 1024 / 1024, 1);
         $this->buffer?->push('fatal', "[mem {$mem}MB peak {$peak}MB] {$message}");
         echo "[FATAL] [{$ts}] [mem {$mem}MB peak {$peak}MB] {$message}\n";
+    }
+
+    /** Resolve an accepted spelling to its canonical level name. */
+    private static function normalizeLevel(string $level): string {
+        return self::LEVEL_ALIASES[$level] ?? $level;
     }
 }

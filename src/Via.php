@@ -51,6 +51,13 @@ class Via {
     public const string VERSION = '0.12.0';
 
     /** Safety bound on coalesced fan-out re-runs for a single scope. */
+    /**
+     * The worker that runs server-wide singleton work (see setInterval()).
+     *
+     * Worker 0 always exists and OpenSwoole restarts it under the same id if it dies.
+     */
+    private const int LEADER_WORKER_ID = 0;
+
     private const int MAX_SYNC_PASSES = 8;
 
     // Legacy public properties for HTTP handlers (will be phased out)
@@ -80,7 +87,7 @@ class Via {
     /** @var array<callable> Callbacks to run on graceful shutdown */
     private array $shutdownCallbacks = [];
 
-    /** @var array<array{callable, int}> Global process-wide intervals registered via setInterval() */
+    /** @var list<array{callable, int, bool}> Server intervals from setInterval(): callback, period, every-worker flag */
     private array $serverIntervals = [];
 
     /** @var list<int> Timer IDs for running server intervals (populated in workerStart) */
@@ -749,8 +756,17 @@ class Via {
                 // so that USR1 hot reload picks up fresh class definitions from disk).
                 $this->requestHandler->setRoutes($this->router->getRoutes());
 
-                // Register process-wide intervals (registered via setInterval())
-                foreach ($this->serverIntervals as [$callback, $ms]) {
+                // Register server intervals (registered via setInterval()).
+                //
+                // Armed on the leader worker only unless the caller opted into every worker.
+                // These are registered inside workerStart, so without the gate each of the N
+                // workers armed its own Timer::tick and a "once per server" job ran N times —
+                // and, if it broadcasts, delivered N^2 times.
+                foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
+                    if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
+                        continue;
+                    }
+
                     $id = Timer::tick($ms, function () use ($callback): void {
                         try {
                             $callback();
@@ -837,11 +853,19 @@ class Via {
     }
 
     /**
-     * Register a process-wide recurring timer that fires every $ms milliseconds.
+     * Register a recurring server timer that fires every $ms milliseconds.
      *
-     * Unlike Context::setInterval() (per-tab), this timer runs once per server process
-     * and is shared across all connections. Use it for background jobs: periodic broadcasts,
-     * cache refreshes, cleanup tasks, leaderboard ticks.
+     * Unlike Context::setInterval() (per-tab), this timer is not tied to a connection. Use it
+     * for background jobs: periodic broadcasts, cache refreshes, cleanup tasks, leaderboard ticks.
+     *
+     * By default the timer is armed on the leader worker only, so the job runs once per server
+     * however many workers are configured. Pass `everyWorker: true` for work that is genuinely
+     * per-process — trimming a per-worker cache, reporting per-worker metrics.
+     *
+     * Note that "once per server" governs the TIMER, not the state it touches. A job that mutates
+     * a PHP static or a per-worker signal still only mutates the leader's copy, and the other
+     * workers render from their own. Simulations that keep state that way need `worker_num = 1`
+     * until that state is shared.
      *
      * The callback is wrapped in a try/catch — errors are logged and the timer continues.
      * All registered intervals are automatically cleared on graceful shutdown.
@@ -850,14 +874,15 @@ class Via {
      * ```php
      * $app->setInterval(function () use ($app): void {
      *     $app->broadcast(Scope::GLOBAL);
-     * }, 5000); // every 5 seconds
+     * }, 5000); // every 5 seconds, once for the whole server
      * ```
      *
-     * @param callable(): void $callback Called every $ms milliseconds
-     * @param int              $ms       Interval in milliseconds (must be > 0)
+     * @param callable(): void $callback    Called every $ms milliseconds
+     * @param int              $ms          Interval in milliseconds (must be > 0)
+     * @param bool             $everyWorker Arm the timer in every worker instead of the leader
      */
-    public function setInterval(callable $callback, int $ms): void {
-        $this->serverIntervals[] = [$callback, $ms];
+    public function setInterval(callable $callback, int $ms, bool $everyWorker = false): void {
+        $this->serverIntervals[] = [$callback, $ms, $everyWorker];
     }
 
     /**

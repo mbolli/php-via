@@ -16,14 +16,18 @@ class ActionHandler {
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
-    /** @var array<string, list<float>> Per-IP request timestamps for rate limiting */
-    private array $rateLimitBuckets = [];
+    private RateLimiter $rateLimiter;
 
-    /** Unix timestamp of last rate-limit bucket cleanup */
-    private int $lastRateLimitCleanup = 0;
+    /** True once the rate-limit store overflow has been logged */
+    private bool $overflowReported = false;
 
     public function __construct(Via $via) {
         $this->via = $via;
+
+        // Allocated here — Via's constructor, so the master process, before $server->start()
+        // forks the workers — because an OpenSwoole\Table is only shared with processes that
+        // inherit it. Single-worker deployments keep plain per-process counters.
+        $this->rateLimiter = new RateLimiter(shared: $via->getConfig()->getWorkerNum() > 1);
     }
 
     public function setRequestLogger(RequestLogger $logger): void {
@@ -152,51 +156,30 @@ class ActionHandler {
     /**
      * Check if the IP is within the configured rate limit.
      *
-     * Uses a sliding-window counter: timestamps older than the window are pruned,
-     * then the current count is compared against the limit. Returns true if allowed.
+     * Delegates to RateLimiter, whose counters are shared across workers. They used to be a
+     * plain property on this class, which — since the handler is built before the workers are
+     * forked — gave each worker its own budget and made the effective limit `limit * worker_num`.
+     * See tests/Feature/ActionRateLimitTest.php.
      */
     private function checkRateLimit(string $ip): bool {
-        $limit = $this->via->getConfig()->getActionRateLimit();
-        if ($limit <= 0) {
-            return true; // Rate limiting disabled
+        $config = $this->via->getConfig();
+
+        $allowed = $this->rateLimiter->allow($ip, $config->getActionRateLimit(), $config->getActionRateWindow());
+
+        if (!$allowed || !$this->rateLimiter->hasOverflowed() || $this->overflowReported) {
+            return $allowed;
         }
 
-        $window = $this->via->getConfig()->getActionRateWindow();
-        $now = microtime(true);
-        $cutoff = $now - $window;
+        // Fail-open is deliberate (an exhausted table means an unusual number of distinct
+        // client IPs, and denying everyone would be the bigger outage) but must not be silent.
+        $this->overflowReported = true;
+        $this->via->log(
+            'warn',
+            'Rate-limit store is full: limits are no longer enforced for new client IPs. '
+            . 'This means an unusually large number of distinct IPs are sending actions.'
+        );
 
-        // Prune expired entries for this IP
-        if (isset($this->rateLimitBuckets[$ip])) {
-            $this->rateLimitBuckets[$ip] = array_values(
-                array_filter($this->rateLimitBuckets[$ip], fn (float $ts) => $ts > $cutoff)
-            );
-        } else {
-            $this->rateLimitBuckets[$ip] = [];
-        }
-
-        // Check limit
-        if (\count($this->rateLimitBuckets[$ip]) >= $limit) {
-            return false;
-        }
-
-        // Record this request
-        $this->rateLimitBuckets[$ip][] = $now;
-
-        // Periodic cleanup: every 60 seconds, remove IPs with no recent requests
-        // to prevent unbounded memory growth from many distinct IPs.
-        if ((int) $now - $this->lastRateLimitCleanup > 60) {
-            $this->lastRateLimitCleanup = (int) $now;
-            foreach ($this->rateLimitBuckets as $bucketIp => $timestamps) {
-                $this->rateLimitBuckets[$bucketIp] = array_values(
-                    array_filter($timestamps, fn (float $ts) => $ts > $cutoff)
-                );
-                if ($this->rateLimitBuckets[$bucketIp] === []) {
-                    unset($this->rateLimitBuckets[$bucketIp]);
-                }
-            }
-        }
-
-        return true;
+        return $allowed;
     }
 
     /**
