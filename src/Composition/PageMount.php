@@ -80,12 +80,16 @@ final class PageMount {
                         // (client may have mutated #[Signal] values via data-bind)
                         self::hydrate($instance, $meta, $ctx);
 
+                        // Record what the action starts from, so syncBack() can tell an
+                        // untouched property from a changed one and size an atomic delta.
+                        $before = self::snapshot($instance, $meta, $ctx);
+
                         // Run the action method
                         $instance->{$method}($ctx);
 
                         // Sync changed values back to signals
                         // Signal::setValue() auto-broadcasts for scoped signals
-                        self::syncBack($instance, $meta, $ctx);
+                        self::syncBack($instance, $meta, $ctx, $before);
 
                         // Flush TAB signal changes to the current client
                         $ctx->syncSignals();
@@ -158,15 +162,67 @@ final class PageMount {
     }
 
     /**
-     * Write instance property values back into their signals.
-     * Signal::setValue() handles auto-broadcast for scoped signals.
+     * Capture each reactive property's value and its signal's write count before the action.
+     *
+     * @return array<string, array{value: mixed, writes: int}>
      */
-    private static function syncBack(object $instance, ClassMetadata $meta, Context $ctx): void {
+    private static function snapshot(object $instance, ClassMetadata $meta, Context $ctx): array {
+        $before = [];
         foreach (self::reactiveProps($meta) as $prop) {
             $signal = $ctx->getSignal($prop);
             if ($signal !== null) {
-                $signal->setValue($instance->{$prop});
+                $before[$prop] = ['value' => $instance->{$prop}, 'writes' => $signal->writeCount()];
             }
+        }
+
+        return $before;
+    }
+
+    /**
+     * Write changed instance property values back into their signals.
+     * Signal::setValue() handles auto-broadcast for scoped signals.
+     *
+     * Three cases, in order:
+     *
+     *  1. The action wrote the signal directly (its write count moved). The explicit write wins
+     *     and the property is left alone — it is either stale or merely mirroring what was just
+     *     written. Assigning it back used to discard the write entirely: an action whose whole
+     *     body was `$ctx->getSignal('votes')->increment()` ended every round back where it
+     *     started, because the untouched property still held the pre-increment value.
+     *
+     *  2. The property is unchanged. Nothing to write. Skipping matters beyond saving a
+     *     round trip: on a shared signal, assigning the hydrated value back would clobber
+     *     whatever another worker wrote while this action was running.
+     *
+     *  3. The property changed. #[Signal(atomic: true)] applies the difference through
+     *     increment() so concurrent workers add up; everything else assigns, as before.
+     *
+     * @param array<string, array{value: mixed, writes: int}> $before from snapshot()
+     */
+    private static function syncBack(object $instance, ClassMetadata $meta, Context $ctx, array $before): void {
+        foreach (self::reactiveProps($meta) as $prop) {
+            $signal = $ctx->getSignal($prop);
+            if ($signal === null || !isset($before[$prop])) {
+                continue;
+            }
+
+            if ($signal->writeCount() !== $before[$prop]['writes']) {
+                continue;
+            }
+
+            $value = $instance->{$prop};
+            $wasValue = $before[$prop]['value'];
+            if ($value === $wasValue) {
+                continue;
+            }
+
+            if (isset($meta->atomicSignals[$prop]) && \is_int($value) && \is_int($wasValue)) {
+                $signal->increment($value - $wasValue);
+
+                continue;
+            }
+
+            $signal->setValue($value);
         }
     }
 }

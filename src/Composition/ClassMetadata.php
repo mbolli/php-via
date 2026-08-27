@@ -24,6 +24,7 @@ final class ClassMetadata {
     /**
      * @param array<string>                                              $signals         Property names annotated #[Signal] with TAB scope
      * @param array<array{prop: string, scope: string}>                  $scopedSignals   #[Signal] properties with a non-TAB scope
+     * @param array<string, true>                                        $atomicSignals   #[Signal(atomic: true)] properties, keyed by name
      * @param array<string>                                              $persists        Property names annotated #[Persist]
      * @param array<array{method: string, name: string, scope: ?string}> $actions
      * @param array<string, mixed>                                       $defaults        Default value per annotated property
@@ -33,6 +34,7 @@ final class ClassMetadata {
         public readonly string $class,
         public readonly array $signals,
         public readonly array $scopedSignals,
+        public readonly array $atomicSignals,
         public readonly array $persists,
         public readonly array $actions,
         public readonly array $defaults,
@@ -79,6 +81,7 @@ final class ClassMetadata {
         // Collect reactive properties
         $signals = [];
         $scopedSignals = [];
+        $atomicSignals = [];
         $persists = [];
         $defaults = [];
 
@@ -96,6 +99,13 @@ final class ClassMetadata {
                     $signals[] = $name;
                 } else {
                     $scopedSignals[] = ['prop' => $name, 'scope' => $signalAttr->scope];
+                }
+                if ($signalAttr->atomic) {
+                    // Reject at mount rather than letting the first action throw: the delta is
+                    // only meaningful for a number, and a string property declared atomic is a
+                    // misunderstanding worth naming immediately.
+                    self::assertAtomicIsInt($class, $prop, $default);
+                    $atomicSignals[$name] = true;
                 }
                 $defaults[$name] = $default;
 
@@ -166,6 +176,7 @@ final class ClassMetadata {
             class: $class,
             signals: $signals,
             scopedSignals: $scopedSignals,
+            atomicSignals: $atomicSignals,
             persists: $persists,
             actions: $actions,
             defaults: $defaults,
@@ -174,6 +185,28 @@ final class ClassMetadata {
             onDisconnect: $onDisconnect,
             onCleanup: $onCleanup,
         );
+    }
+
+    /**
+     * @throws \InvalidArgumentException if an atomic property is not an integer
+     */
+    private static function assertAtomicIsInt(string $class, \ReflectionProperty $prop, mixed $default): void {
+        $type = $prop->getType();
+        $isIntType = $type instanceof \ReflectionNamedType && $type->getName() === 'int';
+
+        if ($isIntType || (!$type instanceof \ReflectionNamedType && \is_int($default))) {
+            return;
+        }
+
+        throw new \InvalidArgumentException(\sprintf(
+            '%s::$%s is declared #[Signal(atomic: true)] but is not an int. atomic applies the '
+            . "action's net CHANGE with Signal::increment(), which only has a meaning for a "
+            . 'number. Drop atomic, or use $ctx->getSignal(\'%s\')->mutate() for a race-free '
+            . 'read-modify-write on a non-integer.',
+            $class,
+            $prop->getName(),
+            $prop->getName(),
+        ));
     }
 
     private static function hasAnyReactiveAttribute(\ReflectionProperty $prop): bool {

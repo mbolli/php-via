@@ -21,6 +21,17 @@ class Signal {
     private ?Via $app = null;
 
     /**
+     * Monotonic count of value-changing writes made through this Signal object.
+     *
+     * Lets a caller that hands the signal to arbitrary code find out afterwards whether that
+     * code wrote it. PageMount uses it to tell a #[Signal] property the action left alone from
+     * one whose signal the action wrote directly, so it does not assign a stale property back
+     * over an explicit write. Per-process and not a version of the shared value: another
+     * worker's write does not move it.
+     */
+    private int $writes = 0;
+
+    /**
      * Cross-worker backing for this signal's value, or null when it lives in this process only.
      *
      * Attached by Via for scoped signals when worker_num > 1. TAB signals never get one: they
@@ -109,6 +120,7 @@ class Signal {
 
         $this->value = $next;
         $this->changed = true;
+        ++$this->writes;
 
         if ($broadcast && $this->isScoped() && $this->autoBroadcast && $this->app !== null) {
             $this->app->broadcast($this->scope);
@@ -146,6 +158,7 @@ class Signal {
 
         $this->value = $next;
         $this->changed = true;
+        ++$this->writes;
 
         if ($broadcast && $this->isScoped() && $this->autoBroadcast && $this->app !== null && $by !== 0) {
             $this->app->broadcast($this->scope);
@@ -171,6 +184,7 @@ class Signal {
 
         if ($markChanged) {
             $this->changed = true;
+            ++$this->writes;
 
             // Auto-broadcast for scoped signals (if enabled, broadcast=true, and value changed)
             if ($broadcast
@@ -204,6 +218,16 @@ class Signal {
      */
     public function isClientWritable(): bool {
         return $this->clientWritable || !$this->isScoped();
+    }
+
+    /**
+     * Number of value-changing writes made through this Signal object so far.
+     *
+     * Only useful as a before/after comparison around a call into other code: an unchanged
+     * count means that code did not write this signal.
+     */
+    public function writeCount(): int {
+        return $this->writes;
     }
 
     /**

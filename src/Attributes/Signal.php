@@ -39,5 +39,23 @@ final class Signal {
     public function __construct(
         /** Signal scope. Defaults to Scope::TAB (isolated per browser tab). */
         public readonly string $scope = Scope::TAB,
+
+        /**
+         * Treat writes to this property as an ADJUSTMENT rather than an assignment.
+         *
+         * Integer properties only. The action's net change is applied with
+         * {@see \Mbolli\PhpVia\Signal::increment()}, so `++$this->votes` on two workers at once
+         * adds two instead of one. Without it the property is read before the action and
+         * assigned back after, and concurrent workers each write back a result computed from
+         * the same stale read.
+         *
+         * The trade is that assignment stops meaning assignment: `$this->votes = 0` becomes
+         * "subtract whatever it currently is", which is both lossy under concurrency and
+         * surprising. Reach for the signal itself when you mean to SET a value —
+         * `$ctx->getSignal('votes')->setValue(0)` — which the mount leaves alone.
+         *
+         * Only meaningful for a shared scope; a TAB signal has no second writer to race.
+         */
+        public readonly bool $atomic = false,
     ) {}
 }
