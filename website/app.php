@@ -298,12 +298,10 @@ $routeScopeDemo = function (Context $c) use ($app): void {
     $c->scope(Scope::routeScope($c->getRoute()));
     $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount');
     $incRoute = $c->action(function (Context $c) use ($app, $routeCount): void {
-        // The scoped signal is the counter of record — increment() is atomic across workers.
-        // GlobalState is only a mirror so the tally survives a restart (it reseeds the signal
-        // above on first mount). Writing back the authoritative post-increment result keeps
-        // that mirror convergent; GlobalState itself has no atomic increment to offer.
-        $newVal = $routeCount->increment();
-        $app->setGlobalState('scope_demo_count', $newVal);
+        // GlobalState is the counter of record — it is what survives a restart, and it
+        // reseeds the signal above on first mount. Both stores are advanced atomically, so
+        // neither drops a click when two workers handle one at the same moment.
+        $routeCount->setValue($app->incrementGlobalState('scope_demo_count'));
     }, 'incRoute');
 
     $c->view(function () use ($routeCount, $incRoute): string {
@@ -343,8 +341,10 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
         if (!in_array($raw, ['tab', 'route', 'session', 'global'], true)) {
             return;
         }
-        $key = 'poll_' . $raw;
-        $app->setGlobalState($key, ($app->globalState($key) ?? 0) + 1);
+        // Atomic. These tallies are pure GlobalState with no signal in front of them, so
+        // before incrementGlobalState() existed this had to be a read-modify-write and two
+        // workers voting at once would have counted one vote.
+        $app->incrementGlobalState('poll_' . $raw);
         $app->broadcast(Scope::routeScope('/'));
     }, 'vote');
 
