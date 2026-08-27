@@ -4,6 +4,22 @@ All notable changes to php-via will be documented in this file.
 
 ## [Unreleased]
 
+### New Features
+
+- **`Via::incrementGlobalState()` and `Via::mutateGlobalState()`:** atomic read-modify-write for
+  GlobalState, closing the last cross-worker store that had no race-free mutation path.
+  `Signal` gained `increment()`/`mutate()` when scoped signal values started crossing workers, but
+  GlobalState kept only get/set — leaving `setGlobalState($k, globalState($k) + 1)` as the only way
+  to express a shared counter. Measured over 4 worker processes doing 500 mutations each on one
+  key, that read-modify-write retained 772–1238 of 2000 increments; `incrementGlobalState()`
+  retains all 2000. For non-integers, appending to a list through `setGlobalState()` kept 536–735
+  of 2000 entries against 2000 through `mutateGlobalState()`.
+  `SharedTable` gained the storage split this needs — an atomic `TYPE_INT` column for integers
+  plus the same ticket lock `SharedSignalStore` uses — and the distinction survives the durable
+  snapshot, so a persisted counter comes back on the atomic path after a restart rather than as an
+  opaque blob that reads correctly and then throws on its next increment.
+  Single-worker behaviour is unchanged, and existing `setGlobalState()` calls keep working.
+
 ### Breaking Changes
 
 - **`ext-openswoole` now requires v26:** the extension constraint was unbound (`*`) and is now

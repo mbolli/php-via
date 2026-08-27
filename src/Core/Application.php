@@ -313,6 +313,61 @@ class Application {
     }
 
     /**
+     * Add to an integer global-state value atomically, returning the new value.
+     *
+     * `setGlobalState($k, getGlobalState($k) + 1)` is a read and a write with a gap in between:
+     * with more than one worker, two of them read the same value and each write back the same
+     * result, silently losing one. This routes to an atomic shared-memory increment instead.
+     *
+     * A key nothing has written yet starts at zero, so the first increment(1) returns 1.
+     * Single-worker behaviour is identical to the equivalent setGlobalState().
+     *
+     * @throws \LogicException if the key is currently holding a non-integer
+     */
+    public function incrementGlobalState(string $key, int $by = 1): int {
+        if ($this->sharedTable !== null) {
+            return $this->sharedTable->increment($key, $by);
+        }
+
+        $current = $this->globalState[$key] ?? 0;
+        if (!\is_int($current)) {
+            throw new \LogicException(
+                "GlobalState key \"{$key}\" does not hold an integer, so it cannot be incremented."
+            );
+        }
+
+        return $this->globalState[$key] = $current + $by;
+    }
+
+    /**
+     * Read, transform and write a global-state value as one indivisible step.
+     *
+     * The supported way to do read-modify-write on a NON-integer global-state value — appending
+     * to a list, updating one key of a map. incrementGlobalState() covers the numeric case, and
+     * a wholesale assignment needs nothing.
+     *
+     * The callback runs on this worker while a lock keeps other workers out, so keep it fast and
+     * free of side effects. The mutator receives null for a key nothing has written yet.
+     *
+     * Do not mix mutateGlobalState() and incrementGlobalState() on the same key: the latter
+     * deliberately skips the lock, so a mutate running beside it can write back over an
+     * increment that landed in between. Pick one per key.
+     *
+     * @template T
+     *
+     * @param callable(mixed): T $mutator Receives the current value, returns the new one
+     *
+     * @return T the value written
+     */
+    public function mutateGlobalState(string $key, callable $mutator): mixed {
+        if ($this->sharedTable !== null) {
+            return $this->sharedTable->mutate($key, $mutator);
+        }
+
+        return $this->globalState[$key] = $mutator($this->globalState[$key] ?? null);
+    }
+
+    /**
      * Set session ID for a context.
      */
     public function setContextSession(string $contextId, string $sessionId): void {

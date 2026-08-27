@@ -768,6 +768,9 @@ class Config {
      * count you need and treat anything above $maxRows as headroom you cannot rely on. Exceeding
      * it raises \OverflowException from GlobalState writes.
      *
+     * Integer values are stored in a dedicated atomic column and ignore $maxValueBytes (1024
+     * counters measured at +0.1 MB); everything else is PHP-serialized and must fit within it.
+     *
      *
      * The byte cap costs nothing until it is used. OpenSwoole maps the table lazily, so the
      * nominal size is not resident memory: a 1024-row table costs a flat ~8 MB whether the value

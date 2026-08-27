@@ -284,9 +284,42 @@ class Via {
 
     /**
      * Set global state value.
+     *
+     * Last-write-wins. For a counter use {@see incrementGlobalState()} and for any other
+     * read-modify-write use {@see mutateGlobalState()} — with more than one worker, reading a
+     * value here and writing back a result computed from it loses concurrent updates.
      */
     public function setGlobalState(string $key, mixed $value): void {
         $this->app->setGlobalState($key, $value);
+    }
+
+    /**
+     * Add to an integer global-state value atomically, returning the new value.
+     *
+     * The race-free alternative to `setGlobalState($k, globalState($k) + 1)`, which loses
+     * updates once worker_num > 1.
+     *
+     * @throws \LogicException if the key is currently holding a non-integer
+     */
+    public function incrementGlobalState(string $key, int $by = 1): int {
+        return $this->app->incrementGlobalState($key, $by);
+    }
+
+    /**
+     * Read, transform and write a global-state value as one indivisible step.
+     *
+     * The race-free way to do read-modify-write on a non-integer — appending to a list,
+     * updating one key of a map. The mutator receives null for a key nothing has written yet,
+     * runs on this worker, and must not block: it holds a lock on the key.
+     *
+     * @template T
+     *
+     * @param callable(mixed): T $mutator
+     *
+     * @return T the value written
+     */
+    public function mutateGlobalState(string $key, callable $mutator): mixed {
+        return $this->app->mutateGlobalState($key, $mutator);
     }
 
     /**
