@@ -39,8 +39,14 @@ final class CompositionDemo {
     #[Persist]
     public int $multiplier = 1;
 
-    /** Total clicks by ALL users. GLOBAL scope → auto-broadcasts to every session. */
-    #[Signal(Scope::GLOBAL)]
+    /**
+     * Total clicks by ALL users. GLOBAL scope → auto-broadcasts to every session.
+     *
+     * atomic: true because every action here does ++$this->totalClicks. Without it the mount
+     * reads the property before the action and assigns it back after, so two workers handling a
+     * click at the same moment would each write back the same total and count one click.
+     */
+    #[Signal(Scope::GLOBAL, atomic: true)]
     public int $totalClicks = 0;
 
     public function view(Context $ctx): void {
