@@ -86,17 +86,27 @@ describe('SharedTable (test mode / array fallback)', function (): void {
         expect($retrieved->value)->toBe(99);
     });
 
-    test('throws InvalidArgumentException for keys exceeding 64 chars', function (): void {
+    test('throws InvalidArgumentException for keys exceeding the limit', function (): void {
         $table = new SharedTable(testMode: true);
         $longKey = str_repeat('a', 65);
         expect(fn () => $table->set($longKey, 'x'))->toThrow(InvalidArgumentException::class);
     });
 
-    test('accepts keys of exactly 64 chars', function (): void {
+    test('accepts keys of exactly 63 chars', function (): void {
         $table = new SharedTable(testMode: true);
-        $key = str_repeat('k', 64);
+        $key = str_repeat('k', 63);
         $table->set($key, 'value');
         expect($table->get($key))->toBe('value');
+    });
+
+    test('rejects keys of 64 chars', function (): void {
+        // This test previously asserted the opposite. OpenSwoole's usable key length is 63: a
+        // 64-character key is accepted but emits "key[...] is too long" as a PHP warning on
+        // every write. It does not truncate, so nothing was corrupted — but the limit advertised
+        // one more character than the backing store supports, and the cost was a warning per
+        // write on the hot path. See tests/Unit/State/SharedTableCapacityTest.php.
+        $table = new SharedTable(testMode: true);
+        expect(fn () => $table->set(str_repeat('k', 64), 'x'))->toThrow(InvalidArgumentException::class);
     });
 
     test('overflow guard triggers when value exceeds maxValueBytes', function (): void {

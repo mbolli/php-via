@@ -145,7 +145,7 @@ final class SpreadsheetExample {
                 }
 
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
-                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'focusCell');
 
@@ -235,7 +235,7 @@ final class SpreadsheetExample {
                 $viewCol->setValue($vc, broadcast: false);
 
                 self::$cursors[$contextId] = ['row' => $fr, 'col' => $fc, 'hue' => self::hueForSession($sessionId)];
-                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'navigate');
 
@@ -273,7 +273,7 @@ final class SpreadsheetExample {
                 self::setCell($focusRow->int(), $focusCol->int(), $editValue->string());
                 $editing->setValue(false, broadcast: false);
                 $editValue->setValue('', broadcast: false);
-                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'commitEdit');
 
@@ -342,7 +342,7 @@ final class SpreadsheetExample {
                 self::setCells($cells);
                 $editing->setValue(false, broadcast: false);
                 $editValue->setValue('', broadcast: false);
-                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'paste');
 
@@ -413,7 +413,7 @@ final class SpreadsheetExample {
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
                 self::$selections[$contextId] = ['r1' => $row, 'c1' => $col, 'r2' => $row, 'c2' => $col];
 
-                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'jumpTo');
 
@@ -447,7 +447,7 @@ final class SpreadsheetExample {
                     self::setCells($cells);
                 }
 
-                $version->setValue($version->int() + 1, markChanged: true, broadcast: false);
+                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'clearCells');
 

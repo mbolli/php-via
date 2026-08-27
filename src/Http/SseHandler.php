@@ -261,6 +261,11 @@ class SseHandler {
                 // paced without a separate sleep. Reaching here at all is the point —
                 // while pop() blocked unboundedly these liveness checks never ran.
 
+                // Heartbeat the cross-worker directory entry. Without this a long-lived
+                // stream outlives its own record and the tab's next action 400s on any
+                // other worker. No-op single-worker.
+                $this->via->getApp()->touchContextRecord($contextId);
+
                 // Safety valve: if context was destroyed externally (e.g. cleanup race),
                 // send a reload so the client reinitialises instead of hanging silently.
                 if (!isset($this->via->contexts[$contextId])) {

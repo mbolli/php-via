@@ -24,6 +24,9 @@ use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Rendering\ViewRenderer;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
+use Mbolli\PhpVia\State\SharedClientRegistry;
+use Mbolli\PhpVia\State\SharedContextDirectory;
+use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\IdGenerator;
@@ -127,6 +130,9 @@ class Via {
     private HtmlBuilder $htmlBuilder;
     private ScopeRegistry $scopeRegistry;
     private SignalManager $signalManager;
+
+    /** Cross-worker backing for scoped signal values; null when running single-worker. */
+    private ?SharedSignalStore $sharedSignalStore = null;
     private ActionRegistry $actionRegistry;
     private MessageBroker $broker;
 
@@ -526,7 +532,22 @@ class Via {
      * @internal Called by Context when creating scoped signals
      */
     public function registerScopedSignal(string $scope, Signal $signal): void {
+        // Back the value with shared memory before anything reads it, so a worker mounting a
+        // route another worker already serves adopts the live value instead of resetting the
+        // scope to its own declared default.
+        $this->sharedSignalStore?->attachTo($signal);
+
         $this->signalManager->registerSignal($scope, $signal);
+    }
+
+    /**
+     * Install cross-worker backing for scoped signal values.
+     *
+     * @internal called from start() in the master process, and by tests that stand two Via
+     *           instances in for two workers
+     */
+    public function setSharedSignalStore(?SharedSignalStore $store): void {
+        $this->sharedSignalStore = $store;
     }
 
     /**
@@ -617,16 +638,17 @@ class Via {
                 );
             }
 
-            // Multi-worker is not yet usable for anything stateful, and the failure modes are
-            // quiet enough that an operator will not connect them to worker_num on their own.
-            // Warn rather than refuse: stateless routes do scale across workers.
+            // Actions and scoped signal values now cross workers, but three things still do not,
+            // and they fail quietly enough that an operator would not connect them to worker_num.
             if ($this->config->getWorkerNum() > 1) {
                 $this->log(
                     'warn',
-                    'worker_num > 1 is not yet supported for stateful routes. A context lives only on the '
-                    . 'worker that served its page, so action success tracks 1/worker_num (HTTP 400 "Invalid '
-                    . 'context" otherwise), and ROUTE/SESSION/GLOBAL signal VALUES are per-worker. Stateless '
-                    . 'routes are unaffected. See PERFORMANCE.md "Re-measured on the real multi-worker path".'
+                    'worker_num > 1: actions, scoped signal values and the client list are shared across '
+                    . 'workers. Two things are not. (1) Mutating a scoped signal by reading it and calling '
+                    . 'setValue() loses updates — use Signal::increment() for counters and Signal::mutate() '
+                    . 'for anything else. (2) PHP statics in your own handlers are per-process, so a '
+                    . 'simulation kept in one diverges per worker. '
+                    . 'See PERFORMANCE.md "Re-measured on the real multi-worker path".'
                 );
             }
 
@@ -682,6 +704,26 @@ class Via {
                     $this->config->getGlobalStateTableValueBytes(),
                 );
                 $this->app->setSharedTable($sharedTable);
+
+                // Same reason, same timing: scoped signal VALUES have to be visible across
+                // workers or every worker runs its own divergent copy of the scope.
+                $this->setSharedSignalStore(new SharedSignalStore(
+                    $this->config->getScopedSignalTableRows(),
+                    $this->config->getScopedSignalTableValueBytes(),
+                ));
+
+                // Lets any worker rebuild a context created by any other, which is what turns
+                // an action landing on the "wrong" worker from a 400 into a served request.
+                $this->app->setContextDirectory(new SharedContextDirectory(
+                    $this->config->getContextDirectoryRows(),
+                    $this->config->getContextDirectoryRecordBytes(),
+                ));
+
+                // So getClients() and the connect/disconnect hooks see the whole server rather
+                // than whichever streams this worker happened to serve.
+                $this->app->setClientRegistry(new SharedClientRegistry(
+                    $this->config->getContextDirectoryRows(),
+                ));
             }
 
             // SwooleBroker receive path: decode inter-worker pipe messages and apply
@@ -1311,8 +1353,10 @@ class Via {
         // only TAB signals are client-writable, so shared/scoped state stays server-authoritative.
         $context->injectSignals($clientSignals);
 
-        // Record consumed — drop it so the map never holds already-rebuilt contexts.
-        $this->app->forgetRevivable($contextId);
+        // Local record consumed — drop it so this worker's map never holds already-rebuilt
+        // contexts. The SHARED directory entry deliberately survives: it is how every other
+        // worker rebuilds this same context, and registerContext() above has just refreshed it.
+        $this->app->forgetLocalRevivable($contextId);
 
         $this->log('info', "Revived context {$contextId} on route {$route}", $context);
 

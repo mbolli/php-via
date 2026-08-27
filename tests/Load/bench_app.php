@@ -22,6 +22,7 @@ declare(strict_types=1);
  * Environment variables:
  *   VIA_PORT           Override listening port (default: 3099)
  *   VIA_BENCH_WORKERS  Worker count; >1 enables SwooleBroker + ROUTE scope (default: 1)
+ *   VIA_BENCH_SCOPE    Force 'route' or 'tab' scope regardless of worker count
  *
  * Usage:
  *   php tests/Load/bench_app.php
@@ -67,7 +68,15 @@ $app = new Via($config);
 //    from any worker after the first page load on each worker.
 // 2. SwooleBroker broadcasts signal updates across workers, so the SSE
 //    observer sees patches regardless of which worker processed the action.
-$useRouteScope = $workers > 1;
+// ROUTE scope is the default above one worker so a shared counter is actually shared. It can be
+// forced either way with VIA_BENCH_SCOPE=route|tab, which is what makes a 1-vs-N comparison
+// measure the same thing at both ends rather than a per-tab counter against a shared one.
+$scopeEnv = strtolower((string) (getenv('VIA_BENCH_SCOPE') ?: ''));
+$useRouteScope = match ($scopeEnv) {
+    'route' => true,
+    'tab' => false,
+    default => $workers > 1,
+};
 
 // ── /bench/counter ────────────────────────────────────────────────────────────
 // Trivial integer increment — measures raw framework + SSE overhead with zero
@@ -78,16 +87,20 @@ $app->page('/bench/counter', function (Context $c) use ($useRouteScope): void {
         $c->scope(Scope::ROUTE);
     }
 
-    $c->signal(0, 'count');
+    $count = $c->signal(0, 'count');
 
     $action = $c->action(function (Context $ctx): void {
-        $sig = $ctx->getSignal('count');
-        $sig->setValue($sig->int() + 1);
+        // increment(), not setValue($sig->int() + 1): the latter is a read-modify-write, so with
+        // more than one worker concurrent actions each write back a result computed from the
+        // same stale read. Measured on this exact benchmark, 2000 actions at concurrency 200:
+        // net increment 2000 / 1951 / 1922 / 1879 / 1840 at 1 / 2 / 4 / 8 / 16 workers.
+        $ctx->getSignal('count')->increment();
         $ctx->syncSignals();
     }, 'increment');
 
     $url = $action->url();
-    $c->view(fn () => "<button data-on:click=\"@post('{$url}')\">+1</button>");
+    $c->view(fn () => "<span data-text=\"\${$count->id()}\"></span>"
+        . "<button data-on:click=\"@post('{$url}')\">+1</button>");
 });
 
 // ── /bench/cpu ────────────────────────────────────────────────────────────────
@@ -105,7 +118,7 @@ $app->page('/bench/cpu', function (Context $c) use ($useRouteScope): void {
         $c->scope(Scope::ROUTE);
     }
 
-    $c->signal(0, 'count');
+    $count = $c->signal(0, 'count');
 
     $action = $c->action(function (Context $ctx): void {
         $sum = 0;
@@ -133,7 +146,8 @@ $app->page('/bench/cpu', function (Context $c) use ($useRouteScope): void {
     }, 'increment');
 
     $url = $action->url();
-    $c->view(fn () => "<button data-on:click=\"@post('{$url}')\">mandelbrot</button>");
+    $c->view(fn () => "<span data-text=\"\${$count->id()}\"></span>"
+        . "<button data-on:click=\"@post('{$url}')\">mandelbrot</button>");
 });
 
 // ── /bench/io ─────────────────────────────────────────────────────────────────
@@ -148,17 +162,19 @@ $app->page('/bench/io', function (Context $c) use ($useRouteScope): void {
         $c->scope(Scope::ROUTE);
     }
 
-    $c->signal(0, 'count');
+    $count = $c->signal(0, 'count');
 
     $action = $c->action(function (Context $ctx): void {
         usleep(2_000); // 2 ms simulated IO — SWOOLE_HOOK_ALL makes this coroutine-safe
-        $sig = $ctx->getSignal('count');
-        $sig->setValue($sig->int() + 1);
+        // increment() for the same reason as /bench/counter: read-modify-write loses updates
+        // across workers, and a load test that quietly under-counts is worse than useless.
+        $ctx->getSignal('count')->increment();
         $ctx->syncSignals();
     }, 'increment');
 
     $url = $action->url();
-    $c->view(fn () => "<button data-on:click=\"@post('{$url}')\">io+1</button>");
+    $c->view(fn () => "<span data-text=\"\${$count->id()}\"></span>"
+        . "<button data-on:click=\"@post('{$url}')\">io+1</button>");
 });
 
 // ── /bench/spreadsheet ────────────────────────────────────────────────────────

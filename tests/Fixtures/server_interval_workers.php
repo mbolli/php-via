@@ -31,7 +31,7 @@ $app = new Via(
     (new Config())
         ->withLogLevel('error')
         ->withHost('127.0.0.1')
-        ->withPort(3471)
+        ->withPort(3700 + (getmypid() % 150))
         ->withWorkerNum($workers)
         ->withBroker(new SwooleBroker())
 );

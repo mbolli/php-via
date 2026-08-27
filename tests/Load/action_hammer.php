@@ -192,9 +192,10 @@ Coroutine::run(function () use (
             $patchChan,
             $observerDone,
             $signalName,
-            $noTlsVerify
+            $noTlsVerify,
+            $sessionCookies
         ): void {
-            openSseObserver($host, $port, $ssl, $sseQuery, $patchChan, $observerDone, $signalName, $noTlsVerify);
+            openSseObserver($host, $port, $ssl, $sseQuery, $patchChan, $observerDone, $signalName, $noTlsVerify, $sessionCookies);
         });
     }
 
@@ -479,7 +480,8 @@ function openSseObserver(
     Channel $patchChan,
     Channel $observerDone,
     string $signalName,
-    bool $noTlsVerify = false
+    bool $noTlsVerify = false,
+    array $cookies = []
 ): void {
     $sockType = $ssl ? SWOOLE_SOCK_TCP | SWOOLE_SSL : SWOOLE_SOCK_TCP;
     $client = new Coroutine\Client($sockType);
@@ -494,15 +496,29 @@ function openSseObserver(
     }
 
     $path = '/_sse?datastar=' . $sseQuery;
-    $headers = implode("\r\n", [
+    $lines = [
         "GET {$path} HTTP/1.1",
         "Host: {$host}:{$port}",
         'Accept: text/event-stream',
         'Cache-Control: no-cache',
         'Connection: keep-alive',
-        '',
-        '',
-    ]);
+    ];
+
+    // Without the session cookie the SSE handler rejects the connection: only the session that
+    // owns a context may attach to it. fireAction() has always sent cookies; this path never
+    // did, so every observer was refused and the patch-delivery and final-value metrics
+    // silently reported 0 rather than failing.
+    if ($cookies !== []) {
+        $pairs = [];
+        foreach ($cookies as $name => $value) {
+            $pairs[] = $name . '=' . $value;
+        }
+        $lines[] = 'Cookie: ' . implode('; ', $pairs);
+    }
+
+    $lines[] = '';
+    $lines[] = '';
+    $headers = implode("\r\n", $lines);
     $client->send($headers);
 
     // Skip HTTP response headers (read until \r\n\r\n).

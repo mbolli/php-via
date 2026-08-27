@@ -106,6 +106,16 @@ class Config {
      */
     private int $workerNum = 1;
 
+    private int $contextDirectoryRows = 4096;
+
+    private int $contextDirectoryRecordBytes = 1024;
+
+    private int $contextDirectoryTtlSeconds = 3600;
+
+    private int $scopedSignalTableRows = 1024;
+
+    private int $scopedSignalTableValueBytes = 32768;
+
     /**
      * Maximum number of rows in the GlobalState OpenSwoole\Table.
      * Each row holds one global-state key. Increase if you need more than 1024 distinct keys.
@@ -116,7 +126,7 @@ class Config {
      * Maximum serialized byte size of a single global-state value.
      * Values exceeding this limit will throw at setGlobalState() time.
      */
-    private int $globalStateTableValueBytes = 4096;
+    private int $globalStateTableValueBytes = 32768;
 
     private ?MessageBroker $broker = null;
 
@@ -715,14 +725,98 @@ class Config {
     /**
      * Tune the OpenSwoole\Table that backs GlobalState in multi-worker mode.
      *
-     * @param int $maxRows       Maximum number of distinct global-state keys (default 1024)
-     * @param int $maxValueBytes Maximum serialized byte size per value (default 4096)
+     * $maxRows is a FLOOR, not a ceiling. OpenSwoole rounds the allocation up (power of two,
+     * floor 64) and then admits well past it — 1024 rows takes ~1776 keys, 4096 takes ~8043 —
+     * after which keys are rejected by hash, intermittently, with no eviction. Size for the key
+     * count you need and treat anything above $maxRows as headroom you cannot rely on. Exceeding
+     * it raises \OverflowException from GlobalState writes.
+     *
+     *
+     * The byte cap costs nothing until it is used. OpenSwoole maps the table lazily, so the
+     * nominal size is not resident memory: a 1024-row table costs a flat ~8 MB whether the value
+     * column is 4 KB or 64 KB, and grows only as rows are actually written with large values
+     * (1024 full 64 KB rows measured at +60 MB, 1024 full 4 KB rows at +0.1 MB). The cap is
+     * therefore a guardrail against a runaway value, not a memory budget — raise it freely for
+     * values you intend to store.
+     *
+     * @param int $maxRows       Guaranteed number of distinct global-state keys (default 1024)
+     * @param int $maxValueBytes Maximum serialized byte size per value (default 32768)
      */
-    public function withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 4096): self {
+    public function withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 32768): self {
         $this->globalStateTableRows = max(1, $maxRows);
         $this->globalStateTableValueBytes = max(64, $maxValueBytes);
 
         return $this;
+    }
+
+    /**
+     * Tune the OpenSwoole\Table that backs scoped signal VALUES in multi-worker mode.
+     *
+     * One row per distinct scoped (non-TAB) signal. As with withGlobalStateTableSize(),
+     * $maxRows is a floor rather than a ceiling — size for the count you need.
+     *
+     * Integer signals are stored in a dedicated atomic column and ignore $maxValueBytes;
+     * everything else is PHP-serialized and must fit within it.
+     *
+     *
+     * The byte cap costs nothing until it is used. OpenSwoole maps the table lazily, so the
+     * nominal size is not resident memory: a 1024-row table costs a flat ~8 MB whether the value
+     * column is 4 KB or 64 KB, and grows only as rows are actually written with large values
+     * (1024 full 64 KB rows measured at +60 MB, 1024 full 4 KB rows at +0.1 MB). The cap is
+     * therefore a guardrail against a runaway value, not a memory budget — raise it freely for
+     * values you intend to store.
+     *
+     * @param int $maxRows       Guaranteed number of distinct scoped signals (default 1024)
+     * @param int $maxValueBytes Maximum serialized byte size per non-integer value (default 32768)
+     */
+    public function withScopedSignalTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->scopedSignalTableRows = max(1, $maxRows);
+        $this->scopedSignalTableValueBytes = max(64, $maxValueBytes);
+
+        return $this;
+    }
+
+    /**
+     * Tune the cross-worker context directory used in multi-worker mode.
+     *
+     * One row per live (or recently destroyed) context across all workers, so size it for peak
+     * concurrent tabs. As with the other shared tables, $maxRows is a floor rather than a
+     * ceiling. Overflow is logged, not thrown: the affected context simply loses cross-worker
+     * reachability and its actions fall back to HTTP 400.
+     *
+     * $ttlSeconds bounds how long a record survives without a heartbeat. Live contexts are
+     * refreshed from the SSE loop, so this only governs entries left behind by a crashed worker.
+     *
+     * @param int $maxRows        Guaranteed number of tracked contexts (default 4096)
+     * @param int $maxRecordBytes Serialized bytes per record (default 1024; real records are 92-341)
+     * @param int $ttlSeconds     Expiry for a record with no heartbeat (default 3600)
+     */
+    public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600): self {
+        $this->contextDirectoryRows = max(1, $maxRows);
+        $this->contextDirectoryRecordBytes = max(128, $maxRecordBytes);
+        $this->contextDirectoryTtlSeconds = max(60, $ttlSeconds);
+
+        return $this;
+    }
+
+    public function getContextDirectoryRows(): int {
+        return $this->contextDirectoryRows;
+    }
+
+    public function getContextDirectoryRecordBytes(): int {
+        return $this->contextDirectoryRecordBytes;
+    }
+
+    public function getContextDirectoryTtlSeconds(): int {
+        return $this->contextDirectoryTtlSeconds;
+    }
+
+    public function getScopedSignalTableRows(): int {
+        return $this->scopedSignalTableRows;
+    }
+
+    public function getScopedSignalTableValueBytes(): int {
+        return $this->scopedSignalTableValueBytes;
     }
 
     public function getGlobalStateTableRows(): int {

@@ -16,7 +16,9 @@ use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Timer;
 
-$server = new Server('127.0.0.1', 3463, Server::POOL_MODE);
+// Derived from the PID rather than fixed: see client_registry_workers.php.
+$port = 3850 + (getmypid() % 140);
+$server = new Server('127.0.0.1', $port, Server::POOL_MODE);
 $server->set([
     'worker_num' => 1,
     'log_level' => 5,
@@ -76,7 +78,7 @@ $server->on('request', static function ($req, $res) use ($server, $threshold): v
     }
 });
 
-$server->on('workerStart', static function ($srv, $id): void {
+$server->on('workerStart', static function ($srv, $id) use ($port): void {
     if ($id !== 0) {
         return;
     }
@@ -87,8 +89,8 @@ $server->on('workerStart', static function ($srv, $id): void {
         $srv->shutdown();
     });
 
-    Timer::after(200, static function (): void {
-        $fp = stream_socket_client('tcp://127.0.0.1:3463', $errno, $err, 3);
+    Timer::after(200, static function () use ($port): void {
+        $fp = stream_socket_client("tcp://127.0.0.1:{$port}", $errno, $err, 3);
         if ($fp === false) {
             return;
         }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\State;
 
+use OpenSwoole\Exception;
 use OpenSwoole\Table;
 
 /**
@@ -16,17 +17,30 @@ use OpenSwoole\Table;
  *
  * Values are PHP-serialized before storage, so any serializable type works.
  *
- * Limits:
- *   - Maximum number of rows is fixed at construction time ($maxRows).
+ * Limits (measured on ext-openswoole 26.2.0):
+ *   - Row capacity is fixed at construction time, but it is NOT $maxRows. OpenSwoole rounds the
+ *     allocation up (power of two, floor 64) and the usable count runs well past that: 1024 rows
+ *     admits ~1776 keys, 4096 admits ~8043. Rejection is per-key-hash and intermittent — at
+ *     $maxRows = 1024 the first failure came at insert 1621 yet 1776 succeeded in total — so the
+ *     effective ceiling is not a number a caller can plan against. Treat $maxRows as a floor.
+ *     There is no eviction: once full, further distinct keys are rejected.
  *   - Maximum serialized byte size of a single value is $maxValueBytes.
- *   - Keys are trimmed to 64 characters (OpenSwoole Table key limit).
+ *   - Keys may be at most MAX_KEY_LENGTH characters; longer keys are rejected, not truncated.
  *
  * In VIA_TEST_MODE the OpenSwoole extension is not loaded; a plain PHP array
  * is used as a fallback so unit tests can exercise SharedTable without
  * starting a real server.
  */
 final class SharedTable {
-    private const int MAX_KEY_LENGTH = 64;
+    /**
+     * OpenSwoole's usable key length is 63, not 64.
+     *
+     * At 64 it accepts the write but emits "key[...] is too long" as a PHP warning on EVERY
+     * write. It does not truncate — two 64-character keys differing only in the final character
+     * stay distinct — so the old limit of 64 was log noise on the hot path rather than
+     * corruption. Rejecting at 64 turns a per-write warning into one clear exception.
+     */
+    private const int MAX_KEY_LENGTH = 63;
 
     /** @var null|Table OpenSwoole shared-memory table (null in test mode) */
     private ?Table $table;
@@ -38,7 +52,7 @@ final class SharedTable {
 
     private int $maxValueBytes;
 
-    public function __construct(int $maxRows = 1024, int $maxValueBytes = 4096, bool $testMode = false) {
+    public function __construct(int $maxRows = 1024, int $maxValueBytes = 32768, bool $testMode = false) {
         $this->testMode = $testMode;
         $this->maxValueBytes = $maxValueBytes;
 
@@ -57,7 +71,8 @@ final class SharedTable {
     /**
      * Store a value under the given key.
      *
-     * @throws \OverflowException        if the serialized value exceeds the column byte limit
+     * @throws \OverflowException        if the serialized value exceeds the column byte limit,
+     *                                   or if the table has no room left for a new key
      * @throws \InvalidArgumentException if the key exceeds MAX_KEY_LENGTH characters
      */
     public function set(string $key, mixed $value): void {
@@ -79,7 +94,21 @@ final class SharedTable {
             return;
         }
 
-        $this->table->set($key, ['value' => $serialized]);
+        try {
+            $this->table->set($key, ['value' => $serialized]);
+        } catch (Exception $e) {
+            // OpenSwoole throws a bare exception once the rows are exhausted, which reaches the
+            // caller as a generic 500. Shape it like the value-size guard above so the failure
+            // names its own remedy.
+            throw new \OverflowException(
+                "GlobalState has no room for key \"{$key}\": the shared table is full. "
+                . 'Raise the row count with Config::withGlobalStateTableSize(). Note that the '
+                . 'usable capacity is not exactly the configured row count — OpenSwoole rounds '
+                . 'the allocation and rejects keys by hash, so leave headroom.',
+                0,
+                $e
+            );
+        }
     }
 
     /**

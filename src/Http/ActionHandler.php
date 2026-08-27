@@ -69,7 +69,19 @@ class ActionHandler {
         // request — only raw FormData fields are sent. Fall back to $request->post for via_ctx.
         $contextId = $signals['via_ctx'] ?? $request->post['via_ctx'] ?? null;
 
-        if (!$contextId || !isset($this->via->contexts[$contextId])) {
+        if (!$contextId) {
+            $response->status(400);
+            $response->end('Invalid context');
+
+            return;
+        }
+
+        // Rebuild the context if this worker has never seen it. SseHandler has always done
+        // this; without it here, a context lived only on the worker that served its page and
+        // action success tracked 1/worker_num — every other worker answered 400. Also covers
+        // the single-worker case SseHandler already handled: a backgrounded tab whose context
+        // was cleaned up, then fires an action before its SSE stream reconnects.
+        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request) === null) {
             $response->status(400);
             $response->end('Invalid context');
 

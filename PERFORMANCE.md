@@ -233,22 +233,76 @@ tables above; the shape across worker counts is the finding.
 `tests/Load/bench_app.php` uses `withWorkerNum($n)`, so this is the path the section
 above was meant to exercise. 1,000 actions, concurrency 100, `/bench/counter`:
 
-| workers | HTTP OK | 1/N |
+| workers | HTTP OK (before) | 1/N | HTTP OK (after) |
+|---|---|---|---|
+| 1 | 1000 (100.0%) | 100% | 100% |
+| 2 | 510 (51.0%) | 50% | 100% |
+| 4 | 262 (26.2%) | 25% | 100% |
+| 8 | 130 (13.0%) | 12.5% | 100% |
+| 16 | 69 (6.9%) | 6.25% | 100% |
+
+**Before the fix, action success tracked `1/worker_num` exactly.** Every failure was
+`HTTP 400 "Invalid context"`: a context was created on the worker that served the page,
+and `ActionHandler` — unlike `SseHandler` — made no attempt to revive one it had not
+seen, so an action only succeeded when it happened to land back on the originating worker.
+
+**Fixed.** `ActionHandler` now rebuilds an unknown context by re-running its route handler,
+using a shared context directory written at context *creation* (a context alive on another
+worker never had a revival record, so sharing those alone would not have been enough), and
+scoped signal values are backed by shared memory so the rebuilt context does not mutate a
+copy nobody is watching. The "after" column is 1,000 actions at concurrency 100, verified
+end to end: 200 actions spread across 4 workers leave the shared counter at exactly 200.
+
+> **Note on the load harness.** `action_hammer` at 16 workers/concurrency 100 reports a
+> variable 80–100%, while a direct probe at the same concurrency gets 1000/1000. The
+> difference is the harness holding 50 SSE observers alongside the action connections, so
+> that residual is client-side, not routing.
+
+### Re-measured again after items 6-10 (2026-08-26)
+
+Hardware and runtime as in the section above (20 cores, PHP 8.5.9, ext-openswoole 26.2.0,
+`SwooleBroker`). `tests/Load/bench_app.php` with `VIA_BENCH_SCOPE=route` at every worker count,
+so all rows measure a shared ROUTE-scoped counter rather than a per-tab one. Worker counts are
+verified per row (`procs = workers + 2`) — an overlapping server from a previous run silently
+makes every row measure the same process tree, which is exactly how an earlier draft of this
+table came out flat.
+
+**CPU-bound action** (`/bench/cpu`, 50x50 Mandelbrot, 1,000 actions, concurrency 100):
+
+| workers | throughput | speedup |
 |---|---|---|
-| 1 | 1000 (100.0%) | 100% |
-| 2 | 510 (51.0%) | 50% |
-| 4 | 262 (26.2%) | 25% |
-| 8 | 130 (13.0%) | 12.5% |
-| 16 | 69 (6.9%) | 6.25% |
+| 1 | 574 req/s | 1.00x |
+| 2 | 1,091 req/s | 1.90x |
+| 4 | 1,660 req/s | 2.89x |
+| 8 | 2,685 req/s | 4.68x |
+| 16 | **4,499 req/s** | **7.84x** |
 
-**Action success tracks `1/worker_num` exactly.** Every failure is
-`HTTP 400 "Invalid context"`: a context is created on the worker that served the page,
-and `ActionHandler` — unlike `SseHandler` — makes no attempt to revive one it has not
-seen, so an action only succeeds when it happens to land back on the originating worker.
+**Broadcast-bound action** (`/bench/counter`, 2,000 actions, concurrency 200):
 
-This is the live consequence of the two changes tracked as item 6 in `PERFORMANCE_TODO.md`
-(share the revival records, give `ActionHandler` the revival fallback). Until those land,
-**multi-worker is not usable for actions** regardless of broker.
+| workers | throughput |
+|---|---|
+| 1 | 19,374 req/s |
+| 2 | 18,772 req/s |
+| 4 | 13,483 req/s |
+| 8 | 13,598 req/s |
+| 16 | 13,861 req/s |
+
+**IO-bound action** (`/bench/io`, 2 ms coroutine sleep): flat at 10-16k req/s across all worker
+counts, as expected — coroutines already provide IO concurrency inside one worker.
+
+HTTP OK was 100% and net increment exact at every worker count in all three.
+
+**So multi-worker is a win exactly where it should be.** Extra workers buy real parallelism for
+CPU-bound handlers (7.8x on 16), buy nothing for IO-bound ones, and cost ~30% for
+broadcast-bound ones where each action already fans out to every worker. Pick the worker count
+from what the handlers actually do.
+
+> **The benchmark indicted itself first.** With the action written as
+> `setValue($sig->int() + 1)` — a read-modify-write — net increment fell below HTTP OK as
+> workers rose: 2000 / 1951 / 1922 / 1879 / 1840 at 1 / 2 / 4 / 8 / 16. That is the lost-update
+> behaviour `Signal::increment()` exists to avoid; switching the harness to it gives exactly
+> 2000 at every worker count. A load test that quietly under-counts is worse than useless, so
+> the harness now uses the atomic API.
 
 ### When multi-worker helps (and when it doesn't)
 
@@ -339,11 +393,15 @@ workers, cross-worker broadcast requires the pluggable `MessageBroker` system
 (already implemented: `SwooleBroker`, `RedisBroker`, `NatsBroker`). TAB-scoped
 routes work without any broker.
 
-> **Not yet, though.** As re-measured above, action success currently tracks
-> `1/worker_num` — a context lives on the worker that served its page and
-> `ActionHandler` cannot revive one it has not seen. Scoped signal VALUES are also
-> still per-worker. Until both are addressed, `worker_num > 1` is not a scaling
-> option for anything beyond stateless routes.
+> **Caveats that remain.** Actions, scoped signal values and the client list now cross
+> workers, and multi-worker is measured as a real win for CPU-bound handlers (7.8x on 16
+> workers) — see "Re-measured again after items 6-10". Two things do not cross. Mutating a scoped signal by reading it and calling
+> `setValue()` loses updates under concurrency — measured 129 of 240 list appends
+> surviving across 4 workers — so use `Signal::increment()` for counters and
+> `Signal::mutate()` for everything else, which take the shared-memory paths that are
+> race-free (240 of 240). And PHP statics in your own handlers are per-process, so a
+> simulation kept in one diverges per worker. The server logs both at start-up whenever
+> `worker_num > 1`.
 
 ### 3. Connection multiplexing / HTTP/2 (reduces connection count)
 

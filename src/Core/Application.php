@@ -9,6 +9,8 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
+use Mbolli\PhpVia\State\SharedClientRegistry;
+use Mbolli\PhpVia\State\SharedContextDirectory;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
@@ -60,6 +62,12 @@ class Application {
      * Null until injected by Via after server creation.
      */
     private ?SharedTable $sharedTable = null;
+
+    /** Cross-worker context directory; null when running single-worker. */
+    private ?SharedContextDirectory $contextDirectory = null;
+
+    /** Cross-worker SSE client registry; null when running single-worker. */
+    private ?SharedClientRegistry $clientRegistry = null;
 
     /** @var array<string, array<string, mixed>> Per-session key-value storage (sessionId => key => value) */
     private array $sessionData = [];
@@ -123,6 +131,11 @@ class Application {
      */
     public function registerContext(Context $context): void {
         $this->contexts[$context->getId()] = $context;
+
+        // Publish how to rebuild it, so an action landing on any other worker can. Written at
+        // creation rather than destruction: a context alive on another worker right now has no
+        // revival record, which is exactly the case that returned HTTP 400.
+        $this->publishContextRecord($context, $this->config->getContextDirectoryTtlSeconds());
     }
 
     /**
@@ -191,12 +204,22 @@ class Application {
      */
     public function registerClient(string $contextId, array $clientInfo): void {
         $this->clients[$contextId] = $clientInfo;
+
+        // The identicon is not published: it is derived from the ID, so every worker can
+        // regenerate it rather than store 1.5 KB of SVG per client.
+        $this->clientRegistry?->register(
+            $contextId,
+            $clientInfo['id'],
+            $clientInfo['ip'],
+            $clientInfo['connected_at']
+        );
     }
 
     /**
      * Unregister a client.
      */
     public function unregisterClient(string $contextId): void {
+        $this->clientRegistry?->unregister($contextId);
         unset($this->clients[$contextId]);
     }
 
@@ -206,6 +229,10 @@ class Application {
      * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
      */
     public function getClients(): array {
+        if ($this->clientRegistry !== null) {
+            return $this->clientRegistry->all();
+        }
+
         $clients = [];
         foreach ($this->clients as $contextId => $client) {
             $clients[$contextId] = array_merge($client, ['context_id' => $contextId]);
@@ -236,6 +263,29 @@ class Application {
      */
     public function setSharedTable(SharedTable $table): void {
         $this->sharedTable = $table;
+    }
+
+    /**
+     * Install the cross-worker context directory.
+     *
+     * @internal called from Via::start() in the master process, and by tests standing several
+     *           Via instances in for several workers
+     */
+    public function setContextDirectory(?SharedContextDirectory $directory): void {
+        $this->contextDirectory = $directory;
+    }
+
+    public function getContextDirectory(): ?SharedContextDirectory {
+        return $this->contextDirectory;
+    }
+
+    /**
+     * Install the cross-worker SSE client registry.
+     *
+     * @internal called from Via::start() in the master process
+     */
+    public function setClientRegistry(?SharedClientRegistry $registry): void {
+        $this->clientRegistry = $registry;
     }
 
     /**
@@ -393,6 +443,10 @@ class Application {
      * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}
      */
     public function getRevivable(string $contextId): ?array {
+        if ($this->contextDirectory !== null) {
+            return $this->contextDirectory->get($contextId);
+        }
+
         $record = $this->revivableContexts[$contextId] ?? null;
         if ($record === null) {
             return null;
@@ -411,7 +465,56 @@ class Application {
      * Drop a revival record once the context has been rebuilt (or is otherwise no longer revivable).
      */
     public function forgetRevivable(string $contextId): void {
+        $this->contextDirectory?->forget($contextId);
         unset($this->revivableContexts[$contextId]);
+    }
+
+    /**
+     * Drop only this process's revival record, leaving the shared directory entry in place.
+     *
+     * Used after a successful rebuild. When records were per-process and only ever described a
+     * DESTROYED context, rebuilding made the record redundant and dropping it was right. The
+     * shared directory entry is a different thing: it is how every OTHER worker rebuilds this
+     * context, so consuming it on the first revival would send the rest back to answering
+     * "400 Invalid context". registerContext() has already refreshed it with a live TTL.
+     */
+    public function forgetLocalRevivable(string $contextId): void {
+        unset($this->revivableContexts[$contextId]);
+    }
+
+    /**
+     * Push a live context's directory entry forward so it cannot expire under a connected tab.
+     *
+     * @internal called from the SSE loop's idle branch
+     */
+    public function touchContextRecord(string $contextId): void {
+        $this->contextDirectory?->touch(
+            $contextId,
+            time() + $this->config->getContextDirectoryTtlSeconds()
+        );
+        $this->clientRegistry?->touch($contextId);
+    }
+
+    /**
+     * Write a context's rebuild record, expiring $ttlSeconds from now.
+     */
+    private function publishContextRecord(Context $context, int $ttlSeconds): void {
+        if ($this->contextDirectory === null) {
+            return;
+        }
+
+        try {
+            $this->contextDirectory->put($context->getId(), [
+                'route' => $context->getRoute(),
+                'params' => $context->getRouteParams(),
+                'sessionId' => $context->getSessionId(),
+                'expiresAt' => time() + $ttlSeconds,
+            ]);
+        } catch (\OverflowException $e) {
+            // Losing the entry costs cross-worker reachability for this one context, which
+            // degrades to the old 400. It must not take the page load down with it.
+            $this->logger->log('warn', 'Context directory write failed: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -422,6 +525,15 @@ class Application {
     private function recordRevivable(Context $context): void {
         $windowMs = $this->config->getContextRevivalWindowMs();
         if ($windowMs <= 0) {
+            return;
+        }
+
+        if ($this->contextDirectory !== null) {
+            // Shorten the live entry to the revival window: the context is gone, and only a
+            // returning tab has any use for it now.
+            $this->publishContextRecord($context, (int) ceil($windowMs / 1000));
+            $this->contextDirectory->prune();
+
             return;
         }
 
