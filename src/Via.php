@@ -813,7 +813,7 @@ class Via {
                     // Inject server reference into ServerAwareBroker implementations (e.g. SwooleBroker).
                     // Must happen after connect() so the worker is fully initialised.
                     if ($this->broker instanceof ServerAwareBroker) {
-                        $this->broker->setServer($server, $workerId, $server->worker_num);
+                        $this->broker->setServer($server, $workerId, self::resolveWorkerNum($server));
                     }
 
                     // Log connection so operators know each worker opens its own broker
@@ -1369,6 +1369,34 @@ class Via {
      */
     public function generateId(): string {
         return IdGenerator::generate();
+    }
+
+    /**
+     * Resolve a running server's worker count.
+     *
+     * ext-openswoole 26 exposes this as `$server->setting['worker_num']` and has no
+     * `worker_num` property. Reading the property directly emitted an "Undefined
+     * property" warning and passed null into ServerAwareBroker::setServer(), whose
+     * TypeError was swallowed by the surrounding catch — leaving the broker without a
+     * server reference and silently disabling all cross-worker broadcast.
+     *
+     * The legacy property is still honoured so older builds keep working.
+     *
+     * @internal Used by workerStart when wiring ServerAwareBroker implementations
+     */
+    public static function resolveWorkerNum(object $server): int {
+        /** @var array<string, mixed> $setting */
+        $setting = property_exists($server, 'setting') && \is_array($server->setting) ? $server->setting : [];
+
+        if (isset($setting['worker_num']) && is_numeric($setting['worker_num'])) {
+            return max(1, (int) $setting['worker_num']);
+        }
+
+        if (property_exists($server, 'worker_num') && is_numeric($server->worker_num)) {
+            return max(1, (int) $server->worker_num);
+        }
+
+        return 1;
     }
 
     /**

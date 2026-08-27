@@ -4,22 +4,21 @@
     "type": "library",
     "require": {
         "php": "^8.4",
-        "ext-openswoole": "*",
+        "ext-openswoole": "^26.0",
         "starfederation/datastar-php": "^1.0",
         "twig/twig": "^3.0",
         "psr/http-server-middleware": "^1.0",
         "nyholm/psr7": "^1.8",
-        "openswoole/core": "^22.2"
+        "openswoole/core": "^26.2"
     },
     "require-dev": {
         "phpstan/phpstan": "^2.1.0",
         "friendsofphp/php-cs-fixer": "^3.90.0",
-        "rector/type-perfect": "^2.1",
-        "tomasvotruba/type-coverage": "^2.0",
+        "tomasvotruba/type-coverage": "^2.3",
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan-deprecation-rules": "^2.0",
-        "pestphp/pest": "^4.0",
-        "openswoole/ide-helper": "^22.1"
+        "pestphp/pest": "^5.0",
+        "openswoole/ide-helper": "^26.2"
     },
     "license": "MIT",
     "autoload": {

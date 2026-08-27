@@ -2,6 +2,39 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **`ext-openswoole` now requires v26:** the extension constraint was unbound (`*`) and is now
+  `^26.0`, matching the upgrade of `openswoole/core` and `openswoole/ide-helper` from v22 to v26.
+  Apps running ext-openswoole 22 must upgrade the extension before updating php-via. Previously the
+  unbound constraint allowed a v22 extension to be paired with the v26 core library — or the
+  reverse — with no install-time error.
+  Migration: rebuild the extension (`pecl install openswoole-26.2.0`), then `composer update`.
+  php-via's own API is unchanged, so no application code changes are required.
+
+### Dependencies
+
+- Upgraded `openswoole/core` `^22.2` → `^26.2` and `openswoole/ide-helper` `^22.1` → `^26.2`.
+  php-via imports nothing from `OpenSwoole\Core\*` and uses none of the APIs dropped in v26
+  (`Coroutine::fgets`/`fread`/`fwrite`, `Coroutine\System::fgets`/`fread`/`fwrite`,
+  `Coroutine::getuid`, `Coroutine::suspend`, and the `Coroutine\PostgreSQL` fetch methods that moved
+  to the new `Coroutine\PostgreSQLStatement`), so no source changes were needed.
+- Upgraded `pestphp/pest` `^4.0` → `^5.0`, which pulls PHPUnit 12 → 13. `phpunit.xml` needs no
+  schema changes.
+- Removed `rector/type-perfect`: the package is abandoned and `tomasvotruba/type-coverage` 2.3.0
+  absorbed it, so both registered the same PHPStan services and the analyser crashed with
+  "Multiple services of type `Rector\TypePerfect\Reflection\MethodNodeAnalyser` found".
+- Pinned `tomasvotruba/type-coverage` to `^2.3`: the `type_perfect:` block in `.phpstan.neon` now
+  depends on the copy bundled from 2.3.0, which the previous `^2.0` could have resolved away.
+- Refreshed lockfiles: `friendsofphp/php-cs-fixer` 3.95.18, `twig/twig` 3.28, `symfony/*` 1.41, and
+  `tempest/highlight` 2.27 (website).
+- Website: `postcss` `^8.5.14` → `^8.5.26`. `public/css/site.css` was rebuilt with no content
+  change — newer postcss emits fewer line breaks. `open-props` was already current at 1.7.23.
+- The `src/Via.php` PHPStan exclusion is still required: the v26 stubs still omit
+  `OpenSwoole\Event::EVENT_READ`, so lifting it still crashes the analyser.
+
 ## [0.12.0] - 2026-07-08
 
 ### New Features

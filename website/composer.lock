@@ -12,12 +12,12 @@
             "dist": {
                 "type": "path",
                 "url": "..",
-                "reference": "9c0502508a75819b3a03be3489a4fa6cec9e9711"
+                "reference": "1def23262edf01d5627ecb50a5a4ac5e3f96906e"
             },
             "require": {
                 "ext-openswoole": "*",
                 "nyholm/psr7": "^1.8",
-                "openswoole/core": "^22.2",
+                "openswoole/core": "^26.2",
                 "php": "^8.4",
                 "psr/http-server-middleware": "^1.0",
                 "starfederation/datastar-php": "^1.0",
@@ -25,13 +25,12 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.90.0",
-                "openswoole/ide-helper": "^22.1",
-                "pestphp/pest": "^4.0",
+                "openswoole/ide-helper": "^26.2",
+                "pestphp/pest": "^5.0",
                 "phpstan/extension-installer": "^1.4",
                 "phpstan/phpstan": "^2.1.0",
                 "phpstan/phpstan-deprecation-rules": "^2.0",
-                "rector/type-perfect": "^2.1",
-                "tomasvotruba/type-coverage": "^2.0"
+                "tomasvotruba/type-coverage": "^2.3"
             },
             "suggest": {
                 "ext-brotli": "Required for Config::withBrotli(): Native Brotli compression for pages, static assets, and SSE streams"
@@ -272,21 +271,21 @@
         },
         {
             "name": "openswoole/core",
-            "version": "22.2.0",
+            "version": "26.2.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/openswoole/core.git",
-                "reference": "d611dd826aa4a9bdd094e4e0d493af4545cf1564"
+                "reference": "cc83e3d9b769380555bb7a4508368a8edc3a7ab1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/openswoole/core/zipball/d611dd826aa4a9bdd094e4e0d493af4545cf1564",
-                "reference": "d611dd826aa4a9bdd094e4e0d493af4545cf1564",
+                "url": "https://api.github.com/repos/openswoole/core/zipball/cc83e3d9b769380555bb7a4508368a8edc3a7ab1",
+                "reference": "cc83e3d9b769380555bb7a4508368a8edc3a7ab1",
                 "shasum": ""
             },
             "require": {
-                "ext-openswoole": ">=22.0",
-                "php": ">=7.4",
+                "ext-openswoole": ">=26.2.0",
+                "php": ">=8.3",
                 "psr/http-message": "^1.0 || ^2.0",
                 "psr/http-server-middleware": "^1.0.0"
             },
@@ -294,9 +293,9 @@
                 "ext-curl": "*",
                 "ext-sockets": "*",
                 "friendsofphp/php-cs-fixer": "^3.6",
-                "openswoole/ide-helper": "^22.0",
+                "openswoole/ide-helper": "^26.2",
                 "php-http/psr7-integration-tests": "^1.1",
-                "phpunit/phpunit": "^9.5"
+                "phpunit/phpunit": "^10.5"
             },
             "suggest": {
                 "ext-mysqli": "*",
@@ -339,7 +338,7 @@
                 "pull-request": "https://github.com/openswoole/openswoole/pulls",
                 "source": "https://github.com/openswoole/openswoole"
             },
-            "time": "2024-09-08T21:58:46+00:00"
+            "time": "2026-07-27T11:48:01+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -661,16 +660,16 @@
         },
         {
             "name": "symfony/deprecation-contracts",
-            "version": "v3.7.0",
+            "version": "v3.7.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/deprecation-contracts.git",
-                "reference": "50f59d1f3ca46d41ac911f97a78626b6756af35b"
+                "reference": "f3202fa1b5097b0af062dc978b32ecf63404e31d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/deprecation-contracts/zipball/50f59d1f3ca46d41ac911f97a78626b6756af35b",
-                "reference": "50f59d1f3ca46d41ac911f97a78626b6756af35b",
+                "url": "https://api.github.com/repos/symfony/deprecation-contracts/zipball/f3202fa1b5097b0af062dc978b32ecf63404e31d",
+                "reference": "f3202fa1b5097b0af062dc978b32ecf63404e31d",
                 "shasum": ""
             },
             "require": {
@@ -708,7 +707,7 @@
             "description": "A generic function and convention to trigger deprecation notices",
             "homepage": "https://symfony.com",
             "support": {
-                "source": "https://github.com/symfony/deprecation-contracts/tree/v3.7.0"
+                "source": "https://github.com/symfony/deprecation-contracts/tree/v3.7.1"
             },
             "funding": [
                 {
@@ -728,7 +727,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-04-13T15:52:40+00:00"
+            "time": "2026-06-05T06:23:12+00:00"
         },
         {
             "name": "symfony/polyfill-ctype",
@@ -900,16 +899,16 @@
         },
         {
             "name": "tempest/highlight",
-            "version": "2.26.0",
+            "version": "2.27.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/tempestphp/highlight.git",
-                "reference": "ad74f092a3d0cbee73f4a007d685cac46c8b0c46"
+                "reference": "7eaf2f4030cc218320672902608b6226bb13a39a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/tempestphp/highlight/zipball/ad74f092a3d0cbee73f4a007d685cac46c8b0c46",
-                "reference": "ad74f092a3d0cbee73f4a007d685cac46c8b0c46",
+                "url": "https://api.github.com/repos/tempestphp/highlight/zipball/7eaf2f4030cc218320672902608b6226bb13a39a",
+                "reference": "7eaf2f4030cc218320672902608b6226bb13a39a",
                 "shasum": ""
             },
             "require": {
@@ -947,7 +946,7 @@
             "description": "Fast, extensible, server-side code highlighting",
             "support": {
                 "issues": "https://github.com/tempestphp/highlight/issues",
-                "source": "https://github.com/tempestphp/highlight/tree/2.26.0"
+                "source": "https://github.com/tempestphp/highlight/tree/2.27.0"
             },
             "funding": [
                 {
@@ -955,7 +954,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-06-07T06:40:56+00:00"
+            "time": "2026-06-29T09:11:42+00:00"
         },
         {
             "name": "tuupola/callable-handler",
@@ -1152,16 +1151,16 @@
         },
         {
             "name": "twig/twig",
-            "version": "v3.27.1",
+            "version": "v3.28.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/twigphp/Twig.git",
-                "reference": "ae2071bffb38f04847fc0864d730c94b9cb8ab74"
+                "reference": "597c12ed286fb9d1701a36684ce6e0cbe28ebc8b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/twigphp/Twig/zipball/ae2071bffb38f04847fc0864d730c94b9cb8ab74",
-                "reference": "ae2071bffb38f04847fc0864d730c94b9cb8ab74",
+                "url": "https://api.github.com/repos/twigphp/Twig/zipball/597c12ed286fb9d1701a36684ce6e0cbe28ebc8b",
+                "reference": "597c12ed286fb9d1701a36684ce6e0cbe28ebc8b",
                 "shasum": ""
             },
             "require": {
@@ -1216,7 +1215,7 @@
             ],
             "support": {
                 "issues": "https://github.com/twigphp/Twig/issues",
-                "source": "https://github.com/twigphp/Twig/tree/v3.27.1"
+                "source": "https://github.com/twigphp/Twig/tree/v3.28.0"
             },
             "funding": [
                 {
@@ -1228,7 +1227,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-05-30T17:09:26+00:00"
+            "time": "2026-07-03T20:44:34+00:00"
         }
     ],
     "packages-dev": [],
@@ -1241,5 +1240,5 @@
         "php": "^8.4"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.9.0"
 }
