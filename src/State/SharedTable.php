@@ -48,6 +48,9 @@ final class SharedTable {
     /** @var array<string, string> Fallback store used in VIA_TEST_MODE */
     private array $fallback = [];
 
+    /** @var array<string, true> Keys written since the last takeDirty(), test-mode only */
+    private array $fallbackDirty = [];
+
     private bool $testMode;
 
     private int $maxValueBytes;
@@ -65,6 +68,9 @@ final class SharedTable {
         $this->table = new Table($maxRows);
         // Single 'value' column holds the serialized PHP value.
         $this->table->column('value', Table::TYPE_STRING, $maxValueBytes);
+        // Set on every write, cleared by takeDirty(). Lets the durable tier flush only what
+        // changed instead of rewriting the whole table on each tick.
+        $this->table->column('dirty', Table::TYPE_INT, 1);
         $this->table->create();
     }
 
@@ -90,12 +96,13 @@ final class SharedTable {
 
         if ($this->testMode) {
             $this->fallback[$key] = $serialized;
+            $this->fallbackDirty[$key] = true;
 
             return;
         }
 
         try {
-            $this->table->set($key, ['value' => $serialized]);
+            $this->table->set($key, ['value' => $serialized, 'dirty' => 1]);
         } catch (Exception $e) {
             // OpenSwoole throws a bare exception once the rows are exhausted, which reaches the
             // caller as a generic 500. Shape it like the value-size guard above so the failure
@@ -147,6 +154,61 @@ final class SharedTable {
         }
 
         $this->table->del($key);
+    }
+
+    /**
+     * Seed a value without marking it dirty.
+     *
+     * Used when loading the durable snapshot at start-up: those entries came FROM storage, so
+     * flushing them straight back would write the whole set again on the first tick.
+     */
+    public function seed(string $key, string $serialized): void {
+        $key = $this->normalizeKey($key);
+
+        if ($this->testMode) {
+            $this->fallback[$key] = $serialized;
+
+            return;
+        }
+
+        $this->table->set($key, ['value' => $serialized, 'dirty' => 0]);
+    }
+
+    /**
+     * Take every key written since the last call, clearing the flags as it goes.
+     *
+     * Racy by construction and deliberately so: a write landing between the read and the clear
+     * has its flag reset while its value is already in the batch, so it is persisted once rather
+     * than twice. A write landing after the clear stays dirty for the next tick. Neither loses
+     * data — the table always holds the authoritative value.
+     *
+     * @return array<string, string> key => serialized value
+     */
+    public function takeDirty(): array {
+        if ($this->testMode) {
+            $dirty = [];
+            foreach (array_keys($this->fallbackDirty) as $key) {
+                if (isset($this->fallback[$key])) {
+                    $dirty[$key] = $this->fallback[$key];
+                }
+            }
+            $this->fallbackDirty = [];
+
+            return $dirty;
+        }
+
+        $dirty = [];
+        foreach ($this->table as $key => $row) {
+            if ((int) ($row['dirty'] ?? 0) === 1) {
+                $dirty[(string) $key] = (string) $row['value'];
+            }
+        }
+
+        foreach (array_keys($dirty) as $key) {
+            $this->table->set($key, ['dirty' => 0]);
+        }
+
+        return $dirty;
     }
 
     private function normalizeKey(string $key): string {

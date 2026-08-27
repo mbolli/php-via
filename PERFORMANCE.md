@@ -304,6 +304,41 @@ from what the handlers actually do.
 > 2000 at every worker count. A load test that quietly under-counts is worse than useless, so
 > the harness now uses the atomic API.
 
+## Brotli SSE compression: the cost is memory, and it is per connection
+
+Measured 2026-08-26 with ext-brotli 0.21.0 against **real captured Game-of-Life SSE frames**
+(2,500 tiles, ~127 KB per frame), 50 concurrent encoders, RSS delta per encoder at steady state.
+
+| level | per encoder | at 2,000 conns | ratio | CPU per frame |
+|---|---|---|---|---|
+| 1 | 574 KB | **1.1 GB** | 19.0:1 | 90 µs |
+| 2 | 8,573 KB | 16.4 GB | 26.9:1 | 190 µs |
+| 3 | 8,567 KB | 16.3 GB | 27.8:1 | 218 µs |
+| **4** (php-via default) | 8,851 KB | **16.9 GB** | 30.3:1 | 277 µs |
+| 5 | 9,677 KB | 18.5 GB | 40.3:1 | 450 µs |
+| 8 | 13,577 KB | 25.9 GB | 49.5:1 | 1,094 µs |
+| 11 | 31,474 KB | 60.0 GB | 75.3:1 | **94,551 µs** |
+
+**The encoder is lazy but saturating.** At init it costs ~7 KB. It grows as the stream feeds it
+and plateaus after roughly 8 MB of traffic — measured identical at 8 MB, 64 MB and 256 MB fed —
+and never shrinks. So the cost is driven by traffic, not connection count: an idle stream stays
+near 7 KB, and the 2,000-connection column above only applies to 2,000 *busy* streams.
+
+That is why the existing 2,000-connection result in this document does not contradict it: that
+run held connections against a low-volume counter, so the ring buffers never grew.
+
+**The window is not tunable.** ext-brotli's `brotli_compress_init()` takes only
+`(level, mode, dict)` and hardcodes `BROTLI_DEFAULT_WINDOW` (22 = 4 MB). Neither lowering it to
+save memory nor raising it for the compression gains Anders Murphy reports is possible without an
+upstream extension change. The lever php-via has is the quality level, and it has a cliff: level 1
+costs 15× less memory and 3× less CPU than the default for 37% more bytes on the wire.
+
+**Level 11 must never be used for streaming** — 94 ms of CPU per frame, on the event loop.
+php-via uses it only for static assets, which are one-shot and cached per file+mtime, so that
+cost is paid once per asset rather than per request.
+
+---
+
 ### When multi-worker helps (and when it doesn't)
 
 At 1–2k SSE connections on a single machine with a localhost Redis broker,

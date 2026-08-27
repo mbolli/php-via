@@ -12,7 +12,7 @@ the lock step.
 
 ## Status (2026-08-26)
 
-**Closed: 0a-0g, 1, 3, 4, 5, 6, 7, 8, 12, 13, 14.** 28 commits on `fix/correctness-backlog`.
+**Closed: 0a-0g, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14. Only #2 remains open.**
 Multi-worker went from non-functional to usable for stateful routes over the course of this work.
 
 | # | Item | Status |
@@ -22,15 +22,15 @@ Multi-worker went from non-functional to usable for stateful routes over the cou
 | 0f | Rate limiter per-worker (`limit x worker_num`) | `DONE` `1ab7230` |
 | 0g | Client registry per-worker | `DONE` `ed4f7dd` |
 | 1 | Non-idempotent patches destroyed | `DONE` `c88a8d5` `025bfc5` |
-| 2 | Brotli window size | **`UNVERIFIED`** — needs a machine with ext-brotli |
+| 2 | Brotli window size | `DONE` — window is not tunable; the real finding is 8.9 MB/connection |
 | 3 | Coalesce broadcasts / split frame | `DONE` `e739186` |
 | 4 | SSE loop liveness | `DONE` `1af5888` |
 | 5 | Slow-consumer frame drop | `DONE` `964676f` |
 | 6 | Cross-worker actions | `DONE` `f26604d` |
 | 7 | Shared scoped signal values | `DONE` `d063820` (stage 1) `e2a506b` (stage 2) |
 | 8 | `SharedTable` capacity + key length | `DONE` `2ece0a7` `7a79667` |
-| 9 | SQLite instead of `SharedTable` | `EXPLORE` — verdict: add a tier, do not replace |
-| 10 | First-class single-writer API | `UNBLOCKED` — the checkpoint blocker's premise was refuted |
+| 9 | SQLite instead of `SharedTable` | `DONE` — tiered, not replaced |
+| 10 | First-class single-writer API | `DONE` (a) `e739186`, (b) as write-behind, no extra process |
 | 11 | HTML caching in shared storage | **CLOSED — gate failed, do not build** |
 | 12 | `Scope::ROUTE` never expanded | `DONE` `9e4e621` |
 | 13 | `addScope()` disables the view cache | `DONE` `2163721` `18e20d2` `e7d0e83` |
@@ -353,7 +353,48 @@ dropping the patch with no signal to the caller. Same class, same fix location.
 
 ---
 
-## 2. Brotli window size is untuned — **`UNVERIFIED`, the only item still open on its own merits**
+## 2. Brotli window size is untuned — `DONE`, **and the proposed fix is impossible**
+
+ext-brotli was built from source (0.21.0, `--with-libbrotli`) to verify this. Answers to the
+three actions, in order:
+
+**1. The default LGWIN is 22 (4 MB)** — `BROTLI_DEFAULT_WINDOW`. Confirmed from the extension
+source: `brotli_compress_init()` takes only `(level, mode, dict)` and passes `0` for lgwin, which
+the helper resolves to the default. **So the window cannot be set at all from PHP**, and action 3
+("add a window argument to `Config::withBrotli()`") is not implementable without an upstream
+change. Neither the memory saving from a smaller window nor Anders' CPU win from a larger one is
+available.
+
+**2. The memory footprint is real, and worse than this item estimated.** Measured against real
+captured Game-of-Life SSE frames (~127 KB each), RSS delta per encoder at steady state:
+
+| level | per encoder | at 2,000 conns | ratio | CPU/frame |
+|---|---|---|---|---|
+| 1 | 574 KB | **1.1 GB** | 19.0:1 | 90 µs |
+| 2 | 8,573 KB | 16.4 GB | 26.9:1 | 190 µs |
+| 3 | 8,567 KB | 16.3 GB | 27.8:1 | 218 µs |
+| **4 (default)** | 8,851 KB | **16.9 GB** | 30.3:1 | 277 µs |
+| 5 | 9,677 KB | 18.5 GB | 40.3:1 | 450 µs |
+| 8 | 13,577 KB | 25.9 GB | 49.5:1 | 1,094 µs |
+| 11 | 31,474 KB | 60.0 GB | 75.3:1 | **94,551 µs** |
+
+The estimate in the table below said ~8 GB at LGWIN 22; it is **16.9 GB**, because the encoder
+holds hash tables as well as the 4 MB ring buffer — roughly 2x the window.
+
+**The growth is lazy and saturating**, which the original note guessed correctly: 7 KB at init,
+plateauing after ~8 MB of traffic (identical at 8, 64 and 256 MB fed) and never shrinking. So the
+cost tracks traffic, not connections — this item was also right that the existing
+2,000-connection result does not clear it, since that run used a low-volume counter.
+
+**What shipped:** the measurements are documented on `Config::withBrotli()` and in
+`PERFORMANCE.md`. The actionable lever is the quality level, not the window: level 1 costs 15x
+less memory and 3x less CPU for 37% more bytes on the wire. The default was left at 4 — it is
+right for hundreds of connections and wrong for thousands, and that is a deployment decision the
+documentation now supports rather than one to guess at globally.
+
+---
+
+### Original analysis
 
 **File:** `src/Http/Middleware/BrotliMiddleware.php:40`
 
@@ -937,7 +978,38 @@ observation was a *user loop* of 200 `setGlobalState()` calls, which is inherent
 
 ---
 
-## 9. SQLite instead of `SharedTable`? — `EXPLORE`, verdict: add a tier, do not replace
+## 9. SQLite instead of `SharedTable`? — `DONE`: tiered, not replaced
+
+**Shipped as `Config::withPersistentGlobalState($path, $flushMs)`.** Re-measured against the
+actual interface before building:
+
+| | µs |
+|---|---|
+| raw `OpenSwoole\Table::get` | 0.083 |
+| `SharedTable::get` (serialize wrapper) | 0.193 |
+| SQLite point SELECT | **2.757** — 14x the wrapper, 33x raw |
+
+So the verdict below holds, and the tier is **write-behind, not write-through**: reads never
+touch SQLite. Writes land in the table and set a dirty flag; a leader-worker timer drains the
+dirty set into one batched transaction.
+
+| dirty keys | flush | per row |
+|---|---|---|
+| 10 | 11.5 µs | 1.15 µs |
+| 100 | 102.5 µs | 1.03 µs |
+| 1000 | 799.9 µs | 0.80 µs |
+
+`wal_checkpoint(TRUNCATE)` of a 4.3 MB WAL: **659.6 µs** — an order of magnitude below the
+8753 µs recorded earlier for a PASSIVE checkpoint under load.
+
+**One bullet in the verdict below is now wrong.** "Atomic read-modify-write — SQLite wins, Table
+cannot solve it" was refuted by item 7: `Table::incr()` is atomic across processes, and the
+non-numeric case is covered by `Signal::mutate()`'s ticket lock. SQLite is not needed for
+atomicity.
+
+---
+
+### Original analysis
 
 ### The blocker: SQLite calls block the whole worker
 
@@ -1069,7 +1141,29 @@ even the revival-record use needs a second look.
 
 ---
 
-## 10. A first-class single-writer API for users — `EXPLORE` (10(b) unblocked, see the refutation below)
+## 10. A first-class single-writer API for users — `DONE`
+
+**(a) — batching the fan-out on a tick** shipped as item 3 (`e739186`).
+
+**(b) — a dedicated writer process** was not built, and does not need to be. Its two jobs were
+cross-worker RMW and getting blocking persistence off the event loop. The first is solved without
+it (item 7: atomic `incr` plus a ticket lock). The second is solved by *when* the writes happen,
+not by *where*: the write-behind flush in item 9 drains the dirty set on a fixed tick inside one
+transaction — Anders' shape exactly — on the leader worker, using the leader-gated timer from
+`f388526`. No extra process, no IPC, and no change to read semantics.
+
+The recommendation below said (b) "should land together with item 9's SQLite tier and item 7's
+scoped-signal ownership — they are one design". That was right about them being one design and
+wrong about its shape: once item 7 no longer needs an owner worker, what remains is a flush
+timer, not a process.
+
+Cost of durability, measured: a sub-millisecond stall once per flush interval on one worker, and
+a bounded loss window equal to that interval. Against 2.757 µs on *every read* if SQLite sat in
+front instead — each one non-yielding CPU that stalls the whole worker's loop.
+
+---
+
+### Original analysis
 
 Anders: *"I have a single writer process. It doesn't even have an event loop. All it does
 is drain queues on a fixed tick rate in one giant transaction and do the writes."*
@@ -1513,13 +1607,12 @@ recorded in the status table at the top: item 7 had to precede item 6, not follo
 
 - **#2** — brotli window size. `UNVERIFIED`; needs a machine with ext-brotli. The memory
   consequence of `LGWIN` is the thing to measure first.
-- **#9 / #10** — SQLite tiering and the single-writer API. **10(b) is no longer blocked.** The
-  recorded blocker rested on "every SSE connection is a long-lived reader", which is false: what
-  pins the WAL is a cursor left mid-scan or an explicit read transaction, and php-via has
-  neither (PHP frees `SQLite3Result` by refcount, so a result local to a helper is finalised on
-  return). Requirement becomes reader hygiene, already satisfied — see
-  `tests/Feature/WalCheckpointReadersTest.php`. The remaining work on #10(b) is the design
-  itself, not an unsolved constraint.
+- **#9 / #10** — **DONE.** Shipped as a write-behind durable tier
+  (`Config::withPersistentGlobalState()`), not a writer process: reads stay in shared memory at
+  0.193 µs, writes set a dirty flag, and a leader-worker timer drains the dirty set into one
+  batched transaction (~1 µs per changed key). The checkpoint blocker that gated this was
+  refuted — see the box under item 10 — and the writer process turned out to be unnecessary once
+  item 7 removed the need for an owner worker.
 - **#11** — closed. Gate failed on measurement: every broadcasting route is too cheap to cache,
   every expensive route never broadcasts.
 - **#6c** (real threads) — closed. OpenSwoole's multicore story is processes.

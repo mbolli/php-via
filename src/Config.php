@@ -106,6 +106,10 @@ class Config {
      */
     private int $workerNum = 1;
 
+    private ?string $globalStatePath = null;
+
+    private int $globalStateFlushMs = 1000;
+
     private int $contextDirectoryRows = 4096;
 
     private int $contextDirectoryRecordBytes = 1024;
@@ -595,6 +599,39 @@ class Config {
      * @param int  $staticLevel  Compression level for static assets (0–11). Default 11 — maximum
      *                           ratio; paid once per file then served from an in-memory cache.
      */
+    /**
+     * Enable Brotli compression for pages, static assets and the SSE stream.
+     *
+     * **The dynamic level is a memory decision, not just a bandwidth one.** A streaming Brotli
+     * encoder holds per-connection state that grows toward the window cap as the stream feeds it
+     * — lazily (7 KB at init) but saturating after ~8 MB of traffic, and it never shrinks.
+     * Measured on real 127 KB Game-of-Life SSE frames, ext-brotli 0.21.0:
+     *
+     *   level | per encoder | at 2,000 conns |   ratio | CPU per frame
+     *       1 |      574 KB |         1.1 GB |  19.0:1 |      90 us
+     *       2 |     8573 KB |        16.4 GB |  26.9:1 |     190 us
+     *       3 |     8567 KB |        16.3 GB |  27.8:1 |     218 us
+     *       4 |     8851 KB |        16.9 GB |  30.3:1 |     277 us   <- default
+     *       5 |     9677 KB |        18.5 GB |  40.3:1 |     450 us
+     *       8 |    13577 KB |        25.9 GB |  49.5:1 |    1094 us
+     *      11 |    31474 KB |        60.0 GB |  75.3:1 |   94551 us
+     *
+     * So the default costs ~8.9 MB per *busy* long-lived stream. That is fine for hundreds of
+     * connections and ruinous for thousands: pick level 1 when connection count matters more
+     * than egress (15x less memory, 3x less CPU, 37% more bytes on the wire), and raise the
+     * level only when streams are few or low-volume.
+     *
+     * Note the cost is driven by traffic, not connections: an idle stream stays near 7 KB. A
+     * counter that ticks occasionally never approaches these numbers; a Game-of-Life board does.
+     *
+     * The sliding window itself is NOT tunable. ext-brotli's brotli_compress_init() takes only
+     * (level, mode, dict) and hardcodes BROTLI_DEFAULT_WINDOW (22 = 4 MB), so the window cannot
+     * be lowered to save memory or raised for the compression Anders Murphy reports from larger
+     * windows. Changing that needs an upstream extension change.
+     *
+     * $staticLevel applies to one-shot asset compression, which is cached per file+mtime, so its
+     * 94 ms at level 11 is paid once rather than per request.
+     */
     public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, int $staticLevel = 11): self {
         $this->brotli = $enabled;
         $this->brotliDynamicLevel = max(0, min(11, $dynamicLevel));
@@ -817,6 +854,40 @@ class Config {
 
     public function getScopedSignalTableValueBytes(): int {
         return $this->scopedSignalTableValueBytes;
+    }
+
+    /**
+     * Persist GlobalState to a SQLite file so it survives a server restart.
+     *
+     * Reads never touch SQLite. Writes land in shared memory at full speed and set a dirty flag;
+     * a timer on the leader worker drains the dirty set into one batched transaction. Measured
+     * flush cost is ~1 us per changed key (100 keys in 102 us), plus a sub-millisecond WAL
+     * checkpoint every few thousand writes — versus 2.8 us on EVERY read if SQLite sat in front
+     * instead, each one non-yielding CPU that stalls the whole worker's event loop.
+     *
+     * The trade is a bounded loss window: anything written since the last flush is lost if the
+     * process dies. Lower $flushMs to narrow it, at the cost of more frequent (but still
+     * sub-millisecond) stalls.
+     *
+     * Enabling this also allocates the shared table in single-worker mode, so that GlobalState
+     * has somewhere to be dirty-tracked. Reads stay at ~0.19 us.
+     *
+     * @param string $path    SQLite file to persist to; created if absent
+     * @param int    $flushMs How often the leader worker drains the dirty set (default 1000)
+     */
+    public function withPersistentGlobalState(string $path, int $flushMs = 1000): self {
+        $this->globalStatePath = $path;
+        $this->globalStateFlushMs = max(50, $flushMs);
+
+        return $this;
+    }
+
+    public function getGlobalStatePath(): ?string {
+        return $this->globalStatePath;
+    }
+
+    public function getGlobalStateFlushMs(): int {
+        return $this->globalStateFlushMs;
     }
 
     public function getGlobalStateTableRows(): int {

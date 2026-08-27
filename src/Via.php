@@ -29,6 +29,7 @@ use Mbolli\PhpVia\State\SharedContextDirectory;
 use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
+use Mbolli\PhpVia\State\SqliteSnapshot;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
@@ -698,13 +699,24 @@ class Via {
 
             // SharedTable: allocate in master process so it is mmap'd into all workers
             // on fork. Only needed when worker_num > 1 — single-worker uses a plain PHP array.
-            if ($this->config->getWorkerNum() > 1) {
+            // The shared table is needed whenever GlobalState has to be visible beyond one
+            // process OR dirty-tracked for persistence, so persistence pulls it in even when
+            // running single-worker.
+            $persistPath = $this->config->getGlobalStatePath();
+
+            if ($this->config->getWorkerNum() > 1 || $persistPath !== null) {
                 $sharedTable = new SharedTable(
                     $this->config->getGlobalStateTableRows(),
                     $this->config->getGlobalStateTableValueBytes(),
                 );
                 $this->app->setSharedTable($sharedTable);
 
+                if ($persistPath !== null) {
+                    $this->installGlobalStatePersistence($sharedTable, $persistPath);
+                }
+            }
+
+            if ($this->config->getWorkerNum() > 1) {
                 // Same reason, same timing: scoped signal VALUES have to be visible across
                 // workers or every worker runs its own divergent copy of the scope.
                 $this->setSharedSignalStore(new SharedSignalStore(
@@ -1545,6 +1557,59 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Seed GlobalState from its durable snapshot and arm the write-behind flush.
+     *
+     * Called from start() in the master process, before the fork, so the seeded table is the one
+     * every worker inherits and the snapshot handle belongs to whoever ends up flushing.
+     */
+    private function installGlobalStatePersistence(SharedTable $table, string $path): void {
+        $snapshot = new SqliteSnapshot($path);
+
+        $loaded = 0;
+        foreach ($snapshot->load() as $key => $serialized) {
+            try {
+                // seed(), not set(): these came FROM storage, and marking them dirty would
+                // write the entire set straight back on the first tick.
+                $table->seed($key, $serialized);
+                ++$loaded;
+            } catch (\Throwable $e) {
+                // A key or value that no longer fits the configured table is not a reason to
+                // refuse to boot; the rest of the snapshot is still usable.
+                $this->log('warn', "GlobalState snapshot: skipped \"{$key}\" — " . $e->getMessage());
+            }
+        }
+
+        if ($loaded > 0) {
+            $this->log('info', "GlobalState restored {$loaded} keys from {$path}");
+        }
+
+        // Leader-only by default (see setInterval()), which is exactly the single-writer
+        // property this needs: one process draining the dirty set into one transaction.
+        $this->setInterval(function () use ($table, $snapshot): void {
+            $dirty = $table->takeDirty();
+            if ($dirty === []) {
+                return;
+            }
+
+            try {
+                $snapshot->save($dirty);
+            } catch (\Throwable $e) {
+                $this->log('error', 'GlobalState flush failed: ' . $e->getMessage());
+            }
+        }, $this->config->getGlobalStateFlushMs());
+
+        // Final drain on the way down, so a graceful stop does not discard the last window.
+        $this->onShutdown(function () use ($table, $snapshot): void {
+            try {
+                $snapshot->save($table->takeDirty());
+                $snapshot->checkpoint();
+            } catch (\Throwable $e) {
+                $this->log('error', 'GlobalState final flush failed: ' . $e->getMessage());
+            }
+        });
     }
 
     /**
