@@ -32,6 +32,21 @@ $config = (new Config())
     // Signal editing stays hard-disabled here (devMode is off in prod); it is
     // re-enabled below for local dev only.
     ->withTracing(true)
+
+    // GlobalState lives in shared memory, which dies with the process. The poll tallies
+    // and the ROUTE-scope demo counter are visitor-contributed, so without this every
+    // deploy silently resets them to zero. Reads stay in memory; a leader-worker timer
+    // batches the dirty keys into SQLite once a second.
+    // Sibling of chat.db/spreadsheet.db, and covered by the same website/*.db gitignore.
+    ->withPersistentGlobalState(__DIR__ . '/state.db')
+
+    // Every demo action here is an unauthenticated POST, and several fan a broadcast out
+    // to every connected client (the poll, the shared counter, Game of Life) — so one IP
+    // can amplify. The ceiling has to clear the per-keystroke examples though: Type Race
+    // and the spreadsheet fire an action per key, so a fast typist alone sustains ~5/s and
+    // several people behind one NAT multiply that. 1200/60s = 20/s per IP leaves them
+    // untouched while still capping a flood.
+    ->withActionRateLimit((int) (getenv('VIA_ACTION_RATE_LIMIT') ?: 1200), 60)
 ;
 
 if (!$isDev) {
@@ -191,7 +206,10 @@ $sharedCounterDemo = function (Context $c) use ($twig): void {
     $lastClickHue = $c->signal(0, 'lastClickHue');
 
     $increment = $c->action(function (Context $c) use ($counter, $lastClick, $lastClickHue): void {
-        $counter->setValue($counter->int() + 1, broadcast: false);
+        // Atomic: $counter inherits the context's ROUTE scope, so with more than one worker
+        // setValue($counter->int() + 1) would let two workers read the same value and each
+        // write back the same result, dropping a click.
+        $counter->increment(broadcast: false);
 
         $visitorNum = substr($c->getId(), -4);
         $lastClick->setValue('Visitor #' . strtoupper($visitorNum), broadcast: false);
@@ -280,9 +298,12 @@ $routeScopeDemo = function (Context $c) use ($app): void {
     $c->scope(Scope::routeScope($c->getRoute()));
     $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount');
     $incRoute = $c->action(function (Context $c) use ($app, $routeCount): void {
-        $newVal = ($app->globalState('scope_demo_count') ?? 0) + 1;
+        // The scoped signal is the counter of record — increment() is atomic across workers.
+        // GlobalState is only a mirror so the tally survives a restart (it reseeds the signal
+        // above on first mount). Writing back the authoritative post-increment result keeps
+        // that mirror convergent; GlobalState itself has no atomic increment to offer.
+        $newVal = $routeCount->increment();
         $app->setGlobalState('scope_demo_count', $newVal);
-        $routeCount->setValue($newVal);
     }, 'incRoute');
 
     $c->view(function () use ($routeCount, $incRoute): string {
