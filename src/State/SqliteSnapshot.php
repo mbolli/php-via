@@ -34,9 +34,12 @@ namespace Mbolli\PhpVia\State;
  * dies. That window is the flush interval, and it is the price of not paying 2.8 us on every read.
  */
 final class SqliteSnapshot {
-    private \SQLite3 $db;
+    private ?\SQLite3 $db = null;
 
-    private \SQLite3Stmt $upsert;
+    private ?\SQLite3Stmt $upsert = null;
+
+    /** Process that opened $db. SQLite forbids carrying a connection across fork(). */
+    private int $ownerPid = 0;
 
     /** Writes since the last checkpoint, used to keep the WAL from growing without bound. */
     private int $writesSinceCheckpoint = 0;
@@ -45,25 +48,9 @@ final class SqliteSnapshot {
      * @param string $path            File to persist to. Created if absent.
      * @param int    $checkpointEvery Rows written between WAL checkpoints
      */
-    public function __construct(string $path, private int $checkpointEvery = 5000) {
-        $this->db = new \SQLite3($path);
-        // Failures arrive as exceptions rather than PHP warnings plus a false return, which is
-        // what SQLite3 does by default. A false return from exec('BEGIN IMMEDIATE') is very easy
-        // to miss, and missing it means writing a batch with no transaction open.
-        $this->db->enableExceptions(true);
-        $this->db->exec('PRAGMA journal_mode=WAL');
-        $this->db->exec('PRAGMA synchronous=NORMAL');
-        // Measured to carry the whole warm-read win; mmap_size is deliberately not set (it
-        // doubles cold-connection first-query cost for no further gain), and busy_timeout is
-        // deliberately left at 0 — on a coroutine loop it converts a blocked checkpoint into a
-        // multi-second freeze.
-        $this->db->exec('PRAGMA cache_size=15625');
-        $this->db->exec('PRAGMA temp_store=MEMORY');
-        $this->db->exec('CREATE TABLE IF NOT EXISTS global_state (k TEXT PRIMARY KEY, v BLOB NOT NULL)');
-
-        $this->upsert = $this->db->prepare(
-            'INSERT INTO global_state (k, v) VALUES (:k, :v) ON CONFLICT(k) DO UPDATE SET v = excluded.v'
-        );
+    public function __construct(private string $path, private int $checkpointEvery = 5000) {
+        // Opened eagerly so a bad path fails at boot rather than on the first flush.
+        $this->db();
     }
 
     /**
@@ -73,7 +60,7 @@ final class SqliteSnapshot {
      */
     public function load(): array {
         $rows = [];
-        $result = $this->db->query('SELECT k, v FROM global_state');
+        $result = $this->db()->query('SELECT k, v FROM global_state');
 
         if ($result === false) {
             return $rows;
@@ -110,8 +97,11 @@ final class SqliteSnapshot {
         // returning false, not by throwing. Ignoring it would let the batch proceed with no
         // transaction open, so each row would commit on its own and a mid-batch failure would
         // leave the snapshot half-applied with nothing to roll back.
+        $db = $this->db();
+        $upsert = $this->upsert ?? throw new \LogicException('db() always prepares the upsert');
+
         try {
-            $this->db->exec('BEGIN IMMEDIATE');
+            $db->exec('BEGIN IMMEDIATE');
         } catch (\Throwable $e) {
             throw new \RuntimeException(
                 'GlobalState snapshot could not begin a write transaction: ' . $e->getMessage()
@@ -123,15 +113,15 @@ final class SqliteSnapshot {
 
         try {
             foreach ($rows as $key => $serialized) {
-                $this->upsert->bindValue(':k', $key, SQLITE3_TEXT);
-                $this->upsert->bindValue(':v', $serialized, SQLITE3_BLOB);
-                $this->upsert->execute();
-                $this->upsert->reset();
+                $upsert->bindValue(':k', $key, SQLITE3_TEXT);
+                $upsert->bindValue(':v', $serialized, SQLITE3_BLOB);
+                $upsert->execute();
+                $upsert->reset();
             }
-            $this->db->exec('COMMIT');
+            $db->exec('COMMIT');
         } catch (\Throwable $e) {
             try {
-                $this->db->exec('ROLLBACK');
+                $db->exec('ROLLBACK');
             } catch (\Throwable) {
                 // Nothing useful to do: the batch is already lost and the caller is about to
                 // hear about it. Swallowing keeps the original cause as the reported failure.
@@ -158,7 +148,7 @@ final class SqliteSnapshot {
     public function checkpoint(): bool {
         $this->writesSinceCheckpoint = 0;
 
-        $result = $this->db->query('PRAGMA wal_checkpoint(TRUNCATE)');
+        $result = $this->db()->query('PRAGMA wal_checkpoint(TRUNCATE)');
         if ($result === false) {
             return false;
         }
@@ -169,7 +159,60 @@ final class SqliteSnapshot {
         return (int) ($row['busy'] ?? 1) === 0;
     }
 
+    /**
+     * Close the connection. The next call opens a fresh one, so close before a fork() and the
+     * child gets its own.
+     */
     public function close(): void {
-        $this->db->close();
+        $this->upsert?->close();
+        $this->db?->close();
+        $this->db = null;
+        $this->upsert = null;
+    }
+
+    /**
+     * The connection, opened on first use in the calling process.
+     */
+    private function db(): \SQLite3 {
+        $pid = (int) getmypid();
+
+        if ($this->db !== null) {
+            if ($this->ownerPid !== $pid) {
+                throw new \LogicException(
+                    "GlobalState snapshot connection opened in pid {$this->ownerPid} used from pid {$pid}; "
+                    . 'SQLite connections must not cross fork(), close() it first'
+                );
+            }
+
+            return $this->db;
+        }
+
+        $db = new \SQLite3($this->path);
+        // Failures arrive as exceptions rather than PHP warnings plus a false return, which is
+        // what SQLite3 does by default. A false return from exec('BEGIN IMMEDIATE') is very easy
+        // to miss, and missing it means writing a batch with no transaction open.
+        $db->enableExceptions(true);
+        $db->exec('PRAGMA journal_mode=WAL');
+        $db->exec('PRAGMA synchronous=NORMAL');
+        // Measured to carry the whole warm-read win; mmap_size is deliberately not set (it
+        // doubles cold-connection first-query cost for no further gain), and busy_timeout is
+        // deliberately left at 0: on a coroutine loop it converts a blocked checkpoint into a
+        // multi-second freeze.
+        $db->exec('PRAGMA cache_size=15625');
+        $db->exec('PRAGMA temp_store=MEMORY');
+        $db->exec('CREATE TABLE IF NOT EXISTS global_state (k TEXT PRIMARY KEY, v BLOB NOT NULL)');
+
+        $upsert = $db->prepare(
+            'INSERT INTO global_state (k, v) VALUES (:k, :v) ON CONFLICT(k) DO UPDATE SET v = excluded.v'
+        );
+        if ($upsert === false) {
+            throw new \RuntimeException('GlobalState snapshot could not prepare its upsert statement');
+        }
+
+        $this->db = $db;
+        $this->upsert = $upsert;
+        $this->ownerPid = $pid;
+
+        return $db;
     }
 }

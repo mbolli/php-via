@@ -153,21 +153,74 @@ test('a batch that cannot take the write lock fails loudly instead of writing un
     $snapshot->close();
 });
 
+/** Run the persistence fixture once and return what globalState('counter') held at start-up. */
+function runPersistentServer(string $path, string $write, int $flushMs = 100, int $workers = 1, string $when = 'start'): string {
+    $fixture = dirname(__DIR__) . '/Fixtures/persistent_global_state.php';
+    $out = (string) shell_exec(
+        'timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture)
+        . ' ' . escapeshellarg($path) . ' ' . escapeshellarg($write) . ' ' . $flushMs . ' ' . $workers
+        . ' ' . escapeshellarg($when) . ' 2>&1'
+    );
+    expect($out)->toMatch('/value=/', 'fixture output: ' . var_export($out, true));
+    preg_match('/value=(.*)/', $out, $m);
+
+    return trim($m[1]);
+}
+
 test('GlobalState survives a real server restart', function (): void {
     // End to end through Via::start(): seed on boot, write-behind flush, drain on shutdown.
-    $fixture = dirname(__DIR__) . '/Fixtures/persistent_global_state.php';
+    expect(runPersistentServer($this->path, 'hello'))->toBe('NULL', 'the first server starts with nothing persisted');
+    expect(runPersistentServer($this->path, '-'))->toBe("'hello'", 'a fresh server must restore what the previous one wrote');
+});
 
-    $run = function (string $write) use ($fixture): string {
-        $out = (string) shell_exec(
-            'timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture)
-            . ' ' . escapeshellarg($this->path) . ' ' . escapeshellarg($write) . ' 2>&1'
-        );
-        expect($out)->toMatch('/value=/', 'fixture output: ' . var_export($out, true));
-        preg_match('/value=(.*)/', $out, $m);
+test('a write the flush timer never saw survives a stop', function (int $workers): void {
+    // No flush tick fires within the run, so only the master's final drain can persist it.
+    // Before, that drain was an onShutdown callback, and onShutdown never ran on a stop.
+    expect(runPersistentServer($this->path, 'late', flushMs: 60_000, workers: $workers))->toBe('NULL');
+    expect(runPersistentServer($this->path, '-', flushMs: 60_000, workers: $workers))->toBe("'late'");
+})->with([1, 2]);
 
-        return trim($m[1]);
-    };
+test('a write made after the leader stopped is saved by the master', function (): void {
+    // The leader's own stop flush has already run by then, so only the master's drain sees it.
+    expect(runPersistentServer($this->path, 'last', flushMs: 60_000, workers: 2, when: 'shutdown'))->toBe('NULL');
+    expect(runPersistentServer($this->path, '-', flushMs: 60_000, workers: 2))->toBe("'last'");
+});
 
-    expect($run('hello'))->toBe('NULL', 'the first server starts with nothing persisted');
-    expect($run('-'))->toBe("'hello'", 'a fresh server must restore what the previous one wrote');
+test('a snapshot reopens after close()', function (): void {
+    $snapshot = new SqliteSnapshot($this->path);
+    $snapshot->close();
+
+    expect($snapshot->save(['k' => serialize('v')]))->toBe(1);
+    expect(unserialize($snapshot->load()['k']))->toBe('v');
+    $snapshot->close();
+});
+
+test('a connection opened before fork() is refused in the child', function (): void {
+    if (!function_exists('pcntl_fork')) {
+        $this->markTestSkipped('ext-pcntl required');
+    }
+
+    $snapshot = new SqliteSnapshot($this->path);
+    $result = sys_get_temp_dir() . '/via_gs_fork_' . bin2hex(random_bytes(6));
+
+    $pid = pcntl_fork();
+    if ($pid === 0) {
+        try {
+            $snapshot->save(['k' => serialize('child')]);
+            file_put_contents($result, 'saved');
+        } catch (LogicException) {
+            file_put_contents($result, 'refused');
+        }
+        // Skip destructors: they would close the parent's inherited connection from here.
+        posix_kill(getmypid(), SIGKILL);
+    }
+    pcntl_waitpid($pid, $status);
+
+    try {
+        expect(@file_get_contents($result))->toBe('refused');
+        expect($snapshot->load())->toBe([]);
+    } finally {
+        @unlink($result);
+        $snapshot->close();
+    }
 });

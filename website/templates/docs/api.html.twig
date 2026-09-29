@@ -81,6 +81,15 @@ $count = $app->globalState('counter', 0);
     <h3 id="via-on-start"><code>onStart(callable $callback): void</code></h3>
     <h3 id="via-on-shutdown"><code>onShutdown(callable $callback): void</code></h3>
     <p>Server lifecycle hooks. Use <code>onStart</code> to create timers; <code>onShutdown</code> to clear them.</p>
+    <p>
+        <code>onShutdown</code> callbacks run once in each worker process when that worker stops: on
+        <code>SIGTERM</code> or <code>SIGINT</code> (<code>docker stop</code>, <code>systemctl stop</code>,
+        Ctrl-C), and also when a worker is reloaded (<code>SIGUSR1</code>) or recycled after
+        <code>max_request</code>. They run inside a coroutine after open SSE streams have been told to close,
+        and <code>onClientDisconnect</code> fires for each connected client during the stop. A callback that throws is logged
+        and the rest still run. OpenSwoole's <code>max_wait_time</code> (1 second by default) bounds how long they
+        may take.
+    </p>
     {% code 'php' %}{% verbatim %}
 $timerId = null;
 $app->onStart(function () use ($app, &$timerId): void {

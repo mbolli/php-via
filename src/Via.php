@@ -37,7 +37,7 @@ use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
-use OpenSwoole\Event;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
@@ -107,7 +107,11 @@ class Via {
     private $notFoundHandler;
 
     private bool $shuttingDown = false;
+    private bool $shutdownStarted = false;
     private bool $signalsRegistered = false;
+
+    /** Final GlobalState drain, run once in the master after every worker has stopped */
+    private ?\Closure $finalGlobalStateDrain = null;
 
     /** @var array<string, true> Scopes whose fan-out is currently running */
     private array $syncInFlight = [];
@@ -808,18 +812,23 @@ class Via {
                     file_put_contents($pidFile, (string) $server->master_pid);
                 }
 
-                // Register SIGINT/SIGTERM in the master process so that Ctrl-C or
-                // systemd stop reliably triggers a clean shutdown. Workers register
-                // their own handlers in workerStart; the master must do so here
-                // because it is the process that holds the port binding — if the
-                // master's reactor does not explicitly handle the signal the port
-                // stays bound after workers exit.
-                Process::signal(SIGTERM, function () use ($server): void {
+                // Not SIGTERM: OpenSwoole owns it in server processes and shuts down on it itself.
+                $this->registerSignal(SIGINT, function () use ($server): void {
                     $server->shutdown();
                 });
-                Process::signal(SIGINT, function () use ($server): void {
-                    $server->shutdown();
-                });
+            });
+
+            // OpenSwoole's manager keeps the default SIGINT action, so Ctrl-C killed it and
+            // orphaned the workers. The master gets the same SIGINT and drives the stop.
+            $this->server->on('managerStart', function (Server $server): void {
+                $this->registerSignal(SIGINT, function (): void {});
+            });
+
+            // Master only, after every worker has stopped, so exactly one process drains.
+            $this->server->on('shutdown', function (Server $server): void {
+                if ($this->finalGlobalStateDrain !== null) {
+                    ($this->finalGlobalStateDrain)();
+                }
             });
 
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
@@ -922,10 +931,18 @@ class Via {
                 $this->logger->fatal("Worker {$workerId} (pid {$workerPid}) crashed: {$reason}");
             });
 
+            // Called on every reactor pass while coroutines are still alive. Cleanup runs in a
+            // coroutine so the SSE loops and hooked I/O in callbacks can finish before max_wait_time.
             $this->server->on('workerExit', function (Server $server, int $workerId): void {
-                // Prevent worker exit timeout by clearing all timers and exiting event loop
+                if (!$this->shutdownStarted) {
+                    Coroutine::create(fn () => $this->runWorkerShutdown());
+                }
                 Timer::clearAll();
-                Event::exit();
+            });
+
+            // No-op after workerExit; covers reload_async => false, where workerExit never fires.
+            $this->server->on('workerStop', function (Server $server, int $workerId): void {
+                $this->runWorkerShutdown();
             });
 
             $this->server->on('request', function (Request $request, Response $response): void {
@@ -946,7 +963,11 @@ class Via {
 
     /**
      * Register a callback to run on graceful shutdown.
-     * Use this to clean up timers, close connections, or save state.
+     *
+     * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
+     * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
+     * recycle. They run inside a coroutine after open SSE streams have been told to close, each in
+     * its own try/catch, and OpenSwoole's `max_wait_time` bounds how long they may take.
      */
     public function onShutdown(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
@@ -1596,7 +1617,8 @@ class Via {
      * Seed GlobalState from its durable snapshot and arm the write-behind flush.
      *
      * Called from start() in the master process, before the fork, so the seeded table is the one
-     * every worker inherits and the snapshot handle belongs to whoever ends up flushing.
+     * every worker inherits. The boot connection is closed before the fork: the leader worker's
+     * flushes and the master's final drain each open their own, and never run at the same time.
      */
     private function installGlobalStatePersistence(SharedTable $table, string $path): void {
         $snapshot = new SqliteSnapshot($path);
@@ -1615,13 +1637,15 @@ class Via {
             }
         }
 
+        $snapshot->close();
+
         if ($loaded > 0) {
             $this->log('info', "GlobalState restored {$loaded} keys from {$path}");
         }
 
         // Leader-only by default (see setInterval()), which is exactly the single-writer
         // property this needs: one process draining the dirty set into one transaction.
-        $this->setInterval(function () use ($table, $snapshot): void {
+        $flush = function () use ($table, $snapshot): void {
             $dirty = $table->takeDirty();
             if ($dirty === []) {
                 return;
@@ -1632,17 +1656,27 @@ class Via {
             } catch (\Throwable $e) {
                 $this->log('error', 'GlobalState flush failed: ' . $e->getMessage());
             }
-        }, $this->config->getGlobalStateFlushMs());
+        };
+        $this->setInterval($flush, $this->config->getGlobalStateFlushMs());
+
+        // The leader flushes once more when it stops: a second SIGTERM to the master can end it
+        // before its shutdown event, and then only this flush saves the last window.
+        $this->onShutdown(function () use ($flush): void {
+            if ($this->server?->getWorkerId() === self::LEADER_WORKER_ID) {
+                $flush();
+            }
+        });
 
         // Final drain on the way down, so a graceful stop does not discard the last window.
-        $this->onShutdown(function () use ($table, $snapshot): void {
+        $this->finalGlobalStateDrain = function () use ($table, $snapshot): void {
             try {
                 $snapshot->save($table->takeDirty());
                 $snapshot->checkpoint();
+                $snapshot->close();
             } catch (\Throwable $e) {
                 $this->log('error', 'GlobalState final flush failed: ' . $e->getMessage());
             }
-        });
+        };
     }
 
     /**
@@ -1768,55 +1802,53 @@ class Via {
     }
 
     /**
-     * Register signal handlers for graceful shutdown.
+     * Register signal handlers in a worker process.
+     *
+     * No SIGTERM: OpenSwoole owns it and the stop runs through workerExit / workerStop.
      */
     private function registerSignalHandlers(): void {
-        // Prevent duplicate registration
         if ($this->signalsRegistered) {
             return;
         }
         $this->signalsRegistered = true;
 
-        // SIGTERM — sent by the master when it calls $server->shutdown().
-        // Workers must NOT call $server->shutdown() back (that would send SIGTERM to
-        // the master again, creating a circular signal loop and preventing teardown).
-        // Run cleanup callbacks and exit cleanly; the master orchestrates the rest.
-        Process::signal(SIGTERM, function (): void {
-            $this->log('info', 'Received SIGTERM, shutting down gracefully...');
-            $this->shuttingDown = true;
-            $this->executeShutdownCallbacks();
-
-            exit(0);
+        // Ctrl-C reaches the whole process group; the master gets it too and drives the stop.
+        $this->registerSignal(SIGINT, function (): void {
+            $this->log('debug', 'Worker received SIGINT, leaving the shutdown to the master');
         });
 
-        // SIGINT — Ctrl+C may also reach workers if they share the terminal process
-        // group. Same rule: run cleanup and exit; master drives $server->shutdown().
-        Process::signal(SIGINT, function (): void {
-            $this->log('info', 'Received SIGINT (Ctrl+C), shutting down gracefully...');
-            $this->shuttingDown = true;
-            $this->executeShutdownCallbacks();
-
-            exit(0);
-        });
-
-        // SIGHUP - systemd reload (just log, don't exit)
-        Process::signal(SIGHUP, function (): void {
+        $this->registerSignal(SIGHUP, function (): void {
             $this->log('info', 'Received SIGHUP signal, ignoring');
         });
     }
 
+    private function registerSignal(int $signo, callable $handler): void {
+        if (@Process::signal($signo, $handler) === false) {
+            $this->log('warning', "Could not register a handler for signal {$signo}");
+        }
+    }
+
     /**
-     * Execute all registered shutdown callbacks.
+     * Stop this worker's own work: intervals, SSE loops, shutdown callbacks, broker.
+     *
+     * Idempotent, because workerExit fires repeatedly and workerStop follows it.
      */
-    private function executeShutdownCallbacks(): void {
+    private function runWorkerShutdown(): void {
+        if ($this->shutdownStarted) {
+            return;
+        }
+        $this->shutdownStarted = true;
         $this->shuttingDown = true;
 
-        // Cancel process-wide intervals registered via setInterval()
         foreach ($this->serverIntervalIds as $id) {
             Timer::clear($id);
         }
-
         $this->serverIntervalIds = [];
+
+        // Wakes SSE loops parked in getPatch() so they leave through their normal exit path.
+        foreach ($this->contexts as $context) {
+            $context->getPatchManager()->closePatchChannel();
+        }
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
@@ -1825,7 +1857,12 @@ class Via {
                 $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
             }
         }
-        $this->broker->disconnect();
+
+        try {
+            $this->broker->disconnect();
+        } catch (\Throwable $e) {
+            $this->log('error', 'Broker disconnect failed during shutdown: ' . $e->getMessage());
+        }
     }
 
     /**

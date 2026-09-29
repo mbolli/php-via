@@ -32,6 +32,31 @@ All notable changes to php-via will be documented in this file.
 
 ### Fixed
 
+- **`onShutdown` callbacks now run when the server is stopped.** OpenSwoole owns SIGTERM in
+  server processes, so the `Process::signal(SIGTERM, ...)` calls in the master and in every worker
+  failed with a "processor has been registered by the system" warning and the only code that ran
+  the callbacks never did. Measured with 2 workers and one open SSE stream: `kill -TERM` and
+  `kill -INT` to the master ran no callback and ended in a scheduler deadlock; SIGINT to the process
+  group ran them and then died with `Uncaught OpenSwoole\ExitException` from the worker's `exit(0)`.
+  Cleanup now runs from `workerExit` (in a coroutine) and `workerStop`: server intervals are
+  cleared, patch channels are closed so SSE loops leave through their normal exit path, each
+  callback runs in its own try/catch, then the broker disconnects. OpenSwoole's manager also no
+  longer dies on Ctrl-C, which had left the workers running under init.
+  Behaviour changes: callbacks run once per worker, inside a coroutine, bounded by `max_wait_time`,
+  and they now also run on a worker reload (SIGUSR1) or a `max_request` recycle. SSE streams end
+  cleanly during a stop, so `onClientDisconnect` fires for every connected client. A stop can take
+  up to `max_wait_time` while coroutines finish, and the signal warnings are gone from the logs.
+
+- **Persistent GlobalState no longer shares one SQLite connection across `fork()`.** The snapshot
+  was opened in the master before the workers were forked, and the final drain was an `onShutdown`
+  callback, so with several workers each one drained and checkpointed over that inherited
+  connection. The boot connection is now closed after loading, the leader worker opens its own for
+  the periodic flush and flushes once more when it stops, and the final drain runs once in the
+  master's `shutdown` event after every worker has stopped. The leader's stop flush is there because
+  a second SIGTERM to the master can end it before that event (seen in about 1 of 8 runs).
+  `SqliteSnapshot` reopens after `close()` and throws instead of using a connection opened in
+  another process.
+
 - **A `#[Signal]` written directly inside an `#[Action]` is no longer discarded.** `syncBack()`
   assigned every reactive property back to its signal unconditionally, so an action whose body was
   `$ctx->getSignal('votes')->increment()` ended each round exactly where it started — the untouched
