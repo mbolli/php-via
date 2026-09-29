@@ -10,7 +10,7 @@ use Mbolli\PhpVia\Http\OriginPolicy;
  *
  * Tests the two CSRF mitigations:
  *   1. Config API for secureCookie and trustedOrigins settings.
- *   2. OriginPolicy::allows(), the Origin check ActionHandler applies to every action.
+ *   2. OriginPolicy::allows(), the Origin check for actions, the Dev Bar and session close.
  */
 
 describe('Config: CSRF options', function (): void {
@@ -32,7 +32,7 @@ describe('Config: CSRF options', function (): void {
         expect($config->getSecureCookie())->toBeFalse();
     });
 
-    test('trustedOrigins defaults to null (no restriction)', function (): void {
+    test('trustedOrigins defaults to null (same-host check)', function (): void {
         $config = new Config();
 
         expect($config->getTrustedOrigins())->toBeNull();
@@ -44,7 +44,7 @@ describe('Config: CSRF options', function (): void {
         expect($config->getTrustedOrigins())->toBe(['https://example.com', 'https://app.example.com']);
     });
 
-    test('withTrustedOrigins(null) disables restriction', function (): void {
+    test('withTrustedOrigins(null) falls back to the same-host check', function (): void {
         $config = (new Config())
             ->withTrustedOrigins(['https://example.com'])
             ->withTrustedOrigins(null)
@@ -54,7 +54,7 @@ describe('Config: CSRF options', function (): void {
     });
 });
 
-describe('ActionHandler: Origin validation', function (): void {
+describe('OriginPolicy: Origin validation', function (): void {
     /**
      * @param null|string       $originHeader       Value of the HTTP Origin header, or null if absent
      * @param null|string       $hostHeader         Value of the HTTP Host header, or null if absent
@@ -62,7 +62,7 @@ describe('ActionHandler: Origin validation', function (): void {
      * @param bool              $devMode            Whether dev mode is enabled
      * @param bool              $allowMissingOrigin Whether withAllowMissingOrigin() is on
      */
-    function callIsOriginAllowed(?string $originHeader, ?array $trustedOrigins, ?string $hostHeader = null, bool $devMode = false, bool $allowMissingOrigin = false): bool {
+    function originPolicyAllows(?string $originHeader, ?array $trustedOrigins, ?string $hostHeader = null, bool $devMode = false, bool $allowMissingOrigin = false): bool {
         $config = (new Config())
             ->withTrustedOrigins($trustedOrigins)
             ->withDevMode($devMode)
@@ -74,92 +74,92 @@ describe('ActionHandler: Origin validation', function (): void {
 
     test('no trustedOrigins + no devMode + present cross-origin → blocked (same-host fallback)', function (): void {
         // Without an explicit allowlist, production mode falls back to same-host.
-        expect(callIsOriginAllowed('https://evil.example.com', null, 'example.com'))->toBeFalse();
+        expect(originPolicyAllows('https://evil.example.com', null, 'example.com'))->toBeFalse();
     });
 
     test('no trustedOrigins + no devMode + absent Origin → denied (require explicit list for prod)', function (): void {
-        expect(callIsOriginAllowed(null, null, 'example.com', devMode: false))->toBeFalse();
+        expect(originPolicyAllows(null, null, 'example.com', devMode: false))->toBeFalse();
     });
 
     test('no trustedOrigins + devMode + absent Origin → allowed (curl / local tools)', function (): void {
-        expect(callIsOriginAllowed(null, null, 'localhost:3000', devMode: true))->toBeTrue();
+        expect(originPolicyAllows(null, null, 'localhost:3000', devMode: true))->toBeTrue();
     });
 
     test('absent Origin header with explicit list → denied in production', function (): void {
-        expect(callIsOriginAllowed(null, ['https://example.com']))->toBeFalse();
+        expect(originPolicyAllows(null, ['https://example.com']))->toBeFalse();
     });
 
     test('absent Origin header with explicit list + withAllowMissingOrigin → allowed (non-browser clients)', function (): void {
-        expect(callIsOriginAllowed(null, ['https://example.com'], allowMissingOrigin: true))->toBeTrue();
+        expect(originPolicyAllows(null, ['https://example.com'], allowMissingOrigin: true))->toBeTrue();
     });
 
     test('no trustedOrigins + withAllowMissingOrigin + absent Origin → allowed', function (): void {
-        expect(callIsOriginAllowed(null, null, 'example.com', allowMissingOrigin: true))->toBeTrue();
+        expect(originPolicyAllows(null, null, 'example.com', allowMissingOrigin: true))->toBeTrue();
     });
 
     test('matching origin → allowed', function (): void {
-        expect(callIsOriginAllowed('https://example.com', ['https://example.com']))->toBeTrue();
+        expect(originPolicyAllows('https://example.com', ['https://example.com']))->toBeTrue();
     });
 
     test('matching one of multiple trusted origins → allowed', function (): void {
         $origins = ['https://example.com', 'https://app.example.com'];
 
-        expect(callIsOriginAllowed('https://app.example.com', $origins))->toBeTrue();
+        expect(originPolicyAllows('https://app.example.com', $origins))->toBeTrue();
     });
 
     test('untrusted origin → blocked', function (): void {
-        expect(callIsOriginAllowed('https://evil.example.com', ['https://example.com']))->toBeFalse();
+        expect(originPolicyAllows('https://evil.example.com', ['https://example.com']))->toBeFalse();
     });
 
     test('origin matching is exact, not prefix-based', function (): void {
         // 'https://example.com.evil.com' must NOT match 'https://example.com'
-        expect(callIsOriginAllowed('https://example.com.evil.com', ['https://example.com']))->toBeFalse();
+        expect(originPolicyAllows('https://example.com.evil.com', ['https://example.com']))->toBeFalse();
     });
 
     test('origin matching is case-sensitive', function (): void {
-        expect(callIsOriginAllowed('https://EXAMPLE.COM', ['https://example.com']))->toBeFalse();
+        expect(originPolicyAllows('https://EXAMPLE.COM', ['https://example.com']))->toBeFalse();
     });
 
     test('empty trusted origins list blocks all browser requests', function (): void {
         // trustedOrigins=[] means no origin is whitelisted
-        expect(callIsOriginAllowed('https://example.com', []))->toBeFalse();
+        expect(originPolicyAllows('https://example.com', []))->toBeFalse();
         // Absent Origin (non-browser) is denied too, unless opted in
-        expect(callIsOriginAllowed(null, []))->toBeFalse();
-        expect(callIsOriginAllowed(null, [], allowMissingOrigin: true))->toBeTrue();
-        expect(callIsOriginAllowed('https://example.com', [], allowMissingOrigin: true))->toBeFalse();
+        expect(originPolicyAllows(null, []))->toBeFalse();
+        expect(originPolicyAllows(null, [], allowMissingOrigin: true))->toBeTrue();
+        expect(originPolicyAllows('https://example.com', [], allowMissingOrigin: true))->toBeFalse();
     });
 });
 
-describe('ActionHandler: same-host fallback (no explicit list)', function (): void {
+describe('OriginPolicy: same-host fallback (no explicit list)', function (): void {
     test('same-host origin is allowed in prod without explicit list', function (): void {
-        expect(callIsOriginAllowed('https://example.com', null, 'example.com'))->toBeTrue();
+        expect(originPolicyAllows('https://example.com', null, 'example.com'))->toBeTrue();
     });
 
     test('same-host with port is allowed', function (): void {
-        expect(callIsOriginAllowed('https://localhost:3000', null, 'localhost:3000'))->toBeTrue();
+        expect(originPolicyAllows('https://localhost:3000', null, 'localhost:3000'))->toBeTrue();
     });
 
     test('http origin also matches same host (proxy strips TLS)', function (): void {
-        expect(callIsOriginAllowed('http://example.com', null, 'example.com'))->toBeTrue();
+        expect(originPolicyAllows('http://example.com', null, 'example.com'))->toBeTrue();
     });
 
     test('cross-origin is blocked in prod without explicit list', function (): void {
-        expect(callIsOriginAllowed('https://attacker.com', null, 'example.com'))->toBeFalse();
+        expect(originPolicyAllows('https://attacker.com', null, 'example.com'))->toBeFalse();
     });
 
     test('dev mode: same-host is allowed', function (): void {
-        expect(callIsOriginAllowed('https://localhost:3000', null, 'localhost:3000', devMode: true))->toBeTrue();
+        expect(originPolicyAllows('https://localhost:3000', null, 'localhost:3000', devMode: true))->toBeTrue();
     });
 
     test('dev mode: cross-origin is still blocked', function (): void {
-        expect(callIsOriginAllowed('https://attacker.com', null, 'localhost:3000', devMode: true))->toBeFalse();
+        expect(originPolicyAllows('https://attacker.com', null, 'localhost:3000', devMode: true))->toBeFalse();
     });
 
     test('no Host header in prod → denied', function (): void {
-        expect(callIsOriginAllowed('https://example.com', null, null, devMode: false))->toBeFalse();
+        expect(originPolicyAllows('https://example.com', null, null, devMode: false))->toBeFalse();
     });
 
     test('no Host header in dev → allowed (unusual local setup)', function (): void {
-        expect(callIsOriginAllowed('https://example.com', null, null, devMode: true))->toBeTrue();
+        expect(originPolicyAllows('https://example.com', null, null, devMode: true))->toBeTrue();
     });
 });

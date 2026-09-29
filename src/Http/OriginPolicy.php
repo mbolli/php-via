@@ -7,14 +7,7 @@ namespace Mbolli\PhpVia\Http;
 use Mbolli\PhpVia\Config;
 
 /**
- * CSRF Origin check shared by action POSTs and the Dev Bar's write endpoints.
- *
- * - No Origin: allowed in dev mode or with Config::withAllowMissingOrigin(), denied otherwise,
- *   with or without an allowlist. Browsers send Origin on every POST, so only non-browser
- *   clients (curl, server-to-server calls, uptime checks) omit it.
- * - Origin with an allowlist (Config::withTrustedOrigins()): exact match.
- * - Origin without an allowlist: its host must equal the Host header, scheme ignored so it works
- *   behind a TLS-terminating proxy. No Host header: allowed in dev mode only.
+ * Shared CSRF Origin check. Browsers send Origin on every POST, so a missing one means a non-browser client.
  */
 final class OriginPolicy {
     public static function allows(Config $config, ?string $origin, ?string $host): bool {

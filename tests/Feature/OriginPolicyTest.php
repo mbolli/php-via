@@ -7,6 +7,9 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\OriginPolicy;
+use Mbolli\PhpVia\Http\RequestHandler;
+use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use Tests\Support\FakeActionRequest;
 use Tests\Support\FakeStaticResponse;
@@ -15,10 +18,10 @@ use Tests\Support\FakeStaticResponse;
 // must apply the same rule as actions.
 
 /**
- * @return array{0: FakeStaticResponse, 1: bool} the response and whether the action ran
+ * @return array{0: FakeStaticResponse, 1: bool, 2: string} the response, whether the action ran, the log output
  */
-function postActionWithoutOrigin(Config $config): array {
-    $via = createVia($config);
+function postAction(Config $config, ?string $origin, int $times = 1): array {
+    $via = new Via($config->withLogLevel('warn'));
     $ctx = new Context('ctx-origin', '/origin', $via);
     $via->contexts['ctx-origin'] = $ctx;
     $ran = false;
@@ -26,17 +29,32 @@ function postActionWithoutOrigin(Config $config): array {
         $ran = true;
     }, 'save');
 
-    $request = new FakeActionRequest($action->id(), ['via_ctx' => 'ctx-origin']);
-    unset($request->header['origin']);
-    $response = new FakeStaticResponse();
-
+    $handler = new ActionHandler($via);
     ob_start();
 
     try {
-        (new ActionHandler($via))->handleAction($request, $response, $action->id());
+        for ($i = 0; $i < $times; ++$i) {
+            $request = new FakeActionRequest($action->id(), ['via_ctx' => 'ctx-origin']);
+            if ($origin === null) {
+                unset($request->header['origin']);
+            } else {
+                $request->header['origin'] = $origin;
+            }
+            $response = new FakeStaticResponse();
+            $handler->handleAction($request, $response, $action->id());
+        }
     } finally {
-        ob_end_clean();
+        $out = (string) ob_get_clean();
     }
+
+    return [$response, $ran, $out];
+}
+
+/**
+ * @return array{0: FakeStaticResponse, 1: bool} the response and whether the action ran
+ */
+function postActionWithoutOrigin(Config $config): array {
+    [$response, $ran] = postAction($config, null);
 
     return [$response, $ran];
 }
@@ -107,6 +125,89 @@ describe('ActionHandler: absent Origin', function (): void {
         expect($response->statusCode)->not->toBe(403)
             ->and($ran)->toBeTrue()
         ;
+    });
+});
+
+describe('ActionHandler: present Origin', function (): void {
+    test('a cross-origin POST answers 403 and does not run the action', function (): void {
+        [$response, $ran] = postAction(new Config(), 'https://evil.example');
+
+        expect($response->statusCode)->toBe(403)
+            ->and($response->body)->toContain('untrusted origin')
+            ->and($ran)->toBeFalse()
+        ;
+    });
+
+    test('a same-host POST runs the action', function (): void {
+        [$response, $ran] = postAction(new Config(), 'http://localhost:3000');
+
+        expect($response->statusCode)->not->toBe(403)
+            ->and($ran)->toBeTrue()
+        ;
+    });
+
+    test('an allowlisted Origin runs the action', function (): void {
+        [$response, $ran] = postAction((new Config())->withTrustedOrigins(['https://app.example']), 'https://app.example');
+
+        expect($response->statusCode)->not->toBe(403)
+            ->and($ran)->toBeTrue()
+        ;
+    });
+});
+
+describe('ActionHandler: missing Origin diagnostics', function (): void {
+    test('the denial says missing Origin and logs the opt-in once per handler', function (): void {
+        [$response, , $out] = postAction((new Config())->withTrustedOrigins(['https://example.com']), null, times: 3);
+
+        expect($response->statusCode)->toBe(403)
+            ->and($response->body)->toContain('missing Origin')
+            ->and(substr_count($out, 'withAllowMissingOrigin()'))->toBe(1)
+            ->and($out)->toContain('[WARN]')
+        ;
+    });
+
+    test('a cross-origin denial does not log the opt-in', function (): void {
+        [, , $out] = postAction(new Config(), 'https://evil.example');
+
+        expect($out)->not->toContain('withAllowMissingOrigin');
+    });
+});
+
+describe('RequestHandler: /_session/close', function (): void {
+    /**
+     * @param array<string, string> $headers
+     */
+    function postSessionClose(array $headers): FakeStaticResponse {
+        $via = createVia();
+        $request = new class extends Request {
+            public function rawContent(): false|string {
+                return 'ctx-unknown';
+            }
+        };
+        $request->server = ['request_uri' => '/_session/close', 'request_method' => 'POST', 'remote_addr' => '127.0.0.1'];
+        $request->header = $headers;
+        $request->cookie = [];
+        $response = new FakeStaticResponse();
+
+        (new RequestHandler($via, new SseHandler($via), new ActionHandler($via)))->handleRequest($request, $response);
+
+        return $response;
+    }
+
+    test('a cross-origin beacon is denied', function (): void {
+        $response = postSessionClose(['host' => 'example.com', 'origin' => 'https://evil.example']);
+
+        expect($response->statusCode)->toBe(403);
+    });
+
+    test('a beacon without Origin is denied in production', function (): void {
+        expect(postSessionClose(['host' => 'example.com'])->statusCode)->toBe(403);
+    });
+
+    test('a same-host beacon is accepted', function (): void {
+        $response = postSessionClose(['host' => 'example.com', 'origin' => 'https://example.com']);
+
+        expect($response->statusCode)->toBe(200);
     });
 });
 

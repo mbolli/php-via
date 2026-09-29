@@ -36,6 +36,9 @@ All notable changes to php-via will be documented in this file.
   `Config::withStrictTabSignals()` (off by default) makes TAB signals server-owned unless declared
   `clientWritable: true`.
 
+- **`Config::withAllowMissingOrigin()`** (off by default) accepts action POSTs without an `Origin`
+  header in production, for non-browser clients. Dev mode always accepts them.
+
 ### Fixed
 
 - **`onShutdown` callbacks now run when the server is stopped.** OpenSwoole owns SIGTERM in
@@ -142,7 +145,10 @@ All notable changes to php-via will be documented in this file.
   stricter setting was the laxer one for that case. The Dev Bar's `/_via/signal` and
   `/_via/reset` had their own copy of the check that let a missing `Origin` or `Host` through in
   every mode. Both now use one `OriginPolicy`: a missing `Origin` is accepted in dev mode or with
-  the new `Config::withAllowMissingOrigin()`, and denied otherwise.
+  the new `Config::withAllowMissingOrigin()`, and denied otherwise. The first such denial per
+  worker logs a warning that names the opt-in, and the 403 body says `missing Origin`.
+  `POST /_session/close` had no Origin check at all, so a cross-site page that knew a context id
+  could end that tab's context; it now uses the same policy.
 
 - **Registering a TAB action name twice in one context logs a warning.** The later callback
   replaced the earlier one with only a debug line. It still does, and now logs a warning once per
@@ -155,7 +161,7 @@ All notable changes to php-via will be documented in this file.
   clients that post to `/_action/*` (curl scripts, server-to-server calls, uptime checks) need
   `Config::withAllowMissingOrigin()`. Without an allowlist nothing changes for actions. The Dev
   Bar's `/_via/signal` and `/_via/reset` no longer accept a missing `Origin`, or an `Origin`
-  without a `Host` header, outside dev mode.
+  without a `Host` header, outside dev mode. The same applies to `POST /_session/close`.
 
 - **Shell placeholders and full-document includes changed.** A custom shell that used
   `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`. Placeholder

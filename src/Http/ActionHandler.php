@@ -22,6 +22,9 @@ class ActionHandler {
     /** True once the rate-limit store overflow has been logged */
     private bool $overflowReported = false;
 
+    /** True once a denied action POST without Origin has been logged */
+    private bool $missingOriginReported = false;
+
     public function __construct(Via $via) {
         $this->via = $via;
 
@@ -42,9 +45,13 @@ class ActionHandler {
         $actionStart = hrtime(true);
 
         // CSRF: Datastar posts with fetch(), so browsers always send Origin (see OriginPolicy).
-        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        $origin = $request->header['origin'] ?? null;
+        if (!OriginPolicy::allows($this->via->getConfig(), $origin, $request->header['host'] ?? null)) {
+            if ($origin === null) {
+                $this->reportMissingOrigin($actionId);
+            }
             $response->status(403);
-            $response->end('Forbidden: untrusted origin');
+            $response->end($origin === null ? 'Forbidden: missing Origin' : 'Forbidden: untrusted origin');
 
             return;
         }
@@ -178,6 +185,19 @@ class ActionHandler {
         );
 
         return $allowed;
+    }
+
+    private function reportMissingOrigin(string $actionId): void {
+        if ($this->missingOriginReported) {
+            return;
+        }
+
+        $this->missingOriginReported = true;
+        $this->via->log(
+            'warn',
+            "Action {$actionId} denied with 403: the request has no Origin header. Browsers always send one; "
+            . 'to accept non-browser clients (curl, uptime checks), enable Config::withAllowMissingOrigin().'
+        );
     }
 
     /**

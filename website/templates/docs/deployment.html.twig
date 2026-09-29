@@ -233,7 +233,7 @@ $config->withTrustedOrigins(['https://myapp.example.com']);
 $config->withAllowMissingOrigin();
     {% endverbatim %}{% endcode %}
     <p>
-        The Dev Bar's <code>/_via/signal</code> and <code>/_via/reset</code> apply the same check.
+        The Dev Bar's <code>/_via/signal</code> and <code>/_via/reset</code> and the tab-close beacon <code>POST /_session/close</code> apply the same check.
     </p>
     <p>
         Note: <code>GET /_action/…</code> always returns <strong>405 Method Not Allowed</strong>

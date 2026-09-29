@@ -198,8 +198,8 @@ class RequestHandler {
 
         // Handle session close
         if ($path === '/_session/close' && $method === 'POST') {
-            $this->handleSessionClose($request, $response);
-            $this->logRequest($method, $path, 200, $requestStart);
+            $status = $this->handleSessionClose($request, $response);
+            $this->logRequest($method, $path, $status, $requestStart);
 
             return;
         }
@@ -592,7 +592,15 @@ class RequestHandler {
     /**
      * Handle session close.
      */
-    private function handleSessionClose(Request $request, Response $response): void {
+    private function handleSessionClose(Request $request, Response $response): int {
+        // sendBeacon() POSTs carry Origin, so a cross-site page cannot end another tab's context.
+        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+            $response->status(403);
+            $response->end('Forbidden: untrusted origin');
+
+            return 403;
+        }
+
         $contextId = $request->rawContent();
 
         if (isset($this->via->contexts[$contextId])) {
@@ -606,6 +614,8 @@ class RequestHandler {
 
         $response->status(200);
         $response->end();
+
+        return 200;
     }
 
     /**
