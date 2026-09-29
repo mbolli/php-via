@@ -31,6 +31,13 @@ class SseHandler {
      */
     private array $reloadedContextIds = [];
 
+    /**
+     * Context IDs whose onClientConnect callbacks have fired and still owe a disconnect.
+     *
+     * @var array<string, true>
+     */
+    private array $connectedContextIds = [];
+
     public function __construct(Via $via) {
         $this->via = $via;
     }
@@ -224,10 +231,22 @@ class SseHandler {
             // Skip the loop but keep the exit path below, which owns the counters and cleanup.
             $synced = false;
             $this->via->log('error', 'Initial SSE sync failed: ' . Logger::describe($e), $context);
+
+            // Nothing has been written yet, so the status still takes effect.
+            try {
+                $response->status(500);
+                $response->end();
+            } catch (\Throwable) {
+                // Client already gone.
+            }
         }
 
-        // Notify app-level onClientConnect callbacks
-        $this->via->triggerClientConnect($context);
+        // A tab whose sync fails never counts as connected, so a view that always throws
+        // does not fire a connect/disconnect pair on every retry.
+        if ($synced) {
+            $this->connectedContextIds[$contextId] = true;
+            $this->via->triggerClientConnect($context);
+        }
 
         // Slow-consumer bookkeeping: $backedUp tracks the stall episode so the log
         // records transitions rather than every dropped frame.
@@ -376,8 +395,10 @@ class SseHandler {
             unset($this->via->clients[$contextId]);
             $this->via->getApp()->unregisterClient($contextId);
 
-            // Notify app-level onClientDisconnect callbacks
-            $this->via->triggerClientDisconnect($context);
+            if (isset($this->connectedContextIds[$contextId])) {
+                unset($this->connectedContextIds[$contextId]);
+                $this->via->triggerClientDisconnect($context);
+            }
 
             // Schedule delayed cleanup
             $this->via->scheduleContextCleanup($contextId);

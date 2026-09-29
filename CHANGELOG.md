@@ -80,17 +80,20 @@ All notable changes to php-via will be documented in this file.
   gone, so the tab's next action got 400 from the respawned worker. The initial page render, the
   per-tab `$c->setInterval()` callback and the broadcast fan-out had no guard at all, and a plain
   `RuntimeException` from a view was enough. Every request, SSE, timer, fan-out and broker entry
-  point now catches `\Throwable` and logs the class, message and `file:line`. The `request`
-  callback has a last guard that answers 500 (an SSE stream is only ended, its headers are already
-  out). A context whose view throws during a broadcast is logged and skipped, so the other
-  contexts still get the frame. The Redis and NATS receive loops report a throwing handler through
-  the broker's error handler and keep reading.
+  point now catches `\Throwable`. These guards, and the existing ones around `Via::setInterval()`,
+  the client connect and disconnect callbacks and revival, log the class, message and `file:line`.
+  The `request`
+  callback has a last guard that answers 500 when nothing has been written yet; an SSE stream
+  that already wrote is only ended. A context whose view throws during a broadcast is logged and
+  skipped, so the other contexts still get the frame. A broker message whose fan-out throws is
+  logged and the Redis and NATS receive loops keep reading.
   Behaviour changes: an action that throws an `\Error` answers 500 `Action failed`, as an
   `\Exception` already did, and the worker keeps running with whatever the action changed before
   it threw, where the crash used to wipe every context on that worker. A page whose render throws
   answers 500 instead of dropping the connection. A per-tab interval keeps ticking after a throw,
-  as `Via::setInterval()` already did. An SSE stream whose initial sync throws ends right away
-  and the client reconnects.
+  as `Via::setInterval()` already did. An SSE stream whose initial sync throws answers 500 and
+  fires neither `onClientConnect` nor `onClientDisconnect`. The default shell retries the stream
+  within 15 s; a custom full-document view without such an interval does not reconnect.
 
 ### Breaking Changes
 

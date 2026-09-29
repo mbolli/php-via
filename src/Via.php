@@ -213,7 +213,12 @@ class Via {
                 return;
             }
 
-            $this->syncLocally($scope);
+            // The broker's own catch only reaches an opt-in error handler, so log here.
+            try {
+                $this->syncLocally($scope);
+            } catch (\Throwable $e) {
+                $this->log('error', "Broker sync failed for scope \"{$scope}\": " . Logger::describe($e));
+            }
         });
 
         // Wire optional error handler (supported by RedisBroker and NatsBroker).
@@ -870,7 +875,7 @@ class Via {
                         try {
                             $callback();
                         } catch (\Throwable $e) {
-                            $this->log('error', 'setInterval callback threw: ' . $e->getMessage());
+                            $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
                         }
                     });
 
@@ -1054,7 +1059,7 @@ class Via {
             try {
                 $callback($context);
             } catch (\Throwable $e) {
-                $this->log('error', 'onClientConnect callback error: ' . $e->getMessage(), $context);
+                $this->log('error', 'onClientConnect callback failed: ' . Logger::describe($e), $context);
             }
         }
     }
@@ -1067,7 +1072,7 @@ class Via {
             try {
                 $callback($context);
             } catch (\Throwable $e) {
-                $this->log('error', 'onClientDisconnect callback error: ' . $e->getMessage(), $context);
+                $this->log('error', 'onClientDisconnect callback failed: ' . Logger::describe($e), $context);
             }
         }
     }
@@ -1403,7 +1408,7 @@ class Via {
         try {
             $this->invokeHandlerWithParams($handler, $context, $record['params']);
         } catch (\Throwable $e) {
-            $this->log('error', "Revival handler exception on {$route}: " . \get_class($e) . ': ' . $e->getMessage());
+            $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
 
             return null;
         }
@@ -1630,13 +1635,9 @@ class Via {
             }
 
             try {
-                // An SSE stream has already sent its headers, so a status line would land in the body.
-                if ($path !== '/_sse') {
-                    $response->status(500);
-                    $response->end('Internal Server Error');
-                } else {
-                    $response->end();
-                }
+                // After a write OpenSwoole keeps the sent status, so this only matters before one.
+                $response->status(500);
+                $response->end($path === '/_sse' ? null : 'Internal Server Error');
             } catch (\Throwable) {
                 // Connection already gone.
             }

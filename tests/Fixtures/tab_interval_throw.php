@@ -28,7 +28,8 @@ Coroutine::run(static function () use ($ctx, &$ticks): void {
         throw new RuntimeException('tab interval failed');
     }, 20);
 
-    while ($ticks < 3) {
+    $deadline = microtime(true) + 2.0;
+    while ($ticks < 3 && microtime(true) < $deadline) {
         Coroutine::usleep(10_000);
     }
     Timer::clear($id);

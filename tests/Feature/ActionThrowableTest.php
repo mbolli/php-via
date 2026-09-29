@@ -2,9 +2,15 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Broker\NodeIdentity;
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
+use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
@@ -129,14 +135,14 @@ describe('request guard', function (): void {
 });
 
 describe('broadcast fan-out', function (): void {
-    test('a context whose view throws does not stop the others from getting the frame', function (): void {
+    test('a context whose view throws does not stop the others from getting the frame', function (string $route, string $scope, string $broadcast): void {
         $via = createVia();
         $count = 0;
 
-        $broken = new Context('ctx-broken', '/a', $via);
-        $healthy = new Context('ctx-healthy', '/b', $via);
+        $broken = new Context('ctx-broken', $route, $via);
+        $healthy = new Context('ctx-healthy', $route, $via);
         foreach ([$broken, $healthy] as $ctx) {
-            $ctx->scope(Scope::GLOBAL);
+            $ctx->scope($scope);
             $via->contexts[$ctx->getId()] = $ctx;
         }
         $broken->view(function () use (&$count): string {
@@ -154,13 +160,92 @@ describe('broadcast fan-out', function (): void {
 
         $count = 1;
         ob_start();
-        $via->broadcast(Scope::GLOBAL);
+        $via->broadcast($broadcast);
         $log = (string) ob_get_clean();
 
         $patch = $healthy->getPatch();
         expect($patch)->not->toBeNull();
         expect($patch['content'])->toContain('Count: 1');
         expect($log)->toContain('[ctx-broken] Sync failed during broadcast: RuntimeException: broken view');
+    })->with([
+        'global' => ['/a', Scope::GLOBAL, Scope::GLOBAL],
+        'route' => ['/r', Scope::ROUTE, Scope::routeScope('/r')],
+        'custom' => ['/c', 'room:lobby', 'room:lobby'],
+    ]);
+
+    test('a broker message whose fan-out throws is logged instead of escaping the receive loop', function (): void {
+        $broker = new class implements MessageBroker {
+            use NodeIdentity;
+
+            /** @var null|callable(string): void */
+            public $handler;
+
+            public function connect(): void {}
+
+            public function disconnect(): void {}
+
+            public function publish(string $scope): void {}
+
+            public function subscribe(callable $handler): void {
+                $this->handler = $handler;
+            }
+
+            public function isConnected(): bool {
+                return true;
+            }
+        };
+        $via = createVia((new Config())->withBroker($broker));
+        (new ReflectionProperty(Via::class, 'viewCache'))->setValue($via, new class extends ViewCache {
+            public function invalidate(string $scope): void {
+                throw new RuntimeException('cache failed');
+            }
+        });
+
+        ob_start();
+        ($broker->handler)(Scope::GLOBAL);
+        $log = (string) ob_get_clean();
+
+        expect($log)->toContain('Broker sync failed for scope "global": RuntimeException: cache failed at ' . __FILE__ . ':');
+    });
+});
+
+describe('SSE initial sync', function (): void {
+    test('a stream whose first sync throws answers 500, skips the client callbacks and still schedules cleanup', function (): void {
+        $via = createVia();
+        $ctx = new Context('ctx-sse', '/sse', $via);
+        $via->contexts['ctx-sse'] = $ctx;
+        $ctx->view(function (): string {
+            throw new RuntimeException('sync failed');
+        });
+
+        $events = [];
+        $via->onClientConnect(function () use (&$events): void {
+            $events[] = 'connect';
+        });
+        $via->onClientDisconnect(function () use (&$events): void {
+            $events[] = 'disconnect';
+        });
+
+        $request = new FakeActionRequest('unused', ['via_ctx' => 'ctx-sse']);
+        $request->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
+        $response = new FakeStaticResponse();
+
+        ob_start();
+
+        try {
+            (new SseHandler($via))->handleSSE($request, $response);
+        } finally {
+            $log = (string) ob_get_clean();
+            $timers = (new ReflectionProperty(Application::class, 'cleanupTimers'))->getValue($via->getApp());
+            $via->getApp()->cancelContextCleanup('ctx-sse');
+        }
+
+        expect($response->statusCode)->toBe(500);
+        expect($response->ended)->toBeTrue();
+        expect($events)->toBe([]);
+        expect($via->activeSseCount)->not->toHaveKey('ctx-sse');
+        expect($timers)->toHaveKey('ctx-sse');
+        expect($log)->toContain('Initial SSE sync failed: RuntimeException: sync failed');
     });
 });
 
