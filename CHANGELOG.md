@@ -120,6 +120,25 @@ All notable changes to php-via will be documented in this file.
   a JSON object also never received the posted value: the object was split into `id.key` entries
   that matched no signal. An object posted under a known signal id is now that signal's value.
 
+- **A view that renders a full `<html>` document gets `via_ctx`, a signal seed and the head/foot
+  includes.** `HtmlBuilder` returned such a view unchanged, so `appendToHead()`/`appendToFoot()`
+  content never reached it and signal values arrived only with the first SSE frame, which left
+  expressions like `$x.y` throwing until then. On the initial render the document now gets, before
+  the first `</head>`, a `via_ctx` meta when it contains no `via_ctx` at all and a
+  `data-signals__ifmissing` meta with what the first sync sends (changed TAB signals, scoped
+  signals and those of the page's components; a signal marked synced is left out). Includes go
+  before the first `</head>` and the last `</body>` unless their exact markup is already there, and
+  they are re-added to every SSE update render, since the morph replaces `<head>` too. The SSE
+  bootstrap and `datastar.js` are never injected: the layout carries them. Shell pages get the same
+  seed meta in `{{ head_content }}`. Shell signal placeholders are now keyed on the name passed to
+  `signal()`, so `graph_display` and `graph_ports` no longer share `{{ graph }}`, and their values
+  are HTML-escaped. The shell is filled in one pass, so placeholder text inside the view or a value
+  is no longer replaced. Behaviour changes: every page gains the seed meta, and content appended
+  with `appendToHead()`/`appendToFoot()` that was silently dropped from full-document pages now
+  appears, so a `<title>` appended for shell pages lands next to the layout's own. A custom shell
+  that used `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`, and a
+  string placeholder inside a `<script>` now arrives HTML-escaped.
+
 ### Breaking Changes
 
 - **`clientWritable: false` on a TAB signal is enforced.** It was ignored before. Such a signal no

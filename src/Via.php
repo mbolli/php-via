@@ -176,7 +176,7 @@ class Via {
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate());
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...));
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -1458,17 +1458,21 @@ class Via {
     }
 
     /**
-     * Re-assert the Dev Bar overlay in a full-document SSE update render.
+     * Decorate an SSE update render of a full `<html>` document.
      *
-     * Pages that re-render their whole `<html>` document on update (the simple,
-     * intended model — Brotli shrinks the diff) would otherwise have the overlay
-     * dropped when the morph reconciles `<body>`. This re-injects it (idempotent)
-     * so it survives; idiomorph matches it by id and preserves the live element.
-     * Fragment updates (no `</body>`) are returned untouched.
+     * Datastar morphs the whole document, `<head>` included, so head/foot includes and the Dev Bar
+     * overlay missing from the update HTML would be removed on the first morph. Both are re-added
+     * (idempotently); fragment updates and components are returned untouched.
      *
      * @internal Used by PatchManager during sync
      */
-    public function decorateDevBarUpdate(string $html, Context $context): string {
+    public function decorateUpdate(string $html, Context $context): string {
+        if ($context->getComponentManager()->isComponent() || stripos($html, '<html') === false) {
+            return $html;
+        }
+
+        $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
+
         if ($this->devBarInjector === null || stripos($html, '</body>') === false) {
             return $html;
         }

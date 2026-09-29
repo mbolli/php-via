@@ -84,7 +84,7 @@
             "name": "Shell templates do not support Twig",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Shell templates are processed by HtmlBuilder using str_replace(), not the Twig engine. Twig block tags are invisible to this processor. Fix: move layout into a proper Twig base template using Twig extends and block inheritance. Page templates fill in the content block. The key injected variable is contextId (not context_id or via_ctx which are the HtmlBuilder placeholders)."
+                "text": "Shell templates are processed by HtmlBuilder using plain string replacement, not the Twig engine. Twig block tags are invisible to this processor. Fix: move layout into a proper Twig base template using Twig extends and block inheritance. Page templates fill in the content block. The key injected variable is contextId (not context_id or via_ctx which are the HtmlBuilder placeholders)."
             }
         },
         {
@@ -369,17 +369,20 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
             <code>setShellTemplate()</code>), but nothing happens or you get a parse error.
         </p>
         <p><strong>Why:</strong> Shell templates are processed by <code>HtmlBuilder</code> using a plain
-        <code>str_replace()</code>, not the Twig engine. They only understand the six literal
+        string replacement, not the Twig engine. They only understand literal
         placeholders: <code>{{ signals_json }}</code>, <code>{{ context_id }}</code>,
         <code>{{ base_path }}</code>, <code>{{ head_content }}</code>, <code>{{ content }}</code>,
-        and <code>{{ foot_content }}</code>. Twig tags are invisible to this processor and will be
-        emitted as raw text.
+        <code>{{ foot_content }}</code>, <code>{{ styles }}</code>, and <code>{{ name }}</code> and
+        <code>{{ name.id }}</code> for each signal by the name passed to <code>signal()</code>.
+        Twig tags are invisible to this processor and will be emitted as raw text.
         </p>
         <p><strong>Fix:</strong> Don't put Twig logic in shell templates. Instead, move the layout into
         a proper Twig base template and have your page templates extend it. The full HTML document
         (including <code>&lt;!DOCTYPE html&gt;</code>, nav, footer) lives in the base template;
         page templates fill in <code>{% block content %}</code>. <code>HtmlBuilder</code> detects a
-        rendered <code>&lt;html&gt;</code> response and passes it through unchanged:</p>
+        rendered <code>&lt;html&gt;</code> response and uses it instead of the shell. It only adds the
+        head and foot includes, a <code>via_ctx</code> meta if the document has none and a seed of the
+        initial signal values; the SSE bootstrap and <code>datastar.js</code> stay in your layout:</p>
         <pre data-lang="twig"><code>{# templates/shells/base.html.twig #}
 &lt;!DOCTYPE html&gt;
 &lt;html&gt;

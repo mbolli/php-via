@@ -15,7 +15,10 @@
                 A static <code>.html</code> file set with <code>withShellTemplate()</code>.
                 php-via performs a simple string replacement of
                 {% verbatim %}<code>{{ placeholder }}</code>{% endverbatim %} tokens —
-                <strong>not Twig</strong>. The shell is sent once per page load and never re-sent over SSE.
+                <strong>not Twig</strong>.
+                Besides the ones below it fills {% verbatim %}<code>{{ name }}</code>{% endverbatim %}
+                with a signal's JSON value (HTML-escaped) and {% verbatim %}<code>{{ name.id }}</code>{% endverbatim %}
+                with its id, where <code>name</code> is the name passed to <code>signal()</code>. The shell is sent once per page load and never re-sent over SSE.
                 Use it for the outer chrome: doctype, nav, scripts, footer.
             </p>
             {% code 'html' %}{% verbatim %}
@@ -61,6 +64,23 @@ $c->view(function () use ($count): string {
         the complete <code>&lt;html&gt;...&lt;/html&gt;</code> document — php-via detects this and skips
         the plain-HTML shell entirely.
     </p>
+    <p>
+        php-via then completes the document instead of wrapping it. On the initial render it adds, before
+        the first <code>&lt;/head&gt;</code>, a <code>via_ctx</code> meta (only when the document contains
+        no <code>via_ctx</code> at all) and a <code>data-signals__ifmissing</code> meta with the signal
+        values the first SSE sync sends, so <code>$count</code> has its value before the stream opens.
+        A value your layout seeds earlier in the document wins, and a signal marked synced is not seeded.
+        Includes from <code>appendToHead()</code> and <code>appendToFoot()</code> go before the first
+        <code>&lt;/head&gt;</code> and the last <code>&lt;/body&gt;</code>, on the initial render and
+        on every SSE update, since the update morphs <code>&lt;head&gt;</code> too. An include whose
+        exact markup is already in the document is skipped.
+    </p>
+    <p>
+        Your layout still has to carry the SSE bootstrap: the <code>@get('_sse')</code> meta, the
+        <code>sendBeacon</code> meta for closing the session and <code>datastar.js</code>. php-via never
+        injects them into a full document, because a second copy would break the page. Copy them from
+        the default <code>shell.html</code>.
+    </p>
     {% code 'twig' %}{% verbatim %}
 {# templates/base.html.twig — you create this #}
 <!DOCTYPE html>
@@ -68,12 +88,15 @@ $c->view(function () use ($count): string {
 <head>
     <meta charset="UTF-8">
     <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
+    <meta data-indicator="_connecting"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
+    <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ basePath }}_session/close', '{{ contextId }}'); });">
     <title>{% block title %}{% endblock %}</title>
 </head>
 <body>
     <nav>...shared nav...</nav>
     <main>{% block content %}{% endblock %}</main>
-    <script type="module" src="/datastar.js"></script>
+    <script type="module" src="{{ basePath }}datastar.js"></script>
 </body>
 </html>
     {% endverbatim %}{% endcode %}

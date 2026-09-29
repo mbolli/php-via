@@ -174,9 +174,8 @@ class PatchManager {
         // Sync view with proper selector for components
         $viewHtml = $this->context->renderView(isUpdate: true);
 
-        // Keep the Dev Bar overlay alive across full-page morphs (no-op for
-        // fragment updates and components, and when tracing is off).
-        $viewHtml = $this->app->decorateDevBarUpdate($viewHtml, $this->context);
+        // A full document morphs <head> too: re-add the includes and the Dev Bar.
+        $viewHtml = $this->app->decorateUpdate($viewHtml, $this->context);
 
         if (!empty(trim($viewHtml))) {
             if ($this->componentManager->isComponent()) {
@@ -258,6 +257,18 @@ class PatchManager {
     }
 
     /**
+     * Signal values the first sync would send, for seeding the initial HTML.
+     *
+     * Covers this context's changed TAB signals and its scoped signals and, for a page, those of
+     * its components. Nothing is marked synced: the first sync still sends them.
+     *
+     * @return array<string, mixed> Nested the same way as a signals patch
+     */
+    public function initialSignalValues(): array {
+        return $this->flatToNested($this->collectInitialSignals());
+    }
+
+    /**
      * Execute JavaScript on the client.
      */
     public function execScript(string $script): void {
@@ -312,6 +323,36 @@ class PatchManager {
             // In test mode the queue is a plain array; carry it across unchanged.
             $this->patchChannel = array_values($this->patchChannel);
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function collectInitialSignals(): array {
+        $flat = [];
+
+        foreach ($this->signalFactory->getTabSignals() as $id => $signal) {
+            if ($signal->hasChanged()) {
+                $flat[$id] = $signal->getValue();
+            }
+        }
+
+        foreach ($this->context->getScopes() as $scope) {
+            if ($scope === Scope::TAB) {
+                continue;
+            }
+            foreach ($this->app->getScopedSignals($scope) as $id => $signal) {
+                $flat[$id] = $signal->getValue();
+            }
+        }
+
+        if (!$this->componentManager->isComponent()) {
+            foreach ($this->componentManager->getComponents() as $component) {
+                $flat += $component->getPatchManager()->collectInitialSignals();
+            }
+        }
+
+        return $flat;
     }
 
     /**

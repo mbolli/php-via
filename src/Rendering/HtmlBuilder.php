@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Rendering;
 
 use Mbolli\PhpVia\Context;
-use Mbolli\PhpVia\Signal;
 
 /**
  * Builds complete HTML documents from rendered content.
@@ -20,7 +19,13 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
-    public function __construct(private ?string $shellTemplate = null) {}
+    /**
+     * @param null|\Closure(string, string, ?Context): void $logger Receives level, message and context
+     */
+    public function __construct(
+        private ?string $shellTemplate = null,
+        private ?\Closure $logger = null,
+    ) {}
 
     /**
      * Add content to the <head> section.
@@ -47,6 +52,9 @@ class HtmlBuilder {
     /**
      * Build complete HTML document from rendered content.
      *
+     * A view that renders its own `<html>` document is completed by injectIntoDocument(); any other
+     * view is placed into the shell template.
+     *
      * @param string  $content   Rendered HTML content
      * @param Context $context   Context for signal injection
      * @param string  $contextId Context ID for initial signals
@@ -55,46 +63,39 @@ class HtmlBuilder {
      * @return string Complete HTML document
      */
     public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
-        // Merge global includes with per-context includes
-        $headContent = implode("\n", array_merge($this->headIncludes, $context->getContextHeadIncludes()));
-        $footContent = implode("\n", array_merge($this->footIncludes, $context->getContextFootIncludes()));
-
-        // If it's a full page (already processed by processView), return it
         if (stripos($content, '<html') !== false) {
-            return $content;
+            return $this->injectIntoDocument($content, $context, initial: true);
         }
 
-        // Use the shell template for fragments
+        [$headIncludes, $footIncludes] = $this->includes($context);
+        $seedMeta = $this->seedMeta($context);
+        if ($seedMeta !== null) {
+            array_unshift($headIncludes, $seedMeta);
+        }
+
         $signalsJson = json_encode([
             'via_ctx' => $contextId,
             '_disconnected' => false,
         ]);
 
-        // Build replacement arrays (base + signals)
+        // {{ name }} and {{ name.id }} for every signal, by the name given to signal()
+        $replacements = [];
+        foreach ($context->getSignalFactory()->getNamedSignals() as $name => $signal) {
+            $replacements['{{ ' . $name . ' }}'] = htmlspecialchars($this->encodeJson($signal->getValue()) ?? 'null', ENT_QUOTES, 'UTF-8');
+            $replacements['{{ ' . $name . '.id }}'] = $signal->id();
+        }
+
         $replacements = [
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
-            '{{ head_content }}' => $headContent,
+            '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
-            '{{ foot_content }}' => $footContent,
+            '{{ foot_content }}' => implode("\n", $footIncludes),
             '{{ styles }}' => '',
-        ];
+        ] + $replacements;
 
-        // Add signal replacements - extract signal name from ID for route-scoped signals
-        // e.g., "embed" from route-scoped or "greeting_TAB123" from tab-scoped
-        foreach ($context->getSignals() as $fullId => $signal) {
-            // Get the base name (before underscore for tab-scoped signals)
-            $baseName = strpos($fullId, '_') !== false
-                ? substr($fullId, 0, strpos($fullId, '_'))
-                : $fullId;
-
-            // Support both {{ signalName }} for value and {{ signalName.id }} for ID
-            $replacements['{{ ' . $baseName . ' }}'] = json_encode($signal->getValue());
-            $replacements['{{ ' . $baseName . '.id }}'] = $signal->id();
-        }
-
-        // Simple template replacement for the shell (per-context override takes priority)
+        // Per-context shell overrides the configured one
         $shellPath = $context->getShellTemplate() ?? $this->shellTemplate ?? __DIR__ . '/shell.html';
         $shell = file_get_contents($shellPath);
 
@@ -102,10 +103,114 @@ class HtmlBuilder {
             throw new \RuntimeException("Failed to load shell template from: {$shellPath}");
         }
 
-        return str_replace(
-            array_keys($replacements),
-            array_values($replacements),
-            $shell
-        );
+        // strtr() replaces in one pass, so placeholder text inside the content or a value stays as is
+        return strtr($shell, $replacements);
+    }
+
+    /**
+     * Complete a view that renders its own `<html>` document.
+     *
+     * Head and foot includes the document does not already contain go before the first `</head>`
+     * and the last `</body>`. On the initial render the head also gets a `via_ctx` meta (only when
+     * the document has none) and a `data-signals__ifmissing` seed with the values the first sync
+     * sends. The SSE bootstrap and `datastar.js` are left to the document.
+     *
+     * @param bool $initial True for the initial page render, false for an SSE update render
+     */
+    public function injectIntoDocument(string $html, Context $context, bool $initial): string {
+        [$headIncludes, $footIncludes] = $this->includes($context);
+
+        $head = [];
+        if ($initial) {
+            if (stripos($html, 'via_ctx') === false) {
+                $head[] = '<meta data-signals="' . htmlspecialchars(
+                    (string) json_encode(['via_ctx' => $context->getId(), '_disconnected' => false], JSON_UNESCAPED_SLASHES),
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) . '">';
+            }
+            $seedMeta = $this->seedMeta($context);
+            if ($seedMeta !== null) {
+                $head[] = $seedMeta;
+            }
+        }
+        $head = array_merge($head, $this->missingFrom($html, $headIncludes));
+        $foot = $this->missingFrom($html, $footIncludes);
+
+        if ($head !== []) {
+            $headEnd = stripos($html, '</head>');
+            if ($headEnd === false) {
+                $this->log('debug', 'Full-document view has no </head>; head content not injected', $context);
+            } else {
+                $html = substr_replace($html, implode("\n", $head) . "\n", $headEnd, 0);
+            }
+        }
+
+        if ($foot !== []) {
+            $bodyEnd = strripos($html, '</body>');
+            if ($bodyEnd === false) {
+                $this->log('debug', 'Full-document view has no </body>; foot content not injected', $context);
+            } else {
+                $html = substr_replace($html, implode("\n", $foot) . "\n", $bodyEnd, 0);
+            }
+        }
+
+        return $html;
+    }
+
+    /**
+     * Global includes followed by the context's own.
+     *
+     * @return array{0: list<string>, 1: list<string>}
+     */
+    private function includes(Context $context): array {
+        return [
+            array_values(array_merge($this->headIncludes, $context->getContextHeadIncludes())),
+            array_values(array_merge($this->footIncludes, $context->getContextFootIncludes())),
+        ];
+    }
+
+    /**
+     * @param list<string> $includes
+     *
+     * @return list<string>
+     */
+    private function missingFrom(string $html, array $includes): array {
+        $missing = [];
+        foreach (array_unique($includes) as $include) {
+            if (!str_contains($html, $include)) {
+                $missing[] = $include;
+            }
+        }
+
+        return $missing;
+    }
+
+    private function seedMeta(Context $context): ?string {
+        $values = $context->getPatchManager()->initialSignalValues();
+        if ($values === []) {
+            return null;
+        }
+
+        $json = $this->encodeJson($values);
+        if ($json === null) {
+            $this->log('warning', 'Initial signal values are not JSON-encodable; the page is not seeded', $context);
+
+            return null;
+        }
+
+        return '<meta data-signals__ifmissing="' . htmlspecialchars($json, ENT_QUOTES, 'UTF-8') . '">';
+    }
+
+    private function encodeJson(mixed $value): ?string {
+        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
+
+        return $json === false ? null : $json;
+    }
+
+    private function log(string $level, string $message, Context $context): void {
+        if ($this->logger !== null) {
+            ($this->logger)($level, $message, $context);
+        }
     }
 }

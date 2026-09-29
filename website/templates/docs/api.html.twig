@@ -160,6 +160,18 @@ $c->appendToHead(
     '<meta name="description" content="...">'
 );
     {% endverbatim %}{% endcode %}
+    <p>
+        <code>$app-&gt;appendToHead()</code> adds to every page, <code>$c-&gt;appendToHead()</code> to one
+        context; <code>appendToFoot()</code> works the same before <code>&lt;/body&gt;</code>. With a shell
+        they fill <code>{% verbatim %}{{ head_content }}{% endverbatim %}</code> and
+        <code>{% verbatim %}{{ foot_content }}{% endverbatim %}</code>. A view that renders a full
+        <code>&lt;html&gt;</code> document gets them before its first <code>&lt;/head&gt;</code> and last
+        <code>&lt;/body&gt;</code>, on the initial render and on every SSE update, unless the exact markup
+        is already there. Such a document also gets a <code>via_ctx</code> meta when it has none and a
+        <code>data-signals__ifmissing</code> seed of the initial signal values, but never the SSE
+        bootstrap or <code>datastar.js</code>: the layout has to carry those. A <code>&lt;title&gt;</code>
+        appended here lands next to the layout's own. See <a href="/docs/twig#twig-shell">Templates</a>.
+    </p>
 
     <h3 id="via-get-twig"><code>getTwig(): Twig\Environment</code></h3>
     {% code 'php' %}{% verbatim %}
