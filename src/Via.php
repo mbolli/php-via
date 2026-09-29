@@ -74,6 +74,9 @@ class Via {
     /** @var array<string, int> Number of active SSE coroutines per context ID */
     public array $activeSseCount = [];
 
+    /** SSE handlers still running, including their exit path and onClientDisconnect hooks */
+    public int $runningSseStreams = 0;
+
     /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
     public array $clients = [];
 
@@ -902,6 +905,10 @@ class Via {
                     }
                 }
 
+                // OpenSwoole only calls workerExit while the reactor has something alive. Without
+                // this an idle worker skipped it and ran the shutdown outside any coroutine.
+                Timer::tick(60_000, static function (): void {});
+
                 // Connect broker and subscribe to foreign invalidations.
                 // Must run inside workerStart (coroutine context) so that async
                 // brokers (Redis, NATS) can spawn their receive-loop coroutines.
@@ -940,7 +947,8 @@ class Via {
                 Timer::clearAll();
             });
 
-            // No-op after workerExit; covers reload_async => false, where workerExit never fires.
+            // No-op after workerExit. With reload_async => false workerExit never fires and this
+            // runs the callbacks outside a coroutine.
             $this->server->on('workerStop', function (Server $server, int $workerId): void {
                 $this->runWorkerShutdown();
             });
@@ -966,8 +974,9 @@ class Via {
      *
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
-     * recycle. They run inside a coroutine after open SSE streams have been told to close, each in
-     * its own try/catch, and OpenSwoole's `max_wait_time` bounds how long they may take.
+     * recycle. A callback cannot tell a reload from a stop. They run inside a coroutine after open
+     * SSE streams have closed, each in its own try/catch. OpenSwoole counts `max_wait_time` in whole
+     * seconds, so the budget for the stop is roughly `max_wait_time` minus up to one second.
      */
     public function onShutdown(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
@@ -1538,7 +1547,7 @@ class Via {
             'max_coroutine' => 100000,
             'worker_num' => $config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,
-            'max_wait_time' => 1,  // Max 1 second to wait for worker to exit
+            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onShutdown
             'reload_async' => true,  // Enable async reload
             'enable_reuse_port' => true,  // Allow immediate rebind on restart
             'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
@@ -1849,6 +1858,7 @@ class Via {
         foreach ($this->contexts as $context) {
             $context->getPatchManager()->closePatchChannel();
         }
+        $this->waitForSseStreams();
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
@@ -1862,6 +1872,22 @@ class Via {
             $this->broker->disconnect();
         } catch (\Throwable $e) {
             $this->log('error', 'Broker disconnect failed during shutdown: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Let the SSE exit paths (onClientDisconnect included) finish before the callbacks and the
+     * broker go away, within half the stop budget so the callbacks keep the rest.
+     */
+    private function waitForSseStreams(): void {
+        if (Coroutine::getCid() <= 0) {
+            return;
+        }
+
+        $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
+        $deadline = microtime(true) + max(0, $maxWait - 1) / 2;
+        while ($this->runningSseStreams > 0 && microtime(true) < $deadline) {
+            Coroutine::usleep(10_000);
         }
     }
 

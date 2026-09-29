@@ -18,12 +18,12 @@ use OpenSwoole\Coroutine\Http\Client;
  *   kill -INT <master>     no onShutdown, scheduler deadlock
  *   SIGINT to the group    onShutdown ran, then "Uncaught OpenSwoole\ExitException" per worker
  *
- * and OpenSwoole's manager keeps the default SIGINT action, so on Ctrl-C it died and left the
- * workers running under init once the worker handler stopped exiting on its own.
+ * OpenSwoole's manager keeps the default SIGINT action, so once the worker SIGINT handler stopped
+ * calling exit() a Ctrl-C killed the manager and left the workers running under init.
  */
 
 /** @return array{out: string, marker: list<string>, leftover: int} */
-function runGracefulShutdownServer(int $workers, string $mode): array {
+function runGracefulShutdownServer(int $workers, string $mode, string $options = ''): array {
     $fixture = dirname(__DIR__) . '/Fixtures/graceful_shutdown_server.php';
     $marker = sys_get_temp_dir() . '/via_shutdown_' . bin2hex(random_bytes(6));
     $log = $marker . '.log';
@@ -33,7 +33,7 @@ function runGracefulShutdownServer(int $workers, string $mode): array {
         // Output goes to a file: orphaned workers would hold a pipe open and hang shell_exec().
         shell_exec(
             'timeout 30 setsid --wait ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture)
-            . ' ' . $workers . ' ' . escapeshellarg($mode) . ' ' . escapeshellarg($marker)
+            . ' ' . $workers . ' ' . escapeshellarg($mode) . ' ' . escapeshellarg($marker) . ' ' . escapeshellarg($options)
             . ' > ' . escapeshellarg($log) . ' 2>&1'
         );
         $out = (string) @file_get_contents($log);
@@ -52,30 +52,37 @@ function runGracefulShutdownServer(int $workers, string $mode): array {
             'leftover' => count($leftover),
         ];
     } finally {
-        @unlink($marker);
-        @unlink($log);
+        foreach ([$marker, $marker . '.reloaded', $log] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
     }
 }
 
 /** @param array{out: string, marker: list<string>, leftover: int} $r */
-function expectCleanStop(array $r, int $workers): void {
+function expectCleanStop(array $r, int $workers, int $streams = 1): void {
     $context = 'fixture output: ' . var_export($r['out'], true) . ' marker: ' . var_export($r['marker'], true);
 
-    expect(str_contains($r['out'], 'sse=open') && str_contains($r['out'], 'sse=eof'))->toBeTrue($context);
+    if ($streams > 0) {
+        expect(str_contains($r['out'], 'sse=open') && str_contains($r['out'], 'sse=eof'))->toBeTrue($context);
+    }
 
-    $shutdownPids = array_map(
-        static fn (string $line): string => substr($line, strlen('shutdown ')),
-        array_values(array_filter($r['marker'], static fn (string $l): bool => str_starts_with($l, 'shutdown '))),
-    );
+    $shutdowns = array_values(array_filter($r['marker'], static fn (string $l): bool => str_starts_with($l, 'shutdown ')));
+    $shutdownPids = array_map(static fn (string $line): string => explode(' ', $line)[1], $shutdowns);
     expect($shutdownPids)->toHaveCount($workers, $context);
     expect(array_unique($shutdownPids))->toHaveCount($workers, 'onShutdown must run once in each worker');
 
+    foreach ($shutdowns as $line) {
+        expect($line)->not->toEndWith('cid=-1', 'onShutdown must run inside a coroutine');
+    }
+
     // The SSE loop left through its normal exit path rather than being cut off.
     expect(array_filter($r['marker'], static fn (string $l): bool => str_starts_with($l, 'disconnect ')))
-        ->toHaveCount(1, $context)
+        ->toHaveCount($streams, $context)
     ;
 
-    foreach (['deadlock', 'ExitException', 'processor has been registered', 'worker exit timeout'] as $needle) {
+    foreach (['deadlock', 'ExitException', 'processor has been registered', 'worker exit timeout', 'must be called in the coroutine'] as $needle) {
         expect($r['out'])->not->toContain($needle);
     }
 
@@ -102,6 +109,27 @@ describe('stopping a real server', function (): void {
 
     test('SIGINT to the process group (Ctrl-C) stops cleanly and orphans nothing', function (): void {
         expectCleanStop(runGracefulShutdownServer(2, 'INTGRP'), 2);
+    });
+
+    // max_wait_time is counted in whole seconds, so 1 left anywhere from 0 to 1 s for this.
+    test('an onShutdown callback that yields for 900 ms completes', function (): void {
+        expectCleanStop(runGracefulShutdownServer(2, 'TERM', 'shutdownYieldMs=900'), 2);
+    });
+
+    test('onClientDisconnect finishes before onShutdown runs, even when it yields', function (): void {
+        $r = runGracefulShutdownServer(1, 'TERM', 'disconnectYieldMs=50');
+        expectCleanStop($r, 1);
+        expect(explode(' ', $r['marker'][0])[0])->toBe('disconnect', var_export($r['marker'], true));
+    });
+
+    test('an idle worker with no timers still runs onShutdown in a coroutine', function (): void {
+        expectCleanStop(runGracefulShutdownServer(1, 'IDLE', 'shutdownYieldMs=10'), 1, streams: 0);
+    });
+
+    test('SIGUSR1 runs onShutdown in the old workers and the new ones keep serving', function (): void {
+        $r = runGracefulShutdownServer(2, 'USR1');
+        expect($r['out'])->toContain('served=ok');
+        expectCleanStop($r, 4);
     });
 });
 

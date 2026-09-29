@@ -38,14 +38,18 @@ All notable changes to php-via will be documented in this file.
   the callbacks never did. Measured with 2 workers and one open SSE stream: `kill -TERM` and
   `kill -INT` to the master ran no callback and ended in a scheduler deadlock; SIGINT to the process
   group ran them and then died with `Uncaught OpenSwoole\ExitException` from the worker's `exit(0)`.
-  Cleanup now runs from `workerExit` (in a coroutine) and `workerStop`: server intervals are
-  cleared, patch channels are closed so SSE loops leave through their normal exit path, each
-  callback runs in its own try/catch, then the broker disconnects. OpenSwoole's manager also no
-  longer dies on Ctrl-C, which had left the workers running under init.
-  Behaviour changes: callbacks run once per worker, inside a coroutine, bounded by `max_wait_time`,
-  and they now also run on a worker reload (SIGUSR1) or a `max_request` recycle. SSE streams end
-  cleanly during a stop, so `onClientDisconnect` fires for every connected client. A stop can take
-  up to `max_wait_time` while coroutines finish, and the signal warnings are gone from the logs.
+  Cleanup now runs from `workerExit`, in a coroutine: server intervals are cleared, patch channels
+  are closed and the worker waits for the SSE loops to leave through their normal exit path
+  (`onClientDisconnect` included), then each callback runs in its own try/catch, then the broker
+  disconnects. Each worker arms an idle keepalive timer so `workerExit` fires even when nothing else
+  is scheduled. OpenSwoole's manager now ignores SIGINT, so the master alone drives a Ctrl-C stop.
+  Behaviour changes: callbacks run once per worker, inside a coroutine. They also run on every
+  worker reload (SIGUSR1) and `max_request` recycle, which end that worker's SSE streams too, so
+  `onClientDisconnect` fires and the clients reconnect. A callback cannot tell a reload from a
+  stop. The default `max_wait_time` is now 3 seconds (was 1): OpenSwoole counts it in whole
+  seconds, so a stopping worker gets roughly `max_wait_time` minus up to one second, and with 1 a
+  callback yielding a few hundred milliseconds was regularly killed. The signal warnings are gone
+  from the logs.
 
 - **Persistent GlobalState no longer shares one SQLite connection across `fork()`.** The snapshot
   was opened in the master before the workers were forked, and the final drain was an `onShutdown`

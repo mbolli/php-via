@@ -10,8 +10,13 @@ declare(strict_types=1);
  * to the marker file. Prints sse=open once the stream is up and sse=eof when the server ends it.
  *
  * argv[1] = worker count
- * argv[2] = TERM, INT (to the master) or INTGRP (to the process group, run it under setsid)
+ * argv[2] = TERM, INT (to the master), INTGRP (to the process group, run it under setsid),
+ *           USR1 (reload, check the new workers serve, then TERM) or IDLE (TERM with no SSE
+ *           stream, no interval and no GC timer)
  * argv[3] = marker file path
+ * argv[4] = options as a query string: shutdownYieldMs, disconnectYieldMs
+ *
+ * onShutdown and onClientDisconnect yield first, then write, so a cut-off callback leaves no line.
  */
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
@@ -25,38 +30,84 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
+use OpenSwoole\Timer;
 
 $workers = (int) ($argv[1] ?? 2);
 $mode = (string) ($argv[2] ?? 'TERM');
 $marker = (string) ($argv[3] ?? sys_get_temp_dir() . '/via_shutdown_marker');
+parse_str((string) ($argv[4] ?? ''), $options);
+$shutdownYieldMs = (int) ($options['shutdownYieldMs'] ?? 0);
+$disconnectYieldMs = (int) ($options['disconnectYieldMs'] ?? 0);
+$reloadFlag = $marker . '.reloaded';
 
-$port = 4000 + (getmypid() % 150);
-$app = new Via(
-    (new Config())
-        ->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
-        ->withWorkerNum($workers)->withBroker(new SwooleBroker())
-);
+$config = (new Config())
+    ->withHost('127.0.0.1')->withPort(4000 + (getmypid() % 150))->withLogLevel('error')
+    ->withWorkerNum($workers)->withBroker(new SwooleBroker())
+;
+if ($mode === 'IDLE') {
+    $config = $config->withGcInterval(0);
+}
+
+$port = $config->getPort();
+$app = new Via($config);
 
 $app->page('/probe', function (Context $c): void {
     $c->view(fn (): string => 'CTX:' . $c->getId() . ':END');
 });
 
-$app->onShutdown(static function () use ($marker): void {
-    file_put_contents($marker, 'shutdown ' . getmypid() . "\n", FILE_APPEND | LOCK_EX);
+$app->onShutdown(static function () use ($marker, $shutdownYieldMs): void {
+    $cid = Coroutine::getCid();
+    if ($shutdownYieldMs > 0) {
+        Coroutine::usleep($shutdownYieldMs * 1000);
+    }
+    file_put_contents($marker, 'shutdown ' . getmypid() . " cid={$cid}\n", FILE_APPEND | LOCK_EX);
 });
 
-$app->onClientDisconnect(static function () use ($marker): void {
+$app->onClientDisconnect(static function () use ($marker, $disconnectYieldMs): void {
+    if ($disconnectYieldMs > 0) {
+        Coroutine::usleep($disconnectYieldMs * 1000);
+    }
     file_put_contents($marker, 'disconnect ' . getmypid() . "\n", FILE_APPEND | LOCK_EX);
 });
 
-$app->setInterval(static function () use ($app, $port, $mode): void {
+$masterPid = static fn (): int => (int) $app->getServer()?->master_pid;
+
+if ($mode === 'IDLE') {
+    $app->onStart(static function () use ($app, $masterPid): void {
+        if ($app->getServer()?->worker_id === 0) {
+            Timer::after(300, static fn () => posix_kill($masterPid(), SIGTERM));
+        }
+    });
+    $app->start();
+
+    exit;
+}
+
+$app->setInterval(static function () use ($port, $mode, $marker, $reloadFlag, $workers, $masterPid): void {
     static $fired = false;
     if ($fired) {
         return;
     }
     $fired = true;
 
-    Coroutine::create(static function () use ($app, $port, $mode): void {
+    if ($mode === 'USR1' && is_file($reloadFlag)) {
+        // New leader after the reload: wait for every old worker's onShutdown, then probe and stop.
+        Coroutine::create(static function () use ($port, $marker, $workers, $masterPid): void {
+            for ($i = 0; $i < 100 && substr_count((string) @file_get_contents($marker), 'shutdown ') < $workers; ++$i) {
+                Coroutine::usleep(50_000);
+            }
+            $client = new Client('127.0.0.1', $port);
+            $client->set(['timeout' => 5]);
+            $client->get('/probe');
+            echo str_contains((string) $client->body, 'CTX:') ? "served=ok\n" : "served=failed\n";
+            $client->close();
+            posix_kill($masterPid(), SIGTERM);
+        });
+
+        return;
+    }
+
+    Coroutine::create(static function () use ($port, $mode, $reloadFlag, $masterPid): void {
         $client = new Client('127.0.0.1', $port);
         $client->set(['timeout' => 5]);
         $client->get('/probe');
@@ -82,10 +133,14 @@ $app->setInterval(static function () use ($app, $port, $mode): void {
 
         Coroutine::usleep(300_000);
 
-        $master = (int) $app->getServer()?->master_pid;
+        $master = $masterPid();
+        if ($mode === 'USR1') {
+            touch($reloadFlag);
+        }
         match ($mode) {
             'INT' => posix_kill($master, SIGINT),
             'INTGRP' => posix_kill(-(int) posix_getpgid($master), SIGINT),
+            'USR1' => posix_kill($master, SIGUSR1),
             default => posix_kill($master, SIGTERM),
         };
 

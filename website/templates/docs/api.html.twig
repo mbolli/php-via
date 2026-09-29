@@ -85,10 +85,11 @@ $count = $app->globalState('counter', 0);
         <code>onShutdown</code> callbacks run once in each worker process when that worker stops: on
         <code>SIGTERM</code> or <code>SIGINT</code> (<code>docker stop</code>, <code>systemctl stop</code>,
         Ctrl-C), and also when a worker is reloaded (<code>SIGUSR1</code>) or recycled after
-        <code>max_request</code>. They run inside a coroutine after open SSE streams have been told to close,
-        and <code>onClientDisconnect</code> fires for each connected client during the stop. A callback that throws is logged
-        and the rest still run. OpenSwoole's <code>max_wait_time</code> (1 second by default) bounds how long they
-        may take.
+        <code>max_request</code>. A callback cannot tell a reload from a stop. They run inside a coroutine after the
+        worker's SSE streams have closed and <code>onClientDisconnect</code> has run for each of their clients. A
+        callback that throws is logged and the rest still run. OpenSwoole's <code>max_wait_time</code> (3 seconds
+        by default) bounds the whole stop, and because it counts whole seconds the real budget is roughly
+        <code>max_wait_time</code> minus up to one second.
     </p>
     {% code 'php' %}{% verbatim %}
 $timerId = null;

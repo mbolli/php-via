@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
@@ -166,6 +167,47 @@ class SseHandler {
         // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
         $context->getPatchManager()->recreatePatchChannel();
 
+        ++$this->via->runningSseStreams;
+
+        try {
+            $this->stream($context, $contextId, $response, $sse, $brotliWrite, $brotliFinish);
+        } finally {
+            --$this->via->runningSseStreams;
+        }
+    }
+
+    /**
+     * Whether a patch should be dropped because the connection cannot keep up.
+     *
+     * `send_yield` already applies backpressure, but as an unbounded park: measured
+     * against a client that never reads, writes 0-100 returned in ~0.05ms each
+     * (~6.4MB buffered) and write 101 then parked for 20s, returning false only when
+     * the client disconnected. `isWritable()` stayed true the whole time, so it is no
+     * use as a backpressure signal. A coroutine parked in write() also stops observing
+     * shutdown and disconnect, which undoes the loop's liveness guarantees.
+     *
+     * Only `elements` patches may be dropped. They are idempotent full-fragment morphs
+     * where the latest supersedes the rest, so a backed-up client simply catches up on
+     * the next broadcast. `signals` are deltas — self-healing only because delivery is
+     * acknowledged — and `script` patches are one-shot side effects with no resend
+     * path, so neither is ever sacrificed here.
+     *
+     * @param string $type           patch type
+     * @param int    $queuedBytes    `send_queued_bytes` for the connection
+     * @param int    $maxQueuedBytes threshold; 0 or less disables dropping
+     */
+    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes): bool {
+        if ($maxQueuedBytes <= 0 || $type !== 'elements') {
+            return false;
+        }
+
+        return $queuedBytes > $maxQueuedBytes;
+    }
+
+    /**
+     * Run the SSE loop for an authorised context until the client, the context or the server goes away.
+     */
+    private function stream(Context $context, string $contextId, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
         // Track that this coroutine holds an active SSE connection for this context.
         // Guards against a race where an older SSE coroutine exits *after* this one starts,
         // scheduling a cleanup timer that would destroy the still-live context.
@@ -333,34 +375,6 @@ class SseHandler {
         } else {
             $this->via->log('debug', "Old SSE coroutine exited; {$this->via->activeSseCount[$contextId]} still active, skipping cleanup: {$contextId}", $context);
         }
-    }
-
-    /**
-     * Whether a patch should be dropped because the connection cannot keep up.
-     *
-     * `send_yield` already applies backpressure, but as an unbounded park: measured
-     * against a client that never reads, writes 0-100 returned in ~0.05ms each
-     * (~6.4MB buffered) and write 101 then parked for 20s, returning false only when
-     * the client disconnected. `isWritable()` stayed true the whole time, so it is no
-     * use as a backpressure signal. A coroutine parked in write() also stops observing
-     * shutdown and disconnect, which undoes the loop's liveness guarantees.
-     *
-     * Only `elements` patches may be dropped. They are idempotent full-fragment morphs
-     * where the latest supersedes the rest, so a backed-up client simply catches up on
-     * the next broadcast. `signals` are deltas — self-healing only because delivery is
-     * acknowledged — and `script` patches are one-shot side effects with no resend
-     * path, so neither is ever sacrificed here.
-     *
-     * @param string $type           patch type
-     * @param int    $queuedBytes    `send_queued_bytes` for the connection
-     * @param int    $maxQueuedBytes threshold; 0 or less disables dropping
-     */
-    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes): bool {
-        if ($maxQueuedBytes <= 0 || $type !== 'elements') {
-            return false;
-        }
-
-        return $queuedBytes > $maxQueuedBytes;
     }
 
     /**

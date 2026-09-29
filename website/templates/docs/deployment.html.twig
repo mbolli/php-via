@@ -284,8 +284,12 @@ kill -USR1 $(cat /var/run/myapp.pid)
     {% endverbatim %}{% endcode %}
 
     <p>
-        php-via listens for <code>SIGTERM</code> and <code>SIGINT</code> and calls your <code>onShutdown</code>
-        callbacks before stopping. Register cleanup callbacks for any timers or open resources.
+        On a reload each old worker ends its SSE streams, which fires
+        <code>onClientDisconnect</code> (the browsers reconnect to the new workers), and then runs your
+        <code>onShutdown</code> callbacks, exactly as on <code>SIGTERM</code> or <code>SIGINT</code>. The same
+        happens when a worker is recycled after <code>max_request</code>. A callback cannot tell a reload from a
+        stop, so keep "server going down" announcements out of <code>onShutdown</code>. Register cleanup callbacks
+        for any timers or open resources.
     </p>
 
     <h2 id="multiple-instances">Multi-worker scaling</h2>
