@@ -26,6 +26,11 @@
     <p>
         TAB scope is always fully isolated per-connection — no broker ever carries TAB broadcasts.
     </p>
+    <p>
+        A worker publishes a scope at most once per broadcast flush, however often it was broadcast in between,
+        and the messages a worker receives between two of its flushes share one re-render. See
+        <a href="/docs/broadcasting#timing">Broadcasting → When the update is sent</a>.
+    </p>
 
     <h2 id="inmemorybroker">InMemoryBroker (default)</h2>
     <p>

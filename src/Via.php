@@ -38,6 +38,7 @@ use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
 use OpenSwoole\Coroutine;
+use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
@@ -54,7 +55,6 @@ use Twig\Environment;
 class Via {
     public const string VERSION = '0.13.0';
 
-    /** Safety bound on coalesced fan-out re-runs for a single scope. */
     /**
      * The worker that runs server-wide singleton work (see setInterval()).
      *
@@ -62,7 +62,17 @@ class Via {
      */
     private const int LEADER_WORKER_ID = 0;
 
+    /** Safety bound on coalesced fan-out re-runs for a single scope. */
     private const int MAX_SYNC_PASSES = 8;
+
+    /** Safety bound on flushes in a row caused by views broadcasting other scopes. */
+    private const int MAX_BROADCAST_HOPS = self::MAX_SYNC_PASSES;
+
+    /**
+     * How long flushBroadcasts() waits for a running fan-out of its scopes, and the shutdown drain
+     * for the publisher. A fan-out running longer than this is logged.
+     */
+    private const int FLUSH_WAIT_MS = 1000;
 
     // Legacy public properties for HTTP handlers (will be phased out)
     /** @var array<string, Context> */
@@ -116,14 +126,44 @@ class Via {
     /** Final GlobalState drain, run once in the master after every worker has stopped */
     private ?\Closure $finalGlobalStateDrain = null;
 
-    /** @var array<string, true> Scopes whose fan-out is currently running */
+    /** @var array<string, array{cid: int, since: int, warned: bool}> Scopes whose fan-out is running => its coroutine, hrtime start, whether it was reported as slow */
     private array $syncInFlight = [];
 
     /** @var array<string, array<string, array{0: \Throwable, 1: Context, 2: int}>> Per scope: failure signature => first throwable, its context, count */
     private array $syncFailures = [];
 
-    /** @var array<string, true> Scopes that were broadcast while their fan-out was running */
+    /** @var array<string, true> Scopes broadcast while their fan-out was running, by that fan-out's own views when coalescing */
     private array $syncPending = [];
+
+    /** @var array<string, int> Scopes waiting for a flush => hops of the render chain that marked them */
+    private array $dirtyScopes = [];
+
+    /** @var array<string, true> Scopes still to be published to the broker */
+    private array $unpublishedScopes = [];
+
+    private bool $flushScheduled = false;
+
+    /** Set while the scheduled flush waits on a timer (the tick gap) rather than Event::defer. */
+    private ?int $flushTimerId = null;
+
+    /** Bumped on every (re)schedule and cancel, so a superseded callback does nothing. */
+    private int $flushGeneration = 0;
+
+    /**
+     * Flushes run side by side, each on scopes no other one is rendering, so a view that waits on
+     * I/O holds up only its own scope.
+     *
+     * @var array<int, int> Coroutine running a flush => hops of the scope it renders
+     */
+    private array $runningFlushes = [];
+
+    private bool $publishing = false;
+
+    /** hrtime(true) when the last flush started or ended, whichever came later; null before the first one */
+    private ?int $lastFlushEdgeNs = null;
+
+    /** Set in workerStart: from then on the reactor can run a deferred flush even outside a coroutine. */
+    private bool $workerStarted = false;
 
     private Application $app;
     private Router $router;
@@ -218,7 +258,7 @@ class Via {
 
             // The broker's own catch only reaches an opt-in error handler, so log here.
             try {
-                $this->syncLocally($scope);
+                $this->receiveBroadcast($scope);
             } catch (\Throwable $e) {
                 $this->log('error', "Broker sync failed for scope \"{$scope}\": " . Logger::describe($e));
             }
@@ -537,15 +577,81 @@ class Via {
      * - $app->broadcast("user:123") - All tabs for user 123
      * - $app->broadcast("room:*") - All rooms (wildcard)
      *
+     * Inside a coroutine this only marks the scope. The worker's next flush renders it once and
+     * publishes it once, however often it was broadcast: at the end of the current event-loop
+     * turn when the worker's last flush started or ended at least Config::getBroadcastTickMs()
+     * ago, otherwise that long after it. Views render the state as it is then; call
+     * flushBroadcasts() to force it. Outside a coroutine, during shutdown, or with
+     * Config::withBroadcastCoalescing(false), it renders before returning, and the publish is sent
+     * by this call or, when another coroutine is publishing, by that one.
+     *
      * @param string $scope Scope to broadcast to
      */
     public function broadcast(string $scope): void {
+        // TAB scope is per-connection: no cross-node recipients exist.
+        $publish = $scope !== Scope::TAB;
+
+        if ($this->shouldCoalesce()) {
+            $this->tracer?->span('broadcast.schedule', static fn () => null, ['scope' => $scope], 'sse');
+            $this->markDirty($scope, $publish);
+            $this->rememberCallerMark($scope);
+            $this->scheduleFlush();
+
+            return;
+        }
+
         $this->syncLocally($scope);
 
-        // TAB scope is per-connection — no cross-node recipients exist.
-        if ($scope !== Scope::TAB) {
-            $this->broker->publish($scope);
+        if (!$publish) {
+            return;
         }
+
+        if ($this->publishing) {
+            // Another coroutine owns the broker connection; it sends this before it stops.
+            $this->unpublishedScopes[$scope] = true;
+
+            return;
+        }
+
+        $this->publishing = true;
+
+        try {
+            $this->broker->publish($scope);
+        } finally {
+            $this->publishing = false;
+
+            if ($this->unpublishedScopes !== []) {
+                $this->publishPending();
+            }
+        }
+    }
+
+    /**
+     * Run the broadcasts scheduled so far in this worker now, in the calling coroutine.
+     *
+     * Use it when the fan-out has to reach clients before something the action queues next,
+     * such as `broadcast(); flushBroadcasts(); execScript(...)`, or before shared state is
+     * changed back. It ignores the broadcast tick. When a scope this coroutine broadcast is
+     * being rendered by another flush, it waits for that fan-out first, up to 1 s; past that it
+     * logs a warning, and that scope's frame follows on a later flush. Publishing to other
+     * workers or nodes is done here too, unless a publish is already running, which then sends
+     * these as well. A no-op when nothing is pending.
+     */
+    public function flushBroadcasts(): void {
+        if (isset($this->runningFlushes[Coroutine::getCid()])) {
+            // Called from a view during a flush: its marks go to the next one.
+            return;
+        }
+
+        $mine = $this->takeCallerMarks();
+        $this->waitWhile(fn (): bool => array_intersect_key($mine, $this->syncInFlight) !== []);
+        foreach (array_intersect_key($mine, $this->syncInFlight) as $scope => $_) {
+            $this->log('warning', "flushBroadcasts() stopped waiting for the running fan-out of \"{$scope}\"; its frame follows on a later flush");
+        }
+
+        $this->cancelScheduledFlush();
+        $this->runTickFlush(inlinePublish: true);
+        $this->scheduleFlush();
     }
 
     /**
@@ -834,6 +940,8 @@ class Via {
             });
 
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
+                $this->workerStarted = true;
+
                 // Register signal handlers in worker process (where timers run)
                 $this->registerSignalHandlers();
 
@@ -1699,10 +1807,12 @@ class Via {
     /**
      * Sync all local contexts matching the given scope and invalidate view cache.
      *
-     * Called both by broadcast() (local work) and by the broker subscription
-     * callback (foreign node invalidations).
+     * Called by a flush, and directly by broadcast() and the broker receive paths when they
+     * do not coalesce.
+     *
+     * @param null|array<int, true> $rendered contexts this flush already rendered, by spl_object_id; the first pass skips them
      */
-    private function syncLocally(string $scope): void {
+    private function syncLocally(string $scope, ?array &$rendered = null): void {
         // Serialize fan-outs per scope.
         //
         // doSyncLocally() renders each context in a loop, and a render can suspend —
@@ -1727,12 +1837,12 @@ class Via {
             return;
         }
 
-        $this->syncInFlight[$scope] = true;
+        $this->syncInFlight[$scope] = ['cid' => Coroutine::getCid(), 'since' => hrtime(true), 'warned' => false];
 
-        // Wrap fan-out in a "broadcast {scope}" root trace. When called
-        // synchronously inside an action this is a no-op (the action trace is
-        // already open and the render spans nest under it); for timer/broker
-        // driven broadcasts it opens its own trace so those renders are visible.
+        // Wrap fan-out in a "broadcast {scope}" root trace. Inside an action (the
+        // synchronous path, or flushBroadcasts()) this is a no-op: the action trace is
+        // already open and the render spans nest under it. A deferred flush, a timer
+        // or a broker message opens its own trace so those renders are visible.
         $tracer = $this->tracer;
         $traceStarted = $tracer !== null && $tracer->startTrace('broadcast ' . $scope, 'sse');
 
@@ -1744,7 +1854,8 @@ class Via {
                 $this->syncFailures[$scope] = [];
 
                 try {
-                    $this->doSyncLocally($scope);
+                    // A re-run exists because state changed mid-pass, so it renders every context again.
+                    $this->doSyncLocally($scope, $rendered, skipRendered: $passes === 0);
                 } finally {
                     $this->logSyncFailures($scope);
                 }
@@ -1765,11 +1876,15 @@ class Via {
         }
     }
 
-    private function doSyncLocally(string $scope): void {
+    /**
+     * @param null|array<int, true> $rendered see syncLocally()
+     */
+    private function doSyncLocally(string $scope, ?array &$rendered = null, bool $skipRendered = false): void {
+        $this->invalidateForBroadcast($scope);
+
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
-            $this->invalidateViewCache($scope);
-            $this->syncAllContexts($scope);
+            $this->syncAllContexts($scope, $rendered, $skipRendered);
             $this->requestLogger->logBroadcast($scope, \count($this->contexts));
 
             return;
@@ -1782,28 +1897,10 @@ class Via {
 
             // If no specific route provided, broadcast to all routes
             if ($route === null) {
-                // Find all route scopes and invalidate their caches
-                // Note: getKeys() returns cache keys with :initial or :update suffix
-                // We need to extract the base scope before invalidating
-                $seenScopes = [];
-                foreach ($this->viewCache->getKeys() as $cacheKey) {
-                    // Extract base scope by removing :initial or :update suffix
-                    $baseScope = preg_replace('/:(?:initial|update)$/', '', $cacheKey);
-
-                    // Only invalidate each base scope once
-                    if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
-                        $this->invalidateViewCache($baseScope);
-                        $seenScopes[$baseScope] = true;
-                    }
-                }
-                // Sync all contexts
-                $this->syncAllContexts($scope);
+                $this->syncAllContexts($scope, $rendered, $skipRendered);
                 $this->requestLogger->logBroadcast($scope, \count($this->contexts));
             } else {
-                // Important: Invalidate cache using the full scope string (route:/path)
-                // The context's primary scope is "route:/path", not just "route"
-                $this->invalidateViewCache($scope);
-                $count = $this->syncContextsOnRoute($route, $scope);
+                $count = $this->syncContextsOnRoute($route, $scope, $rendered, $skipRendered);
                 $this->requestLogger->logBroadcast($scope, $count);
             }
 
@@ -1813,15 +1910,384 @@ class Via {
         // Handle custom scopes (with wildcard support)
         $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
 
-        // Invalidate cache for this scope
-        $this->invalidateViewCache($scope);
-
-        // Sync all matched contexts
         foreach ($matchedContexts as $context) {
-            $this->syncContextSafely($context, $scope);
+            $this->syncContextSafely($context, $scope, $rendered, $skipRendered);
         }
 
         $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
+    }
+
+    /**
+     * Drop the cached views a broadcast of this scope makes stale.
+     */
+    private function invalidateForBroadcast(string $scope): void {
+        if (Scope::isRouteBased($scope) && (Scope::parse($scope)[1] ?? null) === null) {
+            // Bare "route" reaches every route. Cache keys carry an :initial or :update
+            // suffix, so strip it to invalidate each route scope once.
+            $seenScopes = [];
+            foreach ($this->viewCache->getKeys() as $cacheKey) {
+                $baseScope = (string) preg_replace('/:(?:initial|update)$/', '', $cacheKey);
+
+                if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
+                    $this->invalidateViewCache($baseScope);
+                    $seenScopes[$baseScope] = true;
+                }
+            }
+
+            return;
+        }
+
+        // A route broadcast uses the full "route:/path" key, the context's primary scope.
+        $this->invalidateViewCache($scope);
+    }
+
+    /**
+     * Whether a broadcast from the current code is marked for the next flush instead of run now.
+     */
+    private function shouldCoalesce(): bool {
+        return $this->config->isBroadcastCoalescingEnabled() && !$this->shuttingDown && Coroutine::getCid() > 0;
+    }
+
+    /**
+     * Broker and pipe receive path: fan a broadcast from another worker or node out locally.
+     */
+    private function receiveBroadcast(string $scope): void {
+        // pipeMessage runs in a coroutine on OpenSwoole 26, but a started worker can schedule without one.
+        if ($this->config->isBroadcastCoalescingEnabled() && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
+            $this->markDirty($scope, publish: false);
+            $this->scheduleFlush();
+
+            return;
+        }
+
+        $this->syncLocally($scope);
+    }
+
+    /**
+     * Mark a scope for a flush. The caller schedules it.
+     */
+    private function markDirty(string $scope, bool $publish): void {
+        $cid = Coroutine::getCid();
+        $pass = $this->syncInFlight[$scope] ?? null;
+
+        if ($pass !== null && $pass['cid'] === $cid) {
+            // A view broadcasting the scope its own pass renders: re-run the pass, at most MAX_SYNC_PASSES times.
+            $coalesced = isset($this->syncPending[$scope]);
+            $this->syncPending[$scope] = true;
+        } else {
+            $hops = isset($this->runningFlushes[$cid]) ? $this->runningFlushes[$cid] + 1 : 0;
+
+            if ($hops >= self::MAX_BROADCAST_HOPS) {
+                $this->log('warning', "Broadcast chain limit reached for scope \"{$scope}\": check for views that broadcast each other's scopes");
+
+                return;
+            }
+
+            if ($pass === null) {
+                // Eagerly, so a sync() or an SSE initial render before the flush is not served stale HTML.
+                $this->invalidateForBroadcast($scope);
+            } else {
+                // Not mid-pass, which would split its frame: runFlush() invalidates once the pass ends.
+                $this->warnIfSlowPass($scope, $pass);
+            }
+
+            $coalesced = isset($this->dirtyScopes[$scope]);
+            $this->dirtyScopes[$scope] = max($this->dirtyScopes[$scope] ?? 0, $hops);
+        }
+
+        $this->stats->trackBroadcastScheduled($coalesced);
+
+        if ($publish) {
+            $this->unpublishedScopes[$scope] = true;
+        }
+    }
+
+    /**
+     * @param array{cid: int, since: int, warned: bool} $pass
+     */
+    private function warnIfSlowPass(string $scope, array $pass): void {
+        $runningMs = (hrtime(true) - $pass['since']) / 1e6;
+        if ($pass['warned'] || $runningMs < self::FLUSH_WAIT_MS) {
+            return;
+        }
+
+        $this->syncInFlight[$scope]['warned'] = true;
+        $this->log('warning', \sprintf('The fan-out of scope "%s" has been running for %.1f s, and its next frame waits for it: check its views for slow or blocked I/O', $scope, $runningMs / 1000));
+    }
+
+    /**
+     * Remember a scope this coroutine broadcast, for its flushBroadcasts().
+     */
+    private function rememberCallerMark(string $scope): void {
+        $context = Coroutine::getContext();
+        if ($context === null) {
+            return;
+        }
+
+        $key = $this->callerMarksKey();
+        $marks = $context[$key] ?? [];
+        $marks[$scope] = true;
+        $context[$key] = $marks;
+    }
+
+    /**
+     * @return array<string, true> the scopes this coroutine broadcast since its last flushBroadcasts()
+     */
+    private function takeCallerMarks(): array {
+        $context = Coroutine::getContext();
+        $key = $this->callerMarksKey();
+        if ($context === null || !isset($context[$key])) {
+            return [];
+        }
+
+        /** @var array<string, true> $marks */
+        $marks = $context[$key];
+        unset($context[$key]);
+
+        return $marks;
+    }
+
+    private function callerMarksKey(): string {
+        return self::class . '#' . spl_object_id($this) . ':broadcasts';
+    }
+
+    /**
+     * Schedule the next flush: at the end of this event-loop turn when the worker's last flush
+     * started or ended at least one broadcast tick ago, otherwise one tick after that.
+     */
+    private function scheduleFlush(): void {
+        // A scope whose fan-out is running is scheduled when it ends; shutdown drops what is left.
+        if ($this->shuttingDown || !$this->hasFlushWork()) {
+            return;
+        }
+
+        // Timer::clearAll() (workerExit, test fixtures) drops the tick timer without telling anyone.
+        if ($this->flushScheduled && ($this->flushTimerId === null || Timer::exists($this->flushTimerId))) {
+            return;
+        }
+
+        $generation = ++$this->flushGeneration;
+        $this->flushScheduled = true;
+        $this->flushTimerId = null;
+        $callback = fn () => $this->runScheduledFlush($generation);
+
+        $waitMs = $this->msUntilNextTick();
+        if ($waitMs > 0) {
+            $id = Timer::after($waitMs, $callback);
+            if (\is_int($id)) {
+                $this->flushTimerId = $id;
+
+                return;
+            }
+        }
+
+        if (!Event::defer($callback)) {
+            $this->flushScheduled = false;
+            $this->log('error', 'Could not schedule the broadcast flush; running it now');
+            $this->runTickFlush();
+        }
+    }
+
+    private function hasFlushWork(): bool {
+        return ($this->unpublishedScopes !== [] && !$this->publishing) || array_diff_key($this->dirtyScopes, $this->syncInFlight) !== [];
+    }
+
+    /**
+     * 0 when a flush may start now, else the wait in ms (at least 1: Timer::after(0) fails).
+     */
+    private function msUntilNextTick(): int {
+        $tickMs = $this->config->getBroadcastTickMs();
+        if ($tickMs === 0 || $this->lastFlushEdgeNs === null) {
+            return 0;
+        }
+
+        $remainingNs = $tickMs * 1_000_000 - (hrtime(true) - $this->lastFlushEdgeNs);
+
+        return $remainingNs > 0 ? max(1, (int) ceil($remainingNs / 1_000_000)) : 0;
+    }
+
+    private function cancelScheduledFlush(): void {
+        if ($this->flushTimerId !== null) {
+            Timer::clear($this->flushTimerId);
+            $this->flushTimerId = null;
+        }
+        $this->flushScheduled = false;
+        ++$this->flushGeneration;
+    }
+
+    private function runScheduledFlush(int $generation): void {
+        if ($generation !== $this->flushGeneration) {
+            return;
+        }
+
+        if (Coroutine::getCid() <= 0) {
+            // Renders push to Channels, which need a coroutine.
+            if (Coroutine::create(fn () => $this->runScheduledFlush($generation)) === false) {
+                $this->flushScheduled = false;
+                $this->flushTimerId = null;
+                $this->log('error', 'Could not start a coroutine for the broadcast flush');
+            }
+
+            return;
+        }
+
+        $this->flushScheduled = false;
+        $this->flushTimerId = null;
+
+        // A flush that was running when this was scheduled may have ended since, which moves the tick.
+        if ($this->msUntilNextTick() > 1) {
+            $this->scheduleFlush();
+
+            return;
+        }
+
+        $this->runTickFlush();
+    }
+
+    /**
+     * Run one flush on the dirty scopes no other flush is rendering, and record it in the stats.
+     */
+    private function runTickFlush(bool $inlinePublish = false): void {
+        $cid = Coroutine::getCid();
+        $batch = array_diff_key($this->dirtyScopes, $this->syncInFlight);
+        if (isset($this->runningFlushes[$cid]) || ($batch === [] && ($this->unpublishedScopes === [] || $this->publishing))) {
+            return;
+        }
+
+        $this->dirtyScopes = array_diff_key($this->dirtyScopes, $batch);
+        $this->runningFlushes[$cid] = 0;
+        $startNs = $this->lastFlushEdgeNs = hrtime(true);
+
+        try {
+            $this->runFlush($batch, $inlinePublish);
+        } catch (\Throwable $e) {
+            // An exception escaping a deferred callback ends the worker.
+            $this->log('error', 'Broadcast flush failed: ' . Logger::describe($e));
+        } finally {
+            unset($this->runningFlushes[$cid]);
+            $this->lastFlushEdgeNs = hrtime(true);
+            $this->stats->trackBroadcastFlush(($this->lastFlushEdgeNs - $startNs) / 1e6, $this->config->getBroadcastTickMs());
+            $this->scheduleFlush();
+        }
+    }
+
+    /**
+     * Publish the pending scopes, then fan out each scope of the batch once, rendering each
+     * context at most once across the batch.
+     *
+     * @param array<string, int> $batch scope => hops
+     */
+    private function runFlush(array $batch, bool $inlinePublish): void {
+        // Other workers hear about it before the local fan-out starts.
+        if ($this->unpublishedScopes !== [] && !$this->publishing) {
+            if ($inlinePublish || Coroutine::getCid() <= 0 || Coroutine::create(fn () => $this->publishPending()) === false) {
+                $this->publishPending();
+            }
+        }
+
+        // All of them first: a context reached through one scope must not render another
+        // dirty scope's view from the cache, since the dedupe skips it when that scope's turn comes.
+        foreach ($batch as $scope => $_) {
+            if (!isset($this->syncInFlight[$scope])) {
+                $this->invalidateForBroadcast($scope);
+            }
+        }
+
+        $cid = Coroutine::getCid();
+
+        /** @var array<int, true> $rendered */
+        $rendered = [];
+
+        foreach ($batch as $scope => $hops) {
+            if (isset($this->syncInFlight[$scope])) {
+                // Marked again and started by another flush after this batch was taken, so that pass covers it.
+                continue;
+            }
+
+            // A broadcast from one of this scope's views is one hop further down the chain.
+            $this->runningFlushes[$cid] = $hops;
+
+            try {
+                $this->syncLocally($scope, $rendered);
+            } catch (\Throwable $e) {
+                $this->log('error', "Broadcast of {$scope} failed: " . Logger::describe($e));
+            }
+
+            if (isset($this->dirtyScopes[$scope])) {
+                // Marked mid-pass, when invalidating would have split the frame.
+                $this->invalidateForBroadcast($scope);
+                $this->scheduleFlush();
+            }
+        }
+    }
+
+    /**
+     * Publish every pending scope. Only one coroutine per worker publishes at a time, so a broker
+     * connection is never shared by two coroutines.
+     */
+    private function publishPending(): void {
+        if ($this->publishing) {
+            return;
+        }
+        $this->publishing = true;
+
+        try {
+            while ($this->unpublishedScopes !== []) {
+                $scopes = $this->unpublishedScopes;
+                $this->unpublishedScopes = [];
+
+                foreach ($scopes as $scope => $_) {
+                    try {
+                        $this->broker->publish($scope);
+                    } catch (\Throwable $e) {
+                        $this->log('error', "Broker publish of {$scope} failed: " . Logger::describe($e));
+                    }
+                }
+            }
+        } finally {
+            $this->publishing = false;
+        }
+    }
+
+    /**
+     * Shutdown: no deferred flush runs any more, and the owed publishes go out.
+     *
+     * @param bool     $renderPending       render the pending frames in a coroutine of their own, so a view waiting on I/O cannot hold up the stop
+     * @param null|int $publisherDeadlineNs hrtime(true) up to which to let a running publisher finish first
+     */
+    private function drainBroadcasts(bool $renderPending, ?int $publisherDeadlineNs = null): void {
+        $this->cancelScheduledFlush();
+
+        if ($renderPending && Coroutine::getCid() > 0) {
+            // Views that do not yield are done when this returns, before the channels close.
+            Coroutine::create(fn () => $this->runTickFlush());
+        }
+
+        // Left over, such as a scope another flush is still rendering: clients reconnect for fresh state.
+        $this->dirtyScopes = [];
+
+        if ($publisherDeadlineNs !== null) {
+            $this->waitWhile(fn (): bool => $this->publishing, $publisherDeadlineNs);
+        }
+
+        // Still publishing past the deadline: that publisher sends the rest itself.
+        $this->publishPending();
+    }
+
+    /**
+     * Inside a coroutine, wait while $condition holds, up to $deadlineNs (hrtime) or FLUSH_WAIT_MS.
+     *
+     * @param \Closure(): bool $condition
+     */
+    private function waitWhile(\Closure $condition, ?int $deadlineNs = null): void {
+        if (Coroutine::getCid() <= 0) {
+            return;
+        }
+
+        $deadlineNs ??= hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000;
+        while ($condition() && hrtime(true) < $deadlineNs) {
+            Coroutine::usleep(1000);
+        }
     }
 
     /**
@@ -1845,7 +2311,7 @@ class Via {
             return;
         }
 
-        $this->syncLocally($msg['scope']);
+        $this->receiveBroadcast($msg['scope']);
     }
 
     /**
@@ -1885,12 +2351,17 @@ class Via {
             return;
         }
         $this->shutdownStarted = true;
+        // From here broadcast() renders and publishes synchronously.
         $this->shuttingDown = true;
+        $stopStartNs = hrtime(true);
 
         foreach ($this->serverIntervalIds as $id) {
             Timer::clear($id);
         }
         $this->serverIntervalIds = [];
+
+        // The frames waiting for the tick go out before the channels close; workerExit clears the tick's timer.
+        $this->drainBroadcasts(renderPending: true);
 
         // Wakes SSE loops parked in getPatch() so they leave through their normal exit path.
         foreach ($this->contexts as $context) {
@@ -1905,6 +2376,10 @@ class Via {
                 $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
             }
         }
+
+        // Presence broadcasts from onClientDisconnect and onShutdown may still sit with a running publisher.
+        $stopBudgetNs = max(0, (int) ($this->server?->setting['max_wait_time'] ?? 3) - 1) * 1_000_000_000;
+        $this->drainBroadcasts(renderPending: false, publisherDeadlineNs: min(hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000, $stopStartNs + $stopBudgetNs));
 
         try {
             $this->broker->disconnect();
@@ -1936,12 +2411,14 @@ class Via {
 
     /**
      * Sync all contexts on a specific route.
+     *
+     * @param null|array<int, true> $rendered see syncLocally()
      */
-    private function syncContextsOnRoute(string $route, string $scope): int {
+    private function syncContextsOnRoute(string $route, string $scope, ?array &$rendered = null, bool $skipRendered = false): int {
         $count = 0;
         foreach ($this->contexts as $context) {
             if ($context->getRoute() === $route) {
-                $this->syncContextSafely($context, $scope);
+                $this->syncContextSafely($context, $scope, $rendered, $skipRendered);
                 ++$count;
             }
         }
@@ -1951,18 +2428,30 @@ class Via {
 
     /**
      * Sync all contexts across all routes.
+     *
+     * @param null|array<int, true> $rendered see syncLocally()
      */
-    private function syncAllContexts(string $scope): void {
+    private function syncAllContexts(string $scope, ?array &$rendered = null, bool $skipRendered = false): void {
         foreach ($this->contexts as $context) {
-            $this->syncContextSafely($context, $scope);
+            $this->syncContextSafely($context, $scope, $rendered, $skipRendered);
         }
     }
 
     /**
      * Sync one context of a fan-out, so a view that throws cannot stop the others from getting the frame.
      * Failures are collected per signature and logged once per pass by logSyncFailures().
+     *
+     * @param null|array<int, true> $rendered see syncLocally()
      */
-    private function syncContextSafely(Context $context, string $scope): void {
+    private function syncContextSafely(Context $context, string $scope, ?array &$rendered = null, bool $skipRendered = false): void {
+        if ($rendered !== null) {
+            $objectId = spl_object_id($context);
+            if ($skipRendered && isset($rendered[$objectId])) {
+                return;
+            }
+            $rendered[$objectId] = true;
+        }
+
         try {
             $context->sync();
         } catch (\Throwable $e) {

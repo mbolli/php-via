@@ -37,6 +37,12 @@ class Config {
      */
     private int $sseMaxQueuedBytes = 1048576;
 
+    /** Whether broadcasts inside a coroutine are marked and rendered by the worker's next flush. */
+    private bool $broadcastCoalescing = true;
+
+    /** Minimum gap between the start or end of one broadcast flush and the start of the next, in ms. */
+    private int $broadcastTickMs = 25;
+
     /**
      * Whether to set the Secure flag on the session cookie (required for HTTPS).
      * Defaults to false so local HTTP dev works out of the box.
@@ -356,6 +362,53 @@ class Config {
 
     public function getSseMaxQueuedBytes(): int {
         return $this->sseMaxQueuedBytes;
+    }
+
+    /**
+     * Coalesce broadcasts into one flush per worker (on by default).
+     *
+     * Inside a coroutine, broadcast(), scoped signal writes and broadcasts received from other
+     * workers or nodes then only mark the scope. The worker's next flush renders each marked
+     * scope once, renders a context in several marked scopes once, and publishes each scope to
+     * the broker once. See withBroadcastTickMs() for when a flush runs. Views render the state
+     * as it is at flush time, and patches an action queues itself (execScript(), sync()) reach
+     * the client before the broadcast's frame; call Via::flushBroadcasts() where that order
+     * matters. Outside a coroutine and during shutdown broadcast() stays synchronous.
+     *
+     * @param bool $enabled false renders and publishes synchronously on every call, as earlier releases did
+     */
+    public function withBroadcastCoalescing(bool $enabled = true): self {
+        $this->broadcastCoalescing = $enabled;
+
+        return $this;
+    }
+
+    public function isBroadcastCoalescingEnabled(): bool {
+        return $this->broadcastCoalescing;
+    }
+
+    /**
+     * Set the broadcast tick: the minimum gap between two flushes of one worker (default 25 ms).
+     *
+     * A broadcast on a worker whose last flush started or ended at least this long ago is
+     * flushed at the end of the current event-loop turn, so an idle server adds no delay. Under
+     * load, a flush starts this long after the previous one started or ended (OpenSwoole timers
+     * resolve to 1 ms), so flushes whose views render for F ms without waiting on I/O take at
+     * most F / (F + tick) of a worker, however many actions arrive, and every broadcast in
+     * between shares the next flush. A flush does not wait for another scope's flush that waits
+     * on I/O. Larger values cost latency under load and save CPU.
+     * Without coalescing (withBroadcastCoalescing(false)) there is no tick.
+     *
+     * @param int $ms gap in milliseconds; 0 flushes at the end of every event-loop turn with no gap
+     */
+    public function withBroadcastTickMs(int $ms): self {
+        $this->broadcastTickMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getBroadcastTickMs(): int {
+        return $this->broadcastTickMs;
     }
 
     /**

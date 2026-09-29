@@ -42,6 +42,10 @@ interface MessageBroker {
      * The broker appends its nodeId to the message automatically.
      * TAB-scoped broadcasts should not be published (no cross-node recipients).
      *
+     * With broadcast coalescing on (the default) Via calls this at most once per scope per flush,
+     * so one message can stand for several broadcasts. It never calls it from two coroutines of
+     * one worker at the same time.
+     *
      * @param string $scope The scope string to invalidate (e.g. "route:/game", "global", "room:lobby")
      */
     public function publish(string $scope): void;

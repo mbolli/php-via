@@ -28,6 +28,15 @@ class Stats {
     private int $gcRuns = 0;
     private int $gcCyclesFreed = 0;
 
+    // Broadcast flush stats (this worker)
+    private int $broadcastsScheduled = 0;
+    private int $broadcastsCoalesced = 0;
+    private int $broadcastFlushes = 0;
+    private int $broadcastFlushOverruns = 0;
+    private float $broadcastFlushLastMs = 0.0;
+    private float $broadcastFlushMaxMs = 0.0;
+    private float $broadcastFlushTotalMs = 0.0;
+
     /**
      * Track a render operation.
      *
@@ -89,6 +98,54 @@ class Stats {
     }
 
     /**
+     * Track a broadcast marked for the next flush.
+     *
+     * @param bool $coalesced true when the scope was already waiting for that flush
+     */
+    public function trackBroadcastScheduled(bool $coalesced): void {
+        ++$this->broadcastsScheduled;
+        if ($coalesced) {
+            ++$this->broadcastsCoalesced;
+        }
+    }
+
+    /**
+     * Track one broadcast flush.
+     *
+     * @param float $durationMs wall time of the flush, yields included
+     * @param int   $tickMs     the configured broadcast tick; a longer flush counts as an overrun
+     */
+    public function trackBroadcastFlush(float $durationMs, int $tickMs): void {
+        ++$this->broadcastFlushes;
+        $this->broadcastFlushLastMs = $durationMs;
+        $this->broadcastFlushMaxMs = max($this->broadcastFlushMaxMs, $durationMs);
+        $this->broadcastFlushTotalMs += $durationMs;
+        if ($tickMs > 0 && $durationMs > $tickMs) {
+            ++$this->broadcastFlushOverruns;
+        }
+    }
+
+    /**
+     * Broadcast flush statistics of this worker.
+     *
+     * Two readings of flush_total_ms taken a second apart give the share of that second the
+     * worker spent flushing.
+     *
+     * @return array{scheduled: int, coalesced: int, flushes: int, flush_overruns: int, flush_last_ms: float, flush_max_ms: float, flush_total_ms: float}
+     */
+    public function getBroadcastStats(): array {
+        return [
+            'scheduled' => $this->broadcastsScheduled,
+            'coalesced' => $this->broadcastsCoalesced,
+            'flushes' => $this->broadcastFlushes,
+            'flush_overruns' => $this->broadcastFlushOverruns,
+            'flush_last_ms' => $this->broadcastFlushLastMs,
+            'flush_max_ms' => $this->broadcastFlushMaxMs,
+            'flush_total_ms' => $this->broadcastFlushTotalMs,
+        ];
+    }
+
+    /**
      * Get render statistics summary.
      *
      * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
@@ -124,6 +181,13 @@ class Stats {
             'avg_request_time' => $this->requests > 0 ? $this->totalRequestTime / $this->requests : 0.0,
             'gc_runs' => $this->gcRuns,
             'gc_cycles_freed' => $this->gcCyclesFreed,
+            'broadcasts_scheduled' => $this->broadcastsScheduled,
+            'broadcasts_coalesced' => $this->broadcastsCoalesced,
+            'broadcast_flushes' => $this->broadcastFlushes,
+            'broadcast_flush_overruns' => $this->broadcastFlushOverruns,
+            'broadcast_flush_last_ms' => $this->broadcastFlushLastMs,
+            'broadcast_flush_max_ms' => $this->broadcastFlushMaxMs,
+            'broadcast_flush_total_ms' => $this->broadcastFlushTotalMs,
         ];
     }
 
@@ -141,6 +205,13 @@ class Stats {
         $this->totalRequestTime = 0.0;
         $this->gcRuns = 0;
         $this->gcCyclesFreed = 0;
+        $this->broadcastsScheduled = 0;
+        $this->broadcastsCoalesced = 0;
+        $this->broadcastFlushes = 0;
+        $this->broadcastFlushOverruns = 0;
+        $this->broadcastFlushLastMs = 0.0;
+        $this->broadcastFlushMaxMs = 0.0;
+        $this->broadcastFlushTotalMs = 0.0;
         // Note: active_sse and active_contexts are not reset
     }
 }

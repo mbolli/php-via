@@ -624,6 +624,8 @@ class Context {
 
     /**
      * Broadcast updates to all contexts with the same primary scope.
+     *
+     * Inside a coroutine this only marks the scope for the worker's next broadcast flush; see Via::broadcast().
      */
     public function broadcast(): void {
         $this->app->broadcast($this->getPrimaryScope());

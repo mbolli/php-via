@@ -69,6 +69,24 @@ $app->broadcast(Scope::GLOBAL);
 $app->broadcast(Scope::routeScope('/'));
 $app->broadcast('room:lobby');
     {% endverbatim %}{% endcode %}
+    <p>Inside a coroutine (actions, timers, SSE hooks, broker messages) the call only marks the scope. The
+    worker's next flush re-renders it once and publishes it to other workers and nodes once, however many times
+    it was broadcast in the meantime, so views show the state as it is then. That flush runs at the end of the
+    current event-loop turn when the worker's last flush started or ended at least one broadcast tick
+    (25&nbsp;ms by default) ago, otherwise one tick after that. Outside a coroutine and while the worker shuts
+    down, the call renders before it returns. See <a href="/docs/broadcasting#timing">Broadcasting → When the
+    update is sent</a>.</p>
+
+    <h3 id="via-flush-broadcasts"><code>flushBroadcasts(): void</code></h3>
+    <p>Run the broadcasts marked so far now, in the calling coroutine, without waiting for the tick. Use it when
+    the fan-out has to reach clients before something queued after it, or before shared state is changed back.
+    When another flush is rendering a scope this coroutine broadcast, it waits for that fan-out, at most one
+    second; past that it logs a warning and returns, and that scope's frame follows on a later flush.</p>
+    {% code 'php' %}{% verbatim %}
+$app->broadcast('room:lobby');
+$app->flushBroadcasts();
+$c->execScript('scrollToBottom()'); // arrives after the new messages
+    {% endverbatim %}{% endcode %}
 
     <h3 id="via-global-state"><code>globalState(string $key, mixed $default = null): mixed</code></h3>
     <h3 id="via-set-global-state"><code>setGlobalState(string $key, mixed $value): void</code></h3>
@@ -343,7 +361,8 @@ $c->addScope('room:' . $roomId);  // add additional scope
     <p><code>sync()</code> re-renders the view and pushes signals. <code>syncSignals()</code> pushes only signals, skipping view re-render.</p>
 
     <h3 id="context-broadcast"><code>broadcast(): void</code></h3>
-    <p>Broadcast to all contexts in this context's primary scope.</p>
+    <p>Broadcast to all contexts in this context's primary scope. Same timing as
+    <a href="#via-broadcast"><code>$app-&gt;broadcast()</code></a>.</p>
 
     <h3 id="context-exec-script"><code>execScript(string $script): void</code></h3>
     {% code 'php' %}{% verbatim %}
@@ -506,6 +525,8 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
     ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
     ->withSseMaxQueuedBytes(1048576) // drop element patches for a client this far behind; 0 disables
+    ->withBroadcastTickMs(25)       // minimum gap between two broadcast flushes of a worker; 0 = every event-loop turn
+    ->withBroadcastCoalescing(false) // render and publish on every broadcast() call, with no tick (default: coalesced)
     // Multi-worker (single machine)
     ->withWorkerNum(swoole_cpu_num())   // default: 1; requires SwooleBroker/RedisBroker/NatsBroker when > 1
     ->withGlobalStateTableSize(2048, 65536)   // GlobalState rows × value bytes (default 1024 × 32768; rows is a floor)

@@ -14,13 +14,13 @@ use OpenSwoole\Http\Server;
  * on the same machine. No external infrastructure required.
  *
  * The receive path is handled directly in Via.php via the `onPipeMessage`
- * server event (registered before `$server->start()`). Via calls
- * `syncLocally($scope)` on each receiving worker, identical to Redis/NATS.
+ * server event (registered before `$server->start()`). Each receiving worker
+ * fans the scope out locally, identical to Redis/NATS.
  *
  * Lifecycle:
  *   1. nodeId: generated lazily per process (see NodeIdentity) so forked
  *      workers do not share one and discard each other's messages.
- *   2. subscribe($handler): stores handler — Via wires syncLocally() here.
+ *   2. subscribe($handler): unused, see the receive path above.
  *   3. connect(): marks connected. No coroutine loop needed (receive is event-driven).
  *   4. setServer(): called by Via in workerStart; injects server ref + worker identity.
  *   5. publish($scope): fans out sendMessage() to all sibling workers.
@@ -54,8 +54,7 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
     /**
      * Fan-out the scope invalidation to all sibling workers via OpenSwoole pipes.
      *
-     * The current worker's own syncLocally() is called directly by Via::broadcast()
-     * before publish() is invoked, so we only send to OTHER workers.
+     * Via fans the scope out on the current worker itself, so we only send to OTHER workers.
      */
     public function publish(string $scope): void {
         if ($this->server === null || $this->workerNum <= 1) {
@@ -70,7 +69,7 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
 
         for ($id = 0; $id < $this->workerNum; ++$id) {
             if ($id === $this->workerId) {
-                continue; // skip self — Via::broadcast() already called syncLocally()
+                continue; // skip self: Via fans out locally
             }
 
             $this->server->sendMessage($payload, $id);

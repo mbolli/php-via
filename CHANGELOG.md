@@ -4,6 +4,46 @@ All notable changes to php-via will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Inside a coroutine, `broadcast()` marks the scope and returns; the worker's next flush renders
+  it.** This covers `Via::broadcast()`, `Context::broadcast()`, the auto-broadcast of scoped
+  `setValue()`, `increment()` and `mutate()`, and broadcasts received from other workers or nodes.
+  A flush re-renders each marked scope once, renders a context in several marked scopes once, and
+  publishes each scope to the broker once. It runs at the end of the event-loop turn when the
+  worker's last flush started or ended at least one broadcast tick ago, otherwise one tick after
+  that (`Config::withBroadcastTickMs()`, default 25 ms). Flushes of different scopes run side by
+  side, so a view that waits on I/O delays only its own scope, and a scope broadcast while its
+  fan-out runs is rendered by the first flush after that fan-out ends. What changes for apps:
+  - Views render the state at flush time. Several writes in one action send one frame instead of
+    one per write, as long as the action does not wait on I/O between them: a database call in
+    between lets the flush send a half-updated frame, so write first and broadcast last. A value an
+    action sets, broadcasts and resets before it returns never reaches clients.
+  - Patches the action queues itself (`execScript()`, `$c->sync()`, `syncSignals()`) reach the tab
+    before the broadcast's frame.
+  - The action's HTTP response no longer waits for the fan-out, so a Datastar indicator can clear
+    before the frame arrives. An error in the fan-out or in the broker publish is logged instead of
+    failing the action.
+  - Under sustained load a client gets about one frame per tick and skips the states in between.
+    The broadcast reaches clients up to one tick plus one flush later, and one more tick on another
+    worker.
+  - Dev Bar: fan-out renders appear as their own `broadcast {scope}` traces, and the action trace
+    shows a `broadcast.schedule` span per call.
+  - Two new warnings. "Broadcast chain limit reached" means views broadcast each other's scopes in
+    a loop, which stops after 8 flushes. "The fan-out of scope ... has been running for" means a
+    broadcast found that scope's fan-out still rendering after more than a second, usually a view
+    blocked on I/O.
+
+  `Via::flushBroadcasts()` runs the pending flush in the calling coroutine, for code that needs the
+  frame before what it queues next. When another flush is rendering a scope the caller broadcast,
+  it waits for that fan-out up to 1 s; past that it logs a warning and returns, and the frame
+  follows on a later flush. `Config::withBroadcastCoalescing(false)` renders and publishes on every
+  call, as before. `withBroadcastTickMs(0)` keeps the coalescing but flushes every event-loop turn
+  with no gap. Outside a coroutine (CLI scripts, tests) and during worker shutdown `broadcast()`
+  stays synchronous. At shutdown the frames still waiting for the tick are rendered in a coroutine
+  of their own, so they reach clients before the streams close unless a view waits on I/O, which
+  then cannot hold up the stop. The owed publishes go out before the broker disconnects.
+
 ### Fixed
 
 - **A `mutateGlobalState()` or `Signal::mutate()` call that timed out, or a worker that died while
@@ -23,6 +63,22 @@ All notable changes to php-via will be documented in this file.
   served.
 
 ### Performance
+
+- **Broadcast storms cost a bounded number of renders.** Every `broadcast()` call and every scoped
+  signal write re-rendered every client in the scope inside the calling action and published once
+  per call, so N clients and M actions cost N x M renders, and each action waited for its own
+  fan-out. Each worker now renders a scope at most once per flush and starts a flush at least one
+  tick after the previous one started or ended, so flushes whose views render for F ms without
+  waiting on I/O use at most F / (F + tick) of the worker whatever the action rate.
+  `MessageBroker::publish()` is called once per scope per flush, and never from two
+  coroutines of one worker at the same time, so RedisBroker and NatsBroker no longer share their
+  publish connection between coroutines. `$app->getStats()->getBroadcastStats()`, and
+  `broadcast_stats` in the dev-mode `/_stats`, report per worker the broadcasts scheduled and
+  coalesced, the flushes, the last, longest and total flush time, and the flushes that overran the
+  tick. In a small `bench/contention/broadcast_storm.php` run (200 SSE clients, 50 actions from 10
+  connections, 1 worker) renders fell from 10,000 to 400 and frames per client from 50 to 2, and
+  the action p50 from 14 to 19 ms to under 1 ms. The last frame reached every client 25 ms after
+  the last action, against 12 to 19 ms before, which is the tick.
 
 - **Contended `mutateGlobalState()` and `Signal::mutate()` scale with coroutines per worker.**
   Every waiting coroutine held its own ticket and read the whole row at reactor speed, because

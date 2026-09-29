@@ -627,6 +627,11 @@ class RequestHandler {
             'contexts' => \count($this->via->contexts),
             'clients' => $this->via->getClients(),
             'render_stats' => $this->via->getRenderStats(),
+            // Per worker: the worker that served this request.
+            'broadcast_stats' => [
+                'tick_ms' => $this->via->getConfig()->getBroadcastTickMs(),
+                ...$this->via->getStats()->getBroadcastStats(),
+            ],
             'memory' => [
                 'current' => memory_get_usage(true),
                 'peak' => memory_get_peak_usage(true),

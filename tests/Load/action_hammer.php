@@ -7,7 +7,7 @@ declare(strict_types=1);
  *
  * Fires N concurrent POST /_action/{action} requests in parallel coroutines
  * while one SSE observer listens for signal patches. Measures HTTP success
- * rate, SSE patch delivery rate, and validates the final signal value.
+ * rate and SSE frames per observer, and checks that every observer ends on the final value.
  *
  * Designed to run against the php-via website with zero modifications.
  * Defaults target the CounterExample at /examples/counter.
@@ -19,12 +19,12 @@ declare(strict_types=1);
  *   3. Fire N POST /_action/{action} concurrently, each carrying
  *      {"via_ctx": "...", "step": 1, "count": 0} as the JSON body.
  *   4. Collect and count arriving SSE patches.
- *   5. Report: HTTP OK%, patch delivery %, final signal value.
+ *   5. Report: HTTP OK%, frames per observer, observers on the final value.
  *
  * What is tested:
  *   - PatchManager Channel(50) backpressure / drop behaviour under load
  *   - HTTP action handler throughput (req/s)
- *   - SSE patch delivery rate — how many patches reach the observer
+ *   - SSE convergence: whether every observer's last frame shows the final value
  *   - Final signal value correctness (count should equal HTTP-OK count
  *     since each successful increment adds 1)
  *
@@ -158,31 +158,34 @@ Coroutine::run(function () use (
     // Because the counter is ROUTE-scoped, every action broadcasts patches
     // to ALL N SSE connections simultaneously — stressing the Channel fills.
     $observerCtxIds = [$ctxId];
+    // Each page load starts its own session, and only that session may attach to its context.
+    $observerCookies = [$sessionCookies];
 
     if ($numObservers > 1) {
         echo "Opening {$numObservers} observer SSE connections (loading page for each) ...\n";
         $loadChan = new Channel($numObservers - 1);
         for ($i = 1; $i < $numObservers; ++$i) {
             Coroutine::create(function () use ($host, $port, $ssl, $route, $actionName, $loadChan, $noTlsVerify): void {
-                [$c] = loadPage($host, $port, $ssl, $route, $actionName, $noTlsVerify);
-                $loadChan->push($c ?? '');
+                [$c, , , $cookies] = loadPage($host, $port, $ssl, $route, $actionName, $noTlsVerify);
+                $loadChan->push([$c ?? '', $cookies]);
             });
         }
         for ($i = 1; $i < $numObservers; ++$i) {
-            $c = $loadChan->pop(15.0);
-            if ($c !== false && $c !== '') {
-                $observerCtxIds[] = $c;
+            $loaded = $loadChan->pop(15.0);
+            if ($loaded !== false && $loaded[0] !== '') {
+                $observerCtxIds[] = $loaded[0];
+                $observerCookies[] = $loaded[1];
             }
         }
         printf("  Loaded %d contexts\n\n", count($observerCtxIds));
     }
 
     // Step 3: Open one SSE connection per observer context.
-    // patchChan receives a value each time any observer sees our signal.
+    // patchChan receives [observer index, value] each time an observer sees our signal.
     $patchChan = new Channel(10000);
     $observerDone = new Channel(1);
 
-    foreach ($observerCtxIds as $obsCtxId) {
+    foreach ($observerCtxIds as $observerId => $obsCtxId) {
         $sseQuery = urlencode((string) json_encode(['via_ctx' => $obsCtxId]));
         Coroutine::create(function () use (
             $host,
@@ -193,9 +196,10 @@ Coroutine::run(function () use (
             $observerDone,
             $signalName,
             $noTlsVerify,
-            $sessionCookies
+            $observerCookies,
+            $observerId
         ): void {
-            openSseObserver($host, $port, $ssl, $sseQuery, $patchChan, $observerDone, $signalName, $noTlsVerify, $sessionCookies);
+            openSseObserver($host, $port, $ssl, $sseQuery, $patchChan, $observerDone, $signalName, $noTlsVerify, $observerCookies[$observerId], $observerId);
         });
     }
 
@@ -210,7 +214,7 @@ Coroutine::run(function () use (
     while (microtime(true) < $baselineDeadline) {
         $v = $patchChan->pop(0.2);
         if ($v !== false) {
-            $baselineValue = $v;
+            $baselineValue = $v[1];
 
             break; // got first patch; drain the rest below
         }
@@ -219,7 +223,7 @@ Coroutine::run(function () use (
     while (!$patchChan->isEmpty()) {
         $v = $patchChan->pop(0);
         if ($v !== false) {
-            $baselineValue = $v;
+            $baselineValue = $v[1];
         }
     }
     if ($baselineValue !== null) {
@@ -290,12 +294,23 @@ Coroutine::run(function () use (
     $observedCount = 0;
     $lastValue = null;
 
+    /** @var array<int, string> $lastByObserver */
+    $lastByObserver = [];
+
+    /** @var array<int, int> $framesByObserver */
+    $framesByObserver = array_fill_keys(array_keys($observerCtxIds), 0);
+
     while (!$patchChan->isEmpty()) {
         $val = $patchChan->pop(0);
         if ($val !== false) {
+            [$observerId, $value] = $val;
             ++$observedCount;
-            $lastValue = $val;
+            ++$framesByObserver[$observerId];
+            $lastByObserver[$observerId] = $value;
         }
+    }
+    if ($lastByObserver !== []) {
+        $lastValue = (string) max(array_map('intval', $lastByObserver));
     }
 
     $observerDone->push(1);
@@ -311,19 +326,17 @@ Coroutine::run(function () use (
     printf("HTTP errors        : %d\n", $totalFail);
 
     if ($numObservers > 1) {
-        // In broadcast mode the expected patch count = HTTP OK × observers.
-        $expectedTotal = $totalOk * $numObservers;
-        $dropCount = max(0, $expectedTotal - $observedCount);
-        $dropPct = $expectedTotal > 0 ? round($dropCount / $expectedTotal * 100, 1) : 0.0;
-        $deliveryPct = $expectedTotal > 0 ? round($observedCount / $expectedTotal * 100, 1) : 0.0;
-        printf("Observers          : %d\n", $numObservers);
-        printf("Expected patches   : %d  (HTTP OK × observers)\n", $expectedTotal);
+        // Broadcasts coalesce into one frame per flush, so frames per observer track the
+        // broadcast tick, not the action count. Delivery means every observer ends on the final value.
+        $converged = count(array_filter($lastByObserver, static fn (string $v): bool => $v === $lastValue));
+        printf("Observers          : %d\n", count($observerCtxIds));
         printf(
-            "Patches observed   : %d  (%.1f%% delivered, %.1f%% dropped)\n",
-            $observedCount,
-            $deliveryPct,
-            $dropPct
+            "Frames per observer: %.1f avg (min %d, max %d)\n",
+            $observedCount / max(1, count($framesByObserver)),
+            $framesByObserver === [] ? 0 : min($framesByObserver),
+            $framesByObserver === [] ? 0 : max($framesByObserver)
         );
+        printf("Observers converged: %d / %d  (last frame shows %s)\n", $converged, count($observerCtxIds), $lastValue ?? 'none');
         if ($netIncrement !== null) {
             $serverOkPct = $totalOk > 0 ? round($netIncrement / $totalOk * 100, 1) : 0.0;
             printf(
@@ -356,8 +369,8 @@ Coroutine::run(function () use (
     printf("Wall time          : %.2fs\n", $wallTime);
     printf("Throughput         : %d req/s\n", $throughput);
     echo "\n";
-    echo "Note: patch delivery < 100% is expected under load — PatchManager\n";
-    echo "      Channel(50) is non-blocking by design; state is always correct.\n\n";
+    echo "Note: broadcasts coalesce, so an observer gets about one frame per broadcast tick, not one\n";
+    echo "      per action. Every observer should still end on the final value.\n\n";
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -461,7 +474,7 @@ function fireAction(string $host, int $port, bool $ssl, string $actionPath, arra
 
 /**
  * Open a persistent SSE connection using a raw TCP client and push each
- * observed signal value into $patchChan.
+ * observed signal value into $patchChan as [$observerId, value].
  *
  * Why raw TCP instead of OpenSwoole\Coroutine\Http\Client:
  *   Client::get() blocks until the full response body is received. Since SSE
@@ -481,7 +494,8 @@ function openSseObserver(
     Channel $observerDone,
     string $signalName,
     bool $noTlsVerify = false,
-    array $cookies = []
+    array $cookies = [],
+    int $observerId = 0
 ): void {
     $sockType = $ssl ? SWOOLE_SOCK_TCP | SWOOLE_SSL : SWOOLE_SOCK_TCP;
     $client = new Coroutine\Client($sockType);
@@ -567,7 +581,7 @@ function openSseObserver(
             // Match exact key or namespaced key (count__scope__hash).
             foreach ($signals as $key => $val) {
                 if ($key === $signalName || str_starts_with($key, $signalName . '__')) {
-                    $patchChan->push((string) $val, 0);
+                    $patchChan->push([$observerId, (string) $val], 0);
 
                     break;
                 }

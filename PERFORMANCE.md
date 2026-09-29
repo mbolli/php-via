@@ -39,6 +39,11 @@ The test measures three things independently:
 These can diverge because OpenSwoole may finish processing a request but the client
 times out before receiving the response; the mutation has already happened.
 
+Since broadcast coalescing, an observer gets about one frame per broadcast tick instead of one
+per action, so "HTTP OK × observers" no longer counts expected patches. The harness now reports
+frames per observer and how many observers end on the final value. The delivery figures below
+were measured before coalescing.
+
 ### Results
 
 #### Concurrency = 200 (clean ceiling)

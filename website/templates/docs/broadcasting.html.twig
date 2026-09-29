@@ -53,6 +53,80 @@ $c->action(function (Context $c) use ($shared): void {
     // No explicit broadcast needed — auto-broadcast fires for Scope::routeScope('/')
 }, 'inc');
 {% endverbatim %}{% endcode %}
+    <p>
+        An action that writes several scoped signals, or writes them and also calls <code>broadcast()</code>,
+        still re-renders each client once. See the next section.
+    </p>
+
+    <h2 id="timing">When the update is sent</h2>
+    <p>
+        Actions, timers, SSE hooks and broker messages all run in a coroutine. There, <code>broadcast()</code>
+        only marks the scope. The worker's next flush re-renders every marked scope once and publishes it to
+        other workers and nodes once. A client in several marked scopes renders once. Outside a coroutine, for
+        example in a CLI script, and while the worker shuts down, <code>broadcast()</code> renders before it
+        returns.
+    </p>
+    <p>
+        A flush runs at the end of the current event-loop turn when the worker's last flush started or ended at
+        least one broadcast tick ago, so on a quiet server the update goes out at once. Otherwise it runs one
+        tick after that, and every broadcast in between shares it. The tick is 25&nbsp;ms by default. The
+        re-rendering a worker does per second then depends on its clients and the tick, not on how many actions
+        arrive: flushes whose views render for F milliseconds without waiting on I/O use at most F / (F + 25) of
+        the worker. Under load, clients skip intermediate frames and still end on the latest state. Broadcasts
+        received from other workers and nodes go through the same flush.
+    </p>
+    <p>
+        Flushes of different scopes run side by side, so a view that waits on a slow database query delays only
+        its own scope. A scope broadcast while its fan-out is still running is rendered by the first flush after
+        that fan-out ends. When a later broadcast finds a fan-out that has been running for over a second, the
+        worker logs a warning naming the scope.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withBroadcastTickMs(50); // fewer, larger flushes under load; 0 flushes every event-loop turn with no gap
+{% endverbatim %}{% endcode %}
+    <p>
+        Each worker counts its flushes in <code>$app-&gt;getStats()-&gt;getBroadcastStats()</code>, also shown
+        under <code>broadcast_stats</code> in the dev-mode <code>/_stats</code> endpoint: broadcasts scheduled
+        and coalesced, flushes, the last, longest and total flush time, and <code>flush_overruns</code>, the
+        flushes that took longer than the tick. Flush times are wall time, including time the views spend
+        waiting on I/O while the worker does other work. When the views do not wait on I/O, flushes longer
+        than the tick mean the worker spends more than half its time in them under sustained load, so
+        climbing overruns are the signal to raise the tick or make the views cheaper.
+    </p>
+    <p>What this means for your code:</p>
+    <ul>
+        <li>Views render the state as it is when the fan-out runs. Ten broadcasts in one action send one
+            frame with all ten changes, as long as the action does not wait on I/O between them: a database
+            call in between lets the flush run and send a half-updated frame. Write first and broadcast
+            last.</li>
+        <li>If an action sets a value, broadcasts and then changes the value back, clients never see it.
+            Call <code>$app-&gt;flushBroadcasts()</code> before changing it back.</li>
+        <li>Patches the action queues itself, such as <code>execScript()</code> or <code>$c-&gt;sync()</code>,
+            reach the tab before the broadcast's frame. Call <code>flushBroadcasts()</code> first when the
+            script needs the new DOM.</li>
+        <li>The action's HTTP response does not wait for the fan-out to every client, so a
+            <code>data-indicator</code> can clear before the new frame arrives.</li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$send = $c->action(function (Context $c) use ($app): void {
+    $app->mutateGlobalState('messages', fn (?array $m) => [...$m ?? [], $c->input('text')]);
+    $app->broadcast('room:lobby');
+
+    // Render the new message everywhere now, then scroll this tab to it.
+    $app->flushBroadcasts();
+    $c->execScript('document.querySelector("#messages").lastElementChild.scrollIntoView()');
+}, 'send');
+{% endverbatim %}{% endcode %}
+    <p>
+        When another flush is already rendering <code>room:lobby</code>, <code>flushBroadcasts()</code> waits for
+        it and then renders the new message. It waits at most one second: past that it logs a warning and
+        returns, and the message's frame follows on a later flush, after the script.
+    </p>
+    <p>
+        To render and publish on every call instead, as earlier releases did, turn coalescing off:
+        <code>(new Config())-&gt;withBroadcastCoalescing(false)</code>. There is no tick then.
+    </p>
 
     <h2 id="connect-disconnect">Broadcasting on connect and disconnect</h2>
     <p>
@@ -103,6 +177,7 @@ $send = $c->action(function (Context $c) use ($app): void {
         <li><a href="/docs/actions">Actions</a> — server-side handlers that trigger broadcasts</li>
         <li><a href="/docs/broker">Multi-node broker</a> — fan out broadcasts across servers with Redis or NATS</li>
         <li><a href="/docs/api#via-broadcast">API: broadcast()</a> — method signature</li>
+        <li><a href="/docs/api#via-flush-broadcasts">API: flushBroadcasts()</a>: run scheduled broadcasts now</li>
     </ul>
 </article>
 

@@ -21,9 +21,10 @@ use OpenSwoole\Coroutine;
  * used so the tracer is fully unit-testable.
  *
  * startTrace() is a no-op when a trace is already open in the current
- * coroutine: a broadcast triggered synchronously inside an action keeps nesting
- * its render spans under the action trace, while a timer-driven broadcast (no
- * active trace) opens its own root trace.
+ * coroutine: a fan-out run inside an action (Via::flushBroadcasts(), or a
+ * synchronous broadcast) keeps nesting its render spans under the action trace,
+ * while a deferred flush or a timer-driven broadcast (no active trace) opens its
+ * own root trace.
  */
 final class Tracer {
     private static ?self $instance = null;

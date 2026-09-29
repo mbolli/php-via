@@ -96,7 +96,8 @@ test('broadcasts arriving during a fan-out coalesce into one re-run', function (
     expect($renders)->toBe(2);
 });
 
-test('sequential broadcasts still each fan out', function (): void {
+// Inside a coroutine they coalesce into one fan-out instead; see BroadcastCoalescingTest.
+test('sequential broadcasts outside a coroutine still each fan out', function (): void {
     $app = createVia();
     $scope = 'room:sequential';
 
