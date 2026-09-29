@@ -227,10 +227,11 @@ $c->view(fn () => $c->render('page.html.twig', $data), block: 'demo');
     <h2 id="cache-updates">Disabling view caching</h2>
     <p>
         php-via caches view renders and skips re-rendering if signals haven't changed.
-        Disable this when your view reads external state (e.g. <code>getClients()</code>):
+        Disable this when your view reads external state (e.g. <code>getClients()</code>), and read that
+        state inside a closure: an array passed to <code>view()</code> is built once, when the page handler runs.
     </p>
     {% code 'php' %}{% verbatim %}
-$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);
+$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
     {% endverbatim %}{% endcode %}
 
     <h2 id="debugging">Debugging</h2>

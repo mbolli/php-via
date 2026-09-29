@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\State;
 
 use Mbolli\PhpVia\Support\IdGenerator;
+use OpenSwoole\Atomic\Long;
+use OpenSwoole\Exception;
+use OpenSwoole\Process;
 use OpenSwoole\Table;
 
 /**
@@ -20,108 +23,245 @@ use OpenSwoole\Table;
  * from the client ID, so storing it would multiply the row size by five to hold something any
  * worker can regenerate.
  *
- * Rows carry a last-seen stamp refreshed from the SSE loop. A worker that dies without running
- * its disconnect path would otherwise leave its clients in the list forever; anything not seen
- * within the TTL is dropped on read.
+ * A row belongs to the worker process that wrote it: its key includes the worker ID and the
+ * process ID, so no process can overwrite or delete another's row. The owner removes it when
+ * the stream ends. A tab that reconnected to another worker before its old stream ended has a
+ * row on each for that moment, and all() lists it once. Reads never write. A process that dies
+ * without running its disconnect path leaves its rows until OpenSwoole starts the next process
+ * under the same worker ID, whose claimWorker() removes them, and removeDeadProcesses() catches
+ * whatever that misses.
+ *
+ * Every change bumps a version shared by all workers. Each worker keeps the list it built last
+ * and returns it until the version moves, then rebuilds it, reusing the identicons it already made.
  */
 final class SharedClientRegistry {
+    /** Most scans a removal makes while other workers keep writing to the table. */
+    private const int MAX_REMOVAL_SCANS = 5;
+
     private Table $table;
 
+    /** Bumped after every change to the table, by any worker. */
+    private Long $version;
+
+    /** Worker ID this process registers under; set by claimWorker(). */
+    private int $workerId = 0;
+
+    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}> */
+    private array $snapshot = [];
+
+    /** Version $snapshot was read at; -1 before the first read. */
+    private int $snapshotVersion = -1;
+
+    /** Read epoch that reuses $snapshot without checking the version; 0 for none. */
+    private int $pinnedEpoch = 0;
+
     /**
-     * @param int $maxRows    Concurrent SSE clients across all workers. A floor, not a ceiling.
-     * @param int $ttlSeconds How long an entry survives without a heartbeat
+     * Create before the server forks, so every worker shares the table and the version.
+     *
+     * @param int $maxRows Concurrent SSE clients across all workers. A floor, not a ceiling.
      */
-    public function __construct(int $maxRows = 4096, private int $ttlSeconds = 120) {
+    public function __construct(int $maxRows = 4096) {
         $table = new Table($maxRows);
         $table->column('ctx', Table::TYPE_STRING, 255);
         $table->column('id', Table::TYPE_STRING, 64);
         // 45 characters is the longest IPv6 form, plus room for a port or a zone index.
         $table->column('ip', Table::TYPE_STRING, 64);
         $table->column('at', Table::TYPE_INT, 8);
-        $table->column('seen', Table::TYPE_INT, 8);
+        $table->column('wid', Table::TYPE_INT, 8);
+        $table->column('pid', Table::TYPE_INT, 8);
         $table->create();
         $this->table = $table;
+        $this->version = new Long(0);
     }
 
     /**
-     * Record a connected client. Silently ignored when the table is full, since losing a row
-     * costs an inaccurate count and must not fail the SSE connection itself.
-     */
-    public function register(string $contextId, string $clientId, string $ip, int $connectedAt): void {
-        $now = time();
-
-        $this->table->set(self::key($contextId), [
-            'ctx' => $contextId,
-            'id' => $clientId,
-            'ip' => $ip,
-            'at' => $connectedAt,
-            'seen' => $now,
-        ]);
-    }
-
-    public function unregister(string $contextId): void {
-        $this->table->del(self::key($contextId));
-    }
-
-    /**
-     * Refresh a client's last-seen stamp. No-op when it is not registered.
+     * Bind this process to a worker ID and remove the rows an earlier process with that ID left.
      *
-     * Called from the SSE loop's idle branch — the same heartbeat that keeps the context
-     * directory alive, and for the same reason.
+     * OpenSwoole starts a worker under the same ID after a crash, a reload or a max_request
+     * recycle. With reload_async it starts the new process while the old one still drains its
+     * streams, so this removes the rows of a live process too; the old process's own unregister()
+     * calls then find nothing, and they cannot touch the new process's rows.
+     *
+     * @return int number of rows removed
      */
-    public function touch(string $contextId): void {
-        $key = self::key($contextId);
+    public function claimWorker(int $workerId): int {
+        $this->workerId = $workerId;
+        $pid = getmypid();
 
-        if (!$this->table->exists($key)) {
-            return;
-        }
-
-        $this->table->set($key, ['seen' => time()]);
+        return $this->removeRows(static fn (array $row): bool => $row['wid'] === $workerId && $row['pid'] !== $pid);
     }
 
     /**
-     * Every client connected to any worker, dropping entries that have stopped reporting in.
+     * Remove the rows of every process that no longer exists, whatever its worker ID.
+     *
+     * The safety net for rows claimWorker() did not remove: a stopping process can register a
+     * stream after its successor claimed, and then be killed at max_wait_time.
+     *
+     * @return int number of rows removed
+     */
+    public function removeDeadProcesses(): int {
+        /** @var array<int, bool> $alive */
+        $alive = [];
+
+        return $this->removeRows(static function (array $row) use (&$alive): bool {
+            $pid = (int) $row['pid'];
+
+            // Signal 0 only checks. It also fails when the ID now belongs to another user's process.
+            return !($alive[$pid] ??= Process::kill($pid, 0));
+        });
+    }
+
+    /**
+     * Record a connected client, owned by this process.
+     *
+     * @return bool false when the table is full, which costs an inaccurate list and must not fail the SSE connection
+     */
+    public function register(string $contextId, string $clientId, string $ip, int $connectedAt): bool {
+        try {
+            $this->table->set(self::key($contextId, $this->workerId, getmypid()), [
+                'ctx' => $contextId,
+                'id' => $clientId,
+                'ip' => $ip,
+                'at' => $connectedAt,
+                'wid' => $this->workerId,
+                'pid' => getmypid(),
+            ]);
+        } catch (Exception) {
+            return false;
+        }
+        $this->changed();
+
+        return true;
+    }
+
+    /**
+     * Remove the row this process registered for a client. A row another process wrote for the
+     * same context, as when the tab reconnected to another worker before this stream ended, stays.
+     */
+    public function unregister(string $contextId): void {
+        if ($this->table->del(self::key($contextId, $this->workerId, getmypid()))) {
+            $this->changed();
+        }
+    }
+
+    /**
+     * Every client connected to any worker.
+     *
+     * The array is shared between calls: it is rebuilt only after a client registers or leaves on
+     * any worker. Calls with the same non-zero read epoch get the same array without checking for
+     * changes, so a fan-out renders one list. A change made by this process ends that, and so does
+     * a call with another epoch, or none, in between.
+     *
+     * @param int $readEpoch the caller's read epoch ({@see ReadEpochs}), or 0 outside a fan-out
      *
      * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
      */
-    public function all(): array {
-        $cutoff = time() - $this->ttlSeconds;
+    public function all(int $readEpoch = 0): array {
+        if ($readEpoch !== 0 && $readEpoch === $this->pinnedEpoch) {
+            return $this->snapshot;
+        }
+
+        // Read before scanning: a change landing mid-scan leaves the version ahead, so the next call rebuilds.
+        $version = $this->version->get();
+        if ($version !== $this->snapshotVersion) {
+            $this->snapshot = $this->scan();
+            $this->snapshotVersion = $version;
+        }
+        $this->pinnedEpoch = $readEpoch;
+
+        return $this->snapshot;
+    }
+
+    /**
+     * Rows in the table. A tab that reconnected to another worker counts twice until its old
+     * stream ends.
+     */
+    public function count(): int {
+        return \count($this->table);
+    }
+
+    /**
+     * Delete the rows $isStale picks, scanning again while other workers write to the table.
+     *
+     * Only for rows no live process writes any more: the key embeds the writer's process ID, so a
+     * row picked here cannot be replaced by a live one between the scan and the delete.
+     *
+     * @param \Closure(array<string, mixed>): bool $isStale
+     *
+     * @return int number of rows removed
+     */
+    private function removeRows(\Closure $isStale): int {
+        $removed = 0;
+
+        for ($scan = 1; $scan <= self::MAX_REMOVAL_SCANS; ++$scan) {
+            $versionBefore = $this->version->get();
+            $stale = [];
+            foreach ($this->table as $key => $row) {
+                if ($isStale($row)) {
+                    $stale[] = (string) $key;
+                }
+            }
+            // A delete by another worker in a hash chain the scan is walking makes it skip a row.
+            $complete = $this->version->get() === $versionBefore;
+
+            foreach ($stale as $key) {
+                if ($this->table->del($key)) {
+                    ++$removed;
+                }
+            }
+
+            if ($complete) {
+                break;
+            }
+        }
+
+        if ($removed > 0) {
+            $this->changed();
+        }
+
+        return $removed;
+    }
+
+    /**
+     * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
+     */
+    private function scan(): array {
+        $previous = $this->snapshot;
         $clients = [];
-        $stale = [];
 
-        foreach ($this->table as $key => $row) {
-            if ((int) $row['seen'] < $cutoff) {
-                $stale[] = (string) $key;
-
+        foreach ($this->table as $row) {
+            $contextId = (string) $row['ctx'];
+            $connectedAt = (int) $row['at'];
+            // The same tab on two workers, while its old stream ends: list the newer connection.
+            if (isset($clients[$contextId]) && $clients[$contextId]['connected_at'] > $connectedAt) {
                 continue;
             }
 
-            $contextId = (string) $row['ctx'];
             $clientId = (string) $row['id'];
+            $known = $previous[$contextId] ?? null;
 
             $clients[$contextId] = [
                 'id' => $clientId,
                 // Regenerated rather than stored: deterministic from the ID, and 1.5 KB.
-                'identicon' => IdGenerator::generateIdenticon($clientId),
-                'connected_at' => (int) $row['at'],
+                'identicon' => $known !== null && $known['id'] === $clientId
+                    ? $known['identicon']
+                    : IdGenerator::generateIdenticon($clientId),
+                'connected_at' => $connectedAt,
                 'ip' => (string) $row['ip'],
                 'context_id' => $contextId,
             ];
         }
 
-        foreach ($stale as $key) {
-            $this->table->del($key);
-        }
-
         return $clients;
     }
 
-    /** Number of clients currently registered, without building the full list. */
-    public function count(): int {
-        return \count($this->table);
+    /** After a write by this process: tell every worker, and stop reusing a pinned list. */
+    private function changed(): void {
+        $this->version->add(1);
+        $this->pinnedEpoch = 0;
     }
 
-    private static function key(string $contextId): string {
-        return substr(sha1($contextId), 0, 32);
+    private static function key(string $contextId, int $workerId, int $pid): string {
+        return substr(sha1("{$workerId}:{$pid}:{$contextId}"), 0, 32);
     }
 }

@@ -63,6 +63,9 @@ class Via {
      */
     private const int LEADER_WORKER_ID = 0;
 
+    /** How often the leader drops registry rows of worker processes that no longer exist. */
+    private const int DEAD_CLIENT_SWEEP_MS = 60_000;
+
     /** Safety bound on coalesced fan-out re-runs for a single scope. */
     private const int MAX_SYNC_PASSES = 8;
 
@@ -959,6 +962,7 @@ class Via {
 
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
                 $this->workerStarted = true;
+                $this->app->claimWorker($workerId);
 
                 // Register signal handlers in worker process (where timers run)
                 $this->registerSignalHandlers();
@@ -1024,6 +1028,14 @@ class Via {
                 $gcIntervalMs = $this->config->getGcIntervalMs();
                 if ($gcIntervalMs > 0) {
                     $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
+                    }
+                }
+
+                if ($workerId === self::LEADER_WORKER_ID) {
+                    $id = Timer::tick(self::DEAD_CLIENT_SWEEP_MS, fn () => $this->app->removeDeadClients());
 
                     if ($id !== false) {
                         $this->serverIntervalIds[] = $id;
@@ -1227,12 +1239,16 @@ class Via {
     }
 
     /**
-     * Get all connected clients.
+     * Get all connected clients, across all workers.
+     *
+     * A broadcast reads the list once for all the views it renders. It reads it again when a
+     * client connects or leaves on this worker meanwhile, or when other code on this worker reads
+     * the list while a view in the broadcast waits on I/O.
      *
      * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
      */
     public function getClients(): array {
-        return $this->app->getClients();
+        return $this->app->getClients($this->readEpochs->current());
     }
 
     /**

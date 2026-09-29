@@ -51,7 +51,7 @@ class Application {
     /** @var array<string, int> Cleanup timer IDs for contexts */
     private array $cleanupTimers = [];
 
-    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
+    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}> Client info by context ID */
     private array $clients = [];
 
     /** @var array<string, mixed> Global state shared across all routes and clients */
@@ -203,16 +203,20 @@ class Application {
      * @param array{id: string, identicon: string, connected_at: int, ip: string} $clientInfo Client information
      */
     public function registerClient(string $contextId, array $clientInfo): void {
-        $this->clients[$contextId] = $clientInfo;
+        $this->clients[$contextId] = $clientInfo + ['context_id' => $contextId];
 
         // The identicon is not published: it is derived from the ID, so every worker can
         // regenerate it rather than store 1.5 KB of SVG per client.
-        $this->clientRegistry?->register(
+        $registered = $this->clientRegistry?->register(
             $contextId,
             $clientInfo['id'],
             $clientInfo['ip'],
             $clientInfo['connected_at']
         );
+
+        if ($registered === false) {
+            $this->logger->log('warning', "Client registry is full, so getClients() leaves out {$contextId}: raise Config::withContextDirectorySize()");
+        }
     }
 
     /**
@@ -226,19 +230,12 @@ class Application {
     /**
      * Get all connected clients.
      *
+     * @param int $readEpoch the caller's fan-out read epoch, or 0; see SharedClientRegistry::all()
+     *
      * @return array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}>
      */
-    public function getClients(): array {
-        if ($this->clientRegistry !== null) {
-            return $this->clientRegistry->all();
-        }
-
-        $clients = [];
-        foreach ($this->clients as $contextId => $client) {
-            $clients[$contextId] = array_merge($client, ['context_id' => $contextId]);
-        }
-
-        return $clients;
+    public function getClients(int $readEpoch = 0): array {
+        return $this->clientRegistry?->all($readEpoch) ?? $this->clients;
     }
 
     /**
@@ -286,6 +283,33 @@ class Application {
      */
     public function setClientRegistry(?SharedClientRegistry $registry): void {
         $this->clientRegistry = $registry;
+    }
+
+    /**
+     * Bind the client registry to this worker, dropping the clients of the earlier process with
+     * the same worker ID: one that crashed or was killed, or on a reload one still draining.
+     *
+     * @internal called at the start of workerStart
+     */
+    public function claimWorker(int $workerId): void {
+        $removed = $this->clientRegistry?->claimWorker($workerId) ?? 0;
+
+        if ($removed > 0) {
+            $this->logger->log('debug', "Worker {$workerId} dropped {$removed} client(s) registered by its previous process");
+        }
+    }
+
+    /**
+     * Drop the clients of worker processes that no longer exist and that claimWorker() missed.
+     *
+     * @internal run periodically on the leader worker
+     */
+    public function removeDeadClients(): void {
+        $removed = $this->clientRegistry?->removeDeadProcesses() ?? 0;
+
+        if ($removed > 0) {
+            $this->logger->log('info', "Removed {$removed} client(s) of worker processes that no longer run");
+        }
     }
 
     /**
@@ -551,7 +575,6 @@ class Application {
             $contextId,
             time() + $this->config->getContextDirectoryTtlSeconds()
         );
-        $this->clientRegistry?->touch($contextId);
     }
 
     /**

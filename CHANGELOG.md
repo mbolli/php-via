@@ -69,6 +69,25 @@ All notable changes to php-via will be documented in this file.
   recovered if it then died. The lease is now cleared first, and only by the holder still being
   served.
 
+- **With `worker_num > 1`, a client whose stream stayed busy for 120 s dropped out of
+  `getClients()` for good.** A row expired 120 s after its last heartbeat, and the next
+  `getClients()` deleted it, but the heartbeat ran only when the stream had nothing to send. A tab
+  that got a frame at least every 100 ms for two minutes left the list until it reconnected. Rows
+  no longer expire. The worker that registered a client removes it when the stream ends, and the
+  clients of a worker that crashes or is killed leave the list when OpenSwoole restarts it: 65 ms
+  after a SIGKILL in the test, against up to 120 s before. Every 60 s the first worker also drops
+  the clients of any worker process that no longer exists, in case the restart missed some.
+
+- **A tab that reconnected to another worker could drop out of `getClients()`.** When its old
+  stream ended after the new one had registered, the old worker deleted the new row. Each worker
+  process now writes its own row for a client and removes only that one, and the list shows the
+  tab once.
+
+- **A full client registry broke SSE connections.** Past its capacity (the context directory size
+  from `Config::withContextDirectorySize()`, 4,096 rows by default), registering a client threw,
+  which ended that tab's SSE request, and so did every reconnect that registered it again. The
+  client is now left out of `getClients()` and a warning is logged.
+
 ### Performance
 
 - **Broadcast storms cost a bounded number of renders.** Every `broadcast()` call and every scoped
@@ -122,6 +141,20 @@ All notable changes to php-via will be documented in this file.
   broadcast fell from 20,000 to 5 with a view per context and from 10,005 to 5 with a cached route
   view. The store's cost over a single-worker run fell from 30 ms (+146%) to 1.6 ms (+8%) and from
   17 ms (+430%) to 0.6 ms (+14%) per broadcast.
+
+- **`getClients()` no longer rebuilds the list on every call.** With one worker it copied every
+  client into a new array; it now returns the stored one. With `worker_num > 1` every call scanned
+  the shared table and regenerated each client's 1.5 KB identicon, about 5 µs per client, so a
+  broadcast whose per-tab view counts the clients cost tabs x clients. Each worker now keeps the
+  list it built last and rebuilds it only after a client connects or leaves on any worker, reusing
+  the identicons it already made. A broadcast reads the list once for all the views it renders,
+  like scoped signals, and again only when a client joins or leaves this worker meanwhile, or when
+  other code on this worker reads the list while a view in the broadcast waits on I/O. A client
+  joining another worker otherwise shows up on the next broadcast. Each worker that calls
+  `getClients()` holds about 2.3 KB per client. In `bench/contention/get_clients.php` with 500
+  clients, a call went from 2.4 ms to 0.1 µs, or 0.2 ms right after a connect, and a broadcast to
+  100 tabs whose view counts the clients from 239 ms to 0.4 ms. With one worker a call went from
+  36 µs to 0.1 µs. The idle SSE loop no longer writes the registry on each wake.
 
 ## [0.13.0] - 2026-09-29
 

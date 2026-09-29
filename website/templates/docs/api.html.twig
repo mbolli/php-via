@@ -190,9 +190,14 @@ $app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c-
     {% endverbatim %}{% endcode %}
 
     <h3 id="via-get-clients"><code>getClients(): array</code></h3>
+    <p>
+        With several workers the list covers every worker. A broadcast reads it once for all the views it renders,
+        unless a client connects or leaves on this worker, or other code on this worker reads the list while a view
+        waits on I/O.
+    </p>
     {% code 'php' %}{% verbatim %}
 $clients = $app->getClients();
-// ['contextId' => ['id' => '...', 'ip' => '...', 'connected_at' => 1234567890]]
+// ['contextId' => ['id' => '...', 'identicon' => '<svg ...>', 'connected_at' => 1234567890, 'ip' => '...', 'context_id' => 'contextId']]
 $count = count($app->getClients());
     {% endverbatim %}{% endcode %}
 
@@ -318,7 +323,7 @@ $c->view(fn() => "<p>Count: {$count->int()}</p>");
 $c->view(fn() => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo');
 
 // Disable caching for views that read external state:
-$c->view('presence.html.twig', ['n' => count($app->getClients())], cacheUpdates: false);
+$c->view(fn () => $c->render('presence.html.twig', ['n' => count($app->getClients())]), cacheUpdates: false);
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-component"><code>component(callable|string $fn, string $namespace): callable</code></h3>

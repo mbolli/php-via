@@ -6,11 +6,13 @@ declare(strict_types=1);
  * Fixture for ClientRegistryTest: a real multi-worker server.
  *
  * Opens N SSE connections (spread across workers by fd dispatch), then asks several workers
- * how many clients they can see.
+ * how many clients they can see. With argv[4] > 0 it then closes that many connections and asks
+ * again, which catches a worker answering from a list it cached before the disconnects.
  *
- * Prints connected=<n> counts=<comma-separated counts, one per probe> pids=<distinct pids>.
+ * Prints connected=<n> counts=<comma-separated counts, one per probe> pids=<distinct pids>,
+ * and after=<counts> afterpids=<distinct pids> for the second round.
  *
- * argv[1] = worker count, argv[2] = SSE connections, argv[3] = probes
+ * argv[1] = worker count, argv[2] = SSE connections, argv[3] = probes, argv[4] = connections to close
  */
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
@@ -24,6 +26,7 @@ putenv('VIA_TEST_MODE=');
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
@@ -32,6 +35,7 @@ use OpenSwoole\Timer;
 $workers = (int) ($argv[1] ?? 4);
 $connections = (int) ($argv[2] ?? 4);
 $probes = (int) ($argv[3] ?? 8);
+$close = (int) ($argv[4] ?? 0);
 
 // Derived from the PID rather than fixed: two runs overlapping on one port makes the second
 // fatal with "Address already in use" and the test read it as a product failure.
@@ -76,10 +80,42 @@ function openSse(int $port, string $contextId, string $cookie): mixed {
     return $sock;
 }
 
-$app->setInterval(static function () use ($app, $port, $connections, $probes): void {
+/**
+ * Ask $probes workers at once how many clients they see.
+ *
+ * @return array{0: list<int>, 1: int} the counts and the number of distinct pids that answered
+ */
+function probeCounts(int $port, int $probes): array {
+    // Concurrent so fd-based dispatch actually spreads them over workers; sequential
+    // connections reuse the same fd number and land on the same one every time.
+    $results = new Coroutine\Channel($probes);
+    for ($i = 0; $i < $probes; ++$i) {
+        Coroutine::create(static function () use ($port, $results): void {
+            $client = new Client('127.0.0.1', $port);
+            $client->set(['timeout' => 5]);
+            $client->get('/count');
+            $results->push((string) $client->body);
+            $client->close();
+        });
+    }
+
+    $counts = [];
+    $pids = [];
+    for ($i = 0; $i < $probes; ++$i) {
+        preg_match('/COUNT:(\d+):PID:(\d+):END/', (string) $results->pop(10), $m);
+        if (isset($m[1])) {
+            $counts[] = (int) $m[1];
+            $pids[$m[2]] = true;
+        }
+    }
+
+    return [$counts, count($pids)];
+}
+
+$app->setInterval(static function () use ($app, $port, $connections, $probes, $close): void {
     Timer::clearAll();
 
-    Coroutine::create(static function () use ($app, $port, $connections, $probes): void {
+    Coroutine::create(static function () use ($app, $port, $connections, $probes, $close): void {
         // Each SSE stream needs its own context, so load a page per connection first.
         $sockets = [];
         for ($i = 0; $i < $connections; ++$i) {
@@ -104,32 +140,27 @@ $app->setInterval(static function () use ($app, $port, $connections, $probes): v
 
         Coroutine::usleep(400_000);
 
-        // Concurrent so fd-based dispatch actually spreads them over workers; sequential
-        // connections reuse the same fd number and land on the same one every time.
-        $results = new Coroutine\Channel($probes);
-        for ($i = 0; $i < $probes; ++$i) {
-            Coroutine::create(static function () use ($port, $results): void {
-                $client = new Client('127.0.0.1', $port);
-                $client->set(['timeout' => 5]);
-                $client->get('/count');
-                $results->push((string) $client->body);
-                $client->close();
-            });
-        }
-
-        $counts = [];
-        $pids = [];
-        for ($i = 0; $i < $probes; ++$i) {
-            preg_match('/COUNT:(\d+):PID:(\d+):END/', (string) $results->pop(10), $m);
-            if (isset($m[1])) {
-                $counts[] = (int) $m[1];
-                $pids[$m[2]] = true;
-            }
-        }
+        [$counts, $pids] = probeCounts($port, $probes);
 
         echo 'connected=', count($sockets), "\n";
         echo 'counts=', implode(',', $counts), "\n";
-        echo 'pids=', count($pids), "\n";
+        echo 'pids=', $pids, "\n";
+
+        if ($close > 0) {
+            foreach (array_splice($sockets, 0, $close) as $sock) {
+                if (is_resource($sock)) {
+                    fclose($sock);
+                }
+            }
+            // An idle stream notices a closed socket only when it next writes.
+            Coroutine::usleep(100_000);
+            $app->broadcast(Scope::GLOBAL);
+            Coroutine::usleep(500_000);
+
+            [$counts, $pids] = probeCounts($port, $probes);
+            echo 'after=', implode(',', $counts), "\n";
+            echo 'afterpids=', $pids, "\n";
+        }
 
         foreach ($sockets as $sock) {
             if (is_resource($sock)) {

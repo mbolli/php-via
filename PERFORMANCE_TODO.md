@@ -219,9 +219,31 @@ Reproduced with 6 SSE connections held open, one `getClients()` count per probed
 | 4 | 2,1,2,2,2,1,1,1 | 6 x8 |
 | 8 | 1,1,1,1,1,1,**0,0** | 6 x8 |
 
-`SharedClientRegistry` keys by hashed context ID and heartbeats from the same SSE idle branch as
-the context directory, so a worker that dies without running its disconnect path cannot leave
-its clients in the list forever.
+`SharedClientRegistry` keys each row by worker ID, process ID and context ID, so a row belongs to
+the process that wrote it and no other process can overwrite or delete it. The owner removes it
+when the stream ends. A tab that reconnected to another worker has a row on each until its old
+stream ends, and the list shows it once. A worker that dies without running its disconnect path
+leaves its rows until OpenSwoole starts the next process under the same worker ID, whose
+`claimWorker()` in `workerStart` removes them (about 65 ms after a SIGKILL, measured).
+
+With `reload_async` that is the normal reload path, not a corner case: OpenSwoole starts the new
+process about 3 ms after `workerExit`, while the old one is still draining (measured with a raw
+server and Via's settings). The claim removes the old process's rows then, and the per-process key
+keeps the old process's later `unregister()` calls away from the new one's rows.
+
+A scan of the table can step past a row while another worker deletes in the same hash chain, so
+the claim scans again, up to five times, until a scan saw no concurrent write. As a safety net the
+leader worker drops, every 60 s, the rows of any process that no longer exists: a stopping process
+can register a stream after its successor claimed and then be killed at `max_wait_time`.
+
+There is no TTL and no heartbeat any more: the 120 s TTL deleted, on read, the row of any stream
+that stayed busy for two minutes, because the heartbeat ran only when the stream was idle.
+
+**Reads are cached per worker.** A shared version counts every change; each worker keeps the list
+it built last, rebuilds it only when the version moved, and reuses the identicons it already made.
+A broadcast reads the list once per read epoch, like scoped signals, unless a local change or a
+read by other code on this worker comes in between. `bench/contention/get_clients.php` has the
+numbers.
 
 **The identicon is deliberately not stored.** It is a 1,550-byte SVG derived deterministically
 from the client ID, so storing it would have quintupled the row for something any worker can

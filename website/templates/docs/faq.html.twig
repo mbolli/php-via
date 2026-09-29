@@ -271,7 +271,7 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
         <p><strong>Fix:</strong> Disable view caching for views that must always reflect current state:
         </p>
         {% code 'php' %}{% verbatim %}
-$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);
+$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
         {% endverbatim %}{% endcode %}
     </details>
 

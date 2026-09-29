@@ -12,3 +12,7 @@ if (!defined('SWOOLE_EVENT_READ')) {
 if (!defined('SWOOLE_IPC_NONE')) {
     define('SWOOLE_IPC_NONE', 0);
 }
+// Default of OpenSwoole\Process::alarm()'s $type, which the extension leaves undefined.
+if (!defined('ITIMER_REAL')) {
+    define('ITIMER_REAL', 0);
+}

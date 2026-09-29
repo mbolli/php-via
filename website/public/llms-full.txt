@@ -185,7 +185,7 @@ $c->view(function (bool $isUpdate) use ($c, $data): string {
 $c->view(fn () => $c->render('page.html.twig', $data), block: 'counter');
 
 // Disable update caching for views that must always re-render fresh
-$c->view('presence.html.twig', ['count' => count($app->getClients())], cacheUpdates: false);
+$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
 ```
 
 ### 4. Scopes
