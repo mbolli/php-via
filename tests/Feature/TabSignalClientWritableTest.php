@@ -93,6 +93,33 @@ describe('TAB signal clientWritable', function (): void {
         expect($owned->hasChanged())->toBeFalse();
     });
 
+    test('a signal holding an object takes the posted object, or is re-sent when server-owned', function (): void {
+        $ctx = new Context('ctx1', '/test', createVia());
+        $free = $ctx->signal(['a' => 1], 'free');
+        $owned = $ctx->signal(['a' => 1], 'owned', clientWritable: false);
+        $owned->markSynced();
+
+        $ctx->injectSignals([$free->id() => ['a' => 2], $owned->id() => ['a' => 2]]);
+
+        expect($free->getValue())->toBe(['a' => 2])
+            ->and($owned->getValue())->toBe(['a' => 1])
+            ->and($owned->hasChanged())->toBeTrue()
+        ;
+    });
+
+    test('a component signal holding an object takes the posted object', function (): void {
+        $ctx = new Context('ctx1', '/test', createVia());
+        $ctx->component(function (Context $c): void {
+            $c->signal(['a' => 1], 'filters');
+            $c->view(fn () => '');
+        }, 'cmp');
+        $filters = array_values($ctx->getComponentManager()->getComponents())[0]->getSignal('filters');
+
+        $ctx->injectSignals([$filters->id() => ['a' => 2]]);
+
+        expect($filters->getValue())->toBe(['a' => 2]);
+    });
+
     test('a rejected scoped value is overwritten by the next sync', function (): void {
         $ctx = new Context('ctx1', '/test', createVia());
         $ctx->scope('room:owned');

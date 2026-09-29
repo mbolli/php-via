@@ -116,7 +116,9 @@ All notable changes to php-via will be documented in this file.
   when the page is rebuilt, so its signals start from their initial values. Re-declaring a TAB
   signal still sets it to the new initial value, and now logs a warning, once per name, when that
   changes the live value or explicitly asks for a different `clientWritable` (the first one is
-  kept).
+  kept). The warning gives the type and size of both values, never their content. A signal holding
+  a JSON object also never received the posted value: the object was split into `id.key` entries
+  that matched no signal. An object posted under a known signal id is now that signal's value.
 
 ### Breaking Changes
 
@@ -124,6 +126,13 @@ All notable changes to php-via will be documented in this file.
   longer takes the browser's value on actions or on revival, where it starts from the handler's
   initial value. The parameter type widens from `bool` to `?bool`, which breaks a subclass of
   `Context`, `Signal` or `SignalFactory` that overrides one of these signatures with `bool`.
+  With `worker_num > 1`, an action on a worker that does not hold the context rebuilds it the same
+  way, so a server-owned TAB signal is per-worker state: use `worker_num = 1` or a scoped signal.
+
+- **Component TAB signals are client-writable by default, like page TAB signals.** They take the
+  browser's value on every action, which overwrites a value the server set (from an interval, a
+  broadcast or another action) and has not synced yet. `clientWritable: false` or
+  `Config::withStrictTabSignals()` opts out.
 
 - **`ext-openswoole` now requires v26:** the extension constraint was unbound (`*`) and is now
   `^26.0`, matching the upgrade of `openswoole/core` and `openswoole/ide-helper` from v22 to v26.

@@ -485,7 +485,9 @@ class Config {
      * posts with every action. In strict mode the server ignores that value, so only signals the
      * page binds or assigns in the browser need clientWritable: true. An explicit
      * clientWritable: false is honoured in either mode. Revival does not restore server-owned
-     * signals from the browser either, so they start from the handler's initial value.
+     * signals from the browser either, so they start from the handler's initial value. With
+     * worker_num > 1 that rebuild also happens on every action another worker takes, so
+     * server-owned TAB signals are per-worker state: use worker_num = 1 or a scoped signal.
      */
     public function withStrictTabSignals(bool $strict = true): self {
         $this->strictTabSignals = $strict;

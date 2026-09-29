@@ -295,7 +295,7 @@ class SignalFactory {
         if ($live !== $initialValue && !isset($this->redeclarationWarned['value:' . $name])) {
             $this->redeclarationWarned['value:' . $name] = true;
             $this->app->log('warn', \sprintf(
-                "Signal '%s' declared again with initial value %s; it replaces the live value %s",
+                "Signal '%s' declared again with a different initial value (%s); it replaces the live value (%s)",
                 $name,
                 self::describeValue($initialValue),
                 self::describeValue($live),
@@ -315,7 +315,7 @@ class SignalFactory {
 
     /**
      * Compare a server value with the browser's copy after its JSON round trip, which turns 1.0
-     * into 1 and objects into arrays.
+     * into 1 and objects into associative arrays.
      */
     private static function sameClientValue(mixed $server, mixed $client): bool {
         $json = json_encode($server);
@@ -323,11 +323,13 @@ class SignalFactory {
         return ($json === false ? $server : json_decode($json, true)) === $client;
     }
 
+    /** Type and size only: signal values are often user input and must not reach the log. */
     private static function describeValue(mixed $value): string {
-        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
-        $json = $json === false ? get_debug_type($value) : $json;
-
-        return mb_strlen($json) > 80 ? mb_substr($json, 0, 77) . '...' : $json;
+        return match (true) {
+            \is_string($value) => 'string of ' . mb_strlen($value) . ' chars',
+            \is_array($value) => 'array of ' . \count($value) . ' items',
+            default => get_debug_type($value),
+        };
     }
 
     /**
@@ -347,8 +349,8 @@ class SignalFactory {
             $key = (string) $key;
             $fullKey = $prefix !== '' ? $prefix . '.' . $key : $key;
 
-            if (\is_array($value) && !$this->isAssocArray($value)) {
-                // It's a regular array value, not an object
+            if (\is_array($value) && (!$this->isAssocArray($value) || $this->ownsSignalId($fullKey))) {
+                // A list, or an object that is the value of a known signal rather than a namespace
                 $flat[$fullKey] = $value;
             } elseif (\is_array($value)) {
                 // It's an object/nested structure - recurse
@@ -360,6 +362,30 @@ class SignalFactory {
         }
 
         return $flat;
+    }
+
+    /**
+     * Whether $signalId names a TAB signal of this context or one of its components, or a scoped
+     * signal of its scopes.
+     */
+    private function ownsSignalId(string $signalId): bool {
+        if (isset($this->signals[$signalId])) {
+            return true;
+        }
+
+        foreach ($this->context->getScopes() as $scope) {
+            if ($this->app->getScopedSignal($scope, $signalId) !== null) {
+                return true;
+            }
+        }
+
+        foreach ($this->context->getComponentManager()->getComponents() as $component) {
+            if ($component->getSignalFactory()->ownsSignalId($signalId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

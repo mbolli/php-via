@@ -40,7 +40,9 @@ $config->withContextCleanupDelay(60_000); // 60 seconds
         and re-seeds the signal values the client still holds and sends on reconnect. Server-owned
         TAB signals (<code>clientWritable: false</code>, or every TAB signal under
         <code>Config::withStrictTabSignals()</code>) do not take the client's copy and start from the
-        handler's initial value.
+        handler's initial value. With <code>worker_num &gt; 1</code> the same rebuild happens whenever
+        an action lands on a worker that does not hold the context, so server-owned TAB signals are
+        per-worker state there: use <code>worker_num = 1</code> or keep that state in a scoped signal.
     </p>
     <p>
         This is on by default (10-minute window) and needs no application code. Because revival re-runs

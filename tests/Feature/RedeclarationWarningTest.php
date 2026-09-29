@@ -32,9 +32,20 @@ test('re-declaring a TAB signal with a different initial value logs a warning', 
         $ctx->signal(2, 'shared');
     });
 
-    expect($out)->toContain('[WARN]')->toContain("'shared'")->toContain('initial value 2')->toContain('live value 1')
+    expect($out)->toContain('[WARN]')->toContain("'shared'")->toContain('initial value (int)')->toContain('live value (int)')
         ->and($ctx->getSignal('shared')->getValue())->toBe(2)
     ;
+});
+
+test('the warning names the value type and size but never the content', function (): void {
+    $ctx = warnContext();
+
+    $out = redeclarationOutput($ctx, function (Context $ctx): void {
+        $ctx->signal('', 'search')->setValue('hunter2-secret');
+        $ctx->signal('', 'search');
+    });
+
+    expect($out)->toContain('[WARN]')->toContain('string of 14 chars')->not->toContain('hunter2');
 });
 
 test('the warning compares against the live value, not the first initial value', function (): void {
@@ -45,7 +56,7 @@ test('the warning compares against the live value, not the first initial value',
         $ctx->signal(1, 'live');
     });
 
-    expect($out)->toContain('[WARN]')->toContain("'live'")->toContain('live value 5')
+    expect($out)->toContain('[WARN]')->toContain("'live'")->toContain('live value (int)')
         ->and($ctx->getSignal('live')->getValue())->toBe(1)
     ;
 });

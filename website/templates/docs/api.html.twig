@@ -216,9 +216,17 @@ $status = $c->signal('idle', 'status', clientWritable: false);
         component follow the same rules.
     </p>
     <p>
+        A server-owned TAB signal lives in the worker that holds the context. With
+        <code>worker_num &gt; 1</code>, an action that lands on another worker rebuilds the context
+        there, and the signal starts from its initial value, so each worker keeps its own copy. Use
+        <code>worker_num = 1</code> for such pages, or keep the value in a scoped signal, which is
+        shared across workers.
+    </p>
+    <p>
         Declaring a TAB signal again with the same name returns the existing signal and sets it to the
         new initial value. When that changes the live value, or the declaration asks for a different
-        <code>clientWritable</code> (the first one is kept), php-via logs a warning once per name.
+        <code>clientWritable</code> (the first one is kept), php-via logs a warning once per name. The
+        warning gives the type and size of both values, not their content.
     </p>
 
     <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>

@@ -123,6 +123,52 @@ describe('Context revival', function (): void {
         expect($revived->getSignal('count')->int())->toBe(43);
     });
 
+    test('revival does not restore a server-owned TAB signal from the browser', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->signal(0, 'count', clientWritable: false);
+            $c->view(fn (): string => '');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/owned';
+
+        $ctx = reviveMintContext($app, $handler, $contextId, 'sess_owner');
+        $signalId = $ctx->getSignal('count')->id();
+        $ctx->getSignal('count')->setValue(42);
+        $app->getApp()->destroyContext($contextId);
+        unset($app->contexts[$contextId]);
+
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', [$signalId => 42]);
+
+        expect($revived)->not->toBeNull()
+            ->and($revived->getSignal('count')->int())->toBe(0)
+        ;
+    });
+
+    test('revival restores a signal of a component with an explicit namespace', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->component(function (Context $k): void {
+                $k->signal('', 'q');
+                $k->view(fn (): string => '');
+            }, 'search');
+            $c->view(fn (): string => '');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/component';
+
+        reviveMintContext($app, $handler, $contextId, 'sess_owner');
+        $app->getApp()->destroyContext($contextId);
+        unset($app->contexts[$contextId]);
+
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['search_q' => 'typed']);
+        $component = array_values($revived->getComponentManager()->getComponents())[0];
+
+        expect($component->getSignal('q')->id())->toBe('search_q')
+            ->and($component->getSignal('q')->getValue())->toBe('typed')
+        ;
+    });
+
     test('revival is denied when the requester session does not own the context', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/init2';
