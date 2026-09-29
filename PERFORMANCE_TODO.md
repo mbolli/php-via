@@ -809,10 +809,13 @@ below was unnecessary. Over 4 forked workers appending to one list, 60 each:
 | `mutate()` | 240 / 240 (and 800/800 at 8x100, 1600/1600 at 16x100) |
 | `setValue($signal->array() + [...])` | 116-184 / 240 |
 
-Crash safety: the callback runs between acquire and release, so waiters break an overdue lease
-after 2 s, each at most once. A burst can over-advance and skip tickets; those waiters proceed,
-so mutual exclusion degrades to the unlocked behaviour rather than deadlocking. Verified by
-SIGKILLing a process from inside its own callback — recovery in ~2 s with the right value.
+Crash safety: waiters break an overdue lease after 2 s, each once per turn they see, and also
+move on a turn that has stood still for 2 s with no lease: the ticket of a process that died
+waiting. A caller that times out in a coroutine leaves its ticket to a watcher coroutine that
+passes the turn on when it comes. A burst can still over-advance and skip tickets; those waiters
+proceed, so mutual exclusion degrades to the unlocked behaviour rather than deadlocking. Verified
+by SIGKILLing a process inside its own callback and while it waits: recovery in about 2 s with
+the right value.
 
 **Do not mix `mutate()` and `increment()` on one signal.** `increment()` deliberately skips the
 lock, so a `mutate()` beside it can write back over an increment.

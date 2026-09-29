@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\State;
 
-use OpenSwoole\Coroutine;
 use OpenSwoole\Exception;
 use OpenSwoole\Table;
 
@@ -66,19 +65,11 @@ final class SharedTable {
     /** Row uses the serialized string column. */
     private const int KIND_SERIALIZED = 0;
 
-    /**
-     * How long a mutate() lock may be held before waiters assume the holder died.
-     *
-     * The callback runs on the calling worker between an acquire and a release, so a worker
-     * killed mid-callback would otherwise stall every later mutate() on that key forever.
-     */
-    private const int LEASE_MS = 2000;
-
-    /** How long acquire() waits before giving up entirely. */
-    private const int ACQUIRE_TIMEOUT_MS = 5000;
-
     /** @var null|Table OpenSwoole shared-memory table (null in test mode) */
     private ?Table $table;
+
+    /** Lock for mutate() on the table's own rows (null in test mode) */
+    private ?TicketLock $lock = null;
 
     /** @var array<string, string> Fallback store used in VIA_TEST_MODE */
     private array $fallback = [];
@@ -117,6 +108,11 @@ final class SharedTable {
         $this->table->column('serving', Table::TYPE_INT, 8);
         $this->table->column('lease', Table::TYPE_INT, 8);
         $this->table->create();
+        $this->lock = new TicketLock(
+            $this->table,
+            static fn (string $key): string => "Timed out waiting to mutate GlobalState key \"{$key}\". A mutateGlobalState() "
+                . 'callback is blocking or a worker died holding the lock.',
+        );
     }
 
     /**
@@ -244,7 +240,9 @@ final class SharedTable {
      * the new one. It runs on the calling worker — no closure crosses a process boundary —
      * while a ticket lock on the row keeps every other worker out. Keep it fast and side-effect
      * free: it runs inside the lock, and a callback that blocks holds up every other writer of
-     * the same key.
+     * the same key. Concurrent callers in one worker queue locally, and one per worker polls the row.
+     * Exclusion holds while each holder finishes within 2 s: a holder that runs longer, or a worker
+     * that is next in line but cannot run for 2 s, is skipped, and its write can overlap the next.
      *
      * Do not mix mutate() and increment() on the SAME key. increment() deliberately skips the
      * lock — a single atomic operation needs no help — so a mutate() running beside it can
@@ -267,16 +265,13 @@ final class SharedTable {
         }
 
         $this->ensureRow($key);
-        $ticket = $this->acquire($key);
 
-        try {
+        return $this->lock->run($key, function () use ($key, $mutator): mixed {
             $next = $mutator($this->read($key, null));
             $this->set($key, $next);
 
             return $next;
-        } finally {
-            $this->release($key, $ticket);
-        }
+        });
     }
 
     /**
@@ -422,79 +417,5 @@ final class SharedTable {
                 . 'Raise the row count with Config::withGlobalStateTableSize().'
             );
         }
-    }
-
-    /**
-     * Take the ticket lock on a row, returning the ticket that must be released.
-     *
-     * A ticket lock rather than a mutex because Table::incr() is the only cross-process atomic
-     * operation available: OpenSwoole\Lock must not be used inside coroutine context (it blocks
-     * the whole worker, not just the caller) and Table offers no compare-and-swap.
-     */
-    private function acquire(string $key): int {
-        $ticket = (int) $this->table->incr($key, 'next', 1) - 1;
-
-        $startMs = (int) (microtime(true) * 1000);
-        $forcedOnce = false;
-
-        while (true) {
-            $row = $this->table->get($key);
-            $serving = \is_array($row) ? (int) $row['serving'] : 0;
-
-            // >= rather than ==: a lease breaker may have advanced past this ticket, in which
-            // case the lock has already degraded and waiting longer achieves nothing.
-            if ($serving >= $ticket) {
-                $this->table->set($key, ['lease' => (int) (microtime(true) * 1000) + self::LEASE_MS]);
-
-                return $ticket;
-            }
-
-            $nowMs = (int) (microtime(true) * 1000);
-            $lease = \is_array($row) ? (int) $row['lease'] : 0;
-
-            // Holder overdue: assume the process died mid-callback and let the queue move.
-            // Each waiter breaks the lease at most once, so a burst of waiters can over-advance
-            // and skip tickets — those waiters take the >= branch above and proceed. Mutual
-            // exclusion degrades to the unlocked behaviour rather than deadlocking.
-            if (!$forcedOnce && $lease > 0 && $nowMs > $lease) {
-                $forcedOnce = true;
-                $this->table->incr($key, 'serving', 1);
-
-                continue;
-            }
-
-            if ($nowMs - $startMs > self::ACQUIRE_TIMEOUT_MS) {
-                throw new \RuntimeException(
-                    "Timed out waiting to mutate GlobalState key \"{$key}\". A mutateGlobalState() "
-                    . 'callback is blocking or a worker died holding the lock.'
-                );
-            }
-
-            $this->pause();
-        }
-    }
-
-    private function release(string $key, int $ticket): void {
-        $row = $this->table->get($key);
-        $serving = \is_array($row) ? (int) $row['serving'] : 0;
-
-        // Only advance if this ticket is still the one being served; a lease breaker may have
-        // moved on already, and advancing again would skip an innocent waiter.
-        if ($serving === $ticket) {
-            $this->table->incr($key, 'serving', 1);
-        }
-
-        $this->table->set($key, ['lease' => 0]);
-    }
-
-    /** Yield to other coroutines while spinning, or sleep when there is no scheduler. */
-    private function pause(): void {
-        if (class_exists(Coroutine::class) && Coroutine::getCid() > 0) {
-            Coroutine::usleep(200);
-
-            return;
-        }
-
-        usleep(200);
     }
 }

@@ -86,6 +86,21 @@ test('mutateGlobalState keeps the first write to a fresh key', function (): void
     expect($r['final'])->toBe($r['expected']);
 });
 
+test('mutateGlobalState recovers from a worker that died waiting for the lock', function (): void {
+    // The dead process holds a ticket nobody will serve. Before, every later mutate on the key
+    // threw after the 5 s acquire timeout, for as long as the table lived.
+    $fixture = dirname(__DIR__) . '/Fixtures/ticket_lock_dead_waiter.php';
+    $out = (string) shell_exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture) . ' table 2>&1');
+
+    expect($out)->toMatch('/recovered=1/', 'fixture output: ' . var_export($out, true));
+    expect(str_contains($out, "readback='holder+later'"))
+        ->toBeTrue('the recovering write must land on the holder value; output: ' . var_export($out, true))
+    ;
+
+    preg_match('/elapsed_ms=(\d+)/', $out, $m);
+    expect((int) $m[1])->toBeLessThan(3000, 'recovery must take about one 2 s lease');
+});
+
 test('appending through setGlobalState drops entries', function (): void {
     $r = forkGlobalState(workers: 4, each: 500, mode: 'append');
 

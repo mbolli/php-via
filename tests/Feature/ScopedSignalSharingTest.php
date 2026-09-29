@@ -150,6 +150,21 @@ test('a worker that dies holding the lock does not stall the signal forever', fu
     expect((int) $m[1])->toBeLessThan(5000, 'recovery must not take longer than the acquire timeout');
 });
 
+test('a worker that dies waiting for the lock does not stall the signal forever', function (): void {
+    // The dead process holds a ticket nobody will serve. Before, every later mutate() on the
+    // signal threw after the 5 s acquire timeout, for as long as the table lived.
+    $fixture = dirname(__DIR__) . '/Fixtures/ticket_lock_dead_waiter.php';
+    $out = (string) shell_exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture) . ' signal 2>&1');
+
+    expect($out)->toMatch('/recovered=1/', 'fixture output: ' . var_export($out, true));
+    expect(str_contains($out, "readback='holder+later'"))
+        ->toBeTrue('the recovering write must land on the holder value; output: ' . var_export($out, true))
+    ;
+
+    preg_match('/elapsed_ms=(\d+)/', $out, $m);
+    expect((int) $m[1])->toBeLessThan(3000, 'recovery must take about one 2 s lease');
+});
+
 test('mutate() works without a store and returns the written value', function (): void {
     $signal = new Signal('local', ['a']);
 

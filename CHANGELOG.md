@@ -2,6 +2,46 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **A `mutateGlobalState()` or `Signal::mutate()` call that timed out, or a worker that died while
+  waiting in one, wedged the key.** Both left a ticket that the lock later served with no lease on
+  it, and waiters only broke in on an expired lease, so every later mutate on that key threw
+  `RuntimeException` after 5 s for as long as the server ran. One overload burst that timed out a
+  few callers was enough. A caller that times out in a coroutine now leaves its ticket to a
+  watcher coroutine, which passes the turn on as soon as it comes. A ticket nobody watches, from a
+  process that died or from a caller outside a coroutine, is skipped once the queue has stood
+  still for 2 s with no lease, so each one costs about 2 s. The same rule also skips a live worker
+  that is next in line but cannot run for 2 s, for example because its event loop is blocked,
+  just as an overdue holder is skipped, and its write can then overlap the next holder's.
+
+- **Releasing the mutate lock could erase the next holder's lease.** The releasing worker cleared
+  the lease after advancing the queue, and a holder that lost its lease that way could not be
+  recovered if it then died. The lease is now cleared first, and only by the holder still being
+  served.
+
+### Performance
+
+- **Contended `mutateGlobalState()` and `Signal::mutate()` scale with coroutines per worker.**
+  Every waiting coroutine held its own ticket and read the whole row at reactor speed, because
+  OpenSwoole treats a coroutine sleep under 1 ms, such as the old 200 µs pause, as a plain yield.
+  Coroutines of one worker now queue locally, so a worker holds one ticket and runs one poller per
+  key. Polls read a single column, and waiters park on a 1 ms timer once the queue has not moved
+  for 2 ms. Measured with `bench/contention/lock_contention.php` on one hot key, median of 3 runs
+  on a 20-core host shared with other load, so the absolute rates move with that load: 4 workers
+  x 32 coroutines went from 38k to 221k mutations/s and from 106 to 17 µs of CPU per mutation;
+  8 workers x 32 coroutines from 12k to 50k and from 636 to 158 µs. A coroutine waiting behind a
+  holder that stalls for 300 ms uses 6 ms of CPU instead of 300 ms. While the queue moves, each
+  waiting worker still keeps one core busy polling.
+
+  Concurrent mutations of one key now run FIFO within a worker and round-robin across workers,
+  and callers of one worker return in the order they ran. A coroutine waits at most 2 s behind
+  earlier callers of its own worker, or not at all once the local holder has overrun its 2 s
+  lease, and its 5 s timeout starts when it takes a ticket, so a call can now take up to 7 s
+  before it throws.
+
 ## [0.13.0] - 2026-09-29
 
 ### New Features
