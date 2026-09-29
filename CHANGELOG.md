@@ -148,7 +148,8 @@ All notable changes to php-via will be documented in this file.
   the new `Config::withAllowMissingOrigin()`, and denied otherwise. The first such denial per
   worker logs a warning that names the opt-in, and the 403 body says `missing Origin`.
   `POST /_session/close` had no Origin check at all, so a cross-site page that knew a context id
-  could end that tab's context; it now uses the same policy.
+  could schedule that tab's cleanup, which ended the context if its SSE connection was down when
+  the timer fired; it now uses the same policy.
 
 - **Registering a TAB action name twice in one context logs a warning.** The later callback
   replaced the earlier one with only a debug line. It still does, and now logs a warning once per
@@ -161,7 +162,9 @@ All notable changes to php-via will be documented in this file.
   clients that post to `/_action/*` (curl scripts, server-to-server calls, uptime checks) need
   `Config::withAllowMissingOrigin()`. Without an allowlist nothing changes for actions. The Dev
   Bar's `/_via/signal` and `/_via/reset` no longer accept a missing `Origin`, or an `Origin`
-  without a `Host` header, outside dev mode. The same applies to `POST /_session/close`.
+  without a `Host` header, outside dev mode. The same applies to `POST /_session/close`, with or
+  without an allowlist. A page served with `Referrer-Policy: no-referrer` sends its tab-close
+  beacon with `Origin: null`, which is denied; the SSE disconnect then schedules the cleanup.
 
 - **Shell placeholders and full-document includes changed.** A custom shell that used
   `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`. Placeholder

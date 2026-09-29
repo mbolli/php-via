@@ -593,7 +593,8 @@ class RequestHandler {
      * Handle session close.
      */
     private function handleSessionClose(Request $request, Response $response): int {
-        // sendBeacon() POSTs carry Origin, so a cross-site page cannot end another tab's context.
+        // sendBeacon() sends Origin (literal "null" under Referrer-Policy: no-referrer, which is denied;
+        // the SSE disconnect schedules the same cleanup).
         if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end('Forbidden: untrusted origin');
