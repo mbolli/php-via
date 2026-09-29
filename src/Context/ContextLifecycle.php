@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
 /**
@@ -25,6 +27,7 @@ class ContextLifecycle {
 
     public function __construct(
         private Context $context,
+        private Via $via,
     ) {}
 
     /**
@@ -37,13 +40,21 @@ class ContextLifecycle {
     /**
      * Create a timer that will be automatically cleaned up with the context.
      *
+     * A throw from the callback is logged and the timer keeps running, as with Via::setInterval().
+     *
      * @param callable $callback The function to call on each tick
      * @param int      $ms       Interval in milliseconds
      *
      * @return int Timer ID
      */
     public function registerTimer(callable $callback, int $ms): int {
-        $timerId = Timer::tick($ms, $callback);
+        $timerId = Timer::tick($ms, function (mixed ...$args) use ($callback): void {
+            try {
+                $callback(...$args);
+            } catch (\Throwable $e) {
+                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $this->context);
+            }
+        });
         $this->timerIds[] = $timerId;
 
         return $timerId;

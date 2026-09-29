@@ -441,15 +441,19 @@ class Application {
 
         // Schedule cleanup after delay
         $timerId = Timer::after($delayMs, function () use ($contextId, $delayMs, $isActiveCheck): void {
-            if ($isActiveCheck !== null && $isActiveCheck()) {
-                // SSE still connected — reschedule instead of destroying.
-                $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
-                $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
+            try {
+                if ($isActiveCheck !== null && $isActiveCheck()) {
+                    // SSE still connected: reschedule instead of destroying.
+                    $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
+                    $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
 
-                return;
+                    return;
+                }
+
+                $this->destroyContext($contextId);
+            } catch (\Throwable $e) {
+                $this->logger->log('error', "Context cleanup failed for {$contextId}: " . Logger::describe($e));
             }
-
-            $this->destroyContext($contextId);
         });
 
         $this->cleanupTimers[$contextId] = $timerId;

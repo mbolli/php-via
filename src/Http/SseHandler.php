@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
@@ -215,7 +216,15 @@ class SseHandler {
 
         // Send initial sync (view + signals) on connection/reconnection
         // Do this AFTER starting the loop to ensure patches are consumed
-        $context->sync();
+        $synced = true;
+
+        try {
+            $context->sync();
+        } catch (\Throwable $e) {
+            // Skip the loop but keep the exit path below, which owns the counters and cleanup.
+            $synced = false;
+            $this->via->log('error', 'Initial SSE sync failed: ' . Logger::describe($e), $context);
+        }
 
         // Notify app-level onClientConnect callbacks
         $this->via->triggerClientConnect($context);
@@ -226,7 +235,7 @@ class SseHandler {
         $droppedFrames = 0;
 
         // Keep connection alive and listen for patches
-        while (true) {
+        while ($synced) {
             // Exit immediately if server is shutting down
             if ($this->via->isShuttingDown()) {
                 $this->via->log('debug', 'Server shutting down, closing SSE connection', $context);

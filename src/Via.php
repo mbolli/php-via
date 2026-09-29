@@ -784,24 +784,11 @@ class Via {
             // a worker receives its own publish (shouldn't happen with the self-skip
             // in SwooleBroker::publish(), but kept as a belt-and-suspenders guard).
             $this->server->on('pipeMessage', function (Server $server, int $srcWorkerId, string $data): void {
-                $msg = json_decode($data, true);
-
-                if (!\is_array($msg) || !isset($msg['scope'], $msg['nodeId'])) {
-                    return;
+                try {
+                    $this->handlePipeMessage($srcWorkerId, $data);
+                } catch (\Throwable $e) {
+                    $this->log('error', "pipeMessage from worker {$srcWorkerId} failed: " . Logger::describe($e));
                 }
-
-                // Filter own messages (redundant guard — SwooleBroker skips self in publish)
-                if ($msg['nodeId'] === $this->broker->getNodeId()) {
-                    return;
-                }
-
-                if (!Scope::isValidWireScope($msg['scope'])) {
-                    $this->log('warning', "SwooleBroker: rejected invalid scope \"{$msg['scope']}\" from worker {$srcWorkerId}");
-
-                    return;
-                }
-
-                $this->syncLocally($msg['scope']);
             });
 
             $this->server->on('start', function (Server $server): void {
@@ -954,7 +941,7 @@ class Via {
             });
 
             $this->server->on('request', function (Request $request, Response $response): void {
-                $this->requestHandler->handleRequest($request, $response);
+                $this->handleRequestSafely($request, $response);
             });
         }
 
@@ -1627,6 +1614,36 @@ class Via {
     }
 
     /**
+     * Last line of defence for a request coroutine: anything that escapes here would kill the worker.
+     *
+     * @internal public for tests
+     */
+    public function handleRequestSafely(Request $request, Response $response): void {
+        try {
+            $this->requestHandler->handleRequest($request, $response);
+        } catch (\Throwable $e) {
+            $path = (string) ($request->server['request_uri'] ?? '');
+            $this->log('error', "Unhandled exception on {$path}: " . Logger::describe($e));
+
+            if (!$response->isWritable()) {
+                return;
+            }
+
+            try {
+                // An SSE stream has already sent its headers, so a status line would land in the body.
+                if ($path !== '/_sse') {
+                    $response->status(500);
+                    $response->end('Internal Server Error');
+                } else {
+                    $response->end();
+                }
+            } catch (\Throwable) {
+                // Connection already gone.
+            }
+        }
+    }
+
+    /**
      * Seed GlobalState from its durable snapshot and arm the write-behind flush.
      *
      * Called from start() in the master process, before the fork, so the seeded table is the one
@@ -1808,10 +1825,34 @@ class Via {
 
         // Sync all matched contexts
         foreach ($matchedContexts as $context) {
-            $context->sync();
+            $this->syncContextSafely($context);
         }
 
         $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
+    }
+
+    /**
+     * SwooleBroker receive path: apply a scope broadcast published by another worker.
+     */
+    private function handlePipeMessage(int $srcWorkerId, string $data): void {
+        $msg = json_decode($data, true);
+
+        if (!\is_array($msg) || !isset($msg['scope'], $msg['nodeId'])) {
+            return;
+        }
+
+        // Filter own messages (redundant guard: SwooleBroker skips self in publish)
+        if ($msg['nodeId'] === $this->broker->getNodeId()) {
+            return;
+        }
+
+        if (!Scope::isValidWireScope($msg['scope'])) {
+            $this->log('warning', "SwooleBroker: rejected invalid scope \"{$msg['scope']}\" from worker {$srcWorkerId}");
+
+            return;
+        }
+
+        $this->syncLocally($msg['scope']);
     }
 
     /**
@@ -1907,7 +1948,7 @@ class Via {
         $count = 0;
         foreach ($this->contexts as $context) {
             if ($context->getRoute() === $route) {
-                $context->sync();
+                $this->syncContextSafely($context);
                 ++$count;
             }
         }
@@ -1920,7 +1961,18 @@ class Via {
      */
     private function syncAllContexts(): void {
         foreach ($this->contexts as $context) {
+            $this->syncContextSafely($context);
+        }
+    }
+
+    /**
+     * Sync one context of a fan-out, so a view that throws cannot stop the others from getting the frame.
+     */
+    private function syncContextSafely(Context $context): void {
+        try {
             $context->sync();
+        } catch (\Throwable $e) {
+            $this->log('error', 'Sync failed during broadcast: ' . Logger::describe($e), $context);
         }
     }
 

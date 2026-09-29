@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\ConditionalGet;
+use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
@@ -292,16 +293,7 @@ class RequestHandler {
         try {
             $this->via->invokeHandlerWithParams($handler, $context, $params);
         } catch (\Throwable $e) {
-            $this->via->log(
-                'error',
-                'Page handler exception on ' . $route . ': ' . \get_class($e) . ': ' . $e->getMessage()
-                . "\n" . $e->getTraceAsString()
-            );
-            $tracer?->setAttribute('http.status_code', 500);
-            $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
-            $this->logRequest($method, $path, 500, $requestStart);
-            $response->status(500);
-            $response->end('Internal Server Error');
+            $this->failPage('Page handler exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
 
             return;
         }
@@ -314,8 +306,13 @@ class RequestHandler {
         // Register context in its default TAB scope
         $this->via->registerContextInScope($context, Scope::TAB);
 
-        // Build HTML document
-        $html = $this->via->buildHtmlDocument($context);
+        try {
+            $html = $this->via->buildHtmlDocument($context);
+        } catch (\Throwable $e) {
+            $this->failPage('Page render exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
+
+            return;
+        }
 
         // Set session cookie
         $this->via->setSessionCookie($response, $sessionId);
@@ -347,6 +344,15 @@ class RequestHandler {
         }
 
         $this->sendCompressedPage($requestAttributes, $response, $html);
+    }
+
+    private function failPage(string $what, string $route, \Throwable $e, ?Tracer $tracer, string $method, string $path, int $requestStart, Response $response): void {
+        $this->via->log('error', $what . $route . ': ' . Logger::describe($e) . "\n" . $e->getTraceAsString());
+        $tracer?->setAttribute('http.status_code', 500);
+        $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
+        $this->logRequest($method, $path, 500, $requestStart);
+        $response->status(500);
+        $response->end('Internal Server Error');
     }
 
     private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {

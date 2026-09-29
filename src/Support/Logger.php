@@ -54,6 +54,13 @@ class Logger {
     }
 
     /**
+     * One-line summary of a throwable: class, message and where it was thrown.
+     */
+    public static function describe(\Throwable $e): string {
+        return \get_class($e) . ': ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine();
+    }
+
+    /**
      * Log a message with optional context.
      *
      * @param string       $level   Log level (debug, info, warn, error)

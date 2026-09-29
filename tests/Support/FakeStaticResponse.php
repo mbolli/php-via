@@ -36,6 +36,10 @@ final class FakeStaticResponse extends Response {
         return true;
     }
 
+    public function isWritable(): bool {
+        return !$this->ended;
+    }
+
     public function end(mixed $data = null): bool {
         $this->body = (string) $data;
         $this->ended = true;

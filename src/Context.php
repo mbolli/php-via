@@ -95,7 +95,7 @@ class Context {
         $this->sessionId = $sessionId;
 
         // Initialize managers
-        $this->lifecycle = new ContextLifecycle($this);
+        $this->lifecycle = new ContextLifecycle($this, $app);
         $this->signalFactory = new SignalFactory($this, $app);
         $this->componentManager = new ComponentManager($this, $app);
         $this->patchManager = new PatchManager($this, $app, $this->signalFactory, $this->componentManager);
@@ -421,6 +421,7 @@ class Context {
 
     /**
      * Create a timer that will be automatically cleaned up with the context.
+     * A throw from the callback is logged and the timer keeps running.
      *
      * @param callable $callback The function to call on each tick
      * @param int      $ms       Interval in milliseconds

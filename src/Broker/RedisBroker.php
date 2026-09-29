@@ -188,7 +188,11 @@ final class RedisBroker implements MessageBroker {
                         }
 
                         if ($this->handler !== null) {
-                            ($this->handler)($data['scope']);
+                            try {
+                                ($this->handler)($data['scope']);
+                            } catch (\Throwable $e) {
+                                $this->notifyError($e);
+                            }
                         }
                     });
 
@@ -197,7 +201,6 @@ final class RedisBroker implements MessageBroker {
                 } catch (\RedisException) {
                     // $this->running may be false if disconnect() was called concurrently
                     // (coroutine context) while subscribe() was blocking.
-                    /** @phpstan-ignore booleanNot.alwaysFalse */
                     if (!$this->running) {
                         break;
                     }

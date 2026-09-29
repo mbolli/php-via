@@ -74,6 +74,24 @@ All notable changes to php-via will be documented in this file.
   changes the property, the direct write wins, which makes
   `$this->votes = $ctx->getSignal('votes')->increment()` correct rather than double-counting.
 
+- **A throw from an action, a view or a timer no longer kills the worker.** `ActionHandler` caught
+  `\Exception` only, so a `TypeError` or `ValueError` in an action closure escaped the request
+  coroutine: the connection dropped, the worker exited with code 255 and every context on it was
+  gone, so the tab's next action got 400 from the respawned worker. The initial page render, the
+  per-tab `$c->setInterval()` callback and the broadcast fan-out had no guard at all, and a plain
+  `RuntimeException` from a view was enough. Every request, SSE, timer, fan-out and broker entry
+  point now catches `\Throwable` and logs the class, message and `file:line`. The `request`
+  callback has a last guard that answers 500 (an SSE stream is only ended, its headers are already
+  out). A context whose view throws during a broadcast is logged and skipped, so the other
+  contexts still get the frame. The Redis and NATS receive loops report a throwing handler through
+  the broker's error handler and keep reading.
+  Behaviour changes: an action that throws an `\Error` answers 500 `Action failed`, as an
+  `\Exception` already did, and the worker keeps running with whatever the action changed before
+  it threw, where the crash used to wipe every context on that worker. A page whose render throws
+  answers 500 instead of dropping the connection. A per-tab interval keeps ticking after a throw,
+  as `Via::setInterval()` already did. An SSE stream whose initial sync throws ends right away
+  and the client reconnects.
+
 ### Breaking Changes
 
 - **`ext-openswoole` now requires v26:** the extension constraint was unbound (`*`) and is now

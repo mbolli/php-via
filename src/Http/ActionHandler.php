@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
@@ -138,8 +139,8 @@ class ActionHandler {
 
             $response->status(200);
             $response->end();
-        } catch (\Exception $e) {
-            $this->via->log('error', "Action {$actionId} failed: " . $e->getMessage());
+        } catch (\Throwable $e) {
+            $this->via->log('error', "Action {$actionId} failed: " . Logger::describe($e));
             $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;

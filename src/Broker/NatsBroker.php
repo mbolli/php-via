@@ -283,7 +283,11 @@ final class NatsBroker implements MessageBroker {
                     }
 
                     if ($this->handler !== null) {
-                        ($this->handler)($data['scope']);
+                        try {
+                            ($this->handler)($data['scope']);
+                        } catch (\Throwable $e) {
+                            $this->notifyError($e);
+                        }
                     }
                 }
             }
