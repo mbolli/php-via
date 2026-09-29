@@ -7,6 +7,7 @@ use Mbolli\PhpVia\Composition\ClassMetadata;
 use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 
 /*
  * clientWritable for TAB signals: null keeps the old default (writable), false and true are
@@ -19,6 +20,13 @@ final class TabClientWritableFixture {
 
     #[Signal]
     public string $free = 'server';
+
+    public function view(Context $ctx): void {}
+}
+
+final class ScopedClientWritableFixture {
+    #[Signal(Scope::GLOBAL, clientWritable: true)]
+    public string $shared = 'server';
 
     public function view(Context $ctx): void {}
 }
@@ -73,6 +81,31 @@ describe('TAB signal clientWritable', function (): void {
             ->and($owned->getValue())->toBe('server')
         ;
     });
+
+    test('an integral float that the browser posts back as an int is not re-sent', function (): void {
+        $ctx = new Context('ctx1', '/test', createVia());
+        $owned = $ctx->signal([1.0, 0.5], 'owned', clientWritable: false);
+        $owned->markSynced();
+
+        // JSON.stringify(1.0) is "1", so PHP decodes the browser's copy as int.
+        $ctx->injectSignals([$owned->id() => [1, 0.5]]);
+
+        expect($owned->hasChanged())->toBeFalse();
+    });
+
+    test('a rejected scoped value is overwritten by the next sync', function (): void {
+        $ctx = new Context('ctx1', '/test', createVia());
+        $ctx->scope('room:owned');
+        $owned = $ctx->signal('server', 'n', 'room:owned', clientWritable: false);
+
+        $ctx->injectSignals([$owned->id() => 'client']);
+        $ctx->syncSignals();
+        $patch = $ctx->getPatch();
+
+        expect($owned->getValue())->toBe('server')
+            ->and($patch['content'][$owned->id()] ?? null)->toBe('server')
+        ;
+    });
 });
 
 describe('strict TAB signals', function (): void {
@@ -119,6 +152,20 @@ describe('#[Signal(clientWritable: ...)]', function (): void {
 
         expect($owned->isClientWritable())->toBeFalse()
             ->and($owned->getValue())->toBe('server')
-            ->and($free->getValue())->toBe('client');
+            ->and($free->getValue())->toBe('client')
+        ;
+    });
+
+    test('the attribute reaches a scoped signal', function (): void {
+        $via = createVia();
+        $ctx = new Context('ctx1', '/test', $via);
+        PageMount::buildClosure(ClassMetadata::analyze(ScopedClientWritableFixture::class), $via)($ctx);
+
+        $shared = $ctx->getSignal('shared');
+        $ctx->injectSignals([$shared->id() => 'client']);
+
+        expect($shared->isClientWritable())->toBeTrue()
+            ->and($shared->getValue())->toBe('client')
+        ;
     });
 });

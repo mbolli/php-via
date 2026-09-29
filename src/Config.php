@@ -484,7 +484,8 @@ class Config {
      * Off by default: a TAB signal declared without clientWritable accepts the value the browser
      * posts with every action. In strict mode the server ignores that value, so only signals the
      * page binds or assigns in the browser need clientWritable: true. An explicit
-     * clientWritable: false is honoured in either mode.
+     * clientWritable: false is honoured in either mode. Revival does not restore server-owned
+     * signals from the browser either, so they start from the handler's initial value.
      */
     public function withStrictTabSignals(bool $strict = true): self {
         $this->strictTabSignals = $strict;

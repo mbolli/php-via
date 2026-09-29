@@ -121,10 +121,6 @@ class SignalFactory {
             : $baseName . '_' . $this->context->getId();
         $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
 
-        if ($clientWritable === null && $this->app->getConfig()->getStrictTabSignals()) {
-            $clientWritable = false;
-        }
-
         if (isset($this->signals[$signalId])) {
             $existing = $this->signals[$signalId];
             $this->warnOnRedeclaration($existing, $baseName, $initialValue, $clientWritable);
@@ -132,6 +128,10 @@ class SignalFactory {
             $this->signalNameMap[$baseName] = $existing;
 
             return $existing;
+        }
+
+        if ($clientWritable === null && $this->app->getConfig()->getStrictTabSignals()) {
+            $clientWritable = false;
         }
 
         $signal = new Signal($signalId, $initialValue, null, true, $clientWritable);
@@ -248,7 +248,7 @@ class SignalFactory {
                 $signal = $this->signals[$signalId];
                 if ($signal->isClientWritable()) {
                     $signal->setValue($value, false);
-                } elseif ($signal->getValue() !== $value) {
+                } elseif (!self::sameClientValue($signal->getValue(), $value)) {
                     // Re-send the server value so the browser drops its stale copy.
                     $signal->setValue($signal->getValue(), true, false);
                 }
@@ -302,16 +302,25 @@ class SignalFactory {
             ), $this->context);
         }
 
-        $requested = $clientWritable ?? true;
-        if ($requested !== $existing->isClientWritable() && !isset($this->redeclarationWarned['writable:' . $name])) {
+        if ($clientWritable !== null && $clientWritable !== $existing->isClientWritable() && !isset($this->redeclarationWarned['writable:' . $name])) {
             $this->redeclarationWarned['writable:' . $name] = true;
             $this->app->log('warn', \sprintf(
                 "Signal '%s' declared again with clientWritable: %s; keeping the first declaration's %s",
                 $name,
-                var_export($requested, true),
+                var_export($clientWritable, true),
                 var_export($existing->isClientWritable(), true),
             ), $this->context);
         }
+    }
+
+    /**
+     * Compare a server value with the browser's copy after its JSON round trip, which turns 1.0
+     * into 1 and objects into arrays.
+     */
+    private static function sameClientValue(mixed $server, mixed $client): bool {
+        $json = json_encode($server);
+
+        return ($json === false ? $server : json_decode($json, true)) === $client;
     }
 
     private static function describeValue(mixed $value): string {

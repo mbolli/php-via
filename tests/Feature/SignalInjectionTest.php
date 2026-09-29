@@ -142,13 +142,17 @@ describe('Component Signal Injection', function (): void {
     test('a component signal declared clientWritable: false ignores client values', function (): void {
         $page = new Context('page1', '/p', createVia());
         $owned = null;
-        $page->component(function (Context $c) use (&$owned): void {
+        $free = null;
+        $page->component(function (Context $c) use (&$owned, &$free): void {
             $owned = $c->signal('server', 'owned', clientWritable: false);
+            $free = $c->signal('server', 'free');
             $c->view(fn () => '');
         }, 'cmp');
 
-        $page->injectSignals([$owned->id() => 'client']);
+        $page->injectSignals([$owned->id() => 'client', $free->id() => 'client']);
 
-        expect($owned->getValue())->toBe('server');
+        expect($owned->getValue())->toBe('server')
+            ->and($free->getValue())->toBe('client')
+        ;
     });
 });

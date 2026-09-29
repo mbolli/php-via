@@ -161,7 +161,8 @@ $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide
 > still holds, instead of hard-reloading and losing local signals, scroll, and focus. On by default
 > (10-minute window); tune or disable with `Config::withContextRevivalWindow()`. Revival re-runs the
 > page handler, so server-only `#[Persist]` state resets and lifecycle hooks re-fire, just as on a
-> reload.
+> reload. Server-owned TAB signals (`clientWritable: false`, or all of them under
+> `Config::withStrictTabSignals()`) start from the handler's initial value.
 
 ### Route Groups: shared prefix and/or middleware
 

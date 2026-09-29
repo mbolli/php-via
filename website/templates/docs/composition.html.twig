@@ -120,10 +120,27 @@ public string $username = 'Anonymous';
 public int $totalVisitors = 0;
     {% endverbatim %}{% endcode %}
     <p>
-        TAB signals are client-writable via <code>data-bind</code>. Non-TAB scopes are
-        server-authoritative — the client cannot overwrite them — and they auto-broadcast to every
-        context in the scope whenever an action changes the value. No manual
-        <code>$ctx->broadcast()</code> is needed for scoped-signal changes.
+        By default TAB signals take the value the browser posts with each action, so
+        <code>data-bind</code> works on them. Non-TAB scopes are server-authoritative: the client
+        cannot overwrite them, and they auto-broadcast to every context in the scope whenever an
+        action changes the value. No manual <code>$ctx->broadcast()</code> is needed for
+        scoped-signal changes.
+    </p>
+    <p>
+        <code>clientWritable</code> overrides the write rule in either direction:
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[Signal(clientWritable: false)]               // TAB, but the browser cannot overwrite it
+public string $status = 'idle';
+
+#[Signal(Scope::ROUTE, clientWritable: true)]  // shared input every client can write
+public string $note = '';
+    {% endverbatim %}{% endcode %}
+    <p>
+        With <code>Config::withStrictTabSignals()</code>, a TAB <code>#[Signal]</code> without the
+        argument is server-owned, so a property bound with <code>data-bind</code> needs
+        <code>clientWritable: true</code>. See <a href="/docs/api#context-signal">signal()</a> for the
+        details.
     </p>
 
     <h2 id="persist">Server-only state</h2>

@@ -85,3 +85,16 @@ test('a re-declaration with a different clientWritable warns and keeps the first
         ->and($ctx->getSignal('owned')->isClientWritable())->toBeFalse()
     ;
 });
+
+test('a re-declaration without clientWritable does not warn about writability', function (): void {
+    $ctx = warnContext();
+
+    $out = redeclarationOutput($ctx, function (Context $ctx): void {
+        $ctx->signal('v', 'owned', clientWritable: false);
+        $ctx->signal('v', 'owned');
+    });
+
+    expect($out)->toBe('')
+        ->and($ctx->getSignal('owned')->isClientWritable())->toBeFalse()
+    ;
+});

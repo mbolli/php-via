@@ -37,7 +37,10 @@ $config->withContextCleanupDelay(60_000); // 60 seconds
         (<code>_</code>-prefixed) signals the server never saw, scroll position, and focus — php-via
         <strong>revives</strong> it: the server rebuilds an equivalent context with the
         <em>same</em> context ID (so the already-loaded DOM's bindings and action URLs keep working)
-        and re-seeds the signal values the client still holds and sends on reconnect.
+        and re-seeds the signal values the client still holds and sends on reconnect. Server-owned
+        TAB signals (<code>clientWritable: false</code>, or every TAB signal under
+        <code>Config::withStrictTabSignals()</code>) do not take the client's copy and start from the
+        handler's initial value.
     </p>
     <p>
         This is on by default (10-minute window) and needs no application code. Because revival re-runs
