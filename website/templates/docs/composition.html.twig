@@ -142,6 +142,19 @@ public string $note = '';
         <code>clientWritable: true</code>. See <a href="/docs/api#context-signal">signal()</a> for the
         details.
     </p>
+    <p>
+        <code>atomic: true</code> makes a shared integer property safe to change from several workers at once.
+        The property is read before the action and written back after, so two workers running
+        <code>++$this-&gt;votes</code> together would both write back the same result. With
+        <code>atomic: true</code> the action's net change goes through <code>Signal::increment()</code>
+        instead. The catch: assignment becomes an adjustment, so <code>$this-&gt;votes = 0</code> subtracts
+        the current value rather than resetting it. To set a value, use
+        <code>$ctx-&gt;getSignal('votes')-&gt;setValue(0)</code>. Integer properties only.
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[Signal(Scope::GLOBAL, atomic: true)]
+public int $votes = 0;
+    {% endverbatim %}{% endcode %}
 
     <h2 id="persist">Server-only state</h2>
     <p>

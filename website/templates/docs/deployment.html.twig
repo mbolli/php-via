@@ -94,6 +94,13 @@ example.com {
         PHP extension and HTTP/2 (needed for streaming compression to work in browsers).
         A hard error is thrown at startup if either requirement is missing.
     </p>
+    <p>
+        Each SSE stream holds its own Brotli encoder, which grows with the traffic it carries and never
+        shrinks. At the default level 4 a busy stream settles at about 9&nbsp;MB, so 2&nbsp;000 busy
+        connections need about 17&nbsp;GB; an idle stream stays near 7&nbsp;KB. Level 1 uses about
+        570&nbsp;KB per busy stream and a third of the CPU, for about 37% more bytes on the wire:
+        <code>withBrotli(dynamicLevel: 1)</code>. Measurements are in <code>PERFORMANCE.md</code>.
+    </p>
     {% code 'bash' %}{% verbatim %}
 pecl install brotli
     {% endverbatim %}{% endcode %}
@@ -152,7 +159,6 @@ $config = (new Config())
     ->withTemplateDir(__DIR__ . '/templates')
     ->withStaticDir(__DIR__ . '/public');
     // For multi-worker CPU parallelism, see "Multi-worker scaling" below.
-    // Sticky routing is required in all multi-worker configurations.
     {% endverbatim %}{% endcode %}
 
     <h2 id="opcache-jit">OPcache &amp; JIT</h2>
@@ -309,33 +315,68 @@ kill -USR1 $(cat /var/run/myapp.pid)
         and need parallelism on a multi-core machine.
     </p>
 
-    <h3 id="context-ownership">Why sticky routing is mandatory</h3>
+    <h3 id="same-machine">Same machine: <code>withWorkerNum()</code> + SwooleBroker</h3>
     <p>
-        Each php-via context — the SSE connection, signals, and views for one browser tab — lives in
-        the <strong>worker process memory</strong> that handled the initial page <code>GET</code>. The
-        context ID is embedded in every subsequent action <code>POST</code>. If a proxy routes that
-        <code>POST</code> to a <em>different</em> worker, that worker has no record of the context and
-        returns <strong>400 Invalid context</strong>.
+        One php-via process with several OpenSwoole workers. No external infrastructure, and no sticky
+        routing: the load balancer sees one port and OpenSwoole picks the worker for each connection.
+        <a href="/docs/broker#swoolebbroker">SwooleBroker</a> carries broadcasts between workers.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Broker\SwooleBroker;
+
+$config = (new Config())
+    ->withWorkerNum(swoole_cpu_num())
+    ->withBroker(new SwooleBroker());
+    {% endverbatim %}{% endcode %}
+    <p>
+        A tab's context lives on the worker that rendered the page. Every worker can still reach it:
+        contexts are recorded in a shared-memory directory, and an action or SSE reconnect that lands on
+        another worker rebuilds the context by re-running the route handler. Scoped signal values,
+        GlobalState and the connected-client list are in shared memory as well.
     </p>
     <p>
-        Sticky routing ensures that all requests for a given browser session always reach the same
-        upstream. Without stickiness, <strong>50–90% of action requests fail</strong> depending on the
-        number of workers — this is a correctness problem, not merely a performance one.
-        Verified by benchmark: at N=8 workers without stickiness, OK% collapses to ~50% regardless of
-        workload; with cookie-sticky Caddy and N=1, 2, or 4 workers: 100% OK.
+        <strong>What stays per worker.</strong> The server logs these at start-up:
+    </p>
+    <ul>
+        <li>
+            <strong>Read-modify-write on shared values.</strong> <code>setValue($s-&gt;int() + 1)</code> and
+            <code>setGlobalState($k, globalState($k) + 1)</code> lose updates when two workers read the same
+            value. Use <code>Signal::increment()</code> / <code>incrementGlobalState()</code> for counters,
+            <code>Signal::mutate()</code> / <code>mutateGlobalState()</code> for anything else, and
+            <code>#[Signal(..., atomic: true)]</code> in the composition API.
+        </li>
+        <li>
+            <strong>PHP statics and objects in your own code.</strong> A simulation held in a static diverges
+            per worker.
+        </li>
+        <li>
+            <strong>Server-owned TAB signals.</strong> A rebuilt context starts them from the handler's initial
+            value. Use a scoped signal for that state.
+        </li>
+        <li>
+            <strong>Session data</strong> (<code>$c-&gt;sessionData()</code>). Each worker has its own copy.
+            Use a <code>Scope::SESSION</code> signal, or run one worker.
+        </li>
+    </ul>
+    <p>
+        The shared tables are sized at startup. <code>Config::withGlobalStateTableSize()</code> (default
+        1&nbsp;024 keys &times; 32&nbsp;KB per value), <code>withScopedSignalTableSize()</code> and
+        <code>withContextDirectorySize()</code> tune them. Row counts are a floor: OpenSwoole admits more keys
+        than requested, then rejects by hash, and a full GlobalState table throws
+        <code>\OverflowException</code>. GlobalState keys are at most 63 characters.
     </p>
 
     <h3 id="independent-processes">Multiple independent processes (no broker)</h3>
     <p>
-        The simplest multi-core approach: run <em>N</em> independent php-via processes on separate
-        ports, each with a single internal worker. A cookie-sticky load balancer routes each browser
-        session permanently to one upstream. Processes share nothing — no Redis, no broker, no
-        inter-process coordination.
+        Run <em>N</em> php-via processes on separate ports, each with a single worker. Processes share
+        nothing, so a cookie-sticky load balancer has to route each browser session to one upstream: a
+        context, its signals and its session data exist only in the process that rendered the page, and any
+        other process answers <strong>400 Invalid context</strong>.
     </p>
     <p>
         <strong>Limitation:</strong> cross-process broadcasts (<code>Scope::ROUTE</code>,
         <code>Scope::GLOBAL</code>, <code>Scope::SESSION</code> across processes) are not
-        supported. Use SwooleBroker or RedisBroker if you need those scopes.
+        supported. Use one process with several workers, or RedisBroker, if you need those scopes.
     </p>
     {% code 'php' %}{% verbatim %}
 // app.php — run N copies with different VIA_PORT values
@@ -358,40 +399,14 @@ myapp.example.com {
         near-linearly with the number of processes up to CPU saturation.
     </p>
 
-    <h3 id="same-machine">Same machine — SwooleBroker</h3>
-    <p>
-        <a href="/docs/broker#swoolebbroker">SwooleBroker</a> uses OpenSwoole's built-in inter-worker
-        pipes and shared memory (<code>OpenSwoole\Table</code>). No external infrastructure required,
-        and cross-worker broadcasts (<code>Scope::GLOBAL</code>, <code>Scope::ROUTE</code>) work
-        automatically:
-    </p>
-    {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Broker\SwooleBroker;
-
-$config = (new Config())
-    ->withWorkerNum(swoole_cpu_num())
-    ->withBroker(new SwooleBroker());
-    {% endverbatim %}{% endcode %}
-    <p>
-        <strong>Sticky routing required</strong> — for the same context-ownership reason as above.
-        Configure Caddy with <code>lb_policy cookie</code> or nginx with <code>ip_hash</code>.
-        GlobalState and broadcasts still propagate across all workers correctly even without
-        the browser landing on the same worker, but action POSTs and SSE connections must be sticky.
-    </p>
-    <p>
-        GlobalState is backed by an <code>OpenSwoole\Table</code> with capacity fixed at startup
-        (default: 1 024 keys &times; 4 096 bytes). Tune with
-        <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code> before calling
-        <code>start()</code>.
-    </p>
-
     <h3 id="multi-server">Multiple servers — RedisBroker / NatsBroker</h3>
     <p>
         For deployments across multiple machines or containers, use
         <a href="/docs/broker#redisbroker">RedisBroker</a> or
         <a href="/docs/broker#natsbroker">NatsBroker</a>. These carry scope invalidations over
         the network so every server reacts to changes on any other server.
-        Session data still requires sticky routing (same constraint as same-machine).
+        The shared memory above is per machine, so contexts, scoped signal values and GlobalState are not
+        shared between servers: route each browser session to one server with cookie-sticky load balancing.
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Broker\RedisBroker;

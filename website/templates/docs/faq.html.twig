@@ -162,8 +162,8 @@ $c->scope(Scope::GLOBAL);
 $count = $c->signal(0);
 
 $increment = $c->action(
-    fn () => $count->setValue($count->int() + 1)
-    // auto-broadcasts because signal scope != TAB
+    fn () => $count->increment()
+    // atomic across workers, auto-broadcasts because signal scope != TAB
 );
         {% endverbatim %}{% endcode %}
         <p><strong>When <em>is</em> <code>globalState</code> appropriate?</strong> For server-side values

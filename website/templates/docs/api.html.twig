@@ -72,15 +72,38 @@ $app->broadcast('room:lobby');
 
     <h3 id="via-global-state"><code>globalState(string $key, mixed $default = null): mixed</code></h3>
     <h3 id="via-set-global-state"><code>setGlobalState(string $key, mixed $value): void</code></h3>
-    <p>Shared in-memory state across all contexts. Persists for the server lifetime; cleared on restart.</p>
+    <p>Shared in-memory state across all contexts. Lives for the server lifetime and is cleared on restart,
+    unless <a href="#config"><code>withPersistentGlobalState()</code></a> is set.</p>
     {% code 'php' %}{% verbatim %}
 $app->setGlobalState('counter', 0);
 $count = $app->globalState('counter', 0);
     {% endverbatim %}{% endcode %}
+    <p>
+        Keys are at most 63 characters once GlobalState is in shared memory (<code>worker_num &gt; 1</code> or
+        persistence on); a longer key throws <code>\InvalidArgumentException</code>.
+    </p>
+
+    <h3 id="via-increment-global-state"><code>incrementGlobalState(string $key, int $by = 1): int</code></h3>
+    <h3 id="via-mutate-global-state"><code>mutateGlobalState(string $key, callable $mutator): mixed</code></h3>
+    <p>
+        Read-modify-write without losing updates. <code>setGlobalState($k, globalState($k) + 1)</code> is two
+        steps, and with several workers two of them can read the same value: over 4 workers doing 500
+        increments each it kept 772 to 1238 of 2000. <code>incrementGlobalState()</code> is atomic and returns
+        the new value; it throws <code>\LogicException</code> if the key holds a non-integer.
+        <code>mutateGlobalState()</code> passes the current value (<code>null</code> if unset) to the callback
+        under a lock on the key and stores what it returns, so keep the callback short and non-blocking.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->incrementGlobalState('visits');
+$app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?? [], $msg], -50));
+    {% endverbatim %}{% endcode %}
 
     <h3 id="via-on-start"><code>onStart(callable $callback): void</code></h3>
     <h3 id="via-on-shutdown"><code>onShutdown(callable $callback): void</code></h3>
-    <p>Server lifecycle hooks. Use <code>onStart</code> to create timers; <code>onShutdown</code> to clear them.</p>
+    <p>Server lifecycle hooks. Use <code>onStart</code> to create timers; <code>onShutdown</code> to clear them.
+    <code>onStart</code> callbacks run once in each worker process as it starts, so with <code>worker_num &gt; 1</code>
+    a timer created there fires in every worker. Use <a href="#via-set-interval"><code>setInterval()</code></a>
+    for a timer that should fire once per interval for the whole server.</p>
     <p>
         <code>onShutdown</code> callbacks run once in each worker process when that worker stops: on
         <code>SIGTERM</code> or <code>SIGINT</code> (<code>docker stop</code>, <code>systemctl stop</code>,
@@ -108,11 +131,13 @@ $app->onShutdown(function () use (&$timerId): void {
 });
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-set-interval"><code>setInterval(callable $callback, int $ms): void</code></h3>
+    <h3 id="via-set-interval"><code>setInterval(callable $callback, int $ms, bool $everyWorker = false): void</code></h3>
     <p>
-        Register a process-wide recurring timer that fires every <code>$ms</code> milliseconds.
-        The timer is started automatically when the server starts and cleared on shutdown — no manual
-        <code>onStart</code>/<code>onShutdown</code> wiring required.
+        Register a server-wide recurring timer that fires every <code>$ms</code> milliseconds.
+        It is armed when the worker starts and cleared when it stops, with no manual
+        <code>onStart</code>/<code>onShutdown</code> wiring. With <code>worker_num &gt; 1</code> it runs on one
+        worker only, so the callback fires once per interval for the whole server. Pass
+        <code>everyWorker: true</code> for work that has to happen in each process.
     </p>
     {% code 'php' %}{% verbatim %}
 // Broadcast global state every 5 seconds
@@ -376,6 +401,12 @@ $c->getNamespace();       // component namespace, or null
     <h3 id="context-set-session-data"><code>setSessionData(string $key, mixed $value): void</code></h3>
     <h3 id="context-clear-session-data"><code>clearSessionData(?string $key = null): void</code></h3>
     <p>Per-session server-side storage, keyed on the session cookie. Survives page refreshes and context destruction — unlike signals, which reset on refresh.</p>
+    <p>
+        Session data lives in the memory of one worker process. With <code>worker_num &gt; 1</code>, a request
+        served by another worker does not see it, and a load balancer cannot help because every worker sits
+        behind the same port. Run <code>worker_num = 1</code> when you rely on session data, or keep the value
+        in a <code>Scope::SESSION</code> signal, which is shared.
+    </p>
     {% code 'php' %}{% verbatim %}
 $c->setSessionData('auth', ['user' => 'ada', 'role' => 'Engineer']);
 
@@ -410,12 +441,20 @@ $s->bool();       // cast to bool
 
 // Writing
 $s->setValue(42); // triggers broadcast if scoped
+$s->increment();  // atomic across workers, returns the new value
+$s->mutate(fn (array $items) => [...$items, $item]); // read-modify-write under a lock
 
 // Template helpers
 $s->id();     // signal name, e.g. 'count'
 $s->bind();   // 'data-bind="count"'
 $s->text();   // '<span data-text="$count"></span>'
     {% endverbatim %}{% endcode %}
+    <p>
+        On a scoped signal with <code>worker_num &gt; 1</code>, <code>setValue($s-&gt;int() + 1)</code> loses
+        updates when two workers read the same value. Use <code>increment()</code> for counters and
+        <code>mutate()</code> for anything else. Pick one per signal: <code>increment()</code> skips the lock
+        that <code>mutate()</code> takes, so mixing them can overwrite an increment.
+    </p>
 
     ---
 
@@ -466,9 +505,14 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
     ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
     ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
+    ->withSseMaxQueuedBytes(1048576) // drop element patches for a client this far behind; 0 disables
     // Multi-worker (single machine)
     ->withWorkerNum(swoole_cpu_num())   // default: 1; requires SwooleBroker/RedisBroker/NatsBroker when > 1
-    ->withGlobalStateTableSize(2048, 8192)  // GlobalState table: rows × value bytes (default 1024 × 4096)
+    ->withGlobalStateTableSize(2048, 65536)   // GlobalState rows × value bytes (default 1024 × 32768; rows is a floor)
+    ->withScopedSignalTableSize(1024, 32768)  // shared values of scoped signals (defaults shown)
+    ->withContextDirectorySize(4096)          // contexts reachable from every worker; size for peak tabs
+    // GlobalState persistence
+    ->withPersistentGlobalState(__DIR__ . '/state.sqlite', flushMs: 1000) // write-behind to SQLite
     // Multi-node broker (optional — required only for multi-worker / multi-server deployments)
     ->withBroker(new SwooleBroker())    // same machine, no external deps
     ->withBroker(new RedisBroker('127.0.0.1', 6379))  // or new NatsBroker(...)
@@ -480,6 +524,13 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         (proxy with Caddy/Nginx handling TLS). A hard error is thrown at <code>start()</code> if <code>ext-brotli</code>
         is missing or neither HTTPS mode is configured.
         See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
+    </p>
+    <p>
+        <code>withPersistentGlobalState(string $path, int $flushMs = 1000)</code> keeps GlobalState in a SQLite
+        file across restarts. Reads never touch SQLite: writes go to shared memory and mark the key dirty, and one
+        worker writes the dirty keys in a single transaction every <code>$flushMs</code>, about 1&nbsp;µs per key.
+        Anything written since the last flush is lost if the process dies, so lower <code>$flushMs</code> to
+        narrow that window.
     </p>
     <p>
         <code>withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true)</code> makes the
@@ -504,7 +555,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     <p>PHP 8 attribute classes for the <a href="/docs/composition">composition API</a>. All live under
     <code>Mbolli\PhpVia\Attributes\</code>.</p>
 
-    <h3 id="attr-signal"><code>#[Signal(string $scope = Scope::TAB)]</code></h3>
+    <h3 id="attr-signal"><code>#[Signal(string $scope = Scope::TAB, bool $atomic = false, ?bool $clientWritable = null)]</code></h3>
     <p>Target: property. Creates a reactive signal backed by the property's default value, synced to the
     browser and auto-injected into Twig by name. The scope is the first argument:</p>
     <ul>
@@ -532,6 +583,19 @@ public string $username = 'Anonymous';
 
 #[Signal(Scope::GLOBAL)]        // shared across all users
 public int $totalClicks = 0;
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>atomic: true</code> makes a shared integer property safe to change from several workers at once.
+        The property is read before the action and written back after, so two workers running
+        <code>++$this-&gt;votes</code> together would both write back the same result. With
+        <code>atomic: true</code> the action's net change goes through <code>Signal::increment()</code>
+        instead. The catch: assignment becomes an adjustment, so <code>$this-&gt;votes = 0</code> subtracts
+        the current value rather than resetting it. To set a value, use
+        <code>$ctx-&gt;getSignal('votes')-&gt;setValue(0)</code>. Integer properties only.
+    </p>
+    {% code 'php' %}{% verbatim %}
+#[Signal(Scope::GLOBAL, atomic: true)]
+public int $votes = 0;
     {% endverbatim %}{% endcode %}
 
     <h3 id="attr-persist"><code>#[Persist]</code></h3>

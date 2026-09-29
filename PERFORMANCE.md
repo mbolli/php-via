@@ -538,7 +538,7 @@ Four workloads, seven profiles:
 | multi-worker-4w | — ‡ | — ‡ | — ‡ |
 
 † OPcache preloading causes SIGSEGV in OpenSwoole worker fork on this host (known incompatibility with POOL_MODE).  
-‡ Multi-worker results unreliable in bench_app due to benchmark design (context not pre-registered on all workers; ~83–90% 403 failures).
+‡ No usable result: ~83-90% of requests failed with 403 because the context was not registered on all workers. Measured before 0.13.0 made contexts reachable from every worker, and not re-run since. See "Re-measured on the real multi-worker path" above.
 
 #### Spreadsheet live workload (1,000 actions, concurrency=50, website/app.php)
 

@@ -15,8 +15,7 @@
     </p>
     {% code 'php' %}{% verbatim %}
 $increment = $c->action(function (Context $c) use ($app, $counter): void {
-    $newVal = $app->globalState('shared_counter') + 1;
-    $app->setGlobalState('shared_counter', $newVal);
+    $newVal = $app->incrementGlobalState('shared_counter');
     $counter->setValue($newVal);
 
     // Push to everyone on this route
@@ -46,11 +45,11 @@ $c->broadcast(); // broadcasts to $c's primary scope
         an explicit <code>broadcast()</code>. The auto-broadcast fires to the signal's scope:
     </p>
     {% code 'php' %}{% verbatim %}
-// This signal is ROUTE-scoped. Calling setValue() auto-broadcasts to route:/
-$shared = $c->signal($app->globalState('count'), 'count', Scope::routeScope('/'));
+// This signal is ROUTE-scoped. setValue() and increment() auto-broadcast to route:/
+$shared = $c->signal(0, 'count', Scope::routeScope('/'));
 
-$c->action(function (Context $c) use ($app, $shared): void {
-    $shared->setValue($app->globalState('count') + 1);
+$c->action(function (Context $c) use ($shared): void {
+    $shared->increment();
     // No explicit broadcast needed — auto-broadcast fires for Scope::routeScope('/')
 }, 'inc');
 {% endverbatim %}{% endcode %}
@@ -78,9 +77,8 @@ $app->setGlobalState('messages', []);
 
 // In an action:
 $send = $c->action(function (Context $c) use ($app): void {
-    $msgs = $app->globalState('messages');
-    $msgs[] = ['user' => substr($c->getId(), -4), 'text' => $_POST['text'] ?? ''];
-    $app->setGlobalState('messages', array_slice($msgs, -50)); // keep last 50
+    $msg = ['user' => substr($c->getId(), -4), 'text' => $_POST['text'] ?? ''];
+    $app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?? [], $msg], -50)); // keep last 50
 
     $app->broadcast(Scope::routeScope('/chat'));
 }, 'send');
@@ -88,8 +86,10 @@ $send = $c->action(function (Context $c) use ($app): void {
     <p>
         <strong>Multi-worker note.</strong> With <code>withWorkerNum(&gt;1)</code>, GlobalState is backed
         by an <code>OpenSwoole\Table</code> shared across all workers. Values are PHP-serialized
-        before storage; the default column size is 4 096 bytes per value. For large values (deep arrays,
-        long strings), increase the limit with
+        before storage; the default column size is 32&nbsp;KB per value and keys are at most 63 characters.
+        Read-then-write loses updates when two workers do it at once, so append with
+        <code>mutateGlobalState()</code> rather than <code>globalState()</code> plus <code>setGlobalState()</code>.
+        For large values (deep arrays, long strings), increase the limit with
         <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code> before calling
         <code>start()</code>. An <code>\OverflowException</code> is thrown at write time if a value
         exceeds the configured size. For high-frequency or large shared data, prefer scoped signals

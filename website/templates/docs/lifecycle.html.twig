@@ -115,7 +115,8 @@ $c->setInterval(function () use ($elapsed, $c): void {
     <h2 id="server-timers">Server-level timers</h2>
     <p>
         For timers that run regardless of who is connected (e.g. a stock price tick), use
-        <code>$app->setInterval()</code>. It registers the timer once and clears it automatically on shutdown:
+        <code>$app->setInterval()</code>. It runs once for the whole server, on one worker even with
+        <code>worker_num &gt; 1</code>, and is cleared automatically on shutdown:
     </p>
     {% code 'php' %}{% verbatim %}
 $app->setInterval(function () use ($app): void {
@@ -125,9 +126,11 @@ $app->setInterval(function () use ($app): void {
 }, 5000);
 {% endverbatim %}{% endcode %}
     <p>
-        Under the hood <code>setInterval()</code> calls <code>Timer::tick()</code> in <code>onStart</code>
-        and clears the ID in <code>onShutdown</code>. You can still use that pattern directly when you need
-        the timer ID for conditional logic.
+        Under the hood <code>setInterval()</code> calls <code>Timer::tick()</code> when the leader worker starts
+        and clears it when that worker stops. Pass <code>everyWorker: true</code> to arm it in every worker
+        instead, for work that belongs to each process. Call <code>Timer::tick()</code> from <code>onStart</code> yourself
+        when you need the timer ID for conditional logic; <code>onStart</code> runs in every worker, so that
+        timer does too.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

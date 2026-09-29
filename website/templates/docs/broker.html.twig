@@ -56,17 +56,20 @@ $config = (new Config())
     ->withBroker(new SwooleBroker());
 {% endverbatim %}{% endcode %}
     <p>
-        <strong>Sticky sessions required.</strong> Session data is stored per-worker. Configure your
-        load balancer to route each session to the same worker (e.g. Caddy's
-        <a href="https://caddyserver.com/docs/caddyfile/directives/reverse_proxy" target="_blank" rel="noopener"><code>lb_policy cookie</code></a>).
-        GlobalState and broadcasts work correctly across all workers without sticky sessions.
+        <strong>No sticky routing needed.</strong> Every worker sits behind the same port, so a load balancer
+        cannot pick one anyway. An action or SSE reconnect that lands on a worker other than the one that
+        rendered the page rebuilds the context there. Scoped signal values, GlobalState and the client list are
+        shared; session data, server-owned TAB signals and PHP statics stay per worker. See
+        <a href="/docs/deployment#same-machine">Deployment → Same machine</a> for the details and for the
+        atomic update methods.
     </p>
     <p>
         <strong>Limits (configurable).</strong> <code>GlobalState</code> is backed by an
         <code>OpenSwoole\Table</code> with a fixed capacity allocated at startup:
-        1 024 keys × 4 096 bytes per value by default. Increase with
-        <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code>.
-        An <code>\OverflowException</code> is thrown if a value exceeds the configured size.
+        1&nbsp;024 keys × 32&nbsp;KB per value by default, keys up to 63 characters. Increase with
+        <code>Config::withGlobalStateTableSize(int $maxRows, int $maxValueBytes)</code>. The row count is a
+        floor, not a ceiling. An <code>\OverflowException</code> is thrown when a value exceeds the configured
+        size or the table is full.
     </p>
 
     <h2 id="redisbroker">RedisBroker</h2>

@@ -52,7 +52,7 @@ $vote = $c->action(function (Context $c) use ($app, $votes): void {
     if (!in_array($option, ['a', 'b', 'c'], true)) {
         return; // ignore unknown values
     }
-    $app->setGlobalState('vote_' . $option, ($app->globalState('vote_' . $option) ?? 0) + 1);
+    $app->incrementGlobalState('vote_' . $option);
     $votes->setValue(['a' => $app->globalState('vote_a'), 'b' => $app->globalState('vote_b')]);
     $app->broadcast(Scope::routeScope('/'));
 }, 'vote');

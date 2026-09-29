@@ -687,20 +687,21 @@ class Via {
                 );
             }
 
-            // Actions and scoped signal values now cross workers, but three things still do not,
+            // Actions and scoped signal values now cross workers, but four things still do not,
             // and they fail quietly enough that an operator would not connect them to worker_num.
             if ($this->config->getWorkerNum() > 1) {
                 $this->log(
                     'warn',
                     'worker_num > 1: actions, scoped signal values and the client list are shared across '
-                    . 'workers. Three things are not. (1) Mutating a scoped signal by reading it and calling '
+                    . 'workers. Four things are not. (1) Mutating a scoped signal by reading it and calling '
                     . 'setValue() loses updates — use Signal::increment() for counters and Signal::mutate() '
                     . 'for anything else. (2) PHP statics in your own handlers are per-process, so a '
                     . 'simulation kept in one diverges per worker. (3) A server-owned TAB signal '
                     . '(clientWritable: false, or any TAB signal without clientWritable: true under '
                     . 'withStrictTabSignals()) lives in one worker: an action another worker takes rebuilds '
                     . 'it from its initial value, so keep that state in a scoped signal or use worker_num = 1. '
-                    . 'See PERFORMANCE.md "Re-measured on the real multi-worker path".'
+                    . '(4) Session data (sessionData()/setSessionData()) is per worker; use a Scope::SESSION '
+                    . 'signal or worker_num = 1. See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
                 );
             }
 

@@ -26,7 +26,7 @@ Real-time reactive web framework for PHP. Server-side reactive UIs with zero Jav
 ## Requirements
 
 - PHP 8.4+
-- OpenSwoole PHP extension
+- OpenSwoole PHP extension 26+
 - Composer
 - Brotli PHP extension *(optional, required for `Config::withBrotli()`)*
 
@@ -185,9 +185,10 @@ $app->broadcast('room:lobby');      // custom scope
 
 ### Multi-node broadcasting: Redis and NATS brokers
 
-By default php-via uses an `InMemoryBroker` that is correct for single-process deployments.
-To fan out `broadcast()` calls across multiple servers or containers, swap in `RedisBroker` or
-`NatsBroker`:
+By default php-via uses an `InMemoryBroker` that is correct for a single worker. For several
+workers on one machine, use `withWorkerNum()` with `SwooleBroker`, which needs no external
+service. To fan out `broadcast()` calls across multiple servers or containers, swap in
+`RedisBroker` or `NatsBroker`:
 
 ```php
 use Mbolli\PhpVia\Broker\RedisBroker;
