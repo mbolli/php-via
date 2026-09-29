@@ -192,12 +192,16 @@ class HtmlBuilder {
             return null;
         }
 
-        $json = $this->encodeJson($values);
-        if ($json === null) {
+        $json = json_encode($values, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
+        if ($json === false) {
             $this->log('warning', 'Initial signal values are not JSON-encodable; the page is not seeded', $context);
 
             return null;
         }
+
+        // Datastar compiles this as JS: it rewrites `@name(` inside strings, misreads `\\"` when splitting
+        // on `;`, and treats its emoji markers as raw code, so those characters stay \u-escaped.
+        $json = strtr($json, ['@' => '\u0040', ';' => '\u003b', '\\\\' => '\u005c']);
 
         return '<meta data-signals__ifmissing="' . htmlspecialchars($json, ENT_QUOTES, 'UTF-8') . '">';
     }

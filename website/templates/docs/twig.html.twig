@@ -69,7 +69,8 @@ $c->view(function () use ($count): string {
         the first <code>&lt;/head&gt;</code>, a <code>via_ctx</code> meta (only when the document contains
         no <code>via_ctx</code> at all) and a <code>data-signals__ifmissing</code> meta with the signal
         values the first SSE sync sends, so <code>$count</code> has its value before the stream opens.
-        A value your layout seeds earlier in the document wins, and a signal marked synced is not seeded.
+        A value your layout seeds earlier in the document wins. A TAB signal marked synced is not
+        seeded; scoped signals always are, since every sync sends them.
         Includes from <code>appendToHead()</code> and <code>appendToFoot()</code> go before the first
         <code>&lt;/head&gt;</code> and the last <code>&lt;/body&gt;</code>, on the initial render and
         on every SSE update, since the update morphs <code>&lt;head&gt;</code> too. An include whose

@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Tracing\Tracer;
 
 function fullDocument(string $head = '', string $body = '<main id="app">x</main>'): string {
     return "<!DOCTYPE html>\n<html><head><title>t</title>{$head}</head><body>{$body}</body></html>";
@@ -33,6 +36,20 @@ function drainPatches(Context $ctx): array {
 
     return $patches;
 }
+
+/**
+ * @return list<string>
+ */
+function elementPatches(Context $ctx): array {
+    return array_values(array_map(
+        fn (array $p): string => $p['content'],
+        array_filter(drainPatches($ctx), fn (array $p): bool => $p['type'] === 'elements'),
+    ));
+}
+
+afterEach(function (): void {
+    Tracer::setCurrent(null);
+});
 
 describe('full-document views: initial render', function (): void {
     test('global and per-context head/foot includes land before </head> and </body>', function (): void {
@@ -70,7 +87,7 @@ describe('full-document views: initial render', function (): void {
         ;
     });
 
-    test('scoped signals are seeded and a signal marked synced is not', function (): void {
+    test('scoped signals are seeded and a TAB signal marked synced is not', function (): void {
         $via = createVia();
         $ctx = new Context('/_/doc3', '/doc', $via);
         $ctx->addScope('room:doc3');
@@ -82,6 +99,41 @@ describe('full-document views: initial render', function (): void {
         $seed = metaSignals($via->buildHtmlDocument($ctx), 'data-signals__ifmissing');
 
         expect($seed)->toBe([$shared->id() => 7]);
+    });
+
+    test('a scoped signal marked synced is still seeded, as every sync sends it', function (): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc13', '/doc', $via);
+        $ctx->addScope('room:doc13');
+        $shared = $ctx->signal('live', 'shared', 'room:doc13');
+        $shared->markSynced();
+        $ctx->view(fn () => fullDocument());
+
+        $seed = metaSignals($via->buildHtmlDocument($ctx), 'data-signals__ifmissing');
+
+        expect($seed)->toBe([$shared->id() => 'live']);
+    });
+
+    test('the seed escapes what Datastar would compile as code', function (): void {
+        $values = ['foo@bar(baz)', '@media(max-width: 600px)', 'C:\\temp\\', 'color:red;', "\u{1F595}JS_DS\u{1F680}", 'a\\"b', 'grüße'];
+        $via = createVia();
+        $ctx = new Context('/_/doc14', '/doc', $via);
+        $ids = [];
+        foreach ($values as $i => $value) {
+            $ids[] = $ctx->signal($value, "v{$i}")->id();
+        }
+        $ctx->view(fn () => fullDocument());
+
+        $html = $via->buildHtmlDocument($ctx);
+        preg_match('/<meta data-signals__ifmissing="([^"]*)">/', $html, $m);
+        $json = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+
+        expect($json)->not->toContain('@')
+            ->and($json)->not->toContain(';')
+            ->and($json)->not->toContain('\\\\')
+            ->and(mb_check_encoding($json, 'ASCII'))->toBeTrue()
+            ->and(metaSignals($html, 'data-signals__ifmissing'))->toBe(array_combine($ids, $values))
+        ;
     });
 
     test('component signals are seeded with the page', function (): void {
@@ -133,15 +185,20 @@ describe('full-document views: initial render', function (): void {
         expect(substr_count($via->buildHtmlDocument($ctx), $tag))->toBe(1);
     });
 
-    test('a document without </head> is returned without head content', function (): void {
+    test('a document without </head> is returned without head content and logs why', function (): void {
         $via = createVia();
-        $via->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx = new Context('/_/doc7', '/doc', $via);
+        $ctx->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx->signal(1, 'count');
         $doc = '<html><body><main id="app">x</main></body></html>';
-        $ctx->view(fn () => $doc);
+        $logged = [];
+        $builder = new HtmlBuilder(null, function (string $level, string $message) use (&$logged): void {
+            $logged[] = [$level, $message];
+        });
 
-        expect($via->buildHtmlDocument($ctx))->toBe($doc);
+        expect($builder->injectIntoDocument($doc, $ctx, initial: true))->toBe($doc)
+            ->and($logged)->toBe([['debug', 'Full-document view has no </head>; head content not injected']])
+        ;
     });
 });
 
@@ -164,6 +221,54 @@ describe('full-document views: update render', function (): void {
             ->and($html)->not->toContain('via_ctx')
             ->and($html)->not->toContain('__ifmissing')
         ;
+    });
+
+    test('update includes keep their place: head before </head>, foot before </body> and the Dev Bar', function (): void {
+        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $owned = '<link rel="stylesheet" href="/owned.css">';
+        $via->appendToHead($owned);
+        $via->appendToHead('<link rel="stylesheet" href="/global.css">');
+        $via->appendToFoot('<script src="/global.js"></script>');
+        $ctx = new Context('/_/doc15', '/doc', $via);
+        $ctx->view(fn () => fullDocument($owned));
+
+        $initial = $via->buildHtmlDocument($ctx);
+        $ctx->sync();
+        $update = elementPatches($ctx)[0];
+
+        foreach ([$initial, $update] as $html) {
+            $headEnd = stripos($html, '</head>');
+            expect(substr_count($html, $owned))->toBe(1)
+                ->and(strpos($html, '/global.css'))->toBeInt()->toBeLessThan($headEnd)
+                ->and(strpos($html, '/global.js'))->toBeInt()->toBeGreaterThan($headEnd)
+                ->and(strpos($html, '/global.js'))->toBeLessThan(strpos($html, '<via-dev-bar'))
+                ->and(strpos($html, '<via-dev-bar'))->toBeLessThan(strripos($html, '</body>'))
+            ;
+        }
+    });
+
+    test('component updates are not decorated', function (): void {
+        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via->appendToHead('<link rel="stylesheet" href="/global.css">');
+        $ctx = new Context('/_/doc16', '/doc', $via);
+        $inner = null;
+        $render = $ctx->component(function (Context $k) use (&$inner): void {
+            $inner = $k;
+            $k->view(fn () => fullDocument());
+        }, 'cmp');
+        $ctx->view(fn () => fullDocument('', $render()));
+        $via->buildHtmlDocument($ctx);
+        drainPatches($ctx);
+
+        $inner->sync();
+        $updates = [...elementPatches($inner), ...elementPatches($ctx)];
+
+        expect($updates)->not->toBeEmpty();
+        foreach ($updates as $html) {
+            expect($html)->not->toContain('/global.css')
+                ->and($html)->not->toContain('<via-dev-bar')
+            ;
+        }
     });
 
     test('fragment updates are not decorated', function (): void {
@@ -212,6 +317,7 @@ describe('shell (fragment) views', function (): void {
         }
 
         expect($html)->toContain('[&quot;\&quot;lines\&quot;&quot;|[22,443]|5|' . $ports->id() . ']')
-            ->and($html)->toContain('<p>{{ count }}</p>');
+            ->and($html)->toContain('<p>{{ count }}</p>')
+        ;
     });
 });

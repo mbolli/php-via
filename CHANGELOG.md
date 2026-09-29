@@ -123,23 +123,27 @@ All notable changes to php-via will be documented in this file.
 - **A view that renders a full `<html>` document gets `via_ctx`, a signal seed and the head/foot
   includes.** `HtmlBuilder` returned such a view unchanged, so `appendToHead()`/`appendToFoot()`
   content never reached it and signal values arrived only with the first SSE frame, which left
-  expressions like `$x.y` throwing until then. On the initial render the document now gets, before
-  the first `</head>`, a `via_ctx` meta when it contains no `via_ctx` at all and a
-  `data-signals__ifmissing` meta with what the first sync sends (changed TAB signals, scoped
-  signals and those of the page's components; a signal marked synced is left out). Includes go
-  before the first `</head>` and the last `</body>` unless their exact markup is already there, and
-  they are re-added to every SSE update render, since the morph replaces `<head>` too. The SSE
-  bootstrap and `datastar.js` are never injected: the layout carries them. Shell pages get the same
-  seed meta in `{{ head_content }}`. Shell signal placeholders are now keyed on the name passed to
-  `signal()`, so `graph_display` and `graph_ports` no longer share `{{ graph }}`, and their values
-  are HTML-escaped. The shell is filled in one pass, so placeholder text inside the view or a value
-  is no longer replaced. Behaviour changes: every page gains the seed meta, and content appended
-  with `appendToHead()`/`appendToFoot()` that was silently dropped from full-document pages now
-  appears, so a `<title>` appended for shell pages lands next to the layout's own. A custom shell
-  that used `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`, and a
-  string placeholder inside a `<script>` now arrives HTML-escaped.
+  expressions like `$x.y` throwing until then. The initial render now adds, before the first
+  `</head>`, a `via_ctx` meta (only when the document has none) and a `data-signals__ifmissing`
+  meta with what the first sync sends: changed TAB signals, scoped signals and the page's component
+  signals. Datastar compiles that attribute as code, so `@`, `;`, `\\` and non-ASCII characters in
+  the values are `\u`-escaped. Includes go before the first `</head>` and the last `</body>` unless
+  their exact markup is already there, also on every SSE update, since the morph replaces `<head>`
+  too. The layout still carries the SSE bootstrap and `datastar.js`. Shell pages get the same seed
+  in `{{ head_content }}`.
+
+- **Shell signal placeholders use the name passed to `signal()`.** `graph_display` and
+  `graph_ports` both filled `{{ graph }}`. The shell is now filled in one pass, so placeholder text
+  inside the view or a signal value is left alone.
 
 ### Breaking Changes
+
+- **Shell placeholders and full-document includes changed.** A custom shell that used
+  `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`. Placeholder
+  values are HTML-escaped, so a string placeholder inside a `<script>` arrives escaped: read the
+  signal from Datastar instead. Content from `appendToHead()`/`appendToFoot()` that full-document
+  pages silently dropped now appears there, so a `<title>` appended for shell pages lands next to
+  the layout's own: append it only for shell pages. Every page also gains the seed meta.
 
 - **`clientWritable: false` on a TAB signal is enforced.** It was ignored before. Such a signal no
   longer takes the browser's value on actions or on revival, where it starts from the handler's
