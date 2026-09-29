@@ -472,7 +472,9 @@ $s->text();   // '<span data-text="$count"></span>'
         On a scoped signal with <code>worker_num &gt; 1</code>, <code>setValue($s-&gt;int() + 1)</code> loses
         updates when two workers read the same value. Use <code>increment()</code> for counters and
         <code>mutate()</code> for anything else. Pick one per signal: <code>increment()</code> skips the lock
-        that <code>mutate()</code> takes, so mixing them can overwrite an increment.
+        that <code>mutate()</code> takes, so mixing them can overwrite an increment. A broadcast reads each scoped
+        signal once and reuses the value for every tab it renders, so this applies to views as well: a view that
+        computes a new value from a scoped signal computes it from the value the broadcast read.
     </p>
 
     ---

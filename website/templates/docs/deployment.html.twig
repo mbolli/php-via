@@ -343,7 +343,9 @@ $config = (new Config())
             <code>setGlobalState($k, globalState($k) + 1)</code> lose updates when two workers read the same
             value. Use <code>Signal::increment()</code> / <code>incrementGlobalState()</code> for counters,
             <code>Signal::mutate()</code> / <code>mutateGlobalState()</code> for anything else, and
-            <code>#[Signal(..., atomic: true)]</code> in the composition API.
+            <code>#[Signal(..., atomic: true)]</code> in the composition API. During a broadcast each scoped
+            signal is read from shared memory once and reused for every tab the flush renders, so a view that
+            computes a new value from one needs <code>increment()</code> or <code>mutate()</code> as well.
         </li>
         <li>
             <strong>PHP statics and objects in your own code.</strong> A simulation held in a static diverges

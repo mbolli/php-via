@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\Via;
 
@@ -141,4 +142,146 @@ test('scopes that sanitise to the same signal id do not share a value across wor
 
     expect($draftB->string())->toBe('');
     expect($draftA->string())->toBe('private to a-b');
+});
+
+/*
+ * Read snapshots on the synchronous broadcast path (outside a coroutine). A fan-out reads each
+ * scoped signal from shared memory once and reuses it for every context; a direct $store->set()
+ * stands in for another worker's write. Fixtures/read_snapshot_cases.php covers the flush path.
+ */
+
+/**
+ * A worker whose /fan contexts each render the ROUTE-scoped count, then run $afterRead.
+ *
+ * @param Closure(Context, Signal): void $afterRead
+ */
+function fanWorker(SharedSignalStore $store, Closure $afterRead): Via {
+    $app = new Via((new Config())->withLogLevel('error'));
+    $app->setSharedSignalStore($store);
+
+    $app->page('/fan', function (Context $c) use ($afterRead): void {
+        $c->addScope(Scope::routeScope('/fan'));
+        $count = $c->signal(1, 'count', Scope::ROUTE);
+        $c->view(function () use ($c, $count, $afterRead): string {
+            $html = 'count=' . $count->int();
+            $afterRead($c, $count);
+
+            return $html;
+        }, cacheUpdates: false);
+    });
+
+    return $app;
+}
+
+/** @return list<Context> three /fan contexts, rendered in this order by a fan-out */
+function mountFans(Via $app): array {
+    $contexts = [];
+    foreach (['1', '2', '3'] as $n) {
+        $ctx = new Context('/fan_/' . $n, '/fan', $app, null, 'sess1');
+        $app->contexts[$ctx->getId()] = $ctx;
+        $app->getApp()->registerContext($ctx);
+        $app->registerContextInScope($ctx, Scope::TAB);
+        $app->invokeHandlerWithParams($app->getRouter()->getRoutes()['/fan'], $ctx, []);
+        $contexts[] = $ctx;
+    }
+
+    return $contexts;
+}
+
+/**
+ * @param list<Context> $contexts
+ *
+ * @return list<list<string>> the elements frames each context got since the last call
+ */
+function fanFrames(array $contexts): array {
+    return array_map(static function (Context $ctx): array {
+        $frames = [];
+        while (($patch = $ctx->getPatch()) !== null) {
+            if ($patch['type'] === 'elements') {
+                $frames[] = (string) $patch['content'];
+            }
+        }
+
+        return $frames;
+    }, $contexts);
+}
+
+test('a fan-out renders every context from one read of each scoped signal', function (): void {
+    $store = new SharedSignalStore(maxRows: 64);
+    $writeOnce = true;
+    $app = fanWorker($store, function (Context $c, Signal $count) use ($store, &$writeOnce): void {
+        if ($writeOnce) {
+            $writeOnce = false;
+            $store->set($count->sharedKey(), 99);
+        }
+    });
+    $contexts = mountFans($app);
+
+    $app->broadcast(Scope::routeScope('/fan'));
+
+    expect(fanFrames($contexts))->toBe([['count=1'], ['count=1'], ['count=1']], 'one frame, one value');
+    expect($store->readEpoch())->toBe(0);
+
+    $app->broadcast(Scope::routeScope('/fan'));
+
+    expect(fanFrames($contexts))->toBe([['count=99'], ['count=99'], ['count=99']]);
+});
+
+test('a write in a view is read back by the rest of the fan-out', function (Closure $write): void {
+    $store = new SharedSignalStore(maxRows: 64);
+    $writeOnce = true;
+    $app = fanWorker($store, function (Context $c, Signal $count) use ($write, &$writeOnce): void {
+        if ($writeOnce) {
+            $writeOnce = false;
+            $write($count);
+        }
+    });
+    $contexts = mountFans($app);
+
+    $app->broadcast(Scope::routeScope('/fan'));
+
+    expect(fanFrames($contexts))->toBe([['count=1'], ['count=5'], ['count=5']]);
+})->with([
+    'setValue' => [static fn (Signal $s) => $s->setValue(5, true, false)],
+    'increment' => [static fn (Signal $s) => $s->increment(4, false)],
+    'mutate' => [static fn (Signal $s) => $s->mutate(static fn (mixed $v): int => (int) $v + 4, false)],
+]);
+
+test('a view that broadcasts its own scope gets a re-run that reads shared memory again', function (): void {
+    $store = new SharedSignalStore(maxRows: 64);
+    $once = true;
+    $app = null;
+    $app = fanWorker($store, function (Context $c, Signal $count) use ($store, &$once, &$app): void {
+        if ($once) {
+            $once = false;
+            $store->set($count->sharedKey(), 7);
+            $app->broadcast(Scope::routeScope('/fan'));
+        }
+    });
+    $contexts = mountFans($app);
+
+    $app->broadcast(Scope::routeScope('/fan'));
+
+    expect(fanFrames($contexts))->toBe([['count=1', 'count=7'], ['count=1', 'count=7'], ['count=1', 'count=7']]);
+    expect($store->readEpoch())->toBe(0);
+});
+
+test('a throwing view leaves no snapshot open, and later reads go to shared memory', function (): void {
+    $store = new SharedSignalStore(maxRows: 64);
+    $app = fanWorker($store, function (Context $c): void {
+        if ($c->getId() === '/fan_/2') {
+            throw new RuntimeException('view failed');
+        }
+    });
+    $contexts = mountFans($app);
+    $count = $contexts[0]->getSignal('count');
+
+    ob_start();
+    $app->broadcast(Scope::routeScope('/fan'));
+    $log = (string) ob_get_clean();
+
+    expect($log)->toContain('view failed');
+    expect($store->readEpoch())->toBe(0);
+    $store->set($count->sharedKey(), 3);
+    expect($count->int())->toBe(3);
 });

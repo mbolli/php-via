@@ -910,6 +910,10 @@ Three blockers, in descending severity:
    read inside a hot render (Game of Life touches state per cell across 2,500 cells) goes
    from a property read to 2,500 unserializes per frame. This is a cliff in exactly the
    workload php-via advertises.
+   **Status: closed for broadcasts.** A flush holds a read epoch, and each scoped signal is read
+   from the Table once per flush for all the contexts it renders (`SharedSignalStore` read
+   snapshots; `bench/contention/shared_read.php` at 2,000 contexts: 20,000 reads per broadcast
+   down to 5). Actions, timers, hooks and page loads still read, and unserialize, on every call.
 3. **Caps.** 4096 bytes per value and 1024 rows by default. A ROUTE-scoped signal holding a
    todo list or spreadsheet overflows — `set()` already throws `\OverflowException`.
 

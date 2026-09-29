@@ -79,7 +79,8 @@ $c->action(function (Context $c) use ($shared): void {
         Flushes of different scopes run side by side, so a view that waits on a slow database query delays only
         its own scope. A scope broadcast while its fan-out is still running is rendered by the first flush after
         that fan-out ends. When a later broadcast finds a fan-out that has been running for over a second, the
-        worker logs a warning naming the scope.
+        worker logs a warning naming the scope. When two flushes render the same tab and the one that started
+        first finishes last, it renders the tab again, so the tab ends on the newer state after a brief step back.
     </p>
     {% code 'php' %}{% verbatim %}
 $config = (new Config())
@@ -107,6 +108,10 @@ $config = (new Config())
             script needs the new DOM.</li>
         <li>The action's HTTP response does not wait for the fan-out to every client, so a
             <code>data-indicator</code> can clear before the new frame arrives.</li>
+        <li>With <code>worker_num &gt; 1</code>, a flush reads each scoped signal from shared memory once and
+            reuses the value for every tab it renders. A view that computes a new value from one, such as
+            <code>setValue($s-&gt;int() + 1)</code>, computes it from that value, so use <code>increment()</code>
+            or <code>mutate()</code> there.</li>
     </ul>
     {% code 'php' %}{% verbatim %}
 $send = $c->action(function (Context $c) use ($app): void {

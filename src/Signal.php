@@ -39,6 +39,9 @@ class Signal {
      */
     private ?SharedSignalStore $store = null;
 
+    /** Store read epoch $value was loaded under (see SharedSignalStore::readEpoch()); 0 means read it again. */
+    private int $readEpoch = 0;
+
     public function __construct(
         string $id,
         mixed $initialValue,
@@ -86,6 +89,7 @@ class Signal {
     public function attachSharedStore(SharedSignalStore $store): void {
         $this->store = $store;
         $this->value = $store->initialize($this->sharedKey(), $this->value);
+        $this->readEpoch = 0;
     }
 
     /**
@@ -93,8 +97,12 @@ class Signal {
      */
     public function getValue(): mixed {
         if ($this->store !== null) {
-            // Read through: another worker may have moved it since this one last looked.
-            $this->value = $this->store->get($this->sharedKey(), $this->value);
+            // Read through, since another worker may have moved it, unless this coroutine's flush already loaded it.
+            $epoch = $this->store->readEpoch();
+            if ($epoch === 0 || $epoch !== $this->readEpoch) {
+                $this->value = $this->store->get($this->sharedKey(), $this->value);
+                $this->readEpoch = $epoch;
+            }
         }
 
         return $this->value;
@@ -131,6 +139,7 @@ class Signal {
             : $mutator($this->value);
 
         $this->value = $next;
+        $this->readEpoch = 0;
         $this->changed = true;
         ++$this->writes;
 
@@ -169,6 +178,7 @@ class Signal {
         }
 
         $this->value = $next;
+        $this->readEpoch = 0;
         $this->changed = true;
         ++$this->writes;
 
@@ -188,10 +198,12 @@ class Signal {
      */
     public function setValue(mixed $value, bool $markChanged = true, bool $broadcast = true): void {
         // Check if value actually changed. With a shared backing the comparison has to be
-        // against what is actually stored, not against this worker's last-seen copy.
+        // against what is actually stored, not against this worker's last-seen copy or a
+        // flush's read snapshot, so it bypasses getValue().
         $oldValue = $this->store !== null ? $this->store->get($this->sharedKey(), $this->value) : $this->value;
 
         $this->value = $value;
+        $this->readEpoch = 0;
         $this->store?->set($this->sharedKey(), $value);
 
         if ($markChanged) {

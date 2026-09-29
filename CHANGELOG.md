@@ -57,6 +57,13 @@ All notable changes to php-via will be documented in this file.
   that is next in line but cannot run for 2 s, for example because its event loop is blocked,
   just as an overdue holder is skipped, and its write can then overlap the next holder's.
 
+- **A tab could keep an older frame than one it had already received.** When a view waited on I/O
+  during a broadcast, a broadcast that came after it could render the same tab and finish first.
+  The older frame then arrived last and stayed until the next broadcast to one of the tab's scopes,
+  with one worker or several. A fan-out now renders the tab again when a fan-out that started
+  after it finished that tab first, so the tab shows the older frame briefly and then the current
+  one. After 8 such renders in a row it stops and logs a warning.
+
 - **Releasing the mutate lock could erase the next holder's lease.** The releasing worker cleared
   the lease after advancing the queue, and a holder that lost its lease that way could not be
   recovered if it then died. The lease is now cleared first, and only by the holder still being
@@ -97,6 +104,24 @@ All notable changes to php-via will be documented in this file.
   earlier callers of its own worker, or not at all once the local holder has overrun its 2 s
   lease, and its 5 s timeout starts when it takes a ticket, so a call can now take up to 7 s
   before it throws.
+
+- **A broadcast reads each scoped signal from shared memory once per flush.** With `worker_num > 1`
+  every read of a scoped signal went to the shared table (a sha1 of the key, a row lock, and an
+  `unserialize()` for non-integers), and a fan-out read every signal again for every context, once
+  in its view and once for its signals patch. A flush now reads each signal once and reuses the
+  value for every context of every scope it renders. With `withBroadcastCoalescing(false)` or
+  outside a coroutine, each fan-out reads each signal once. Actions, timers, hooks, page loads and
+  SSE initial syncs still read shared memory on every call, and a write on this worker during a
+  flush, a view's own included, is read back at once. A write on another worker arrives with a
+  broadcast: a scope it marks before a running flush reaches that scope is read again there,
+  including the tabs the flush rendered before the mark, and any other scope goes to the next
+  flush. A tab that an older flush renders after a newer one did is rendered again (see Fixed). A
+  view that computes a new value from a scoped signal during a broadcast now computes it from the
+  flush's value, so use `increment()` or `mutate()` there. In `bench/contention/shared_read.php` (2,000
+  contexts, 5 scoped signals written by another worker, two runs per tree), store reads per
+  broadcast fell from 20,000 to 5 with a view per context and from 10,005 to 5 with a cached route
+  view. The store's cost over a single-worker run fell from 30 ms (+146%) to 1.6 ms (+8%) and from
+  17 ms (+430%) to 0.6 ms (+14%) per broadcast.
 
 ## [0.13.0] - 2026-09-29
 

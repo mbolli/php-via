@@ -33,6 +33,15 @@ use OpenSwoole\Table;
  * cannot do is read-modify-write — `setValue($signal->array() + [...])` on two workers at once
  * drops one side. Signals shaped that way need {@see increment()} where they are numeric, and
  * a single writer where they are not.
+ *
+ * ## Read snapshots
+ *
+ * A broadcast flush renders every context of its scopes, and each render reads the same rows.
+ * While a coroutine runs a flush or a fan-out it holds a read epoch ({@see ReadEpochs}), and a
+ * Signal read under that epoch keeps the value it loaded, so each row is read once per flush
+ * rather than once per context. The epoch is new for every flush and never reused, so a value
+ * served in one was read after it began. Code outside a flush (actions, timers, hooks, page
+ * loads) has no epoch and reads through on every call.
  */
 final class SharedSignalStore {
     /** Row uses the atomic integer column. */
@@ -44,6 +53,8 @@ final class SharedSignalStore {
     private Table $table;
 
     private TicketLock $lock;
+
+    private ReadEpochs $readEpochs;
 
     /**
      * @param int $maxRows      Distinct scoped signals to track. See SharedTable for why this is
@@ -64,6 +75,7 @@ final class SharedSignalStore {
         $table->column('lease', Table::TYPE_INT, 8);
         $table->create();
         $this->table = $table;
+        $this->readEpochs = new ReadEpochs();
         $this->lock = new TicketLock(
             $table,
             static fn (string $key): string => "Timed out waiting to mutate scoped signal (key {$key}). A mutate() callback "
@@ -188,6 +200,24 @@ final class SharedSignalStore {
     /** Number of scoped signals currently tracked. */
     public function count(): int {
         return \count($this->table);
+    }
+
+    /**
+     * The epochs a Signal backed by this store reads under. Via runs its fan-outs on them.
+     *
+     * @internal
+     */
+    public function readEpochs(): ReadEpochs {
+        return $this->readEpochs;
+    }
+
+    /**
+     * The calling coroutine's read epoch, or 0 when it holds none and must read through.
+     *
+     * @internal
+     */
+    public function readEpoch(): int {
+        return $this->readEpochs->current();
     }
 
     /**
