@@ -78,6 +78,14 @@ test('mutateGlobalState keeps every append under contention', function (): void 
     expect($r['final'])->toBe(2000);
 });
 
+test('mutateGlobalState keeps the first write to a fresh key', function (): void {
+    // Every worker creates each key at the same moment. Row creation used exists() then set(),
+    // so a late set() reset the ticket lock and value of a row another worker was mutating.
+    $r = forkGlobalState(workers: 8, each: 200, mode: 'firstTouch');
+
+    expect($r['final'])->toBe($r['expected']);
+});
+
 test('appending through setGlobalState drops entries', function (): void {
     $r = forkGlobalState(workers: 4, each: 500, mode: 'append');
 

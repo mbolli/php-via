@@ -404,21 +404,24 @@ final class SharedTable {
         return $serialized === '' ? $default : unserialize($serialized);
     }
 
-    /** Create the row if absent, so incr() on the ticket column never has to allocate. */
+    /**
+     * Create the row if absent, so incr() on the ticket column never has to allocate.
+     * incr() by zero creates a zeroed row atomically; a set() here would reset the ticket, serving
+     * and value columns of a row another worker created and is already mutating.
+     */
     private function ensureRow(string $key): void {
         if ($this->table->exists($key)) {
             return;
         }
 
-        $this->table->set($key, [
-            'kind' => self::KIND_SERIALIZED,
-            'n' => 0,
-            'value' => '',
-            'dirty' => 0,
-            'next' => 0,
-            'serving' => 0,
-            'lease' => 0,
-        ]);
+        // At capacity incr() warns and fails rather than throwing, so check that the row appeared.
+        @$this->table->incr($key, 'next', 0);
+        if (!\is_array($this->table->get($key))) {
+            throw new \OverflowException(
+                "GlobalState has no room for key \"{$key}\": the shared table is full. "
+                . 'Raise the row count with Config::withGlobalStateTableSize().'
+            );
+        }
     }
 
     /**

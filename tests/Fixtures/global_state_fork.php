@@ -17,6 +17,7 @@ declare(strict_types=1);
  *           "setValue"  (integer read-modify-write through setGlobalState)
  *           "mutate"    (non-integer read-modify-write through mutateGlobalState)
  *           "append"    (non-integer read-modify-write through setGlobalState)
+ *           "firstTouch" (mutateGlobalState once per fresh key, argv[2] keys, all workers in step)
  */
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
@@ -36,7 +37,7 @@ const READY = 'barrier_ready';
 // Master process: allocated before any fork, exactly as Via::start() does it.
 // The value cap is raised well above the default only so the list modes below can build a
 // 2000-entry array without tripping the size guard; it has no bearing on what is measured.
-$table = new SharedTable(maxRows: 64, maxValueBytes: 1_048_576);
+$table = new SharedTable(maxRows: $mode === 'firstTouch' ? 2048 : 64, maxValueBytes: 1_048_576);
 
 function mountWorker(SharedTable $table): Via {
     $app = new Via((new Config())->withLogLevel('error'));
@@ -71,6 +72,14 @@ for ($w = 0; $w < $workers; ++$w) {
 
                     return $list;
                 });
+            } elseif ($mode === 'firstTouch') {
+                // Per-key barrier: the race is only in row creation, so every worker has to
+                // reach each fresh key together or they drift apart after the first one.
+                $table->increment('arrive_' . $i, 1);
+                while ((int) $table->get('arrive_' . $i, 0) < $workers) {
+                    // spin: a sleep here lets the workers drift apart again
+                }
+                $app->mutateGlobalState('fresh_' . $i, static fn (mixed $list): array => [...(is_array($list) ? $list : []), $w]);
             } elseif ($mode === 'append') {
                 $list = $app->globalState(KEY, []);
                 $list = is_array($list) ? $list : [];
@@ -104,6 +113,13 @@ foreach ($pids as $pid) {
 }
 
 // Read back from the master, which never wrote the key at all.
-$final = $table->get(KEY, $listMode ? [] : 0);
+if ($mode === 'firstTouch') {
+    $final = [];
+    for ($i = 0; $i < $each; ++$i) {
+        $final = [...$final, ...(array) $table->get('fresh_' . $i, [])];
+    }
+} else {
+    $final = $table->get(KEY, $listMode ? [] : 0);
+}
 echo 'final=', is_array($final) ? count($final) : var_export($final, true), "\n";
 echo 'expected=', $workers * $each, "\n";
