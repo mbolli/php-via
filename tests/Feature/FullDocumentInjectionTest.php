@@ -136,6 +136,24 @@ describe('full-document views: initial render', function (): void {
         ;
     });
 
+    test('via_ctx and the seed come before the layout\'s SSE bootstrap in <head>', function (): void {
+        $via = createVia();
+        $via->appendToHead('<link rel="stylesheet" href="/global.css">');
+        $ctx = new Context('/_/doc17', '/doc', $via);
+        $ctx->signal(1, 'count');
+        $bootstrap = '<meta data-on-interval__duration.15s.leading="@get(\'/_sse\')">';
+        $ctx->view(fn () => "<!DOCTYPE html>\n<html lang=\"en\"><head data-x=\"1\"><title>t</title>{$bootstrap}</head><body></body></html>");
+
+        $html = $via->buildHtmlDocument($ctx);
+
+        $boot = strpos($html, $bootstrap);
+        expect(strpos($html, '<head data-x="1">'))->toBeLessThan(strpos($html, 'via_ctx'))
+            ->and(strpos($html, 'via_ctx'))->toBeLessThan($boot)
+            ->and(strpos($html, '__ifmissing'))->toBeLessThan($boot)
+            ->and(strpos($html, '/global.css'))->toBeGreaterThan($boot)->toBeLessThan(stripos($html, '</head>'))
+        ;
+    });
+
     test('component signals are seeded with the page', function (): void {
         $via = createVia();
         $ctx = new Context('/_/doc12', '/doc', $via);
@@ -271,6 +289,20 @@ describe('full-document views: update render', function (): void {
         }
     });
 
+    test('an update with <body> but no <html> keeps the Dev Bar and gets no includes', function (): void {
+        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via->appendToHead('<link rel="stylesheet" href="/global.css">');
+        $ctx = new Context('/_/doc18', '/doc', $via);
+        $ctx->view(fn () => '<body><main id="app">x</main></body>');
+
+        $ctx->sync();
+        $html = elementPatches($ctx)[0];
+
+        expect($html)->toContain('<via-dev-bar')
+            ->and($html)->not->toContain('/global.css')
+        ;
+    });
+
     test('fragment updates are not decorated', function (): void {
         $via = createVia();
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
@@ -306,7 +338,7 @@ describe('shell (fragment) views', function (): void {
             $via = createVia();
             $ctx = new Context('/_/doc11', '/doc', $via);
             $ctx->setShellTemplate($shell);
-            $ctx->signal('"lines"', 'graph_display');
+            $ctx->signal('"lines"@x(y);', 'graph_display');
             $ports = $ctx->signal([22, 443], 'graph_ports');
             $ctx->signal(5, 'count', Scope::ROUTE);
             $ctx->view(fn () => '<p>{{ count }}</p>');
@@ -316,7 +348,7 @@ describe('shell (fragment) views', function (): void {
             unlink($shell);
         }
 
-        expect($html)->toContain('[&quot;\&quot;lines\&quot;&quot;|[22,443]|5|' . $ports->id() . ']')
+        expect($html)->toContain('[&quot;\&quot;lines\&quot;\u0040x(y)\u003b&quot;|[22,443]|5|' . $ports->id() . ']')
             ->and($html)->toContain('<p>{{ count }}</p>')
         ;
     });

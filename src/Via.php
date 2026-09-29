@@ -1458,20 +1458,22 @@ class Via {
     }
 
     /**
-     * Decorate an SSE update render of a full `<html>` document.
+     * Decorate an SSE update render of a page.
      *
-     * Datastar morphs the whole document, `<head>` included, so head/foot includes and the Dev Bar
-     * overlay missing from the update HTML would be removed on the first morph. Both are re-added
-     * (idempotently); fragment updates and components are returned untouched.
+     * Datastar morphs the whole document, `<head>` included, so head/foot includes missing from a
+     * full `<html>` update would be removed on the first morph, and the Dev Bar overlay from any
+     * update that carries `</body>`. Both are re-added (idempotently); components are left untouched.
      *
      * @internal Used by PatchManager during sync
      */
     public function decorateUpdate(string $html, Context $context): string {
-        if ($context->getComponentManager()->isComponent() || stripos($html, '<html') === false) {
+        if ($context->getComponentManager()->isComponent()) {
             return $html;
         }
 
-        $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
+        if (stripos($html, '<html') !== false) {
+            $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
+        }
 
         if ($this->devBarInjector === null || stripos($html, '</body>') === false) {
             return $html;

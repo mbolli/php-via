@@ -65,11 +65,12 @@ $c->view(function () use ($count): string {
         the plain-HTML shell entirely.
     </p>
     <p>
-        php-via then completes the document instead of wrapping it. On the initial render it adds, before
-        the first <code>&lt;/head&gt;</code>, a <code>via_ctx</code> meta (only when the document contains
-        no <code>via_ctx</code> at all) and a <code>data-signals__ifmissing</code> meta with the signal
-        values the first SSE sync sends, so <code>$count</code> has its value before the stream opens.
-        A value your layout seeds earlier in the document wins. A TAB signal marked synced is not
+        php-via then completes the document instead of wrapping it. On the initial render it adds, right
+        after the opening <code>&lt;head&gt;</code> tag and so ahead of your SSE bootstrap, a
+        <code>via_ctx</code> meta (only when the document contains no <code>via_ctx</code> at all) and a
+        <code>data-signals__ifmissing</code> meta with the signal values the first SSE sync sends, so
+        <code>$count</code> has its value before the stream opens. A value your layout sets in its own
+        <code>data-signals</code> wins. A TAB signal marked synced is not
         seeded; scoped signals always are, since every sync sends them.
         Includes from <code>appendToHead()</code> and <code>appendToFoot()</code> go before the first
         <code>&lt;/head&gt;</code> and the last <code>&lt;/body&gt;</code>, on the initial render and

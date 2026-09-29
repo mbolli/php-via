@@ -111,19 +111,20 @@ class HtmlBuilder {
      * Complete a view that renders its own `<html>` document.
      *
      * Head and foot includes the document does not already contain go before the first `</head>`
-     * and the last `</body>`. On the initial render the head also gets a `via_ctx` meta (only when
-     * the document has none) and a `data-signals__ifmissing` seed with the values the first sync
-     * sends. The SSE bootstrap and `datastar.js` are left to the document.
+     * and the last `</body>`. On the initial render a `via_ctx` meta (only when the document has
+     * none) and a `data-signals__ifmissing` seed with the values the first sync sends go right after
+     * the opening `<head>` tag, ahead of the document's SSE bootstrap. The bootstrap and
+     * `datastar.js` are left to the document.
      *
      * @param bool $initial True for the initial page render, false for an SSE update render
      */
     public function injectIntoDocument(string $html, Context $context, bool $initial): string {
         [$headIncludes, $footIncludes] = $this->includes($context);
 
-        $head = [];
+        $signals = [];
         if ($initial) {
             if (stripos($html, 'via_ctx') === false) {
-                $head[] = '<meta data-signals="' . htmlspecialchars(
+                $signals[] = '<meta data-signals="' . htmlspecialchars(
                     (string) json_encode(['via_ctx' => $context->getId(), '_disconnected' => false], JSON_UNESCAPED_SLASHES),
                     ENT_QUOTES,
                     'UTF-8'
@@ -131,18 +132,27 @@ class HtmlBuilder {
             }
             $seedMeta = $this->seedMeta($context);
             if ($seedMeta !== null) {
-                $head[] = $seedMeta;
+                $signals[] = $seedMeta;
             }
         }
-        $head = array_merge($head, $this->missingFrom($html, $headIncludes));
+        $head = $this->missingFrom($html, $headIncludes);
         $foot = $this->missingFrom($html, $footIncludes);
 
-        if ($head !== []) {
+        if ($signals !== [] || $head !== []) {
             $headEnd = stripos($html, '</head>');
             if ($headEnd === false) {
                 $this->log('debug', 'Full-document view has no </head>; head content not injected', $context);
             } else {
-                $html = substr_replace($html, implode("\n", $head) . "\n", $headEnd, 0);
+                if ($head !== []) {
+                    $html = substr_replace($html, implode("\n", $head) . "\n", $headEnd, 0);
+                }
+                // Datastar applies attributes in document order, so via_ctx must precede a bootstrap @get in <head>
+                if ($signals !== []) {
+                    $headStart = preg_match('/<head(?=[\s>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd
+                        ? $m[0][1] + \strlen($m[0][0])
+                        : $headEnd;
+                    $html = substr_replace($html, "\n" . implode("\n", $signals), $headStart, 0);
+                }
             }
         }
 
@@ -192,24 +202,28 @@ class HtmlBuilder {
             return null;
         }
 
-        $json = json_encode($values, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
-        if ($json === false) {
+        $json = $this->encodeJson($values);
+        if ($json === null) {
             $this->log('warning', 'Initial signal values are not JSON-encodable; the page is not seeded', $context);
 
             return null;
         }
 
-        // Datastar compiles this as JS: it rewrites `@name(` inside strings, misreads `\\"` when splitting
-        // on `;`, and treats its emoji markers as raw code, so those characters stay \u-escaped.
-        $json = strtr($json, ['@' => '\u0040', ';' => '\u003b', '\\\\' => '\u005c']);
-
         return '<meta data-signals__ifmissing="' . htmlspecialchars($json, ENT_QUOTES, 'UTF-8') . '">';
     }
 
+    /**
+     * JSON for a value that ends up in a Datastar attribute.
+     */
     private function encodeJson(mixed $value): ?string {
-        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
+        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
+        if ($json === false) {
+            return null;
+        }
 
-        return $json === false ? null : $json;
+        // Datastar compiles attributes as JS: it rewrites `@name(` inside strings, misreads `\\"` when splitting
+        // on `;`, and treats its emoji markers as raw code, so those characters stay \u-escaped.
+        return strtr($json, ['@' => '\u0040', ';' => '\u003b', '\\\\' => '\u005c']);
     }
 
     private function log(string $level, string $message, Context $context): void {

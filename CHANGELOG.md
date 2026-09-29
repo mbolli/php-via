@@ -123,14 +123,14 @@ All notable changes to php-via will be documented in this file.
 - **A view that renders a full `<html>` document gets `via_ctx`, a signal seed and the head/foot
   includes.** `HtmlBuilder` returned such a view unchanged, so `appendToHead()`/`appendToFoot()`
   content never reached it and signal values arrived only with the first SSE frame, which left
-  expressions like `$x.y` throwing until then. The initial render now adds, before the first
-  `</head>`, a `via_ctx` meta (only when the document has none) and a `data-signals__ifmissing`
-  meta with what the first sync sends: changed TAB signals, scoped signals and the page's component
-  signals. Datastar compiles that attribute as code, so `@`, `;`, `\\` and non-ASCII characters in
-  the values are `\u`-escaped. Includes go before the first `</head>` and the last `</body>` unless
-  their exact markup is already there, also on every SSE update, since the morph replaces `<head>`
-  too. The layout still carries the SSE bootstrap and `datastar.js`. Shell pages get the same seed
-  in `{{ head_content }}`.
+  expressions like `$x.y` throwing until then. The initial render now adds, right after the opening
+  `<head>` tag and so ahead of the layout's SSE bootstrap, a `via_ctx` meta (only when the document
+  has none) and a `data-signals__ifmissing` meta with what the first sync sends: changed TAB
+  signals, scoped signals and the page's component signals. Datastar compiles that attribute as
+  code, so `@`, `;`, `\\` and non-ASCII characters in the values are `\u`-escaped. Includes go
+  before the first `</head>` and the last `</body>` unless their exact markup is already there, also
+  on every SSE update, since the morph replaces `<head>` too. The layout still carries the SSE
+  bootstrap and `datastar.js`. Shell pages get the same seed in `{{ head_content }}`.
 
 - **Shell signal placeholders use the name passed to `signal()`.** `graph_display` and
   `graph_ports` both filled `{{ graph }}`. The shell is now filled in one pass, so placeholder text
@@ -141,9 +141,12 @@ All notable changes to php-via will be documented in this file.
 - **Shell placeholders and full-document includes changed.** A custom shell that used
   `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`. Placeholder
   values are HTML-escaped, so a string placeholder inside a `<script>` arrives escaped: read the
-  signal from Datastar instead. Content from `appendToHead()`/`appendToFoot()` that full-document
-  pages silently dropped now appears there, so a `<title>` appended for shell pages lands next to
-  the layout's own: append it only for shell pages. Every page also gains the seed meta.
+  signal from Datastar instead. They are also JSON with `@`, `;`, `\\` and non-ASCII characters
+  `\u`-escaped, like the seed, so they are safe inside a Datastar attribute. Content from
+  `appendToHead()`/`appendToFoot()` that full-document pages silently dropped now appears there,
+  so a `<title>` appended for shell pages lands next to the layout's own: append it only for shell
+  pages. Every page also gains the seed meta. The Dev Bar is no longer re-added to component
+  updates.
 
 - **`clientWritable: false` on a TAB signal is enforced.** It was ignored before. Such a signal no
   longer takes the browser's value on actions or on revival, where it starts from the handler's
