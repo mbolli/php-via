@@ -52,7 +52,7 @@ use Twig\Environment;
  * Main application class that manages routing, contexts, and SSE connections.
  */
 class Via {
-    public const string VERSION = '0.12.0';
+    public const string VERSION = '0.13.0';
 
     /** Safety bound on coalesced fan-out re-runs for a single scope. */
     /**

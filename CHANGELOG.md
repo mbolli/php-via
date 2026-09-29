@@ -2,9 +2,37 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [Unreleased]
+## [0.13.0] - 2026-09-29
 
 ### New Features
+
+- **Multi-worker mode works.** With `worker_num > 1`, scoped signal values, the SSE client list
+  and the context directory now live in shared memory, so an action served by any worker reaches
+  the context it names. Before, an action on a worker that had not rendered the page got 400
+  `Invalid context`: measured over 1,000 actions, success fell to 51% at 2 workers and 6.9% at 16.
+  It is now 100% at every worker count. A worker that does not hold a context rebuilds it by
+  re-running the route handler, as SSE reconnects already did, and adopts the live shared values
+  instead of the declared defaults. The server logs a warning at start-up listing what stays
+  per-worker: PHP statics in app code, server-owned TAB signals and session data.
+
+- **`Signal::increment()` and `Signal::mutate()`** for race-free updates to shared signals.
+  `increment()` is atomic across workers; `mutate()` runs a callback under a per-signal lock.
+  Over 4 workers doing 500 mutations each, `increment()` kept 2000 of 2000 against 802 for
+  `setValue($signal->int() + 1)`. Do not mix the two on one signal: `increment()` skips the lock.
+
+- **`Config::withPersistentGlobalState($path, $flushMs = 1000)`** keeps GlobalState in a SQLite
+  file across restarts. Reads never touch SQLite. Writes mark the key dirty and the leader worker
+  writes the dirty keys in one transaction every `$flushMs`, about 1 µs per key. Anything written
+  since the last flush is lost if the process dies.
+
+- **`Config::withSseMaxQueuedBytes()`** (default 1 MB, `0` disables) drops element patches for a
+  client whose unsent backlog exceeds the threshold, instead of parking its SSE coroutine in
+  `write()` until the client drains or disconnects (measured at 20 s). Element patches are
+  idempotent, so the client catches up on the next broadcast. Signal and script patches are never
+  dropped.
+
+- **`Config::withScopedSignalTableSize()` and `Config::withContextDirectorySize()`** size the new
+  shared tables.
 
 - **`#[Signal(Scope::GLOBAL, atomic: true)]`:** atomic counters for the composition API.
   PageMount hydrates each `#[Signal]` property before an `#[Action]` and assigns it back after, so
@@ -40,6 +68,65 @@ All notable changes to php-via will be documented in this file.
   header in production, for non-browser clients. Dev mode always accepts them.
 
 ### Fixed
+
+- **Scoped signals of two different scopes could share one value across workers.** Signal ids
+  are sanitised, so `user:a-b@x.com` and `user:a.b@x.com` produce the same id for a signal of
+  the same name. With `worker_num > 1` the shared store was keyed by that id alone, so one
+  user's value showed up in the other's scope. Rows are now keyed by the raw scope plus the id.
+  Single-worker servers were not affected.
+
+- **`mutateGlobalState()` and `Signal::mutate()` could lose writes on a fresh key.** The lock
+  row was created with `exists()` then `set()`, so two workers touching a new key together could
+  both create it: the second reset the value and the ticket counter while the first was inside its
+  callback, and both held the lock. With 8 workers creating 200 keys in step, 44 to 76 of 1600
+  appends were lost per run. Rows are now created atomically.
+
+- **Multi-worker was non-functional.** Four independent faults, each enough on its own:
+  `dispatch_mode => 7` is not a valid OpenSwoole constant, so session affinity never ran; the
+  `dispatch_func` installed beside it fatals on PHP 8.4; every broker generated its node id before
+  the fork, so sibling workers shared one id and dropped each other's messages as their own; and
+  `$server->worker_num` does not exist on ext-openswoole 26, so the broker fan-out looped zero
+  times. The custom dispatch is removed, the node id is generated per process, and the worker
+  count is read from `$server->setting`.
+
+- **A signal patch dropped from a full queue was never resent.** Signals were marked synced when
+  the patch was queued rather than delivered, so an evicted delta left the browser out of step for
+  good. Delivery is now confirmed by the SSE writer and an evicted signal stays dirty for the next
+  sync. Eviction under pressure now drops element patches first, then signal patches, and script
+  patches only as a last resort.
+
+- **The SSE loop stopped noticing shutdown, destroyed contexts and dead clients.**
+  `Channel::pop(0)` blocks with no timeout, so the loop parked indefinitely and its liveness
+  checks never ran. It now pops with a real timeout and exits on a closed channel.
+
+- **Two broadcasts could interleave mid-fan-out,** so a client received half of one frame and half
+  of the next. Fan-outs are now serialised per scope.
+
+- **A signal declared with `Scope::ROUTE` emitted no patches.** It was compared against the
+  unexpanded constant instead of the route-qualified scope, so the browser never saw it change.
+
+- **A component that declares no signals froze on its first render.** With `cacheUpdates: true`,
+  the default, an empty signal set counted as "nothing changed" on every broadcast. It now syncs.
+
+- **`withActionRateLimit()` was enforced per worker,** so the effective limit was
+  `limit × worker_num`. The counter is now shared and the limit holds at any worker count. If the
+  table fills up, requests are allowed and the overflow is logged once.
+
+- **`Via::setInterval()` fired once per worker.** It now runs on one worker; see Breaking Changes.
+
+- **`log('warning')` was filtered as info,** and `withLogLevel('warning')` meant info and above.
+  Both spellings now map to the warn level, so `withLogLevel('warn')` shows the warnings it
+  previously hid.
+
+- **GlobalState table limits.** A full table raises `\OverflowException` instead of a bare
+  OpenSwoole error. The value cap per key is raised from 4 KB to 32 KB: a growing list overflowed at
+  about 240 short entries. `maxRows` is documented as a floor, since OpenSwoole admits more keys
+  than requested but rejects by hash once past it.
+
+- **A shared scope that silently disabled the update cache is now reported.** A context that joins
+  a shared scope with `addScope()` stays TAB-primary and re-renders per client on every broadcast.
+  A warning is logged once per route when such a view still claims to be cacheable and declares no
+  TAB signals.
 
 - **`onShutdown` callbacks now run when the server is stopped.** OpenSwoole owns SIGTERM in
   server processes, so the `Process::signal(SIGTERM, ...)` calls in the master and in every worker
@@ -156,6 +243,14 @@ All notable changes to php-via will be documented in this file.
   action id. Scoped actions keep the first registration, as before.
 
 ### Breaking Changes
+
+- **`Via::setInterval()` runs on the leader worker only.** With `worker_num > 1` each worker used to
+  arm its own timer, so a 100 ms interval fired about 4 times as often on 4 workers. Pass
+  `everyWorker: true` for work that must run in every process.
+
+- **GlobalState keys longer than 63 characters throw `\InvalidArgumentException`** wherever the
+  shared table backs GlobalState: with `worker_num > 1` or `withPersistentGlobalState()`. A
+  64-character key used to be accepted with a "key is too long" warning on every write.
 
 - **Action POSTs without an `Origin` header get 403 in production when `withTrustedOrigins()` is
   set.** Browsers send `Origin` on every POST, so browser traffic is unaffected. Non-browser
