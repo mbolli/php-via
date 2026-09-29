@@ -119,6 +119,9 @@ class Via {
     /** @var array<string, true> Scopes whose fan-out is currently running */
     private array $syncInFlight = [];
 
+    /** @var array<string, array<string, array{0: \Throwable, 1: Context, 2: int}>> Per scope: failure signature => first throwable, its context, count */
+    private array $syncFailures = [];
+
     /** @var array<string, true> Scopes that were broadcast while their fan-out was running */
     private array $syncPending = [];
 
@@ -946,7 +949,7 @@ class Via {
             });
 
             $this->server->on('request', function (Request $request, Response $response): void {
-                $this->handleRequestSafely($request, $response);
+                $this->requestHandler->handleRequest($request, $response);
             });
         }
 
@@ -1619,32 +1622,6 @@ class Via {
     }
 
     /**
-     * Last line of defence for a request coroutine: anything that escapes here would kill the worker.
-     *
-     * @internal public for tests
-     */
-    public function handleRequestSafely(Request $request, Response $response): void {
-        try {
-            $this->requestHandler->handleRequest($request, $response);
-        } catch (\Throwable $e) {
-            $path = (string) ($request->server['request_uri'] ?? '');
-            $this->log('error', "Unhandled exception on {$path}: " . Logger::describe($e));
-
-            if (!$response->isWritable()) {
-                return;
-            }
-
-            try {
-                // After a write OpenSwoole keeps the sent status, so this only matters before one.
-                $response->status(500);
-                $response->end($path === '/_sse' ? null : 'Internal Server Error');
-            } catch (\Throwable) {
-                // Connection already gone.
-            }
-        }
-    }
-
-    /**
      * Seed GlobalState from its durable snapshot and arm the write-behind flush.
      *
      * Called from start() in the master process, before the fork, so the seeded table is the one
@@ -1755,7 +1732,13 @@ class Via {
 
             do {
                 unset($this->syncPending[$scope]);
-                $this->doSyncLocally($scope);
+                $this->syncFailures[$scope] = [];
+
+                try {
+                    $this->doSyncLocally($scope);
+                } finally {
+                    $this->logSyncFailures($scope);
+                }
                 ++$passes;
             } while (isset($this->syncPending[$scope]) && $passes < self::MAX_SYNC_PASSES);
 
@@ -1765,7 +1748,7 @@ class Via {
                 $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\" — check for a view that broadcasts its own scope");
             }
         } finally {
-            unset($this->syncInFlight[$scope], $this->syncPending[$scope]);
+            unset($this->syncInFlight[$scope], $this->syncPending[$scope], $this->syncFailures[$scope]);
 
             if ($traceStarted) {
                 $tracer->endTrace();
@@ -1777,7 +1760,7 @@ class Via {
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
             $this->invalidateViewCache($scope);
-            $this->syncAllContexts();
+            $this->syncAllContexts($scope);
             $this->requestLogger->logBroadcast($scope, \count($this->contexts));
 
             return;
@@ -1805,13 +1788,13 @@ class Via {
                     }
                 }
                 // Sync all contexts
-                $this->syncAllContexts();
+                $this->syncAllContexts($scope);
                 $this->requestLogger->logBroadcast($scope, \count($this->contexts));
             } else {
                 // Important: Invalidate cache using the full scope string (route:/path)
                 // The context's primary scope is "route:/path", not just "route"
                 $this->invalidateViewCache($scope);
-                $count = $this->syncContextsOnRoute($route);
+                $count = $this->syncContextsOnRoute($route, $scope);
                 $this->requestLogger->logBroadcast($scope, $count);
             }
 
@@ -1826,7 +1809,7 @@ class Via {
 
         // Sync all matched contexts
         foreach ($matchedContexts as $context) {
-            $this->syncContextSafely($context);
+            $this->syncContextSafely($context, $scope);
         }
 
         $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
@@ -1945,11 +1928,11 @@ class Via {
     /**
      * Sync all contexts on a specific route.
      */
-    private function syncContextsOnRoute(string $route): int {
+    private function syncContextsOnRoute(string $route, string $scope): int {
         $count = 0;
         foreach ($this->contexts as $context) {
             if ($context->getRoute() === $route) {
-                $this->syncContextSafely($context);
+                $this->syncContextSafely($context, $scope);
                 ++$count;
             }
         }
@@ -1960,21 +1943,34 @@ class Via {
     /**
      * Sync all contexts across all routes.
      */
-    private function syncAllContexts(): void {
+    private function syncAllContexts(string $scope): void {
         foreach ($this->contexts as $context) {
-            $this->syncContextSafely($context);
+            $this->syncContextSafely($context, $scope);
         }
     }
 
     /**
      * Sync one context of a fan-out, so a view that throws cannot stop the others from getting the frame.
+     * Failures are collected per signature and logged once per pass by logSyncFailures().
      */
-    private function syncContextSafely(Context $context): void {
+    private function syncContextSafely(Context $context, string $scope): void {
         try {
             $context->sync();
         } catch (\Throwable $e) {
-            $this->log('error', 'Sync failed during broadcast: ' . Logger::describe($e), $context);
+            $key = $e::class . '@' . $e->getFile() . ':' . $e->getLine();
+            if (isset($this->syncFailures[$scope][$key])) {
+                ++$this->syncFailures[$scope][$key][2];
+            } else {
+                $this->syncFailures[$scope][$key] = [$e, $context, 1];
+            }
         }
+    }
+
+    private function logSyncFailures(string $scope): void {
+        foreach ($this->syncFailures[$scope] ?? [] as [$e, $context, $count]) {
+            $this->log('error', "Sync failed during broadcast of {$scope} for {$count} context(s): " . Logger::describe($e), $context);
+        }
+        $this->syncFailures[$scope] = [];
     }
 
     /**

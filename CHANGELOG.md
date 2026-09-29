@@ -79,14 +79,16 @@ All notable changes to php-via will be documented in this file.
   coroutine: the connection dropped, the worker exited with code 255 and every context on it was
   gone, so the tab's next action got 400 from the respawned worker. The initial page render, the
   per-tab `$c->setInterval()` callback and the broadcast fan-out had no guard at all, and a plain
-  `RuntimeException` from a view was enough. Every request, SSE, timer, fan-out and broker entry
-  point now catches `\Throwable`. These guards, and the existing ones around `Via::setInterval()`,
-  the client connect and disconnect callbacks and revival, log the class, message and `file:line`.
-  The `request`
-  callback has a last guard that answers 500 when nothing has been written yet; an SSE stream
-  that already wrote is only ended. A context whose view throws during a broadcast is logged and
-  skipped, so the other contexts still get the frame. A broker message whose fan-out throws is
-  logged and the Redis and NATS receive loops keep reading.
+  `RuntimeException` from a view was enough. Every request, SSE, per-tab and server interval,
+  cleanup, fan-out and broker entry point now catches `\Throwable`. These guards, and the existing
+  ones around `Via::setInterval()`, the client connect and disconnect callbacks and revival, log
+  the class, message and `file:line`. `RequestHandler::handleRequest()` has a last guard that
+  answers 500 when nothing has been written yet; an SSE stream that already wrote is only ended,
+  and its exit bookkeeping still runs, so the context is cleaned up as usual. A page whose handler
+  or render throws has its context torn down before the 500, timers and scopes included. A context
+  whose view throws during a broadcast is skipped, so the other contexts still get the frame, and
+  each broadcast logs one line per distinct failure with the number of contexts it hit. A broker
+  message whose fan-out throws is logged and the Redis and NATS receive loops keep reading.
   Behaviour changes: an action that throws an `\Error` answers 500 `Action failed`, as an
   `\Exception` already did, and the worker keeps running with whatever the action changed before
   it threw, where the crash used to wipe every context on that worker. A page whose render throws

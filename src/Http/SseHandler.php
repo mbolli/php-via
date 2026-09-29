@@ -221,6 +221,18 @@ class SseHandler {
         // scheduling a cleanup timer that would destroy the still-live context.
         $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 0) + 1;
 
+        // The exit bookkeeping must run even if the loop throws, or the count never drops to zero.
+        try {
+            $this->runStream($context, $contextId, $response, $sse, $brotliWrite, $brotliFinish);
+        } finally {
+            $this->releaseStream($context, $contextId);
+        }
+    }
+
+    /**
+     * Initial sync, then the patch loop until the client, the context or the server goes away.
+     */
+    private function runStream(Context $context, string $contextId, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
         // Send initial sync (view + signals) on connection/reconnection
         // Do this AFTER starting the loop to ensure patches are consumed
         $synced = true;
@@ -228,7 +240,7 @@ class SseHandler {
         try {
             $context->sync();
         } catch (\Throwable $e) {
-            // Skip the loop but keep the exit path below, which owns the counters and cleanup.
+            // Skip the loop; releaseStream() still owns the counters and cleanup.
             $synced = false;
             $this->via->log('error', 'Initial SSE sync failed: ' . Logger::describe($e), $context);
 
@@ -371,7 +383,12 @@ class SseHandler {
         if ($droppedFrames > 0) {
             $this->via->log('debug', "Dropped {$droppedFrames} element frames for slow client: {$contextId}", $context);
         }
+    }
 
+    /**
+     * Drop this stream from the active count and, when it was the last one, release the context.
+     */
+    private function releaseStream(Context $context, string $contextId): void {
         $this->requestLogger?->logSseDisconnect($contextId);
 
         // Decrement active SSE counter. Only perform cleanup when this is the last

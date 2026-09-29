@@ -67,9 +67,59 @@ class RequestHandler {
     }
 
     /**
-     * Handle incoming HTTP request.
+     * Handle incoming HTTP request. A throw that escapes routing answers 500 instead of
+     * killing the worker and every context on it.
      */
     public function handleRequest(Request $request, Response $response): void {
+        try {
+            $this->dispatch($request, $response);
+        } catch (\Throwable $e) {
+            $path = (string) ($request->server['request_uri'] ?? '');
+            $this->via->log('error', "Unhandled exception on {$path}: " . Logger::describe($e));
+
+            if (!$response->isWritable()) {
+                return;
+            }
+
+            try {
+                // After a write OpenSwoole keeps the sent status, so this only matters before one.
+                $response->status(500);
+                $response->end($path === '/_sse' ? null : 'Internal Server Error');
+            } catch (\Throwable) {
+                // Connection already gone.
+            }
+        }
+    }
+
+    /**
+     * Handle page rendering.
+     *
+     * @internal called by middleware pipeline core handler
+     *
+     * @param array<string, string> $params            Route parameters
+     * @param array<string, mixed>  $requestAttributes PSR-7 request attributes from middleware
+     */
+    public function handlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart, array $requestAttributes = []): void {
+        // Open a Dev Bar trace for this page request (no-op when tracing is off).
+        // render.regions spans nest under it automatically via the ambient tracer.
+        $tracer = $this->via->getTracer();
+        $traceStarted = $tracer !== null && $tracer->startTrace($method . ' ' . $route, 'request');
+        if ($traceStarted) {
+            $tracer->setAttribute('http.method', $method);
+            $tracer->setAttribute('http.route', $route);
+            $tracer->setAttribute('http.target', $path);
+        }
+
+        try {
+            $this->doHandlePage($request, $response, $route, $handler, $params, $method, $path, $requestStart, $requestAttributes, $tracer);
+        } finally {
+            if ($traceStarted) {
+                $tracer->endTrace();
+            }
+        }
+    }
+
+    private function dispatch(Request $request, Response $response): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
         $requestStart = hrtime(true);
@@ -233,34 +283,6 @@ class RequestHandler {
     }
 
     /**
-     * Handle page rendering.
-     *
-     * @internal called by middleware pipeline core handler
-     *
-     * @param array<string, string> $params            Route parameters
-     * @param array<string, mixed>  $requestAttributes PSR-7 request attributes from middleware
-     */
-    public function handlePage(Request $request, Response $response, string $route, callable $handler, array $params, string $method, string $path, int $requestStart, array $requestAttributes = []): void {
-        // Open a Dev Bar trace for this page request (no-op when tracing is off).
-        // render.regions spans nest under it automatically via the ambient tracer.
-        $tracer = $this->via->getTracer();
-        $traceStarted = $tracer !== null && $tracer->startTrace($method . ' ' . $route, 'request');
-        if ($traceStarted) {
-            $tracer->setAttribute('http.method', $method);
-            $tracer->setAttribute('http.route', $route);
-            $tracer->setAttribute('http.target', $path);
-        }
-
-        try {
-            $this->doHandlePage($request, $response, $route, $handler, $params, $method, $path, $requestStart, $requestAttributes, $tracer);
-        } finally {
-            if ($traceStarted) {
-                $tracer->endTrace();
-            }
-        }
-    }
-
-    /**
      * Core page handling, wrapped by {@see handlePage()} for tracing.
      *
      * @param array<string, string> $params            Route parameters
@@ -293,6 +315,7 @@ class RequestHandler {
         try {
             $this->via->invokeHandlerWithParams($handler, $context, $params);
         } catch (\Throwable $e) {
+            $this->discardContext($context);
             $this->failPage('Page handler exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
 
             return;
@@ -309,6 +332,7 @@ class RequestHandler {
         try {
             $html = $this->via->buildHtmlDocument($context);
         } catch (\Throwable $e) {
+            $this->discardContext($context);
             $this->failPage('Page render exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
 
             return;
@@ -344,6 +368,16 @@ class RequestHandler {
         }
 
         $this->sendCompressedPage($requestAttributes, $response, $html);
+    }
+
+    /**
+     * Tear down a context whose page failed. No SSE stream or close beacon will ever come for it,
+     * so nothing else would clear its timers, scopes or registry entries.
+     */
+    private function discardContext(Context $context): void {
+        $contextId = $context->getId();
+        $this->via->getApp()->discardContext($context);
+        unset($this->via->contexts[$contextId], $this->via->contextSessions[$contextId]);
     }
 
     private function failPage(string $what, string $route, \Throwable $e, ?Tracer $tracer, string $method, string $path, int $requestStart, Response $response): void {

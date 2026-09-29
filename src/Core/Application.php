@@ -143,25 +143,25 @@ class Application {
      */
     public function unregisterContext(string $contextId): void {
         if (isset($this->contexts[$contextId])) {
-            $context = $this->contexts[$contextId];
-
-            // Remove from scope registry
-            $emptyScopes = $this->scopeRegistry->unregisterContextFromAllScopes($context);
-
-            // Clean up signals and actions for empty scopes
-            foreach ($emptyScopes as $scope) {
-                $hadSignals = $this->signalManager->clearScope($scope);
-                $hadActions = $this->actionRegistry->clearScope($scope);
-
-                if ($hadSignals || $hadActions) {
-                    $this->logger->log('debug', "Cleaned up empty scope with signals/actions: {$scope}");
-                } else {
-                    $this->logger->log('debug', "Cleaned up empty scope: {$scope}");
-                }
-            }
+            $this->releaseScopes($this->contexts[$contextId]);
 
             unset($this->contexts[$contextId], $this->clients[$contextId], $this->cleanupTimers[$contextId]);
         }
+    }
+
+    /**
+     * Destroy a context that never reached the client, registered or not: no revival record,
+     * no directory entry, no timers.
+     *
+     * @internal called when the page handler or the initial render throws
+     */
+    public function discardContext(Context $context): void {
+        $contextId = $context->getId();
+        $context->cleanup();
+        $this->releaseScopes($context);
+        $this->cancelContextCleanup($contextId);
+        $this->forgetRevivable($contextId);
+        unset($this->contexts[$contextId], $this->clients[$contextId], $this->contextSessions[$contextId]);
     }
 
     /**
@@ -552,6 +552,24 @@ class Application {
             time() + $this->config->getContextDirectoryTtlSeconds()
         );
         $this->clientRegistry?->touch($contextId);
+    }
+
+    /**
+     * Remove a context from all its scopes and clear the signals and actions of scopes left empty.
+     */
+    private function releaseScopes(Context $context): void {
+        $emptyScopes = $this->scopeRegistry->unregisterContextFromAllScopes($context);
+
+        foreach ($emptyScopes as $scope) {
+            $hadSignals = $this->signalManager->clearScope($scope);
+            $hadActions = $this->actionRegistry->clearScope($scope);
+
+            if ($hadSignals || $hadActions) {
+                $this->logger->log('debug', "Cleaned up empty scope with signals/actions: {$scope}");
+            } else {
+                $this->logger->log('debug', "Cleaned up empty scope: {$scope}");
+            }
+        }
     }
 
     /**

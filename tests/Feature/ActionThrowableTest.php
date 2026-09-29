@@ -14,6 +14,7 @@ use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
+use OpenSwoole\Timer;
 use Tests\Support\FakeActionRequest;
 use Tests\Support\FakeStaticResponse;
 
@@ -38,6 +39,31 @@ function postThrowingAction(Throwable $thrown): array {
 
     try {
         (new ActionHandler($via))->handleAction(new FakeActionRequest($action->id(), ['via_ctx' => 'ctx-throw']), $response, $action->id());
+    } finally {
+        $log = (string) ob_get_clean();
+    }
+
+    return [$log, $response];
+}
+
+/**
+ * @return array{0: string, 1: FakeStaticResponse} captured log output and the response
+ */
+function getThroughRequestHandler(Via $via, string $path): array {
+    // start() hands the routes over; there is no server here.
+    $handler = (new ReflectionProperty(Via::class, 'requestHandler'))->getValue($via);
+    assert($handler instanceof RequestHandler);
+    $handler->setRoutes($via->getRouter()->getRoutes());
+
+    $request = new Request();
+    $request->server = ['request_uri' => $path, 'request_method' => 'GET'];
+    $request->header = [];
+    $response = new FakeStaticResponse();
+
+    ob_start();
+
+    try {
+        $handler->handleRequest($request, $response);
     } finally {
         $log = (string) ob_get_clean();
     }
@@ -84,31 +110,61 @@ describe('actions', function (): void {
 });
 
 describe('page render', function (): void {
-    test('a view that throws on the initial render answers 500', function (): void {
+    test('a view that throws on the initial render answers 500 and leaves no context behind', function (): void {
         $via = createVia();
-        $via->page('/viewthrow', function (Context $c): void {
-            $c->view(function (): string {
+        $renders = 0;
+        $via->page('/viewthrow', function (Context $c) use (&$renders): void {
+            $c->scope(Scope::ROUTE);
+            $c->view(function () use (&$renders): string {
+                ++$renders;
+
                 throw new RuntimeException('view failed');
             });
         });
 
-        // start() hands the routes over; there is no server here.
-        $handler = (new ReflectionProperty(Via::class, 'requestHandler'))->getValue($via);
-        assert($handler instanceof RequestHandler);
-        $handler->setRoutes($via->getRouter()->getRoutes());
-
-        $request = new Request();
-        $request->server = ['request_uri' => '/viewthrow', 'request_method' => 'GET'];
-        $request->header = [];
-        $response = new FakeStaticResponse();
-
-        ob_start();
-        $via->handleRequestSafely($request, $response);
-        $log = (string) ob_get_clean();
+        for ($i = 0; $i < 3; ++$i) {
+            [$log, $response] = getThroughRequestHandler($via, '/viewthrow');
+        }
 
         expect($response->statusCode)->toBe(500);
         expect($response->body)->toBe('Internal Server Error');
         expect($log)->toContain('Page render exception on /viewthrow: RuntimeException: view failed');
+        expect($via->contexts)->toBe([]);
+        expect($via->contextSessions)->toBe([]);
+        expect($via->getApp()->getAllContexts())->toBe([]);
+        expect($via->getContextsByScope(Scope::routeScope('/viewthrow')))->toBe([]);
+
+        $renders = 0;
+        ob_start();
+        $via->broadcast(Scope::routeScope('/viewthrow'));
+        ob_end_clean();
+        expect($renders)->toBe(0);
+    });
+
+    test('a page handler that throws clears the timers and scopes it registered', function (): void {
+        $via = createVia();
+        $timerId = null;
+        $via->page('/handlerthrow', function (Context $c) use (&$timerId): void {
+            $c->scope('room:doomed');
+            $timerId = $c->setInterval(function (): void {}, 60_000);
+
+            throw new RuntimeException('handler failed');
+        });
+
+        try {
+            [$log, $response] = getThroughRequestHandler($via, '/handlerthrow');
+            $alive = Timer::exists($timerId);
+        } finally {
+            if ($timerId !== null) {
+                Timer::clear($timerId);
+            }
+        }
+
+        expect($response->statusCode)->toBe(500);
+        expect($log)->toContain('Page handler exception on /handlerthrow: RuntimeException: handler failed');
+        expect($alive)->toBeFalse();
+        expect($via->contextSessions)->toBe([]);
+        expect($via->getContextsByScope('room:doomed'))->toBe([]);
     });
 });
 
@@ -119,14 +175,7 @@ describe('request guard', function (): void {
             throw new LogicException('not found handler failed');
         });
 
-        $request = new Request();
-        $request->server = ['request_uri' => '/missing', 'request_method' => 'GET'];
-        $request->header = [];
-        $response = new FakeStaticResponse();
-
-        ob_start();
-        $via->handleRequestSafely($request, $response);
-        $log = (string) ob_get_clean();
+        [$log, $response] = getThroughRequestHandler($via, '/missing');
 
         expect($response->statusCode)->toBe(500);
         expect($response->body)->toBe('Internal Server Error');
@@ -166,12 +215,31 @@ describe('broadcast fan-out', function (): void {
         $patch = $healthy->getPatch();
         expect($patch)->not->toBeNull();
         expect($patch['content'])->toContain('Count: 1');
-        expect($log)->toContain('[ctx-broken] Sync failed during broadcast: RuntimeException: broken view');
+        expect($log)->toContain("[ctx-broken] Sync failed during broadcast of {$broadcast} for 1 context(s): RuntimeException: broken view");
     })->with([
         'global' => ['/a', Scope::GLOBAL, Scope::GLOBAL],
         'route' => ['/r', Scope::ROUTE, Scope::routeScope('/r')],
         'custom' => ['/c', 'room:lobby', 'room:lobby'],
     ]);
+
+    test('contexts failing the same way log one line per broadcast', function (): void {
+        $via = createVia();
+        for ($i = 0; $i < 5; ++$i) {
+            $ctx = new Context("ctx-{$i}", '/many', $via);
+            $ctx->scope(Scope::ROUTE);
+            $ctx->view(function (): string {
+                throw new RuntimeException('same failure');
+            });
+            $via->contexts[$ctx->getId()] = $ctx;
+        }
+
+        ob_start();
+        $via->broadcast(Scope::routeScope('/many'));
+        $log = (string) ob_get_clean();
+
+        expect(substr_count($log, 'Sync failed during broadcast'))->toBe(1);
+        expect($log)->toContain('Sync failed during broadcast of route:/many for 5 context(s): RuntimeException: same failure');
+    });
 
     test('a broker message whose fan-out throws is logged instead of escaping the receive loop', function (): void {
         $broker = new class implements MessageBroker {
@@ -246,6 +314,42 @@ describe('SSE initial sync', function (): void {
         expect($via->activeSseCount)->not->toHaveKey('ctx-sse');
         expect($timers)->toHaveKey('ctx-sse');
         expect($log)->toContain('Initial SSE sync failed: RuntimeException: sync failed');
+    });
+});
+
+describe('SSE loop', function (): void {
+    test('a throw inside the stream loop still releases the stream and schedules cleanup', function (): void {
+        $via = createVia();
+        $ctx = new class('ctx-loop', '/loop', $via) extends Context {
+            public function getPatch(): ?array {
+                throw new LogicException('loop failed');
+            }
+        };
+        $via->contexts['ctx-loop'] = $ctx;
+        $ctx->view(fn (): string => '<div id="ok">ok</div>');
+
+        $events = [];
+        $via->onClientDisconnect(function () use (&$events): void {
+            $events[] = 'disconnect';
+        });
+
+        $request = new FakeActionRequest('unused', ['via_ctx' => 'ctx-loop']);
+        $request->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
+        ob_start();
+
+        try {
+            (new SseHandler($via))->handleSSE($request, new FakeStaticResponse());
+        } catch (LogicException) {
+            // The request guard in RequestHandler::handleRequest() answers this one.
+        } finally {
+            ob_end_clean();
+            $timers = (new ReflectionProperty(Application::class, 'cleanupTimers'))->getValue($via->getApp());
+            $via->getApp()->cancelContextCleanup('ctx-loop');
+        }
+
+        expect($via->activeSseCount)->not->toHaveKey('ctx-loop');
+        expect($events)->toBe(['disconnect']);
+        expect($timers)->toHaveKey('ctx-loop');
     });
 });
 
