@@ -1422,9 +1422,8 @@ class Via {
         $this->app->setContextSession($contextId, $sessionId);
         $this->registerContextInScope($context, Scope::TAB);
 
-        // Seed TAB signal values the client still holds (sent with the /_sse reconnect).
-        // injectSignals matches by signal ID — identical because the context ID was reused — and
-        // only TAB signals are client-writable, so shared/scoped state stays server-authoritative.
+        // Seed signal values the client still holds (sent with the /_sse reconnect), matched by
+        // signal ID since the context ID was reused. Only client-writable signals take them.
         $context->injectSignals($clientSignals);
 
         // Local record consumed — drop it so this worker's map never holds already-rebuilt

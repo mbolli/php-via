@@ -767,25 +767,25 @@ class Context {
     }
 
     /**
-     * Create a reactive signal.
-     *
-     * @param mixed       $initialValue Initial value of the signal
-     * @param null|string $name         Optional human-readable name
-     */
-    /**
      * Create a signal.
      *
      * @param mixed       $initialValue   The initial value of the signal
      * @param null|string $name           Optional signal name (defaults to 'signal')
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
-     * @param bool        $clientWritable Whether clients can write to this scoped signal (default: false)
+     * @param null|bool   $clientWritable Whether the client may write this signal. null (default):
+     *                                    TAB signals are writable, scoped ones server-owned, and
+     *                                    Config::withStrictTabSignals() makes TAB ones server-owned
+     *                                    too. true or false applies to any scope.
      *
      * TAB scope (scope=null): Signal is private to this context, not shared
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
+     *
+     * Declaring a TAB signal again with the same name returns the existing signal and sets it to
+     * the new initial value; a warning is logged when that changes the live value.
      */
-    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, bool $clientWritable = false): Signal {
+    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
     }
 

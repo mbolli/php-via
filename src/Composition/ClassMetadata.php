@@ -25,6 +25,7 @@ final class ClassMetadata {
      * @param array<string>                                              $signals         Property names annotated #[Signal] with TAB scope
      * @param array<array{prop: string, scope: string}>                  $scopedSignals   #[Signal] properties with a non-TAB scope
      * @param array<string, true>                                        $atomicSignals   #[Signal(atomic: true)] properties, keyed by name
+     * @param array<string, bool>                                        $clientWritable  Explicit #[Signal(clientWritable: ...)] per property
      * @param array<string>                                              $persists        Property names annotated #[Persist]
      * @param array<array{method: string, name: string, scope: ?string}> $actions
      * @param array<string, mixed>                                       $defaults        Default value per annotated property
@@ -35,6 +36,7 @@ final class ClassMetadata {
         public readonly array $signals,
         public readonly array $scopedSignals,
         public readonly array $atomicSignals,
+        public readonly array $clientWritable,
         public readonly array $persists,
         public readonly array $actions,
         public readonly array $defaults,
@@ -82,6 +84,7 @@ final class ClassMetadata {
         $signals = [];
         $scopedSignals = [];
         $atomicSignals = [];
+        $clientWritable = [];
         $persists = [];
         $defaults = [];
 
@@ -106,6 +109,9 @@ final class ClassMetadata {
                     // misunderstanding worth naming immediately.
                     self::assertAtomicIsInt($class, $prop, $default);
                     $atomicSignals[$name] = true;
+                }
+                if ($signalAttr->clientWritable !== null) {
+                    $clientWritable[$name] = $signalAttr->clientWritable;
                 }
                 $defaults[$name] = $default;
 
@@ -177,6 +183,7 @@ final class ClassMetadata {
             signals: $signals,
             scopedSignals: $scopedSignals,
             atomicSignals: $atomicSignals,
+            clientWritable: $clientWritable,
             persists: $persists,
             actions: $actions,
             defaults: $defaults,

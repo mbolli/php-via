@@ -73,6 +73,9 @@ class Config {
      */
     private ?array $trustedOrigins = null;
 
+    /** TAB signals declared without clientWritable are server-owned instead of client-writable. */
+    private bool $strictTabSignals = false;
+
     /** Path to SSL certificate file (PEM). Required for HTTPS/HTTP2. */
     private ?string $sslCertFile = null;
 
@@ -473,6 +476,24 @@ class Config {
      */
     public function getTrustedOrigins(): ?array {
         return $this->trustedOrigins;
+    }
+
+    /**
+     * Make TAB signals server-owned unless declared with clientWritable: true.
+     *
+     * Off by default: a TAB signal declared without clientWritable accepts the value the browser
+     * posts with every action. In strict mode the server ignores that value, so only signals the
+     * page binds or assigns in the browser need clientWritable: true. An explicit
+     * clientWritable: false is honoured in either mode.
+     */
+    public function withStrictTabSignals(bool $strict = true): self {
+        $this->strictTabSignals = $strict;
+
+        return $this;
+    }
+
+    public function getStrictTabSignals(): bool {
+        return $this->strictTabSignals;
     }
 
     /**

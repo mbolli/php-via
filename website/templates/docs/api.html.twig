@@ -180,7 +180,7 @@ $app->log('debug', 'Action fired', $c);
     <h2 id="context">Context</h2>
     <p>One context per connected browser tab. Holds signals, actions, and view definition for that client.</p>
 
-    <h3 id="context-signal"><code>signal(mixed $initial, ?string $name, ?string $scope, bool $autoBroadcast, bool $clientWritable)</code></h3>
+    <h3 id="context-signal"><code>signal(mixed $initial, ?string $name, ?string $scope, bool $autoBroadcast, ?bool $clientWritable)</code></h3>
     {% code 'php' %}{% verbatim %}
 $count  = $c->signal(0);                            // TAB scope, auto-named
 $count  = $c->signal(0, 'count');                   // named
@@ -190,11 +190,35 @@ $room   = $c->signal('', 'note', 'room:lobby');     // custom scope
 
 // Collaborative: allow clients to write to a scoped signal
 $input  = $c->signal('', 'note', Scope::ROUTE, clientWritable: true);
+
+// Server-owned TAB signal: the value the browser posts is ignored
+$status = $c->signal('idle', 'status', clientWritable: false);
     {% endverbatim %}{% endcode %}
     <p>
-        Scoped signals are <strong>server-authoritative</strong> by default — clients cannot overwrite
-        shared state. Use <code>clientWritable: true</code> for collaborative inputs where multiple
-        clients need to push values (e.g. shared text fields with <code>data-bind</code>).
+        Datastar posts every signal the browser holds with each action, and php-via writes the
+        values into the signals before the action runs. <code>clientWritable</code> decides which
+        signals take them:
+    </p>
+    <ul>
+        <li><code>null</code> (default): TAB signals take the client value, scoped signals are
+            <strong>server-authoritative</strong>, so clients cannot overwrite shared state.</li>
+        <li><code>true</code>: the signal takes the client value in any scope. Use it for
+            collaborative inputs where several clients push values, e.g. a shared text field with
+            <code>data-bind</code>.</li>
+        <li><code>false</code>: the signal ignores the client value in any scope. When the posted
+            value differs, the server value is sent back with the next sync.</li>
+    </ul>
+    <p>
+        <code>Config::withStrictTabSignals()</code> turns the TAB default into server-owned, so only
+        TAB signals declared <code>clientWritable: true</code> take client values. Before switching it
+        on, check which signals the page binds or assigns in the browser. The composition API takes
+        the same argument: <code>#[Signal(clientWritable: false)]</code>. Signals declared inside a
+        component follow the same rules.
+    </p>
+    <p>
+        Declaring a TAB signal again with the same name returns the existing signal and sets it to the
+        new initial value. When that changes the live value, or the declaration asks for a different
+        <code>clientWritable</code> (the first one is kept), php-via logs a warning once per name.
     </p>
 
     <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>
@@ -408,6 +432,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
+    ->withStrictTabSignals()        // TAB signals are server-owned unless clientWritable: true
     ->withEmbeddable('https://parent.example')  // SameSite=None; Secure; Partitioned + frame-ancestors
     ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP
     // HTTPS / HTTP2 / Brotli compression (requires ext-brotli)

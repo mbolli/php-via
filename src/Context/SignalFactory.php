@@ -25,6 +25,9 @@ class SignalFactory {
     /** @var array<string, Signal> Map of user-supplied signal name → Signal (all scopes) */
     private array $signalNameMap = [];
 
+    /** @var array<string, true> Re-declaration warnings already logged, keyed by kind and name */
+    private array $redeclarationWarned = [];
+
     public function __construct(
         private Context $context,
         private Via $app,
@@ -33,16 +36,17 @@ class SignalFactory {
     /**
      * Create a signal.
      *
-     * @param mixed       $initialValue  The initial value of the signal
-     * @param null|string $name          Optional signal name (defaults to 'signal')
-     * @param null|string $scope         Optional scope for shared signal (null = TAB scope, no sharing)
-     * @param bool        $autoBroadcast Auto-broadcast changes for scoped signals (default: true)
+     * @param mixed       $initialValue   The initial value of the signal
+     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
+     * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
+     * @param null|bool   $clientWritable Whether the client may write it; null picks the scope's default
      *
      * TAB scope (scope=null): Signal is private to this context, not shared
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
      */
-    public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, bool $clientWritable = false): Signal {
+    public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         $baseName = $name ?? 'signal';
 
         // If no explicit scope provided, inherit from context's primary scope
@@ -117,15 +121,20 @@ class SignalFactory {
             : $baseName . '_' . $this->context->getId();
         $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
 
-        // Check if signal already exists
-        if (isset($this->signals[$signalId])) {
-            $this->signals[$signalId]->setValue($initialValue);
-            $this->signalNameMap[$baseName] = $this->signals[$signalId];
-
-            return $this->signals[$signalId];
+        if ($clientWritable === null && $this->app->getConfig()->getStrictTabSignals()) {
+            $clientWritable = false;
         }
 
-        $signal = new Signal($signalId, $initialValue);
+        if (isset($this->signals[$signalId])) {
+            $existing = $this->signals[$signalId];
+            $this->warnOnRedeclaration($existing, $baseName, $initialValue, $clientWritable);
+            $existing->setValue($initialValue);
+            $this->signalNameMap[$baseName] = $existing;
+
+            return $existing;
+        }
+
+        $signal = new Signal($signalId, $initialValue, null, true, $clientWritable);
         $this->signals[$signalId] = $signal;
         $this->signalNameMap[$baseName] = $signal;
 
@@ -215,34 +224,58 @@ class SignalFactory {
     /**
      * Inject signals from the client.
      *
-     * TAB-scoped signals are always writable from the client.
-     * Scoped signals (ROUTE, SESSION, GLOBAL, custom) are server-authoritative
-     * by default — only signals created with clientWritable: true accept client
-     * values. This prevents arbitrary overwrite of shared state.
+     * Only signals whose isClientWritable() is true take the client's value: by default TAB
+     * signals do and scoped signals (ROUTE, SESSION, GLOBAL, custom) do not, and an explicit
+     * clientWritable or Config::withStrictTabSignals() changes that. Ids this context does not
+     * own are passed on to its component contexts.
      *
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
      */
     public function injectSignals(array $signalsData): void {
-        // Convert nested structure back to flat
-        $flat = $this->nestedToFlat($signalsData);
+        $this->injectFlat($this->nestedToFlat($signalsData));
+    }
 
+    /**
+     * Apply flat client values to this context's signals, then hand the rest to its components.
+     *
+     * @internal
+     *
+     * @param array<string, mixed> $flat
+     */
+    public function injectFlat(array $flat): void {
         foreach ($flat as $signalId => $value) {
-            // TAB-scoped signals: always accept client values
             if (isset($this->signals[$signalId])) {
-                $this->signals[$signalId]->setValue($value, false);
+                $signal = $this->signals[$signalId];
+                if ($signal->isClientWritable()) {
+                    $signal->setValue($value, false);
+                } elseif ($signal->getValue() !== $value) {
+                    // Re-send the server value so the browser drops its stale copy.
+                    $signal->setValue($signal->getValue(), true, false);
+                }
+                unset($flat[$signalId]);
 
                 continue;
             }
 
-            // Scoped signals: only accept if explicitly marked clientWritable
             foreach ($this->context->getScopes() as $scope) {
                 $signal = $this->app->getScopedSignal($scope, $signalId);
-                if ($signal !== null && $signal->isClientWritable()) {
-                    $signal->setValue($value, false);
+                if ($signal !== null) {
+                    if ($signal->isClientWritable()) {
+                        $signal->setValue($value, false);
+                    }
+                    unset($flat[$signalId]);
 
                     break;
                 }
             }
+        }
+
+        if ($flat === []) {
+            return;
+        }
+
+        foreach ($this->context->getComponentManager()->getComponents() as $component) {
+            $component->getSignalFactory()->injectFlat($flat);
         }
     }
 
@@ -251,6 +284,41 @@ class SignalFactory {
      */
     public function clearSignals(): void {
         $this->signals = [];
+    }
+
+    /**
+     * Warn, once per name, when a TAB re-declaration clobbers the live value or asks for a
+     * different clientWritable (the first declaration's setting is kept).
+     */
+    private function warnOnRedeclaration(Signal $existing, string $name, mixed $initialValue, ?bool $clientWritable): void {
+        $live = $existing->getValue();
+        if ($live !== $initialValue && !isset($this->redeclarationWarned['value:' . $name])) {
+            $this->redeclarationWarned['value:' . $name] = true;
+            $this->app->log('warn', \sprintf(
+                "Signal '%s' declared again with initial value %s; it replaces the live value %s",
+                $name,
+                self::describeValue($initialValue),
+                self::describeValue($live),
+            ), $this->context);
+        }
+
+        $requested = $clientWritable ?? true;
+        if ($requested !== $existing->isClientWritable() && !isset($this->redeclarationWarned['writable:' . $name])) {
+            $this->redeclarationWarned['writable:' . $name] = true;
+            $this->app->log('warn', \sprintf(
+                "Signal '%s' declared again with clientWritable: %s; keeping the first declaration's %s",
+                $name,
+                var_export($requested, true),
+                var_export($existing->isClientWritable(), true),
+            ), $this->context);
+        }
+    }
+
+    private static function describeValue(mixed $value): string {
+        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        $json = $json === false ? get_debug_type($value) : $json;
+
+        return mb_strlen($json) > 80 ? mb_substr($json, 0, 77) . '...' : $json;
     }
 
     /**

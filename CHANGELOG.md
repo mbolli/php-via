@@ -97,6 +97,26 @@ All notable changes to php-via will be documented in this file.
   fires neither `onClientConnect` nor `onClientDisconnect`. The default shell retries the stream
   within 15 s; a custom full-document view without such an interval does not reconnect.
 
+- **`clientWritable` is honoured for TAB signals, and component signals receive client values.**
+  `SignalFactory` built TAB signals without the flag and `injectSignals()` accepted every TAB value,
+  so `$c->signal(..., clientWritable: false)` was silently ignored and a TAB signal could not be
+  kept server-owned: Datastar posts every signal with each `@post`, and the browser copy overwrote
+  the server value before the action ran. `clientWritable` is now `?bool` on `Context::signal()`,
+  `Signal` and `#[Signal]`: `null` keeps the old rule (TAB writable, scoped server-owned), `true`
+  and `false` apply to any scope. A rejected value that differs from the server's marks the signal
+  changed, so the next sync puts the server value back in the browser. The new
+  `Config::withStrictTabSignals()` (off by default) makes TAB signals server-owned unless declared
+  `clientWritable: true`. `injectSignals()` also only looked at the page context's own signals, so
+  a `data-bind` inside a component never reached the component's action; ids the page does not own
+  now go to its components, nested ones included. Re-declaring a TAB signal still sets it to the
+  new initial value, and now logs a warning, once per name, when that changes the live value or
+  asks for a different `clientWritable` (the first one is kept).
+  Behaviour changes: `clientWritable: false` on a TAB signal is enforced, and revival no longer
+  restores such a signal from the browser's copy, so it starts from the handler's initial value.
+  Component TAB signals take client values on actions and on revival. The parameter type widens
+  from `bool` to `?bool`, which breaks a subclass of `Context`, `Signal` or `SignalFactory` that
+  overrides one of these signatures with `bool`.
+
 ### Breaking Changes
 
 - **`ext-openswoole` now requires v26:** the extension constraint was unbound (`*`) and is now

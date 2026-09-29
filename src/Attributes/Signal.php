@@ -20,6 +20,7 @@ use Mbolli\PhpVia\Scope;
  *
  * Non-TAB scopes are server-authoritative (the client cannot write them directly)
  * and auto-broadcast to every context in the scope when the value changes.
+ * `clientWritable` overrides the write rule for either kind.
  *
  * @example
  * #[Signal]
@@ -33,6 +34,9 @@ use Mbolli\PhpVia\Scope;
  *
  * #[Signal(Scope::GLOBAL)]
  * public int $totalVisitors = 0;            // GLOBAL — shared across all users
+ *
+ * #[Signal(clientWritable: false)]
+ * public string $status = '';               // TAB, but the browser cannot overwrite it
  */
 #[\Attribute(\Attribute::TARGET_PROPERTY)]
 final class Signal {
@@ -57,5 +61,12 @@ final class Signal {
          * Only meaningful for a shared scope; a TAB signal has no second writer to race.
          */
         public readonly bool $atomic = false,
+
+        /**
+         * Whether the browser may write this signal. null (default) keeps the scope's rule: TAB
+         * is client-writable unless Config::withStrictTabSignals() is on, shared scopes are
+         * server-owned. true or false applies to any scope.
+         */
+        public readonly ?bool $clientWritable = null,
     ) {}
 }

@@ -5,11 +5,10 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
-use Mbolli\PhpVia\Via;
 
 beforeEach(function (): void {
     $this->config = new Config();
-    $this->app = new Via($this->config);
+    $this->app = createVia($this->config);
 });
 
 test('signal updates value when called multiple times with same name in TAB scope', function (): void {

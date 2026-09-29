@@ -17,7 +17,7 @@ class Signal {
     private bool $changed = true;
     private ?string $scope = null;
     private bool $autoBroadcast = true;
-    private bool $clientWritable = false;
+    private ?bool $clientWritable = null;
     private ?Via $app = null;
 
     /**
@@ -44,7 +44,7 @@ class Signal {
         mixed $initialValue,
         ?string $scope = null,
         bool $autoBroadcast = true,
-        bool $clientWritable = false,
+        ?bool $clientWritable = null,
         ?Via $app = null
     ) {
         $this->id = $id;
@@ -213,11 +213,12 @@ class Signal {
 
     /**
      * Whether this signal accepts values from the client.
-     * TAB-scoped signals are always client-writable.
-     * Scoped signals default to server-authoritative; opt in with clientWritable: true.
+     *
+     * An explicit clientWritable (true or false) always wins. Without one, TAB signals are
+     * client-writable and scoped signals are server-authoritative.
      */
     public function isClientWritable(): bool {
-        return $this->clientWritable || !$this->isScoped();
+        return $this->clientWritable ?? !$this->isScoped();
     }
 
     /**

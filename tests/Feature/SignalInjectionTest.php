@@ -9,8 +9,8 @@ use Mbolli\PhpVia\Scope;
  * Signal Injection / clientWritable Tests
  *
  * Verifies that injectSignals() respects the security boundary between
- * TAB-scoped (always client-writable) and scoped signals (server-authoritative
- * by default, opt-in with clientWritable: true).
+ * TAB-scoped (client-writable by default) and scoped signals (server-authoritative
+ * by default, opt-in with clientWritable: true), and reaches component signals.
  */
 
 describe('TAB Signal Injection', function (): void {
@@ -24,7 +24,7 @@ describe('TAB Signal Injection', function (): void {
         expect($count->getValue())->toBe(42);
     });
 
-    test('TAB signals are always client-writable', function (): void {
+    test('TAB signals are client-writable by default', function (): void {
         $app = createVia();
         $ctx = new Context('ctx1', '/test', $app);
         $signal = $ctx->signal('hello', 'greeting');
@@ -101,5 +101,54 @@ describe('Scoped Signal Injection', function (): void {
         $ctx2->injectSignals([$shared->id() => 99]);
 
         expect($shared->getValue())->toBe(0);
+    });
+});
+
+describe('Component Signal Injection', function (): void {
+    test('a component TAB signal receives the client value before its action runs', function (): void {
+        $page = new Context('page1', '/p', createVia());
+        $seen = null;
+        $page->component(function (Context $c) use (&$seen): void {
+            $x = $c->signal('initial', 'x');
+            $c->action(function () use ($x, &$seen): void {
+                $seen = $x->getValue();
+            }, 'read');
+            $c->view(fn () => '<input ' . $x->bind() . '>');
+        }, 'cmp');
+        $component = array_values($page->getComponentManager()->getComponents())[0];
+
+        $page->injectSignals([$component->getSignal('x')->id() => 'typed by user']);
+        $page->executeAction('cmp-read');
+
+        expect($seen)->toBe('typed by user');
+    });
+
+    test('a nested component TAB signal receives the client value', function (): void {
+        $page = new Context('page1', '/p', createVia());
+        $inner = null;
+        $page->component(function (Context $outer) use (&$inner): void {
+            $outer->component(function (Context $c) use (&$inner): void {
+                $inner = $c->signal('initial', 'y');
+                $c->view(fn () => '');
+            }, 'inner');
+            $outer->view(fn () => '');
+        }, 'outer');
+
+        $page->injectSignals([$inner->id() => 'typed']);
+
+        expect($inner->getValue())->toBe('typed');
+    });
+
+    test('a component signal declared clientWritable: false ignores client values', function (): void {
+        $page = new Context('page1', '/p', createVia());
+        $owned = null;
+        $page->component(function (Context $c) use (&$owned): void {
+            $owned = $c->signal('server', 'owned', clientWritable: false);
+            $c->view(fn () => '');
+        }, 'cmp');
+
+        $page->injectSignals([$owned->id() => 'client']);
+
+        expect($owned->getValue())->toBe('server');
     });
 });

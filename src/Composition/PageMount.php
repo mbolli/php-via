@@ -33,12 +33,12 @@ final class PageMount {
             // 2. Register signals. #[Signal] (TAB) is created with an explicit TAB
             //    scope so it never inherits a non-TAB primary scope set by #[Broadcast].
             foreach ($meta->signals as $prop) {
-                $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB);
+                $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB, clientWritable: $meta->clientWritable[$prop] ?? null);
             }
             // 3. Register scoped #[Signal(Scope::X)] signals. ROUTE is expanded to the
             //    per-route scope here (SignalFactory resolves SESSION on its own).
             foreach ($meta->scopedSignals as ['prop' => $prop, 'scope' => $scope]) {
-                $ctx->signal($meta->defaults[$prop], $prop, self::resolveScope($scope, $ctx));
+                $ctx->signal($meta->defaults[$prop], $prop, self::resolveScope($scope, $ctx), clientWritable: $meta->clientWritable[$prop] ?? null);
             }
             // #[Persist] → no signal, pure instance property
 
