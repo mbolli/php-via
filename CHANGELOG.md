@@ -48,8 +48,11 @@ All notable changes to php-via will be documented in this file.
   `onClientDisconnect` fires and the clients reconnect. A callback cannot tell a reload from a
   stop. The default `max_wait_time` is now 3 seconds (was 1): OpenSwoole counts it in whole
   seconds, so a stopping worker gets roughly `max_wait_time` minus up to one second, and with 1 a
-  callback yielding a few hundred milliseconds was regularly killed. The signal warnings are gone
-  from the logs.
+  callback yielding a few hundred milliseconds was regularly killed. A stop can take up to
+  `max_wait_time` while coroutines finish: a coroutine, socket or `Event::add` fd the app keeps
+  alive past `onShutdown` holds the worker until OpenSwoole kills it, and the worker then logs how
+  many coroutines were left. `isShuttingDown()` is now public so background loops can end on
+  their own. The signal warnings are gone from the logs.
 
 - **Persistent GlobalState no longer shares one SQLite connection across `fork()`.** The snapshot
   was opened in the master before the workers were forked, and the final drain was an `onShutdown`

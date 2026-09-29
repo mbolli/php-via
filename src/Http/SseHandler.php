@@ -188,8 +188,8 @@ class SseHandler {
      *
      * Only `elements` patches may be dropped. They are idempotent full-fragment morphs
      * where the latest supersedes the rest, so a backed-up client simply catches up on
-     * the next broadcast. `signals` are deltas — self-healing only because delivery is
-     * acknowledged — and `script` patches are one-shot side effects with no resend
+     * the next broadcast. `signals` are deltas (self-healing only because delivery is
+     * acknowledged), and `script` patches are one-shot side effects with no resend
      * path, so neither is ever sacrificed here.
      *
      * @param string $type           patch type

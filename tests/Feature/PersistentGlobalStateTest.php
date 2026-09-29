@@ -174,8 +174,8 @@ test('GlobalState survives a real server restart', function (): void {
 });
 
 test('a write the flush timer never saw survives a stop', function (int $workers): void {
-    // No flush tick fires within the run, so only the master's final drain can persist it.
-    // Before, that drain was an onShutdown callback, and onShutdown never ran on a stop.
+    // No flush tick fires within the run, so only the stop path can persist it: the leader's
+    // stop flush or the master's final drain. Before, onShutdown never ran on a stop.
     expect(runPersistentServer($this->path, 'late', flushMs: 60_000, workers: $workers))->toBe('NULL');
     expect(runPersistentServer($this->path, '-', flushMs: 60_000, workers: $workers))->toBe("'late'");
 })->with([1, 2]);
@@ -185,6 +185,40 @@ test('a write made after the leader stopped is saved by the master', function ()
     expect(runPersistentServer($this->path, 'last', flushMs: 60_000, workers: 2, when: 'shutdown'))->toBe('NULL');
     expect(runPersistentServer($this->path, '-', flushMs: 60_000, workers: 2))->toBe("'last'");
 });
+
+test('a write survives a double SIGTERM that ends the master before its shutdown event', function (int $workers): void {
+    // The second signal ends the master before its drain runs, so the leader's stop flush is
+    // the only thing that saves the write.
+    $fixture = dirname(__DIR__) . '/Fixtures/persistent_global_state.php';
+    $proc = proc_open(
+        [PHP_BINARY, $fixture, $this->path, 'late', '60000', (string) $workers, 'external'],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes
+    );
+    $out = '';
+    $deadline = microtime(true) + 10;
+    while (!str_contains($out, 'value=') && microtime(true) < $deadline) {
+        $out .= (string) fgets($pipes[1]);
+    }
+    expect($out)->toContain('value=NULL');
+
+    $master = proc_get_status($proc)['pid'];
+    usleep(300_000);
+    posix_kill($master, SIGTERM);
+    usleep(2_000);
+    posix_kill($master, SIGTERM);
+
+    $deadline = microtime(true) + 10;
+    while (proc_get_status($proc)['running'] && microtime(true) < $deadline) {
+        usleep(20_000);
+    }
+    if (proc_get_status($proc)['running']) {
+        proc_terminate($proc, SIGKILL);
+    }
+    proc_close($proc);
+
+    expect(runPersistentServer($this->path, '-', flushMs: 60_000, workers: $workers))->toBe("'late'");
+})->with([1, 2]);
 
 test('a snapshot reopens after close()', function (): void {
     $snapshot = new SqliteSnapshot($this->path);

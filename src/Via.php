@@ -947,8 +947,8 @@ class Via {
                 Timer::clearAll();
             });
 
-            // No-op after workerExit. With reload_async => false workerExit never fires and this
-            // runs the callbacks outside a coroutine.
+            // No-op after workerExit; covers a worker that stops without workerExit, in which
+            // case the callbacks run outside a coroutine.
             $this->server->on('workerStop', function (Server $server, int $workerId): void {
                 $this->runWorkerShutdown();
             });
@@ -974,9 +974,13 @@ class Via {
      *
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
-     * recycle. A callback cannot tell a reload from a stop. They run inside a coroutine after open
-     * SSE streams have closed, each in its own try/catch. OpenSwoole counts `max_wait_time` in whole
-     * seconds, so the budget for the stop is roughly `max_wait_time` minus up to one second.
+     * recycle. A callback cannot tell a reload from a stop. They run inside a coroutine, each in its
+     * own try/catch, after waiting up to half the stop budget for open SSE streams to finish
+     * (no wait when `max_wait_time` is below 2). OpenSwoole counts `max_wait_time` in whole seconds,
+     * so the budget for the stop is roughly `max_wait_time` minus up to one second.
+     *
+     * End long-lived coroutines, sockets and `Event::add` fds here (or check isShuttingDown() in
+     * the loop): anything still alive holds the worker until `max_wait_time`, then it is killed.
      */
     public function onShutdown(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
@@ -1082,9 +1086,9 @@ class Via {
     }
 
     /**
-     * Check if server is shutting down.
+     * Whether this worker has begun stopping (stop, reload or recycle).
      *
-     * @internal Used by SSE handler to exit gracefully
+     * Background loops can check it to end on their own before `max_wait_time` runs out.
      */
     public function isShuttingDown(): bool {
         return $this->shuttingDown;
@@ -1872,6 +1876,11 @@ class Via {
             $this->broker->disconnect();
         } catch (\Throwable $e) {
             $this->log('error', 'Broker disconnect failed during shutdown: ' . $e->getMessage());
+        }
+
+        $others = (int) (Coroutine::stats()['coroutine_num'] ?? 0) - (Coroutine::getCid() > 0 ? 1 : 0);
+        if ($others > 0) {
+            $this->log('warning', "{$others} coroutine(s) still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
         }
     }
 
