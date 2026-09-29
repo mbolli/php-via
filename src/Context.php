@@ -32,6 +32,9 @@ class Context {
     /** Monotonic counter for generating deterministic IDs for anonymous (unnamed) TAB actions. */
     private int $anonActionSeq = 0;
 
+    /** @var array<string, true> TAB action ids already warned about as registered twice */
+    private array $duplicateActionWarned = [];
+
     /** @var array<string, Action> Named actions keyed by user-supplied name (raw, not camelCased) */
     private array $namedActions = [];
 
@@ -858,6 +861,9 @@ class Context {
      * If the context has a non-TAB scope, the action is registered as a scoped action
      * and shared with all contexts in the same scope.
      *
+     * Registering a name twice: a TAB action keeps the later callback and logs a warning once
+     * per id; a scoped action keeps the first callback registered in its scope and reuses it.
+     *
      * @param callable    $fn    The action function to execute
      * @param null|string $name  Optional human-readable name
      * @param null|string $scope Optional explicit scope (defaults to context's primary scope)
@@ -905,8 +911,9 @@ class Context {
             $namespace = $this->getNamespace();
             $actionId = $namespace !== null ? $namespace . '-' . $base : $base;
 
-            if (isset($this->actionRegistry[$actionId])) {
-                $this->app->log('debug', "[{$this->getId()}] Duplicate TAB action id {$actionId}; overwriting previous registration", $this);
+            if (isset($this->actionRegistry[$actionId]) && !isset($this->duplicateActionWarned[$actionId])) {
+                $this->duplicateActionWarned[$actionId] = true;
+                $this->app->log('warn', "Action '{$actionId}' registered twice in this context; the later callback replaces the earlier one", $this);
             }
 
             $this->actionRegistry[$actionId] = $fn;

@@ -41,12 +41,8 @@ class ActionHandler {
     public function handleAction(Request $request, Response $response, string $actionId): void {
         $actionStart = hrtime(true);
 
-        // CSRF: validate the Origin header.
-        // Datastar fires actions via fetch(), which always sends Origin on cross-origin
-        // requests. When no explicit allowlist is configured, the framework falls back to
-        // a same-host check derived from the Host header.  In dev mode, absent Origin is
-        // also accepted (curl, Postman, local tooling).
-        if (!$this->isOriginAllowed($request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        // CSRF: Datastar posts with fetch(), so browsers always send Origin (see OriginPolicy).
+        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end('Forbidden: untrusted origin');
 
@@ -156,17 +152,6 @@ class ActionHandler {
     }
 
     /**
-     * Validate the request Origin header against the configured trustedOrigins list.
-     *
-     * Returns true when:
-     * - No trustedOrigins list is configured (dev mode / opt-in).
-     * - The Origin header is absent (non-browser clients, curl, internal calls).
-     * - The Origin header value exactly matches one of the trusted origins.
-     *
-     * Returns false (block the request) when an Origin header is present but
-     * does not match any trusted origin.
-     */
-    /**
      * Check if the IP is within the configured rate limit.
      *
      * Delegates to RateLimiter, whose counters are shared across workers. They used to be a
@@ -212,51 +197,5 @@ class ActionHandler {
         }
 
         return $callerSessionId !== null && $callerSessionId === $storedSessionId;
-    }
-
-    /**
-     * Validate the Origin header against the configured allowlist or a derived same-host check.
-     *
-     * Explicit allowlist (withTrustedOrigins):
-     *   – Absent Origin is always allowed (non-browser clients, curl, server-to-server).
-     *   – Present Origin must be in the list.
-     *
-     * No explicit allowlist:
-     *   – Falls back to a same-host check: the Origin's host must equal the Host header.
-     *     Accepts both http:// and https:// prefixes so it works behind a TLS-terminating proxy.
-     *   – Absent Origin: allowed in dev mode (curl/tools), denied in production.
-     *   – No Host header: allowed in dev mode, denied in production.
-     */
-    private function isOriginAllowed(?string $origin, ?string $host): bool {
-        $config = $this->via->getConfig();
-        $trustedOrigins = $config->getTrustedOrigins();
-        $devMode = $config->getDevMode();
-
-        if ($trustedOrigins !== null) {
-            // Explicit allowlist configured — check strictly.
-            // Absent Origin is always allowed (non-browser clients, curl, server-to-server).
-            if ($origin === null) {
-                return true;
-            }
-
-            return \in_array($origin, $trustedOrigins, strict: true);
-        }
-
-        // No explicit allowlist: same-host fallback.
-        if ($origin === null) {
-            // Dev: allow absent Origin (curl, local tooling).  Prod: deny.
-            return $devMode;
-        }
-
-        if ($host === null) {
-            // No Host header: allow in dev (unusual setup), deny in prod.
-            return $devMode;
-        }
-
-        // Strip the scheme from the Origin header and compare to the Host header.
-        // This handles both http:// and https:// transparently.
-        $originHost = (string) preg_replace('#^https?://#', '', $origin);
-
-        return $originHost === $host;
     }
 }

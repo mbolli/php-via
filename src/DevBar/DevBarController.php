@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\DevBar;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Http\OriginPolicy;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
@@ -153,7 +154,7 @@ final class DevBarController {
         $response->header('Content-Type', 'application/json');
         $response->header('Cache-Control', 'no-store');
 
-        if (!$this->isOriginAllowed($request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end((string) json_encode(['error' => 'Untrusted origin']));
 
@@ -171,7 +172,7 @@ final class DevBarController {
         $response->header('Cache-Control', 'no-store');
 
         // Defence in depth: same-origin check (writes are devMode-only already).
-        if (!$this->isOriginAllowed($request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end((string) json_encode(['error' => 'Untrusted origin']));
 
@@ -330,22 +331,5 @@ final class DevBarController {
         } catch (\Throwable) {
             return false;
         }
-    }
-
-    /**
-     * Same-origin check for signal writes. Allows absent Origin (curl/dev tools)
-     * and matches the Origin host against the Host header when present.
-     */
-    private function isOriginAllowed(?string $origin, ?string $host): bool {
-        $trusted = $this->via->getConfig()->getTrustedOrigins();
-        if ($trusted !== null) {
-            return $origin === null || \in_array($origin, $trusted, true);
-        }
-
-        if ($origin === null || $host === null) {
-            return true;
-        }
-
-        return preg_replace('#^https?://#', '', $origin) === $host;
     }
 }

@@ -251,6 +251,11 @@ $inc = $c->action(function (Context $c) use ($count): void {
 
 // In Twig: data-on:click="@post('/_action/increment')"
     {% endverbatim %}{% endcode %}
+    <p>
+        Registering a TAB action with the same name again replaces the earlier callback, and php-via
+        logs a warning once per action id. A scoped action works the other way round: the first
+        callback registered in the scope wins and later registrations reuse it.
+    </p>
 
     <h3 id="context-view"><code>view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void</code></h3>
     <p>
@@ -453,6 +458,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
+    ->withAllowMissingOrigin()      // accept actions without an Origin header outside dev mode
     ->withStrictTabSignals()        // TAB signals are server-owned unless clientWritable: true
     ->withEmbeddable('https://parent.example')  // SameSite=None; Secure; Partitioned + frame-ancestors
     ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP

@@ -149,10 +149,14 @@ $config = (new Config())
     ->withTrustedOrigins(['https://myapp.com', 'https://staging.myapp.com']);
     {% endverbatim %}{% endcode %}
     <ul>
-        <li><code>null</code> (default) — no restriction; all origins pass (development-friendly)</li>
-        <li><code>[]</code> — block all browser-origin requests</li>
-        <li><code>['https://example.com']</code> — strict allowlist</li>
+        <li><code>null</code> (default): the <code>Origin</code> host must match the <code>Host</code> header</li>
+        <li><code>[]</code>: block all browser-origin requests</li>
+        <li><code>['https://example.com']</code>: strict allowlist</li>
     </ul>
+    <p>
+        Outside dev mode a request without an <code>Origin</code> header gets 403 in every case,
+        unless <code>withAllowMissingOrigin()</code> is set for non-browser clients.
+    </p>
 
     <h3 id="session-cookies">Secure session cookies</h3>
     <p>

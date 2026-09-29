@@ -6,7 +6,8 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
-// Re-declaring a TAB signal keeps last-wins behaviour but must be visible at warning level.
+// Re-declaring a TAB signal or registering a TAB action id twice keeps last-wins behaviour but
+// must be visible at warning level.
 
 function redeclarationOutput(Context $ctx, callable $fn): string {
     ob_start();
@@ -108,4 +109,34 @@ test('a re-declaration without clientWritable does not warn about writability', 
     expect($out)->toBe('')
         ->and($ctx->getSignal('owned')->isClientWritable())->toBeFalse()
     ;
+});
+
+test('registering a TAB action id twice logs a warning once and keeps the later callback', function (): void {
+    $ctx = warnContext();
+    $calls = [];
+
+    $out = redeclarationOutput($ctx, function (Context $ctx) use (&$calls): void {
+        $ctx->action(function () use (&$calls): void { $calls[] = 'first'; }, 'save');
+        $ctx->action(function () use (&$calls): void { $calls[] = 'second'; }, 'save');
+        $ctx->action(function () use (&$calls): void { $calls[] = 'third'; }, 'save');
+    });
+    $ctx->executeAction('save');
+
+    expect($out)->toContain('[WARN]')->toContain("'save'")
+        ->and(substr_count($out, '[WARN]'))->toBe(1)
+        ->and($calls)->toBe(['third'])
+    ;
+});
+
+test('distinct and anonymous TAB actions stay quiet', function (): void {
+    $ctx = warnContext();
+
+    $out = redeclarationOutput($ctx, function (Context $ctx): void {
+        $ctx->action(static function (): void {}, 'save');
+        $ctx->action(static function (): void {}, 'load');
+        $ctx->action(static function (): void {});
+        $ctx->action(static function (): void {});
+    });
+
+    expect($out)->toBe('');
 });

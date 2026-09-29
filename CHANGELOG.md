@@ -136,7 +136,26 @@ All notable changes to php-via will be documented in this file.
   `graph_ports` both filled `{{ graph }}`. The shell is now filled in one pass, so placeholder text
   inside the view or a signal value is left alone.
 
+- **An Origin allowlist no longer lets requests without an Origin through.** With
+  `withTrustedOrigins()` set, `ActionHandler` accepted any action POST that carried no `Origin`
+  header, even in production, while without an allowlist the same request was denied: the
+  stricter setting was the laxer one for that case. The Dev Bar's `/_via/signal` and
+  `/_via/reset` had their own copy of the check that let a missing `Origin` or `Host` through in
+  every mode. Both now use one `OriginPolicy`: a missing `Origin` is accepted in dev mode or with
+  the new `Config::withAllowMissingOrigin()`, and denied otherwise.
+
+- **Registering a TAB action name twice in one context logs a warning.** The later callback
+  replaced the earlier one with only a debug line. It still does, and now logs a warning once per
+  action id. Scoped actions keep the first registration, as before.
+
 ### Breaking Changes
+
+- **Action POSTs without an `Origin` header get 403 in production when `withTrustedOrigins()` is
+  set.** Browsers send `Origin` on every POST, so browser traffic is unaffected. Non-browser
+  clients that post to `/_action/*` (curl scripts, server-to-server calls, uptime checks) need
+  `Config::withAllowMissingOrigin()`. Without an allowlist nothing changes for actions. The Dev
+  Bar's `/_via/signal` and `/_via/reset` no longer accept a missing `Origin`, or an `Origin`
+  without a `Host` header, outside dev mode.
 
 - **Shell placeholders and full-document includes changed.** A custom shell that used
   `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`. Placeholder

@@ -220,11 +220,20 @@ opcache.jit_buffer_size=32M
 $config->withTrustedOrigins(['https://myapp.example.com']);
     {% endverbatim %}{% endcode %}
     <p>
-        With an allowlist configured, action requests whose <code>Origin</code> header is absent
-        or does not exactly match one of the listed origins are rejected with
-        <strong>403 Forbidden</strong>. Non-browser clients (curl, server-to-server) that omit
-        <code>Origin</code> are still allowed when no list is configured (same-host fallback only
-        applies to browser-sent requests).
+        With an allowlist configured, action requests whose <code>Origin</code> header does not
+        exactly match one of the listed origins are rejected with <strong>403 Forbidden</strong>.
+    </p>
+    <p>
+        A request without an <code>Origin</code> header is rejected outside dev mode, with or
+        without an allowlist. Browsers send <code>Origin</code> on every POST, so this only affects
+        non-browser clients (curl scripts, server-to-server calls, uptime checks). If you have such
+        clients, opt in:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withAllowMissingOrigin();
+    {% endverbatim %}{% endcode %}
+    <p>
+        The Dev Bar's <code>/_via/signal</code> and <code>/_via/reset</code> apply the same check.
     </p>
     <p>
         Note: <code>GET /_action/…</code> always returns <strong>405 Method Not Allowed</strong>

@@ -65,13 +65,15 @@ class Config {
     private ?array $frameAncestors = null;
 
     /**
-     * Allowed origins for action requests.
-     * Null means no Origin restriction (dev default).
-     * Set to a list of allowed origins in production, e.g. ['https://example.com'].
+     * Allowed origins for action requests, e.g. ['https://example.com'].
+     * Null means the Origin host must match the Host header.
      *
      * @var null|list<string>
      */
     private ?array $trustedOrigins = null;
+
+    /** Accept action requests without an Origin header outside dev mode. */
+    private bool $allowMissingOrigin = false;
 
     /** TAB signals declared without clientWritable are server-owned instead of client-writable. */
     private bool $strictTabSignals = false;
@@ -461,7 +463,8 @@ class Config {
      * Restrict action POST requests to the given list of Origin header values.
      *
      * Each entry should be a full origin without trailing slash, e.g. 'https://example.com'.
-     * Pass null (the default) to disable Origin checking — suitable for local dev.
+     * With null (the default) the Origin host must match the Host header instead. A request
+     * without Origin is denied outside dev mode either way, see withAllowMissingOrigin().
      *
      * @param null|list<string> $origins
      */
@@ -476,6 +479,24 @@ class Config {
      */
     public function getTrustedOrigins(): ?array {
         return $this->trustedOrigins;
+    }
+
+    /**
+     * Accept action requests that carry no Origin header outside dev mode.
+     *
+     * Browsers send Origin on every POST, so only non-browser clients (curl, server-to-server
+     * calls, uptime checks) need this. Off by default: such requests get 403 in production,
+     * with or without withTrustedOrigins(). Dev mode always accepts them. Also applies to the
+     * Dev Bar's /_via/signal and /_via/reset.
+     */
+    public function withAllowMissingOrigin(bool $allow = true): self {
+        $this->allowMissingOrigin = $allow;
+
+        return $this;
+    }
+
+    public function getAllowMissingOrigin(): bool {
+        return $this->allowMissingOrigin;
     }
 
     /**

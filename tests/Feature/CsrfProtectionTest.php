@@ -3,15 +3,14 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
-use Mbolli\PhpVia\Http\ActionHandler;
-use Mbolli\PhpVia\Via;
+use Mbolli\PhpVia\Http\OriginPolicy;
 
 /*
  * CSRF Protection Tests
  *
  * Tests the two CSRF mitigations:
  *   1. Config API for secureCookie and trustedOrigins settings.
- *   2. ActionHandler::isOriginAllowed() logic (via reflection).
+ *   2. OriginPolicy::allows(), the Origin check ActionHandler applies to every action.
  */
 
 describe('Config: CSRF options', function (): void {
@@ -57,25 +56,20 @@ describe('Config: CSRF options', function (): void {
 
 describe('ActionHandler: Origin validation', function (): void {
     /**
-     * Helper: call the private isOriginAllowed() method via reflection.
-     *
-     * @param null|string       $originHeader   Value of the HTTP Origin header, or null if absent
-     * @param null|string       $hostHeader     Value of the HTTP Host header, or null if absent
-     * @param null|list<string> $trustedOrigins Configured allowlist
-     * @param bool              $devMode        Whether dev mode is enabled
+     * @param null|string       $originHeader       Value of the HTTP Origin header, or null if absent
+     * @param null|string       $hostHeader         Value of the HTTP Host header, or null if absent
+     * @param null|list<string> $trustedOrigins     Configured allowlist
+     * @param bool              $devMode            Whether dev mode is enabled
+     * @param bool              $allowMissingOrigin Whether withAllowMissingOrigin() is on
      */
-    function callIsOriginAllowed(?string $originHeader, ?array $trustedOrigins, ?string $hostHeader = null, bool $devMode = false): bool {
+    function callIsOriginAllowed(?string $originHeader, ?array $trustedOrigins, ?string $hostHeader = null, bool $devMode = false, bool $allowMissingOrigin = false): bool {
         $config = (new Config())
             ->withTrustedOrigins($trustedOrigins)
             ->withDevMode($devMode)
+            ->withAllowMissingOrigin($allowMissingOrigin)
         ;
-        $via = new Via($config);
 
-        $handler = new ActionHandler($via);
-
-        $method = new ReflectionMethod(ActionHandler::class, 'isOriginAllowed');
-
-        return $method->invoke($handler, $originHeader, $hostHeader);
+        return OriginPolicy::allows($config, $originHeader, $hostHeader);
     }
 
     test('no trustedOrigins + no devMode + present cross-origin → blocked (same-host fallback)', function (): void {
@@ -91,8 +85,16 @@ describe('ActionHandler: Origin validation', function (): void {
         expect(callIsOriginAllowed(null, null, 'localhost:3000', devMode: true))->toBeTrue();
     });
 
-    test('absent Origin header with explicit list → allowed (non-browser clients)', function (): void {
-        expect(callIsOriginAllowed(null, ['https://example.com']))->toBeTrue();
+    test('absent Origin header with explicit list → denied in production', function (): void {
+        expect(callIsOriginAllowed(null, ['https://example.com']))->toBeFalse();
+    });
+
+    test('absent Origin header with explicit list + withAllowMissingOrigin → allowed (non-browser clients)', function (): void {
+        expect(callIsOriginAllowed(null, ['https://example.com'], allowMissingOrigin: true))->toBeTrue();
+    });
+
+    test('no trustedOrigins + withAllowMissingOrigin + absent Origin → allowed', function (): void {
+        expect(callIsOriginAllowed(null, null, 'example.com', allowMissingOrigin: true))->toBeTrue();
     });
 
     test('matching origin → allowed', function (): void {
@@ -121,8 +123,10 @@ describe('ActionHandler: Origin validation', function (): void {
     test('empty trusted origins list blocks all browser requests', function (): void {
         // trustedOrigins=[] means no origin is whitelisted
         expect(callIsOriginAllowed('https://example.com', []))->toBeFalse();
-        // But absent Origin (non-browser) still allowed when allowlist is configured
-        expect(callIsOriginAllowed(null, []))->toBeTrue();
+        // Absent Origin (non-browser) is denied too, unless opted in
+        expect(callIsOriginAllowed(null, []))->toBeFalse();
+        expect(callIsOriginAllowed(null, [], allowMissingOrigin: true))->toBeTrue();
+        expect(callIsOriginAllowed('https://example.com', [], allowMissingOrigin: true))->toBeFalse();
     });
 });
 
