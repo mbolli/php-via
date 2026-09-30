@@ -2,15 +2,18 @@
 
 Before and after measurements for the five contention findings (F1 to F5)
 fixed on `perf/contention`. Base (A) is 737b2aa: the v0.13.0 release (5ff9d25)
-plus the scripts in this directory. Branch (B) is 5a9850a. The base worktree ran
-the branch's copies of the scripts, which differ from 737b2aa only in comments
-and code style, so the scripts are byte-identical in both trees and every run
-is `php bench/contention/<name>.php` from inside the tree under test. The
-lock_contention, idle_sse and shared_read JSON records the commit each run ran
-on, with `src/` clean in every run; broadcast_storm and get_clients do not
-record it, and their runners pick the tree by working directory. The two branch
-commits not covered below (197c8d7, 5a9850a) touch only the changelog and the
-benchmark code style.
+plus the scripts in this directory. Branch (B) is 70d23a5 in the F1 and F4
+tables marked so and in both their regression checks, and 5a9850a everywhere
+else. The base worktree ran the branch's copies of the scripts, which differ
+from 737b2aa only in comments and code style, so the scripts are byte-identical
+in both trees and every run is `php bench/contention/<name>.php` from inside
+the tree under test. The lock_contention, idle_sse and shared_read JSON records
+the commit each run ran on, with `src/` clean in every run; broadcast_storm and
+get_clients do not record it, and their runners pick the tree by working
+directory. The two branch commits not covered below (197c8d7, 5a9850a) touch
+only the changelog and the benchmark code style. Two later commits change
+`src/`: 5e38da9 (when a broadcast flush starts) and 70d23a5 (the fan-out loop).
+F2, F3 and F5 were not rerun on them.
 
 Host: 20 cores, shared with other projects that run browser tests on it. PHP
 8.5.11 CLI (NTS) with opcache and JIT off, ext-openswoole 26.2.0.
@@ -26,37 +29,59 @@ of the medians when the two differ by 2x or more, and a percentage otherwise;
 "ranges overlap" marks a change whose base and branch min-to-max ranges
 overlap. Raw per-run JSON is not committed.
 
+The 70d23a5 runs come from one later session. Unless a table says otherwise, B
+and A ran interleaved as B1, A1, B2, A2, ..., with identical arguments. The
+load before each run was 0.68 to 5.96, so no run waited. The broadcast_storm
+runner wrote each run's commit and `src/` state to a metadata file. Numbers
+from different sessions are not comparable. The host runs the `powersave`
+governor on a CPU with performance and efficiency cores, and the same
+configuration (K=2 in the F1 regression checks) measured 9.229 ms on base and
+43.452 ms on 5a9850a in the first session, against 6.984 ms on base and 59.846
+and 65.997 ms on 5a9850a in two batches of the later one. Every comparison in
+this file is within one session.
+
+The branch always ran from /develop/php-via, a FUSE mount (`fuse.shfs`), and
+base from a worktree on btrfs, with opcache off. In the later session 70d23a5
+run from a btrfs worktree acknowledged the single action at K=1 in 1.24 ms
+against 3.416 ms from /develop/php-via, and converged in 15.308 against
+25.674 ms (medians of 5). This penalizes only the branch. It changes no
+verdict below, but it inflates small branch latencies, K=1 in particular. Its
+size was measured only with broadcast_storm.
+
 Every run was correct in both trees. All 36 lock_contention invocations
 reached the expected final value in every round. All 72 broadcast_storm runs
 converged every client to the server value with no failed action. All 30
 idle_sse runs delivered their broadcasts to every connection. All 40
 shared_read runs had 0 mismatched frames, and all 40 get_clients runs had every
-freshness and patch flag true.
+freshness and patch flag true. In the later session the same held for all 60
+broadcast_storm and 30 shared_read runs against base and for all 129 runs of
+the comparison with 5a9850a in the F1 regression checks.
 
 ## F1: broadcast coalescing (08d6449)
 
 Inside a coroutine, `broadcast()`, scoped signal auto-broadcasts and broker
 receives now only mark the scope. The worker's next flush renders each marked
-scope once and each context once. It runs at the end of the event-loop turn
-when the last flush ended at least one tick ago
-(`Config::withBroadcastTickMs()`, default 25 ms), and otherwise once that tick
-has passed. Measured with `broadcast_storm.php`: N SSE clients on one page, K
-actions fired over `concurrency` actor connections.
+scope once and each context once. Since 5e38da9 it starts one tick
+(`Config::withBroadcastTickMs()`, default 25 ms) after the last flush started
+and at least half a tick after that flush ended, or at the end of the
+event-loop turn when both have passed; 08d6449 counted the tick from the end
+of the last flush. Measured with `broadcast_storm.php`: N SSE clients on one
+page, K actions fired over `concurrency` actor connections.
 
 Defaults, `php bench/contention/broadcast_storm.php` (N=1000, K=200,
-concurrency 50, 1 worker, tab mode, global state), 3 reps:
+concurrency 50, 1 worker, tab mode, global state), 70d23a5, 3 reps:
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
 | renders | 200000 | 2000 | 100x fewer |
 | frames per client | 200 | 2 | 100x fewer |
-| worker CPU net of idle (s) | 1.511 (1.482 to 1.521) | 0.04 (0.02 to 0.04) | 37.8x lower |
-| master CPU (s) | 1.21 (1.16 to 1.21) | 0.02 (0.02 to 0.04) | 60.5x lower |
-| action latency p50 (ms) | 379.184 (373.339 to 381.522) | 1.434 (0.448 to 1.434) | 264x lower |
-| action latency p99 (ms) | 407.273 (399.672 to 410.552) | 18.287 (13.34 to 24.019) | 22.3x lower |
-| actions/s | 127.7 (126.7 to 130.2) | 8711.5 (6912.5 to 13174.3) | 68.2x higher |
-| converge after last send (ms) | 383.907 (379.136 to 397.791) | 34.505 (33.929 to 41.521) | 11.1x lower |
-| storm to converge (ms) | 1565.677 (1535.714 to 1579.064) | 55.799 (48.617 to 69.021) | 28.1x lower |
+| worker CPU net of idle (s) | 1.254 (1.253 to 1.338) | 0.03 (0.03 to 0.04) | 41.8x lower |
+| master CPU (s) | 1.03 (1.02 to 1.14) | 0.03 (0.02 to 0.04) | 34.3x lower |
+| action latency p50 (ms) | 323.461 (322.549 to 339.56) | 1.113 (0.426 to 1.381) | 291x lower |
+| action latency p99 (ms) | 333.735 (332.749 to 359.186) | 20.448 (14.373 to 23.811) | 16.3x lower |
+| actions/s | 151.5 (143.7 to 152.5) | 7748.4 (7719.6 to 11277.1) | 51.1x higher |
+| converge after last send (ms) | 323.747 (322.484 to 354.722) | 21.534 (17.905 to 23.076) | 15.0x lower |
+| storm to converge (ms) | 1320.407 (1311.08 to 1391.819) | 46.889 (35.038 to 47.592) | 28.2x lower |
 
 CPU comes from `/proc` at 10 ms clock-tick resolution. At the default size the
 branch's CPU is 1 to 10 ticks, so the CPU ratios give the order of magnitude,
@@ -64,20 +89,28 @@ not a precise factor. The N=5000 runs are the only ones where branch CPU sits
 well above resolution.
 
 Larger storm, `--n=5000 --k=500 --concurrency=50 --converge-timeout=60
---watchdog=240`, with 1 worker and with `--workers=4`, 3 reps each:
+--watchdog=240`, with 1 worker and with `--workers=4`, 70d23a5, 3 reps each:
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
-| worker CPU net of idle, 1 worker (s) | 18.903 (18.298 to 19.626) | 0.11 (0.11 to 0.13) | 172x lower |
-| worker CPU net of idle, 4 workers (s) | 30.614 (28.467 to 30.953) | 0.19 (0.18 to 0.27) | 161x lower |
-| action latency p99, 1 worker (ms) | 2299.158 (2278.22 to 3693.051) | 50.551 (50.357 to 62.149) | 45.5x lower |
-| action latency p99, 4 workers (ms) | 1766.782 (1340.012 to 2514.202) | 27.685 (26.208 to 32.952) | 63.8x lower |
-| converge after last send, 1 worker (ms) | 2107.047 (2077.247 to 2185.607) | 69.766 (61.118 to 73.65) | 30.2x lower |
-| converge after last send, 4 workers (ms) | 1737.181 (1208.017 to 1844.744) | 51.674 (40.371 to 59.786) | 33.6x lower |
-| storm to converge, 1 worker (ms) | 21506.763 (20671.569 to 23175.319) | 124.089 (121.401 to 143.908) | 173x lower |
-| storm to converge, 4 workers (ms) | 8381.587 (7350.136 to 8458.367) | 74.369 (64.373 to 80.877) | 113x lower |
+| frames per client, 1 worker | 500 | 2 | 250x fewer |
+| frames per client, 4 workers | 500 | 2.75 (2.75 to 3.25) | 182x fewer |
+| worker CPU net of idle, 1 worker (s) | 13.668 (13.429 to 13.85) | 0.11 (0.1 to 0.14) | 124x lower |
+| worker CPU net of idle, 4 workers (s) | 22.227 (19.459 to 22.661) | 0.29 (0.26 to 0.5) | 76.6x lower |
+| action latency p99, 1 worker (ms) | 1888.692 (1852.223 to 1944.149) | 65.056 (59.871 to 77.278) | 29.0x lower |
+| action latency p99, 4 workers (ms) | 1728.628 (1095.086 to 2086.508) | 55.887 (28.88 to 87.874) | 30.9x lower |
+| converge after last send, 1 worker (ms) | 1891.457 (1781.402 to 1894.742) | 49.759 (47.162 to 49.949) | 38.0x lower |
+| converge after last send, 4 workers (ms) | 908.656 (893.373 to 1699.84) | 49.984 (39.448 to 71.476) | 18.2x lower |
+| storm to converge, 1 worker (ms) | 18115.591 (17779.905 to 19094.633) | 119.961 (111.422 to 135.588) | 151x lower |
+| storm to converge, 4 workers (ms) | 6114.461 (5965.124 to 6572.856) | 96.39 (91.188 to 135.968) | 63.4x lower |
 
-Other variants at the default size, 3 reps each:
+The 4-worker runs had the highest load of the session, 2.83 to 5.96. A later
+batch in the same session, at a load of 1.7 to 2.49, measured storm to
+converge at 62.004 (60.135 to 79.908) ms on 70d23a5 against 125.954 (105.435
+to 163.261) ms on 5a9850a, so the 96.39 ms median above does not show a
+regression from 5e38da9.
+
+Other variants at the default size, 5a9850a in the first session, 3 reps each:
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
@@ -91,9 +124,9 @@ Other variants at the default size, 3 reps each:
 Route mode renders once per action on base (200 renders against 200000 in tab
 mode) and still gains about as much, because most of the base cost is per
 context (patch queue, SSE resume, response write), not per render. With 4
-workers the branch sends 2.75 to 3 frames per client instead of 2.
+workers the branch sends 2.75 to 3.25 frames per client instead of 2.
 
-On the branch all K actions are sent within 7 to 72 ms, 1 to 3 ticks, because
+On the branch all K actions are sent within 7 to 90 ms, 1 to 4 ticks, because
 an action no longer waits for its fan-out. Two frames per client therefore
 means the whole storm fit into two flushes. It does not show how the branch
 handles a paced stream of updates over several seconds, which this script
@@ -101,59 +134,83 @@ cannot generate.
 
 ### F1 regression checks
 
-Low load with one actor (`--concurrency=1`), N=1000, 5 reps each:
+Low load with one actor (`--concurrency=1`), N=1000 on 1 worker unless marked,
+70d23a5, 5 reps (3 at N=5000 and with 4 workers). The N=5000 runs used
+`--converge-timeout=60 --watchdog=240`.
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
-| converge after last send, K=1 (ms) | 9.95 (8.243 to 17.733) | 10.448 (8.685 to 20.194) | +5.0%, ranges overlap |
-| converge after last send, K=2 (ms) | 9.229 (7.446 to 19.151) | 43.452 (40.929 to 49.442) | 4.71x higher |
-| storm to converge, K=2 (ms) | 17.183 (15.854 to 39.2) | 44.425 (41.686 to 50.624) | 2.59x higher |
-| converge after last send, K=20 (ms) | 8.015 (7.249 to 9.424) | 45.474 (31.597 to 47.212) | 5.67x higher |
-| storm to converge, K=20 (ms) | 167.769 (153.101 to 226.522) | 58.062 (40.883 to 63.846) | 2.89x lower |
-| action latency p50, K=20 (ms) | 7.813 (7.364 to 8.734) | 0.074 (0.023 to 0.079) | 106x lower |
-| action latency p99, K=20 (ms) | 15.156 (7.986 to 19.865) | 8.705 (7.982 to 15.108) | -42.6%, ranges overlap |
+| converge after last send, K=1 (ms) | 18.545 (12.383 to 34.316) | 26.326 (16.63 to 31.156) | +42.0%, ranges overlap |
+| action latency, K=1 (ms) | 18.612 (12.435 to 34.403) | 3.706 (2.878 to 4.834) | 5.02x lower |
+| converge after last send, K=2 (ms) | 6.984 (6.728 to 8.74) | 46.155 (45.549 to 56.083) | 6.61x higher |
+| storm to converge, K=2 (ms) | 19.159 (14.375 to 40.857) | 50.125 (49.256 to 59.777) | 2.62x higher |
+| action latency p99, K=2 (ms) | 12.425 (7.385 to 32.104) | 21.285 (18.529 to 32.3) | +71.3%, ranges overlap |
+| converge after last send, K=20 (ms) | 6.614 (6.549 to 7.015) | 30.69 (24.642 to 32.446) | 4.64x higher |
+| storm to converge, K=20 (ms) | 166.784 (144.069 to 176.722) | 56.014 (50.5 to 71.144) | 2.98x lower |
+| action latency p50, K=20 (ms) | 6.839 (6.556 to 7.075) | 0.024 (0.022 to 0.065) | 285x lower |
+| action latency p99, K=20 (ms) | 26.725 (13.924 to 28.342) | 22.465 (21.855 to 34.126) | -15.9%, ranges overlap |
+| converge after last send, K=2, N=5000 (ms) | 35.339 (34.785 to 37.928) | 117.484 (116.072 to 126.695) | 3.32x higher |
+| storm to converge, K=2, N=5000 (ms) | 91.291 (74.647 to 97.79) | 121.035 (120.764 to 127.538) | +32.6% |
+| action latency p99, K=2, N=5000 (ms) | 53.356 (39.301 to 62.995) | 62.689 (62.572 to 71.972) | +17.5%, ranges overlap |
+| converge after last send, K=2, 4 workers (ms) | 12.134 (6.966 to 16.821) | 33.332 (29.494 to 37.623) | 2.75x higher |
+| storm to converge, K=2, 4 workers (ms) | 22.474 (12.601 to 26.696) | 34.211 (30.504 to 41.447) | +52.2% |
 
-This check fails. An isolated update (K=1) arrives as fast as on base, because
-the first flush runs at the end of the event-loop turn. An update that lands
-during or shortly after a flush waits: at K=20 every branch run converged later
-than every base run, at load 3.3 to 5.4. `runTickFlush()` in `src/Via.php` sets
-`lastFlushEdgeNs` when a flush starts and again when it ends, and
-`msUntilNextTick()` counts the tick from that edge. The 08d6449 commit message
-says a flush runs when the last one "started or ended" a tick ago, but once a
-flush ends its end overwrites the start, so after a flush the tick counts from
-the end. The shortest gap from one flush start to the next is therefore the
-flush duration plus the tick. At N=1000 on one worker a flush takes about 8 ms
-(the second action at K=2 waits for it: median 8.599 ms), which predicts
-8 + 25 + 8 = 41 ms against 43.452 ms measured at K=2. At K=20 the last send
-comes about 11 ms after the first, so the same model predicts about 31 ms after
-the last send. One run matched (31.597 ms); the other four took 42.881 to
-47.212 ms, and in those four the gap between the median and the p99 client
-convergence was about 10 ms against about 4 ms at K=2, which suggests their
-second flush ran longer. That was not investigated.
+This check fails at K=2, at both sizes and with 4 workers, and at K=20. At
+5a9850a, in the first session, K=2 and K=20 converged 43.452 and 45.474 ms
+after the last send against 9.229 and 8.015 ms on base, and 5e38da9, which was
+meant to fix that, does not make the check pass. K=1 shows no measurable
+regression but is not a confident pass: the ranges overlap, and run from btrfs
+like base (see Protocol) the branch took 15.308 (8.35 to 22.675) ms against
+12.958 (7.347 to 16.307) ms, still overlapping. At K=20 the branch converges
+4.64x later after the last send, while the whole storm still converges 2.98x
+sooner, because base renders every action (20000 renders against 2000).
 
-The delay grows with the number of contexts: judging by the branch action p99
-at N=5000 on one worker (50.551 ms), a flush there takes about 50 ms. A K=2 run
-at that size was not made. Counting the tick from the start of the last flush,
-and flushing at once when the tick is already overdue at the end of a flush,
-removes the flush duration from the gap, so the delay stops growing with N once
-a flush takes longer than a tick. It does not remove the tick itself: at N=1000
-an update that lands during a flush would still arrive about 25 + 8 ms after it
-was sent, against about 9 ms on base. Both are untested estimates. The existing
+Since 5e38da9, `msUntilNextTick()` in `src/Via.php` starts the next flush one
+tick after the last one started and at least half a tick (12.5 ms) after it
+ended. At K=2 the second update lands while the first flush runs, so it waits
+for the rest of that flush, then half a tick, then its own flush. The worker
+cannot handle the second action before the first flush ends, so its latency,
+the branch action p99 at K=2 (21.285 ms), is about the length of that flush.
+Whenever a flush lasts longer than half a tick, the half-tick floor and not
+the tick sets the next start, so the delay still grows with N: 3.32x base at
+N=5000, where the second action waited 62.689 ms. With 4 workers each worker
+flushes about 250 contexts, the tick from the last start decides, and what
+remains is about one tick: 33.332 ms against 12.134 ms on base. The existing
 knobs are `withBroadcastTickMs()` and `withBroadcastCoalescing(false)`.
 
+Same-session comparison with 5a9850a (P), the commit before both fixes:
+converge after last send in ms, 5 reps (3 at N=5000), interleaved B, H, P, A
+at a load of 0.68 to 2.47. H is 70d23a5 run from a btrfs worktree, like P; B
+ran from /develop/php-via as everywhere else.
+
+| Config | Base | P (5a9850a) | B (70d23a5) | H (70d23a5, btrfs) |
+|---|---|---|---|---|
+| K=1 | 12.958 (7.347 to 16.307) | 24.054 (23.418 to 27.219) | 25.674 (17.307 to 26.99) | 15.308 (8.35 to 22.675) |
+| K=2 | 6.955 (6.774 to 21.722) | 65.997 (61.566 to 71.617) | 49.094 (39.248 to 50.911) | 46.411 (40.833 to 54.927) |
+| K=20 | 6.88 (6.659 to 10.194) | 44.208 (32.826 to 52.955) | 31.494 (25.512 to 35.469) | 22.68 (18.339 to 27.15) |
+| K=2, N=5000 | 35.982 (35.911 to 36.62) | 111.068 (110.477 to 123.382) | 108.493 (98.66 to 118.445) | 100.204 (96.822 to 121.836) |
+
+An earlier batch without H (B, P, A) gave B 45.999 against P 59.846 ms at K=2,
+25.532 against 41.777 ms at K=20, and 104.622 against 134.629 ms at N=5000
+(3 reps, no base). So the fixes shorten the follow-up delay against P, by 14
+to 20 ms at K=2 and 13 to 22 ms at K=20 across both batches and both B and H.
+At N=5000 the gain was 30 ms without overlap in the first batch and 3 to 11 ms
+with overlapping ranges in the second. At K=1 all variants overlapped in both
+batches.
+
 A flush does not yield between contexts, so a request that lands on its worker
-while it runs waits for it. Branch action p99 is 50.551 ms at N=5000 on one
-worker and 27.685 ms at N=5000 on 4 workers (1250 contexts each). Base ran the
-same non-yielding fan-out inside the broadcasting action and was at 2299.158 ms
-and 1766.782 ms, so this is not a regression: the cost moved from the action
+while it runs waits for it. Branch action p99 is 65.056 ms at N=5000 on one
+worker and 55.887 ms at N=5000 on 4 workers (1250 contexts each). Base ran the
+same non-yielding fan-out inside the broadcasting action and was at 1888.692 ms
+and 1728.628 ms, so this is not a regression: the cost moved from the action
 that broadcasts to whichever request arrives during the flush.
 
-CPU at K=1 and K=2 is 1 to 5 clock ticks in both trees, so the two cannot be
-told apart there. Branch idle worker CPU is 0 in every configuration against
-0.03 to 0.255 s/s on base (that is F2). `worker_cpu_net_s` subtracts the idle
-rate measured in the same run, so F2 does not inflate the F1 CPU numbers. F4
-cannot be isolated with this script, since coalescing already cuts a storm to 2
-or 3 flushes per worker.
+CPU at K=1 and K=2 with N=1000 on one worker is 1 to 5 clock ticks in both
+trees, so the two cannot be told apart there. Branch idle worker CPU is 0 in
+every configuration against 0.04 to 0.534 s/s on base (that is F2).
+`worker_cpu_net_s` subtracts the idle rate measured in the same run, so F2 does
+not inflate the F1 CPU numbers. F4 cannot be isolated with this script, since
+coalescing already cuts a storm to 2 or 3 flushes per worker.
 
 ## F2: idle SSE wakeups (0b56613)
 
@@ -348,28 +405,32 @@ third instance writes them as another worker would. Store reads are counted by
 swapping the store's table for a counting subclass.
 
 Defaults, `php bench/contention/shared_read.php` (N=2000, S=5, 20 broadcasts,
-tab and route modes, remote writer), 5 reps:
+tab and route modes, remote writer), 70d23a5, 5 reps:
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
 | store reads per broadcast, tab | 20000 | 5 | 4000x fewer |
 | store reads per broadcast, route | 10005 | 5 | 2001x fewer |
-| with store, tab (ms per broadcast) | 51.51 (51.05 to 52.81) | 23.71 (23.59 to 24.07) | 2.17x lower |
-| with store, route (ms per broadcast) | 23.33 (22.62 to 24.81) | 6.001 (5.868 to 6.086) | 3.89x lower |
-| store overhead over no store, tab (%) | 146.8 (145.9 to 148.1) | 8.99 (7.24 to 10.66) | |
-| store overhead over no store, route (%) | 405.6 (392.1 to 425.9) | 14.08 (12.33 to 15) | |
-| no store, tab (ms per broadcast) | 20.85 (20.69 to 21.28) | 21.75 (21.65 to 22.09) | +4.3% |
-| no store, route (ms per broadcast) | 4.646 (4.478 to 4.74) | 5.236 (5.136 to 5.335) | +12.7% |
+| with store, tab (ms per broadcast) | 48.8 (48.26 to 48.84) | 21.64 (21.29 to 22.82) | 2.26x lower |
+| with store, route (ms per broadcast) | 20 (19.93 to 20.68) | 4.466 (4.349 to 4.564) | 4.48x lower |
+| store overhead over no store, tab (%) | 147.1 (146.1 to 148.3) | 11.73 (11.16 to 12.29) | |
+| store overhead over no store, route (%) | 429.9 (425.7 to 447.8) | 19.24 (17.66 to 21.03) | |
+| no store, tab (ms per broadcast) | 19.67 (19.51 to 19.84) | 19.35 (19.16 to 20.42) | -1.6%, ranges overlap |
+| no store, route (ms per broadcast) | 3.767 (3.637 to 3.933) | 3.726 (3.648 to 3.805) | -1.1%, ranges overlap |
 | peak memory (MB) | 78 | 44 | -43.6% |
 
-Larger configurations, 5 reps each:
+Larger configurations, 70d23a5, 5 reps each. The
+`--view-reads=3 --array-items=100` rows come from a separate A/B run shortly
+before the others, with the order alternating per rep, at a load of 1.41 to
+1.73:
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
-| with store, route, `--modes=route --contexts=5000 --broadcasts=30` (ms) | 47.1 (46.59 to 47.94) | 13.52 (13.51 to 13.61) | 3.48x lower |
+| with store, route, `--modes=route --contexts=5000 --broadcasts=30` (ms) | 44.28 (43.75 to 46.79) | 11.24 (11.11 to 11.9) | 3.94x lower |
 | store reads, route, N=5000 | 25005 | 5 | 5001x fewer |
-| with store, tab, `--view-reads=3 --array-items=100` (ms) | 418.3 (414.8 to 422.3) | 215 (214 to 219.5) | -48.6% |
-| with store, route, `--view-reads=3 --array-items=100` (ms) | 81.24 (80.15 to 91.6) | 17.44 (17.37 to 17.47) | 4.66x lower |
+| peak memory, N=5000 (MB) | 146 | 54 | 2.70x lower |
+| with store, tab, `--view-reads=3 --array-items=100` (ms) | 397.9 (396.1 to 400.9) | 203.6 (202.2 to 205) | -48.8% |
+| with store, route, `--view-reads=3 --array-items=100` (ms) | 73.61 (73.4 to 74.23) | 15.55 (15.51 to 16.12) | 4.73x lower |
 | store reads, tab, `--view-reads=3 --array-items=100` | 40000 | 5 | 8000x fewer |
 | peak memory, `--view-reads=3 --array-items=100` (MB) | 318 | 108 | 2.94x lower |
 
@@ -378,48 +439,40 @@ the base read count, which the branch no longer performs.
 
 ### F4 regression checks
 
-This check fails for route mode. The fan-out without a store, which is the
-single-worker path, is slower on the branch in every configuration and in both
-run orders, and the ranges never overlap:
+At 5a9850a the fan-out without a store, the single-worker path, was 4.7 to
+20.7% slower than base in route mode and up to 4.5% slower in tab mode, and
+70d23a5 fixed that. Every context of a fan-out paid for the frame-ordering
+check, with or without a store: a read epoch lookup, and a read and a write of
+a `WeakMap`. 70d23a5 keeps the newest frame epoch on each `Context` as an int,
+and a fan-out pass looks its read epoch up once, and again only after
+`ReadEpochs::renew()` moved it. The check still runs without a store, since it
+also orders the frames of single-worker coroutines whose views yield.
+
+Without a store, from the runs above:
 
 | Metric | Base | Branch | Change |
 |---|---|---|---|
-| no store, route, defaults (ms) | 4.646 (4.478 to 4.74) | 5.236 (5.136 to 5.335) | +12.7% |
-| no store, route, defaults in A,B order, 2 reps (ms) | 4.015 (3.862 to 4.169) | 4.51 (4.506 to 4.515) | +12.3% |
-| no store, route, `--writer=local`, 3 reps (ms) | 3.999 (3.944 to 4.008) | 4.819 (4.52 to 5.108) | +20.5% |
-| no store, route, `--view-reads=3 --array-items=100` (ms) | 15.91 (15.84 to 16.49) | 16.65 (16.58 to 16.8) | +4.7% |
-| no store, route, N=5000 (ms) | 10.08 (9.958 to 10.31) | 11.84 (11.79 to 11.93) | +17.5% |
+| no store, tab, defaults (ms) | 19.67 (19.51 to 19.84) | 19.35 (19.16 to 20.42) | -1.6%, ranges overlap |
+| no store, route, defaults (ms) | 3.767 (3.637 to 3.933) | 3.726 (3.648 to 3.805) | -1.1%, ranges overlap |
+| no store, route, N=5000 (ms) | 9.345 (9.246 to 9.784) | 9.257 (9.177 to 9.907) | -0.9%, ranges overlap |
+| no store, tab, `--view-reads=3 --array-items=100` (ms) | 198.5 (198.2 to 200.9) | 197.2 (195.3 to 198.8) | -0.7%, ranges overlap |
+| no store, route, `--view-reads=3 --array-items=100` (ms) | 14.72 (14.55 to 14.81) | 14.6 (14.48 to 15.2) | -0.8%, ranges overlap |
 
-Tab mode without a store is marginal: +4.3% (defaults) and +4.5%
-(`--writer=local`) with no overlap, but -1.0% in the A,B order runs and -0.4%
-with three view reads, where about 208 ms of rendering hides it; both of those
-have overlapping ranges.
-
-A scratch driver that builds only the no-store instance, so that a store in the
-same process cannot skew the timing, gives the same result: route +20.7% at
-N=200, +19.2% at N=2000, +11.8% at N=5000 and +18.9% at N=10000, 0.22 to
-0.37 us per context, and tab +3.2% at N=2000. The same driver locates the cost.
-Calling `Context::sync()` on every context costs the same in both trees (3.374
-against 3.416 ms at N=2000, route). The same loop through
-`Via::syncContextSafely()` costs 3.42 ms on base and 4.099 ms on the branch
-(+19.9%). The extra cost is the epoch bookkeeping in `syncContextSafely()`:
-`spl_object_id`, `ReadEpochs::current()` (which calls `Coroutine::getCid()`),
-a read and a write of the `frameEpochs` WeakMap. It runs even without a store,
-because Via always builds a `ReadEpochs`. A tight loop of those operations
-costs only about 60 ns per context, so the rest is probably cache misses
-between contexts in a real fan-out; that is not proven. The frame-ordering
-guard also protects single-worker coroutines whose views yield, so skipping it
-when there is no store is not a fix on its own.
-
-The store path on the branch still costs more than no store: +8.99% in tab mode
-(about 2.0 ms at N=2000), +14.08% in route mode (about 0.7 ms), and about 4%
-with three view reads. Divided by the accessor calls (the base read count), the
-residual is 66 to 103 ns per call in every configuration but one, tab mode with
-three view reads and 100-item arrays, where it is about 213 ns. It does not
-follow the store reads, which are down to S. That the per-call cost is the
-`readEpoch()` check in `getValue()` is an inference, not measured.
+N=5000 is `--modes=route --contexts=5000 --broadcasts=30`. This check passes:
+without a store the branch is 0.7 to 1.6% faster than base, and the ranges
+overlap in every configuration. Store reads stay at S=5 per broadcast, and
 `mismatched_frames` was 0 in every run, so no stale value reached a frame.
-`SharedSignalStore::get()` micro timings are unchanged.
+
+The store path on the branch still costs more than no store: +11.73% in tab
+mode (2.286 ms at N=2000), +19.24% in route mode (0.702 ms), +20.8% in route
+mode at N=5000 (1.957 ms), and +3.12% (tab) and +6.82% (route) with three view
+reads. Divided by the accessor calls (the base read count), the residual is 70
+to 114 ns per call in every configuration but one, tab mode with three view
+reads and 100-item arrays, where it is about 153 ns. It does not follow the
+store reads, which are S=5 per broadcast in every run. That the per-call cost
+is the `readEpoch()` check in `getValue()` is an inference, not measured.
+`SharedSignalStore::get()` micro timings are within noise of base, with
+overlapping ranges.
 
 Everything runs in one process, so cross-process contention on the store rows
 is not measured, and the base numbers are a lower bound for a multi-worker
@@ -500,14 +553,12 @@ branch.
 
 Worse on the branch:
 
-- F1: an update that lands during a flush, or less than one tick after a flush
-  ends, waits until one tick after that end. It reached every client 43.452 ms
-  (K=2) and 45.474 ms (K=20) after the last send at N=1000 on one worker,
-  against 9.229 and 8.015 ms on base. The tick counts from the end of the last
-  flush, so the delay grows with the contexts per worker.
-- F4: the fan-out without a store is 4.7 to 20.7% slower in route mode and up
-  to 4.5% slower in tab mode, from the read-epoch bookkeeping in
-  `syncContextSafely()`.
+- F1: an update that lands during a flush waits for the rest of it, then half
+  a tick, then its own flush. At N=1000 on one worker it reached every client
+  46.155 ms (K=2) and 30.69 ms (K=20) after the last send, against 6.984 and
+  6.614 ms on base; at N=5000, 117.484 against 35.339 ms; with 4 workers,
+  33.332 against 12.134 ms. The delay still grows with the contexts per
+  worker.
 - F2: shutdown with 5000 open streams takes 10.7 to 16.4% longer (the ranges
   overlap), worker RSS grows by 3 to 4 KB per connection with one worker, and
   the 15 s keep-alive adds master and client CPU that base does not have.
@@ -518,13 +569,15 @@ Worse on the branch:
 Moved, not worse:
 
 - F1: a running flush blocks the requests that land on its worker (branch
-  action p99 50.551 ms at N=5000 on one worker). Base paid the same fan-out
-  inside the broadcasting action (2299.158 ms).
+  action p99 65.056 ms at N=5000 on one worker). Base paid the same fan-out
+  inside the broadcasting action (1888.692 ms).
 
 Unchanged:
 
 - F3: waiters still spin, so one hot key costs W cores, and its throughput
   still falls as W grows (branch C=1 global: 28526 ops/s at W=16).
+- F4: the fan-out without a store, the single-worker path, runs at base speed:
+  0.7 to 1.6% faster, with overlapping ranges in every configuration.
 
 Not measured:
 
@@ -533,8 +586,9 @@ Not measured:
   flush longer, which lengthens both F1 effects above.
 - F1: a paced stream of updates over several seconds. The script sends all K
   actions at once.
-- F1: the follow-up delay (the K=2 case) at N=5000 or with 4 workers. Its
-  growth with N is predicted from the flush duration, not measured.
+- All benchmarks except the H runs in the F1 regression checks: the branch on
+  the same filesystem as base. See Protocol.
+- F2, F3 and F5 on 5e38da9 and 70d23a5. Those sections are from 5a9850a.
 - F2: the HTTP/2 stream-reset check and the per-worker directory refresh timer
   (every 150 s by default, longer than any idle window here), and the
   destroyed-context safety valve.
