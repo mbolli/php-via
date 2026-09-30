@@ -143,9 +143,9 @@ No mocking framework: tests use real class instantiation with the env guard.
 | [src/Http/RequestHandler.php](src/Http/RequestHandler.php) | HTTP request routing |
 | [src/Http/SseHandler.php](src/Http/SseHandler.php) | SSE connection management |
 | [website/src/Examples/CounterExample.php](website/src/Examples/CounterExample.php) | Canonical usage example |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Deeper architectural notes |
-| [TESTING.md](TESTING.md) | Testing conventions |
-| [API.md](API.md) | Public API reference |
+| [website/templates/docs/api.html.twig](website/templates/docs/api.html.twig) | Public API reference |
+| [PERFORMANCE.md](PERFORMANCE.md) | Performance profile and scaling notes |
+| [bench/contention/RESULTS.md](bench/contention/RESULTS.md) | Contention benchmark results, base vs branch |
 
 ## Release Checklist
 
