@@ -42,7 +42,7 @@ All notable changes to php-via will be documented in this file.
   waits for that fan-out up to 1 s; past that it logs a warning and returns, and the frame follows
   on a later flush. `Config::withBroadcastCoalescing(false)` renders and publishes on every call, as
   before, except that a fan-out that other actions re-run 8 times in a row leaves the rest to a
-  flush paced by the tick, which `getBroadcastStats()` counts under `flushes`.
+  flush paced by the tick, which `getBroadcastStats()` counts under `flushes` (see Fixed).
   `withBroadcastTickMs(0)` keeps the coalescing but flushes every event-loop turn with no gap.
   Outside a coroutine (CLI scripts, tests) and during worker shutdown `broadcast()` stays
   synchronous. At shutdown the frames still waiting for the tick are rendered in a coroutine of
@@ -115,8 +115,7 @@ All notable changes to php-via will be documented in this file.
   session, and each write holds a lock on that session, so writes from several workers to different
   keys of one session all land (4 workers × 500 writes: 2,000 of 2,000 kept, about 680 without the
   lock). A key written twice keeps the last write, as before. What changes for apps:
-  - Values are serialized, so they must be serializable and an object comes back as a copy. A
-    value that cannot be serialized throws `\InvalidArgumentException`.
+  - Values must be serializable and come back as copies (see Breaking Changes).
   - Reading a key and writing it back is not atomic across workers: two tabs adding to one cart
     at the same moment on different workers can lose one of the adds.
   - One session's data is capped at 32 KB serialized, and a write past it throws
@@ -204,11 +203,11 @@ All notable changes to php-via will be documented in this file.
   own scope. 0.13.0 renders this way on every broadcast and has the same fault. After 8 passes the
   fan-out now hands the owed broadcast to the next flush, paced by the tick, and returns; during
   shutdown it drops it, since no flush runs any more. "Broadcast re-entrancy limit reached" is
-  logged only when the fan-out's own views broadcast its scope again in all 8 passes, directly or
-  from a coroutine they start during the fan-out, and that broadcast is still dropped, so such a
-  view cannot hold the worker. This holds with coalescing on too. A coroutine the action started
-  before it broadcast counts as another action. Coalesced broadcasts from other actions already
-  went to the next flush and were not affected.
+  logged only when the fan-out's own views broadcast its scope again in all 8 passes, directly,
+  through another scope or from a coroutine they start during the fan-out, and that broadcast is
+  still dropped, so such a view cannot hold the worker. This holds with coalescing on too. A
+  coroutine the action started before it broadcast counts as another action. Coalesced broadcasts
+  from other actions already went to the next flush and were not affected.
 
 ### Performance
 
