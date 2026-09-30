@@ -194,9 +194,16 @@ function lastFrames(array $contexts): array {
     }, $contexts);
 }
 
+function readEpochs(Via $app): ReadEpochs {
+    $epochs = (new ReflectionProperty(Via::class, 'readEpochs'))->getValue($app);
+    assert($epochs instanceof ReadEpochs);
+
+    return $epochs;
+}
+
 /** @return array<int, int> coroutine id => epoch still open */
 function openEpochs(Via $app): array {
-    $epochs = (new ReflectionProperty(Via::class, 'readEpochs'))->getValue($app);
+    $epochs = readEpochs($app);
 
     return (new ReflectionProperty(ReadEpochs::class, 'open'))->getValue($epochs);
 }
@@ -476,6 +483,30 @@ $cases = [
         });
 
         return ['renders' => $world->renders, 'frames' => array_map(frames(...), $contexts), 'open' => openEpochs($app)];
+    },
+
+    // A fan-out without coalescing: a0's view in room:a's pass broadcasts room:b, and ab's view broadcasts
+    // room:b again, so room:b re-runs under a renewed epoch before room:a's loop reaches ab. argv[2]:
+    // "off": in a coroutine with coalescing off. "outside": outside any coroutine.
+    'nested-renewal' => static function (string $variant = 'off'): array {
+        $app = snapshotApp(null, $variant === 'off' ? (new Config())->withBroadcastCoalescing(false) : null);
+        $world = new SnapshotWorld();
+        $contexts = [];
+        foreach (['a0' => ['room:a'], 'ab' => ['room:a', 'room:b'], 'a2' => ['room:a']] as $id => $scopes) {
+            $contexts[$id] = reader($app, $id, $scopes, $world);
+            frames($contexts[$id]);
+        }
+        $world->hook = static function () use ($app, $world): void {
+            $world->hook = static fn () => $app->broadcast('room:b');
+            $app->broadcast('room:b');
+        };
+        $epochs = readEpochs($app);
+        $renewals = $epochs->renewals;
+
+        $fanOut = static fn () => $app->broadcast('room:a');
+        $variant === 'off' ? inCoroutine($fanOut) : $fanOut();
+
+        return ['renders' => $world->renders, 'renewals' => $epochs->renewals - $renewals, 'open' => openEpochs($app)];
     },
 ];
 

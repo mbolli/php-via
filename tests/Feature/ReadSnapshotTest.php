@@ -103,6 +103,18 @@ test('the contexts after an overtaken one render once, under the renewed epoch',
     'one worker writes after the view read it' => ['local'],
 ]);
 
+test('a fan-out whose epoch a nested fan-out renewed renders its next context once', function (string $variant): void {
+    $r = readSnapshotCase('nested-renewal', $variant);
+
+    // ab: room:b's pass, its re-run, then room:a's pass under the re-run's epoch, with no overtaken retry.
+    expect($r['renders'])->toBe(['a0' => 1, 'ab' => 3, 'a2' => 1]);
+    expect($r['renewals'])->toBe(1, "only room:b's re-run renews");
+    expect($r['open'])->toBe([]);
+})->with([
+    'coalescing off' => ['off'],
+    'outside a coroutine' => ['outside'],
+]);
+
 test('a scope marked after a flush began, whose mark another flush took, is read and rendered again in full', function (): void {
     $r = readSnapshotCase('mark-taken-by-another-flush');
 
