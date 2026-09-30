@@ -59,7 +59,8 @@ All notable changes to php-via will be documented in this file.
   - A stream that has sent nothing for 15 s writes the SSE comment `: keep-alive`, which browsers
     and Datastar ignore. Proxies that cut idle connections, such as nginx with its 60 s default
     `proxy_read_timeout`, therefore keep idle streams open. `Config::withSseKeepAliveMs()` sets the
-    interval and `0` turns the comment off. Code that reads the raw stream sees the comment.
+    interval. `0` turns the comment off, and idle streams then wake once a minute. Code that reads
+    the raw stream sees the comment.
   - `Config::withSsePollIntervalMs()` now sets only how often the Dev Bar stream polls. Page
     streams do not poll (see Performance).
   - With `dispatch_mode` 1, 3 or 7 in `withSwooleSettings()`, OpenSwoole has no close event, and
@@ -81,14 +82,33 @@ All notable changes to php-via will be documented in this file.
   of the TTL or of the revival window, whichever is shorter (150 s by default), and restores an
   entry that has gone.
 
-- **A tab that reconnected before its old stream ended dropped out of its scopes and
-  `getClients()`.** The new stream registered the tab, then ended the old stream, which still
-  counted as the tab's last one and unregistered it again, firing `onClientDisconnect`. The tab
-  then missed broadcasts to custom and session scopes until its next reconnect. In 0.13.0 this was
-  every reconnect of an idle HTTP/1.1 tab to the same worker, such as a tab the browser hid and
-  showed again, because the old stream never noticed its connection close. A tab whose new stream
+- **With `worker_num > 1`, a client whose stream stayed busy for 120 s dropped out of
+  `getClients()` for good.** A row expired 120 s after its last heartbeat, and the next
+  `getClients()` deleted it, but the heartbeat ran only when the stream had nothing to send. A tab
+  that got a frame at least every 100 ms for two minutes left the list until it reconnected. Rows
+  no longer expire. The worker that registered a client removes it when the stream ends, and the
+  clients of a worker that crashes or is killed leave the list when OpenSwoole restarts it: 65 ms
+  after a SIGKILL in the test, against up to 120 s before. Every 60 s the first worker also drops
+  the clients of any worker process that no longer exists, in case the restart missed some.
+
+- **A tab that reconnected to the same worker before its old stream ended dropped out of its
+  scopes and `getClients()`.** The new stream registered the tab, then ended the old stream, which
+  still counted as the tab's last one and unregistered it again, firing `onClientDisconnect`. The
+  tab then missed broadcasts to custom and session scopes until its next reconnect. In 0.13.0 this
+  was every such reconnect of an idle HTTP/1.1 tab, such as a tab the browser hid and showed
+  again, because the old stream never noticed its connection close. A tab whose new stream
   replaces a running one now stays connected: `onClientConnect` fires once and
   `onClientDisconnect` fires when its last stream ends.
+
+- **A tab that reconnected to another worker could drop out of `getClients()`.** When its old
+  stream ended after the new one had registered, the old worker deleted the new row. Each worker
+  process now writes its own row for a client and removes only that one, and the list shows the
+  tab once.
+
+- **A full client registry broke SSE connections.** Past its capacity (the context directory size
+  from `Config::withContextDirectorySize()`, 4,096 rows by default), registering a client threw,
+  which ended that tab's SSE request, and so did every reconnect that registered it again. The
+  client is now left out of `getClients()` and a warning is logged.
 
 - **A `mutateGlobalState()` or `Signal::mutate()` call that timed out, or a worker that died while
   waiting in one, wedged the key.** Both left a ticket that the lock later served with no lease on
@@ -101,36 +121,17 @@ All notable changes to php-via will be documented in this file.
   that is next in line but cannot run for 2 s, for example because its event loop is blocked,
   just as an overdue holder is skipped, and its write can then overlap the next holder's.
 
+- **Releasing the mutate lock could erase the next holder's lease.** The releasing worker cleared
+  the lease after advancing the queue, and a holder that lost its lease that way could not be
+  recovered if it then died. The lease is now cleared first, and only by the holder still being
+  served.
+
 - **A tab could keep an older frame than one it had already received.** When a view waited on I/O
   during a broadcast, a broadcast that came after it could render the same tab and finish first.
   The older frame then arrived last and stayed until the next broadcast to one of the tab's scopes,
   with one worker or several. A fan-out now renders the tab again when a fan-out that started
   after it finished that tab first, so the tab shows the older frame briefly and then the current
   one. After 8 such renders in a row it stops and logs a warning.
-
-- **Releasing the mutate lock could erase the next holder's lease.** The releasing worker cleared
-  the lease after advancing the queue, and a holder that lost its lease that way could not be
-  recovered if it then died. The lease is now cleared first, and only by the holder still being
-  served.
-
-- **With `worker_num > 1`, a client whose stream stayed busy for 120 s dropped out of
-  `getClients()` for good.** A row expired 120 s after its last heartbeat, and the next
-  `getClients()` deleted it, but the heartbeat ran only when the stream had nothing to send. A tab
-  that got a frame at least every 100 ms for two minutes left the list until it reconnected. Rows
-  no longer expire. The worker that registered a client removes it when the stream ends, and the
-  clients of a worker that crashes or is killed leave the list when OpenSwoole restarts it: 65 ms
-  after a SIGKILL in the test, against up to 120 s before. Every 60 s the first worker also drops
-  the clients of any worker process that no longer exists, in case the restart missed some.
-
-- **A tab that reconnected to another worker could drop out of `getClients()`.** When its old
-  stream ended after the new one had registered, the old worker deleted the new row. Each worker
-  process now writes its own row for a client and removes only that one, and the list shows the
-  tab once.
-
-- **A full client registry broke SSE connections.** Past its capacity (the context directory size
-  from `Config::withContextDirectorySize()`, 4,096 rows by default), registering a client threw,
-  which ended that tab's SSE request, and so did every reconnect that registered it again. The
-  client is now left out of `getClients()` and a warning is logged.
 
 ### Performance
 
@@ -146,9 +147,9 @@ All notable changes to php-via will be documented in this file.
   `broadcast_stats` in the dev-mode `/_stats`, report per worker the broadcasts scheduled and
   coalesced, the flushes, the last, longest and total flush time, and the flushes that overran the
   tick. In a small `bench/contention/broadcast_storm.php` run (200 SSE clients, 50 actions from 10
-  connections, 1 worker) renders fell from 10,000 to 400 and frames per client from 50 to 2, and
-  the action p50 from 14 to 19 ms to under 1 ms. The last frame reached every client 25 ms after
-  the last action, against 12 to 19 ms before, which is the tick.
+  connections, 1 worker) renders fell from 10,000 to 400, frames per client from 50 to 2, and the
+  action p50 from between 14 and 19 ms to under 1 ms. The last frame reached every client one
+  tick (25 ms) after the last action, against 12 to 19 ms before.
 
 - **Contended `mutateGlobalState()` and `Signal::mutate()` scale with coroutines per worker.**
   Every waiting coroutine held its own ticket and read the whole row at reactor speed, because
@@ -180,8 +181,8 @@ All notable changes to php-via will be documented in this file.
   including the tabs the flush rendered before the mark, and any other scope goes to the next
   flush. A tab that an older flush renders after a newer one did is rendered again (see Fixed). A
   view that computes a new value from a scoped signal during a broadcast now computes it from the
-  flush's value, so use `increment()` or `mutate()` there. In `bench/contention/shared_read.php` (2,000
-  contexts, 5 scoped signals written by another worker, two runs per tree), store reads per
+  flush's value, so use `increment()` or `mutate()` there. In `bench/contention/shared_read.php`
+  (2,000 contexts, 5 scoped signals written by another worker, two runs per tree), store reads per
   broadcast fell from 20,000 to 5 with a view per context and from 10,005 to 5 with a cached route
   view. The store's cost over a single-worker run fell from 30 ms (+146%) to 1.6 ms (+8%) and from
   17 ms (+430%) to 0.6 ms (+14%) per broadcast.
@@ -198,13 +199,14 @@ All notable changes to php-via will be documented in this file.
   `getClients()` holds about 2.3 KB per client. In `bench/contention/get_clients.php` with 500
   clients, a call went from 2.4 ms to 0.1 µs, or 0.2 ms right after a connect, and a broadcast to
   100 tabs whose view counts the clients from 239 ms to 0.4 ms. With one worker a call went from
-  36 µs to 0.1 µs. The idle SSE loop no longer writes the registry on each wake.
+  36 µs to 0.1 µs.
 
 - **Idle SSE streams cost nothing between events.** Every page stream woke every 100 ms to check
-  its connection, and with `worker_num > 1` each wake also wrote the context directory in shared
-  memory, so idle CPU grew with the number of open tabs. A stream now sleeps until a patch is
-  queued, its connection closes, the worker stops or the keep-alive interval passes, which is one
-  wake per 15 s instead of 150. The directory refresh moved to one timer per worker (see Fixed).
+  its connection, and with `worker_num > 1` each wake also wrote the context directory and the
+  client registry in shared memory, so idle CPU grew with the number of open tabs. A stream now
+  sleeps until a patch is queued, its connection closes, the worker stops or the keep-alive
+  interval passes, which is one wake per 15 s instead of 150. The directory refresh moved to one
+  timer per worker (see Fixed).
   Patch latency does not change, because a queued patch always woke the stream at once.
   In `bench/contention/idle_sse.php` with 1,000 idle streams, worker CPU went from 4% of a core
   to below the 0.25% the run can resolve with one worker, and from 8.75% to below it with four.
