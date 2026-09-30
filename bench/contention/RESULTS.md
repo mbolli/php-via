@@ -16,7 +16,8 @@ only the changelog and the benchmark code style. Two later commits change
 F2, F3 and F5 were not rerun on them.
 
 Host: 20 cores, shared with other projects that run browser tests on it. PHP
-8.5.11 CLI (NTS) with opcache and JIT off, ext-openswoole 26.2.0.
+8.5.11 CLI (NTS) with opcache and JIT off except in Opcache and JIT,
+ext-openswoole 26.2.0.
 
 Protocol: A and B ran interleaved (B1, A1, B2, A2, ...; one shared_read check
 ran A first) with identical arguments, one benchmark at a time. The 1-minute
@@ -581,13 +582,15 @@ Unchanged:
 
 Not measured:
 
-- All benchmarks: opcache and JIT were off, and every view was a cheap PHP
-  closure (broadcast_storm: 512 bytes, `--render-us=0`). Heavier views make a
-  flush longer, which lengthens both F1 effects above.
+- All benchmarks: every view was a cheap PHP closure (broadcast_storm: 512
+  bytes, `--render-us=0`). Heavier views make a flush longer, which lengthens
+  both F1 effects above. Opcache and JIT were off in the F sections; Opcache
+  and JIT below covers them for one or two configurations per benchmark.
 - F1: a paced stream of updates over several seconds. The script sends all K
   actions at once.
-- All benchmarks except the H runs in the F1 regression checks: the branch on
-  the same filesystem as base. See Protocol.
+- The F sections, except the H runs in the F1 regression checks: the branch on
+  the same filesystem as base. See Protocol. Opcache and JIT ran both trees on
+  btrfs.
 - F2, F3 and F5 on 5e38da9 and 70d23a5. Those sections are from 5a9850a.
 - F2: the HTTP/2 stream-reset check and the per-worker directory refresh timer
   (every 150 s by default, longer than any idle window here), and the
@@ -609,3 +612,381 @@ Not measured:
   script runs outside a coroutine, so `broadcast()` renders synchronously).
 - F5 single mode: a caller that keeps the returned array while a client
   registers or unregisters makes PHP copy it (O(N)) at that write. Not timed.
+
+## Opcache and JIT
+
+The F sections ran with opcache and JIT off. This section repeats one or two
+configurations of each benchmark under four opcache and JIT settings. It comes
+from a later session (2026-09-30, 06:44 to 08:12 UTC) on other commits in both
+trees, with both trees on btrfs, so its absolute numbers are not comparable
+with any table above. Base idle worker CPU at 5000 connections on one worker
+with opcache off is 25.11% here and 13.39% in F2. Compare within this section
+only.
+
+### Trees, settings and protocol for the opcache and JIT runs
+
+Base (A) is 8405dbc, the v0.13.0 release commit on master and the branch's
+merge base. It adds d286954 (shared signal rows keyed by scope) to the 5ff9d25
+base used above. Branch (B) is 3c1070d plus the lock_contention read-back fix
+from b4c4ad0, which changes only `bench/contention/lock_contention.php`. Both
+trees are worktrees on the same btrfs filesystem with byte-identical copies of
+the scripts, and every run is `php bench/contention/<name>.php` from inside the
+tree. lock_contention, idle_sse and shared_read record the commit in their
+JSON, with `src/` clean in every run.
+
+Each setting is one extra ini directory in `PHP_INI_SCAN_DIR`, which every
+forked worker, server and client process inherits:
+
+| Setting | ini values |
+|---|---|
+| off | `opcache.enable_cli=0`, `opcache.jit=disable` |
+| opcache | `opcache.enable=1`, `opcache.enable_cli=1`, `opcache.jit=disable`, `opcache.validate_timestamps=0`, `opcache.memory_consumption=256` |
+| jit-tracing | as opcache, with `opcache.jit=tracing` and `opcache.jit_buffer_size=128M` |
+| jit-function | as opcache, with `opcache.jit=function` and `opcache.jit_buffer_size=128M` |
+
+A probe per benchmark read `opcache_get_status()` in the processes that do the
+work, started the way the script starts them: the forked lock_contention
+workers, the server workers of broadcast_storm and idle_sse, and the single
+process of shared_read and get_clients. Each setting was in effect in both
+trees. With off, opcache was disabled. With opcache, the project's `src/`
+files were cached and JIT was off. Under jit-tracing the JIT buffer held
+compiled traces after the work, and under jit-function it held 3.2 to 3.9 MB
+of compiled code. broadcast_storm and shared_read also report the opcache and
+JIT state in their JSON, get_clients reports the opcache state, and every run
+matched its setting.
+
+Host, PHP and OpenSwoole are the same as above. Each configuration ran 3 reps.
+Within a rep the settings ran in the order off, opcache, jit-tracing,
+jit-function, each as B then A with identical arguments, one run at a time.
+The 1-minute load before a run was 0.78 to 5.80, except at lock_contention
+W=16: each of those runs pushed the load to 8.71 to 12.47 with its own 16
+spinning workers, so 23 of the 24 waited 30 s (one waited 60 s) and started at
+5.15 to 7.47. The tables use the format described at the top of this file.
+
+All 156 invocations exited 0 and were correct in both trees under every
+setting, both JIT modes included, and none crashed. All 48 lock_contention
+invocations reached the expected final value in all 192 rounds, with no error
+or timeout. All 24 broadcast_storm runs converged all 1000 clients to the
+server value with no failed action. All 36 idle_sse invocations (72 server
+runs) connected all 5000 streams, delivered the broadcast to every one and shut
+down without a timeout. All 24 shared_read runs had 0 mismatched frames, and
+all 24 get_clients runs had every freshness and patch flag true.
+
+### lock_contention under opcache and JIT
+
+W=4, default sweep (`--reps=1 --timeout=300`: 20000 ops per worker, C=1, 8,
+32), 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| ops/s, global, C=1 | off | 135091 (131255 to 146410) | 304322 (289173 to 309001) | 2.25x higher |
+| ops/s, global, C=1 | opcache | 131092 (130582 to 132258) | 277528 (275577 to 320591) | 2.12x higher |
+| ops/s, global, C=1 | jit-tracing | 108407 (102057 to 109190) | 226867 (219450 to 231865) | 2.09x higher |
+| ops/s, global, C=1 | jit-function | 113504 (111381 to 118992) | 234203 (225754 to 235584) | 2.06x higher |
+| ops/s, global, C=32 | off | 53856 (50522 to 54126) | 317559 (314416 to 319970) | 5.90x higher |
+| ops/s, global, C=32 | opcache | 55281 (54220 to 59042) | 295217 (258598 to 300439) | 5.34x higher |
+| ops/s, global, C=32 | jit-tracing | 59008 (55424 to 61299) | 265073 (256650 to 288775) | 4.49x higher |
+| ops/s, global, C=32 | jit-function | 55273 (53860 to 58475) | 287670 (280720 to 288328) | 5.20x higher |
+| CPU per op, global, C=32 (us) | off | 74.27 (73.88 to 79.1) | 12.46 (12.4 to 12.7) | 5.96x lower |
+| CPU per op, global, C=32 (us) | opcache | 72.35 (67.72 to 73.69) | 13.53 (13.3 to 15.29) | 5.35x lower |
+| CPU per op, global, C=32 (us) | jit-tracing | 67.73 (65.25 to 72.14) | 15.04 (13.83 to 15.54) | 4.50x lower |
+| CPU per op, global, C=32 (us) | jit-function | 72.36 (68.4 to 74.26) | 13.89 (13.83 to 13.91) | 5.21x lower |
+| ops/s, signal, C=1 | off | 163014 (149116 to 165100) | 241947 (226077 to 271523) | +48.4% |
+| ops/s, signal, C=1 | opcache | 148341 (147603 to 152390) | 258537 (245424 to 282620) | +74.3% |
+| ops/s, signal, C=1 | jit-tracing | 121741 (120831 to 121743) | 212239 (210999 to 219933) | +74.3% |
+| ops/s, signal, C=1 | jit-function | 127183 (120619 to 128045) | 199981 (195488 to 207654) | +57.2% |
+| ops/s, signal, C=32 | off | 57317 (54590 to 66607) | 307569 (270138 to 320946) | 5.37x higher |
+| ops/s, signal, C=32 | opcache | 57745 (54492 to 60619) | 279382 (270498 to 325778) | 4.84x higher |
+| ops/s, signal, C=32 | jit-tracing | 59084 (58235 to 60407) | 311476 (290569 to 316885) | 5.27x higher |
+| ops/s, signal, C=32 | jit-function | 55978 (55385 to 60899) | 270228 (263674 to 291979) | 4.83x higher |
+
+Both JIT modes slow the C=1 case in both trees, and no JIT range overlaps the
+range with opcache off: ops/s drops by 12.3 to 25.5% and CPU per op rises by 15
+to 34%. The time goes mostly between holders, not into the mutation.
+Global-mode handoff at C=1 grows from 1.74 us (off) to 2.81 us (jit-tracing)
+and 2.48 us (jit-function) on the branch and from 5.14 to 7.03 and 6.63 us on
+base, while the median hold time stays within 1.56 to 1.76 us on the branch and
+2.25 to 2.41 us on base; only the branch's jit-function hold (1.76 us against
+1.56 us) is clear of its off range. The cause was not isolated. Base loses 16.0
+to 25.3% of its C=1 throughput and the branch 12.3 to 25.5%, so the branch
+still does 2.06x to 2.25x base's global throughput at C=1. At C=32 base gains
+up to 9.6% (global, jit-tracing: 55424 to 61299 against 50522 to 54126 ops/s),
+and the branch under jit-tracing does 16.5% fewer global ops/s than with
+opcache off (256650 to 288775 against 314416 to 319970). With opcache alone it
+already does 7.0% fewer (258598 to 300439), so that loss is not specific to
+JIT. In signal mode at C=32 no range in either tree is clear of its off range.
+`cpu_cores` stays at about 4 (W) in both trees under every setting, so waiters
+still spin.
+
+W=16, C=1 (`--workers=16 --coroutines=1 --ops=20000 --reps=1
+--timeout=300`), 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| ops/s, global | off | 20179 (19616 to 21199) | 32587 (29791 to 33357) | +61.5% |
+| ops/s, global | opcache | 20481 (19071 to 21533) | 33591 (30305 to 34114) | +64.0% |
+| ops/s, global | jit-tracing | 20547 (20094 to 20608) | 31812 (30797 to 33730) | +54.8% |
+| ops/s, global | jit-function | 20143 (16443 to 20575) | 32547 (31922 to 35692) | +61.6% |
+| CPU per op, global (us) | off | 771.99 (752.39 to 802.78) | 480.65 (471.44 to 524.91) | -37.7% |
+| CPU per op, global (us) | opcache | 779.39 (740.46 to 831.13) | 475.42 (464.12 to 517.23) | -39.0% |
+| CPU per op, global (us) | jit-tracing | 774.78 (773.96 to 790.11) | 496.67 (471.55 to 503.61) | -35.9% |
+| CPU per op, global (us) | jit-function | 782.61 (774.14 to 849.3) | 476.52 (445.13 to 488.06) | -39.1% |
+| ops/s, signal | off | 20706 (19093 to 23440) | 30358 (28045 to 31992) | +46.6% |
+| ops/s, signal | opcache | 21435 (18234 to 21644) | 31402 (26638 to 31590) | +46.5% |
+| ops/s, signal | jit-tracing | 19405 (19113 to 20953) | 34576 (29871 to 36471) | +78.2% |
+| ops/s, signal | jit-function | 18201 (17598 to 20131) | 34891 (34151 to 36423) | +91.7% |
+| CPU per op, signal (us) | off | 770.58 (681.33 to 831.14) | 505.57 (488.47 to 534.64) | -34.4% |
+| CPU per op, signal (us) | opcache | 735.42 (733.42 to 846.61) | 498.94 (492.33 to 524.68) | -32.2% |
+| CPU per op, signal (us) | jit-tracing | 780.52 (761.08 to 831.27) | 461.77 (436.33 to 503.08) | -40.8% |
+| CPU per op, signal (us) | jit-function | 846.74 (789.64 to 905.35) | 456.62 (437.34 to 461.94) | -46.1% |
+
+The branch leads under every setting without overlap, by 54.8 to 64.0% in
+global and 46.5 to 91.7% in signal ops/s. In signal mode the lead is largest
+under JIT, with base medians lower (18201 and 19405 against 20706 ops/s) and
+branch medians higher (34576 and 34891 against 30358). Only the branch's
+jit-function range lies clear of its off range; the branch's jit-tracing range
+and both base JIT ranges overlap their off ranges, so 3 reps do not show that
+JIT widens the gap. Two runs had a worker descheduled (`cpu_cores` below 14 of
+16) and are kept in the ranges: base jit-function rep 1 in global mode (16443
+ops/s) and branch opcache rep 1 in signal mode (26638 ops/s).
+
+### broadcast_storm under opcache and JIT
+
+Defaults, `php bench/contention/broadcast_storm.php` (N=1000, K=200,
+concurrency 50, 1 worker, tab mode, global state), 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| storm to converge (ms) | off | 1426.038 (1381.789 to 1521.236) | 40.153 (38.292 to 75.317) | 35.5x lower |
+| storm to converge (ms) | opcache | 1284.946 (1213.331 to 1339.874) | 44.915 (42.587 to 51.802) | 28.6x lower |
+| storm to converge (ms) | jit-tracing | 1064.268 (1043.523 to 1156.915) | 59.949 (52.736 to 64.08) | 17.8x lower |
+| storm to converge (ms) | jit-function | 1143.299 (1077.496 to 1191.939) | 43.187 (35.357 to 48.613) | 26.5x lower |
+| converge after last send (ms) | off | 342.476 (338.031 to 357.894) | 25.043 (16.953 to 26.524) | 13.7x lower |
+| converge after last send (ms) | opcache | 336.154 (297.234 to 373.822) | 20.766 (20.665 to 21.82) | 16.2x lower |
+| converge after last send (ms) | jit-tracing | 262.962 (255.621 to 280.713) | 19.181 (9.184 to 35.71) | 13.7x lower |
+| converge after last send (ms) | jit-function | 279.764 (264.066 to 292.276) | 19.527 (18.51 to 23.067) | 14.3x lower |
+| worker CPU net of idle (s) | off | 1.348 (1.303 to 1.463) | 0.02 (0.02 to 0.07) | 67.4x lower |
+| worker CPU net of idle (s) | opcache | 1.224 (1.149 to 1.262) | 0.04 (0.03 to 0.04) | 30.6x lower |
+| worker CPU net of idle (s) | jit-tracing | 1.021 (1.007 to 1.084) | 0.05 (0.05 to 0.06) | 20.4x lower |
+| worker CPU net of idle (s) | jit-function | 1.114 (1.048 to 1.13) | 0.03 (0.02 to 0.04) | 37.1x lower |
+| action latency p50 (ms) | off | 350.771 (337.56 to 355.988) | 1.387 (1.385 to 1.823) | 253x lower |
+| action latency p50 (ms) | opcache | 309.672 (299.24 to 316.403) | 0.596 (0.499 to 0.896) | 520x lower |
+| action latency p50 (ms) | jit-tracing | 258.199 (256.994 to 281.044) | 2.248 (0.904 to 7.387) | 115x lower |
+| action latency p50 (ms) | jit-function | 281.108 (265.149 to 292.44) | 0.498 (0.37 to 1.305) | 564x lower |
+| action latency p99 (ms) | off | 364.902 (345.471 to 452.058) | 9.878 (8.751 to 53.91) | 36.9x lower |
+| action latency p99 (ms) | opcache | 336.838 (302.926 to 373.788) | 22.294 (19.902 to 27.196) | 15.1x lower |
+| action latency p99 (ms) | jit-tracing | 273.563 (267.039 to 298.06) | 35.278 (24.386 to 38.106) | 7.75x lower |
+| action latency p99 (ms) | jit-function | 289.346 (273.157 to 298.042) | 19.857 (15.74 to 23.88) | 14.6x lower |
+
+Base renders 200000 views and sends 200 frames per client under every setting,
+the branch 2000 and 2, except one branch jit-tracing run (rep 3) that flushed a
+third time (3000 renders, 3 frames). Branch worker CPU is 2 to 7 clock ticks,
+so its CPU ratios give the order of magnitude only. Base converges 9.9% sooner
+with opcache, 25.4% with jit-tracing and 19.8% with jit-function. The branch is
+slowest under jit-tracing: 59.949 ms storm to converge against 40.153 ms with
+opcache off, and 2.248 against 1.387 ms action p50. Its action p99 is 9.878 ms
+with opcache off and 19.857 to 35.278 ms with opcache on. All of these ranges
+overlap with off, whose storm and p99 ranges reach 75.317 and 53.91 ms through
+one slow run (rep 3). In the other direction, the branch's action p50 with
+opcache (0.499 to 0.896 ms) and jit-function (0.37 to 1.305 ms) lies below its
+off range (1.385 to 1.823 ms). JIT compile time inside a 40 to 60 ms storm is a
+possible cause, not a measured one. Only this configuration ran: the larger
+storm (N=5000), 4 workers and the low-load check (K=2, one actor) were not run
+under these settings.
+
+### idle_sse under opcache and JIT
+
+`--n=5000 --workers=1,4 --idle=15 --settle=3`, 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| worker CPU, 1 worker (%) | off | 25.11 (24.93 to 27.04) | 0.47 (0.33 to 0.47) | 53.4x lower |
+| worker CPU, 1 worker (%) | opcache | 21.65 (20.71 to 21.92) | 0.4 | 54.1x lower |
+| worker CPU, 1 worker (%) | jit-tracing | 19.18 (14.85 to 19.25) | 0.47 (0.33 to 0.47) | 40.8x lower |
+| worker CPU, 1 worker (%) | jit-function | 20.18 (19.91 to 20.98) | 0.4 (0.4 to 0.47) | 50.4x lower |
+| worker CPU, 4 workers summed (%) | off | 53.08 (51.48 to 53.54) | 0.53 (0.34 to 0.87) | 100x lower |
+| worker CPU, 4 workers summed (%) | opcache | 45.82 (40.36 to 47.15) | 0.73 (0.73 to 0.87) | 62.8x lower |
+| worker CPU, 4 workers summed (%) | jit-tracing | 38.62 (25.84 to 40.56) | 0.46 (0.4 to 0.52) | 84.0x lower |
+| worker CPU, 4 workers summed (%) | jit-function | 43.5 (29.11 to 43.76) | 0.66 (0.53 to 0.73) | 65.9x lower |
+| wakeups/s, 4 workers | off | 2276.1 (2259.8 to 2363.6) | 84.8 (58.6 to 91.7) | 26.8x lower |
+| wakeups/s, 4 workers | opcache | 2248 (2232.2 to 2311.9) | 89.1 (86.3 to 94) | 25.2x lower |
+| wakeups/s, 4 workers | jit-tracing | 2236.1 (2064 to 2375.6) | 76 (69.9 to 78.2) | 29.4x lower |
+| wakeups/s, 4 workers | jit-function | 2275.8 (2101.6 to 2325.5) | 79.6 (77.6 to 84.5) | 28.6x lower |
+| broadcast to all connections, 4 workers (ms) | off | 62.26 (62.19 to 68.36) | 48.5 (33.61 to 81.64) | -22.1%, ranges overlap |
+| broadcast to all connections, 4 workers (ms) | opcache | 68.4 (67.62 to 71.12) | 47.63 (47.41 to 64.63) | -30.4% |
+| broadcast to all connections, 4 workers (ms) | jit-tracing | 67.16 (62.26 to 78.03) | 82.39 (73.56 to 83.43) | +22.7%, ranges overlap |
+| broadcast to all connections, 4 workers (ms) | jit-function | 56.87 (53.46 to 65.97) | 59.96 (32.3 to 98.25) | +5.4%, ranges overlap |
+| worker RSS, 1 worker (MB) | off | 210.4 (209.9 to 210.4) | 229.8 (226.4 to 230.3) | +9.2% |
+| worker RSS, 1 worker (MB) | opcache | 170.8 (170.5 to 171.2) | 177.3 (176.5 to 177.3) | +3.8% |
+| worker RSS, 1 worker (MB) | jit-tracing | 177.5 (177.3 to 177.6) | 212.2 (211.3 to 212.5) | +19.5% |
+| worker RSS, 1 worker (MB) | jit-function | 173.6 (173.1 to 174.1) | 180.3 (180.3 to 181) | +3.9% |
+
+Wakeups do not depend on the setting. At 1 worker the medians are 577.7 to
+599.4/s on base and 18.5 to 20.7/s on the branch. Base idle CPU falls with
+opcache and JIT because each wake costs less: at 1 worker by 13.8% (opcache),
+23.6% (jit-tracing) and 19.6% (jit-function). Branch CPU at 1 worker is 5 to 7
+clock ticks per 15 s window (one 10 ms tick is 0.067%), near the measurement
+floor, so its ratios are rough. Some base runs came in low, with all workers
+lower together while wakeups fell by less than 10%: jit-tracing rep 1 (14.85%
+at 1 worker, 25.84% at 4) and jit-function rep 1 at 4 workers (29.11%). The
+same happened with opcache off in extra rep 6 (20.78% at 1 worker, 27.71% at
+4), so these runs are read as host state and kept in the ranges. That off run
+falls inside the opcache and jit-function ranges at 1 worker, so those two
+drops rest on 3 reps each; jit-tracing stays clear of all 6 off runs (14.19 to
+20.05% against 20.78 to 27.04%).
+
+Reps 4 to 6 ran right after, with off and jit-tracing only, to check the two
+differences below. Over all 6 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| broadcast to all connections, 4 workers (ms) | off | 66.68 (62.19 to 75.69) | 45.135 (33.61 to 81.64) | -32.3%, ranges overlap |
+| broadcast to all connections, 4 workers (ms) | jit-tracing | 66.215 (62.26 to 142.72) | 82.91 (71.82 to 96.25) | +25.2%, ranges overlap |
+| worker RSS, 1 worker (MB) | off | 209.75 (206.8 to 210.4) | 229.55 (226.4 to 230.3) | +9.4% |
+| worker RSS, 1 worker (MB) | jit-tracing | 177.55 (176.8 to 192.8) | 212.1 (209.4 to 212.5) | +19.5% |
+
+Under jit-tracing all 6 branch runs took 71.82 ms or more to reach every
+connection with 4 workers. With opcache off 2 of 6 did (80.42 and 81.64 ms) and
+the other 4 took 33.61 to 48.5 ms, and under jit-function 1 of 3 did
+(98.25 ms). So under jit-tracing the branch reaches every connection later than
+base at the median (82.91 against 66.215 ms), while with opcache off it is
+earlier. The ranges overlap and the cause was not investigated; this is a
+signal to follow up, not a proven regression. The fire request lands on worker
+id 1 with opcache off and on worker id 2 with opcache on, in both trees, and
+with opcache but no JIT the branch took 47.41 to 64.63 ms, so the worker
+placement alone does not explain it. With 1 worker the branch median is at or
+below base under every setting.
+
+Branch worker RSS at 1 worker is 34.7 MB above base under jit-tracing (every
+branch run above every base run), against 19.4 MB with opcache off and 6.5 and
+6.7 MB with opcache or jit-function. A `/proc` breakdown of separate 1-worker
+runs puts the difference in private anonymous memory: RssAnon was 186 to 191
+MB for the branch under jit-tracing, 153 to 158 MB for the branch with opcache
+and 157 MB for base under jit-tracing, while RssShmem, which holds the opcache
+and JIT shared memory, was 6 to 8 MB in all of them. RssAnon stayed
+flat through the idle window, so the memory is allocated while the connections
+are set up and does not grow while idle. Its cause was not investigated.
+Shutdown medians are 106.03 to 145.28 ms in every cell, with no timeout and no
+setting effect beyond noise.
+
+### shared_read under opcache and JIT
+
+Defaults, `php bench/contention/shared_read.php` (N=2000, S=5, 20 broadcasts,
+tab and route modes, remote writer), 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| with store, tab (ms per broadcast) | off | 49.71 (49.492 to 49.948) | 21.827 (21.524 to 22.496) | 2.28x lower |
+| with store, tab (ms per broadcast) | opcache | 47.463 (47.371 to 49.844) | 20.786 (20.776 to 22.06) | 2.28x lower |
+| with store, tab (ms per broadcast) | jit-tracing | 42.554 (42.433 to 43.236) | 17.076 (17.033 to 17.335) | 2.49x lower |
+| with store, tab (ms per broadcast) | jit-function | 44.103 (43.791 to 45.994) | 18.716 (17.823 to 18.826) | 2.36x lower |
+| with store, route (ms per broadcast) | off | 20.296 (20.227 to 20.744) | 4.48 (4.399 to 4.9) | 4.53x lower |
+| with store, route (ms per broadcast) | opcache | 19.608 (19.496 to 19.62) | 4.176 (4.058 to 4.45) | 4.70x lower |
+| with store, route (ms per broadcast) | jit-tracing | 17.36 (17.274 to 18.269) | 2.476 (2.463 to 2.48) | 7.01x lower |
+| with store, route (ms per broadcast) | jit-function | 18.202 (18.175 to 19.309) | 3.153 (3.045 to 3.27) | 5.77x lower |
+| no store, route (ms per broadcast) | off | 3.717 (3.713 to 3.758) | 3.721 (3.669 to 4.053) | +0.1%, ranges overlap |
+| no store, route (ms per broadcast) | opcache | 3.554 (3.518 to 3.683) | 3.553 (3.489 to 3.775) | 0.0%, ranges overlap |
+| no store, route (ms per broadcast) | jit-tracing | 2.364 (2.334 to 2.476) | 2.228 (2.226 to 2.257) | -5.8% |
+| no store, route (ms per broadcast) | jit-function | 2.773 (2.706 to 2.946) | 2.755 (2.653 to 2.883) | -0.6%, ranges overlap |
+| store overhead over no store, tab (%) | off | 155.41 (155.17 to 158.07) | 11.45 (11.34 to 13.03) |  |
+| store overhead over no store, tab (%) | opcache | 146.21 (145.5 to 147.17) | 10.18 (9.9 to 10.71) |  |
+| store overhead over no store, tab (%) | jit-tracing | 167.61 (164.52 to 169.66) | 8.41 (7.62 to 8.42) |  |
+| store overhead over no store, tab (%) | jit-function | 161.4 (158.6 to 162.85) | 6.99 (6.94 to 8.99) |  |
+| store overhead over no store, route (%) | off | 446.67 (444.15 to 451.99) | 20.41 (19.88 to 20.89) |  |
+| store overhead over no store, route (%) | opcache | 451.79 (432.75 to 454.24) | 17.54 (16.31 to 17.88) |  |
+| store overhead over no store, route (%) | jit-tracing | 637.79 (634.24 to 640.03) | 10.53 (9.9 to 11.25) |  |
+| store overhead over no store, route (%) | jit-function | 555.36 (555.36 to 572.74) | 14.42 (13.45 to 14.76) |  |
+
+Store reads per broadcast are the same under every setting: 20000 (tab) and
+10005 (route) on base, 5 on the branch. JIT speeds up rendering more than the
+store read, which stays at 2.15 to 2.45 us per `SharedSignalStore::get()` of
+an array in every run, so on base the store's share of a fan-out grows under
+JIT: its overhead goes from 155.41% (off) to 167.61% (jit-tracing) in tab mode
+and from 446.67% to 637.79% in route mode. The branch gains from JIT on the
+whole path, and its lead with the store grows from 2.28x to 2.49x (tab) and
+from 4.53x to 7.01x (route) between opcache off and jit-tracing. Its remaining
+store overhead falls from 11.45% to 6.99 to 8.41% (tab) and from 20.41% to
+10.53 to 14.42% (route) under JIT. The branch reads the store 5 times per
+broadcast, so a residual that shrinks with JIT points to PHP work per context
+on the store path rather than to store reads. Without a store the trees are
+within 2.3% of each other, except in route mode under jit-tracing, where the
+branch is 5.8% faster with non-overlapping ranges over 3 reps.
+
+### get_clients under opcache and JIT
+
+`--n=100,1000 --fanout-cap=1000 --broadcasts=3 --timeout=300` (shared and
+single modes; every broadcast covers all N contexts), 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| shared, N=100, broadcast to 100 contexts (ms) | off | 44.26 (43.5 to 45.32) | 0.21 (0.2 to 0.21) | 211x lower |
+| shared, N=100, broadcast to 100 contexts (ms) | opcache | 35.98 (35.56 to 38.38) | 0.2 (0.19 to 0.2) | 180x lower |
+| shared, N=100, broadcast to 100 contexts (ms) | jit-tracing | 31.37 (28.77 to 31.49) | 1.01 (0.98 to 1.18) | 31.1x lower |
+| shared, N=100, broadcast to 100 contexts (ms) | jit-function | 31.74 (30.55 to 32.16) | 0.16 (0.15 to 0.16) | 198x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | off | 4409.31 (4378.25 to 4518.73) | 1.89 (1.89 to 1.9) | 2333x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | opcache | 3732.41 (3614.78 to 3736.12) | 1.86 (1.7 to 1.86) | 2007x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | jit-tracing | 3021.75 (2919.57 to 3035.75) | 1.32 (1.29 to 1.37) | 2289x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | jit-function | 3116.77 (3085.45 to 3150.11) | 1.43 (1.4 to 1.58) | 2180x lower |
+| shared, N=1000, call after one new client (ms) | off | 4.268 (4.2473 to 4.3922) | 0.3757 (0.3709 to 0.3777) | 11.4x lower |
+| shared, N=1000, call after one new client (ms) | opcache | 3.7196 (3.4989 to 3.7359) | 0.3544 (0.3494 to 0.3626) | 10.5x lower |
+| shared, N=1000, call after one new client (ms) | jit-tracing | 3.0275 (2.8151 to 3.0287) | 0.3125 (0.2995 to 0.3135) | 9.69x lower |
+| shared, N=1000, call after one new client (ms) | jit-function | 3.0195 (2.9647 to 3.158) | 0.3424 (0.3303 to 0.3605) | 8.82x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | off | 104.6 (103.85 to 106.84) | 1.38 (1.37 to 1.4) | 75.8x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | opcache | 102.8 (100.57 to 107.85) | 1.35 (1.3 to 1.38) | 76.1x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | jit-tracing | 97.99 (94.38 to 99.56) | 0.82 (0.8 to 0.84) | 120x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | jit-function | 98.89 (96.71 to 100.67) | 1.04 (0.99 to 1.13) | 95.1x lower |
+
+Opcache and JIT make base's shared path faster by a constant factor and keep
+its quadratic shape: the N=1000 broadcast takes 4409.31 ms with opcache off and
+3021.75 ms under jit-tracing. Single mode gains only 6.3% on base (104.6
+against 97.99 ms). Branch call times without a membership change stay at the
+script's rounding floor under every setting (0 to 0.0002 ms) and are left out.
+Under jit-tracing the branch's shared N=100 broadcast, the first case the
+script measures, takes 1.01 ms against 0.16 to 0.21 ms under the other
+settings. A branch-only run that repeats that case four times in one process
+measured 0.91, 0.13, 0.25 and 0.14 ms under jit-tracing and 0.19 to 0.2 ms with
+opcache off, which points to trace compilation in the first case; the
+compilation itself was not timed. In the N=1000 cases, measured after both
+N=100 cases, jit-tracing is the branch's fastest setting (shared 1.32 ms,
+single 0.82 ms). In the single N=100 case, measured second, it is slower than
+jit-function (0.16 against 0.1 ms in every run).
+
+### What the settings change
+
+- Opcache without JIT makes base at most 18.7% faster (get_clients shared N=100
+  broadcast; 15.4% at N=1000) and changes no verdict. Base lock_contention at
+  C=1 is up to 9.0% slower with it, with overlapping ranges.
+- JIT makes base faster in broadcast_storm, idle_sse, shared_read and the
+  get_clients shared path: storm to converge by 25.4% (jit-tracing) and 19.8%
+  (jit-function), idle worker CPU at 1 worker by 23.6% and 19.6%, shared_read
+  tab with store by 14.4% and 11.3%, and the get_clients shared N=1000
+  broadcast by 31.5% and 29.3%. The get_clients single-mode N=1000 broadcast
+  gains only 5.5 to 6.3%. Renders, frames, wakeups and store reads stay the
+  same, so the work the branch removes is still there.
+- Both JIT modes slow the least contended lock case (lock_contention W=4, C=1:
+  one coroutine per worker) by 12.3 to 25.5% in both trees. The time is lost
+  mostly between holders; the cause was not isolated.
+- The branch advantage holds under every setting on the metrics each benchmark
+  targets, and base and branch ranges stay apart there. For off, opcache,
+  jit-tracing and jit-function: lock_contention W=4 global C=32 ops/s 5.90x,
+  5.34x, 4.49x and 5.20x higher; broadcast_storm storm to converge 35.5x,
+  28.6x, 17.8x and 26.5x lower; idle_sse worker CPU at 1 worker 53.4x, 54.1x,
+  40.8x and 50.4x lower; shared_read route with store 4.53x, 4.70x, 7.01x and
+  5.77x lower; get_clients shared N=1000 broadcast 2333x, 2007x, 2289x and
+  2180x lower. The advantage shrinks in lock_contention global mode at C=32
+  under jit-tracing, with both trees clear of their off ranges: base gains
+  9.6% and the branch loses 16.5% (7.0% with opcache alone). In broadcast_storm
+  the ratio of medians falls from 35.5x to 17.8x under jit-tracing, but only
+  base getting 9.9 to 25.4% faster is clear of noise: every branch storm range
+  overlaps its off range. The advantage grows in shared_read under JIT.
+- Under jit-tracing the branch shows one difference clear of noise and two
+  within overlapping ranges, none explained yet. Clear: a 1-worker server with
+  5000 idle connections holds 34.7 MB more RSS than base (every branch run
+  above every base run), against 6.5 to 19.4 MB under the other settings, all
+  of it anonymous memory. Within overlapping ranges: the 4-worker broadcast
+  after idle reaches every connection later than on base (82.91 against 66.215
+  ms over 6 runs), and broadcast_storm converges in 59.949 ms against 40.153 ms
+  with opcache off. The first get_clients case takes 1.01 ms against 0.16 to
+  0.21 ms and drops to 0.13 to 0.25 ms when it repeats in one process, which
+  points to trace compilation.
+- No run crashed or returned a wrong result under any setting.
