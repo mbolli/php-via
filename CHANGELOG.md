@@ -11,10 +11,11 @@ All notable changes to php-via will be documented in this file.
   `setValue()`, `increment()` and `mutate()`, and broadcasts received from other workers or nodes.
   A flush re-renders each marked scope once, renders a context in several marked scopes once, and
   publishes each scope to the broker once. It runs at the end of the event-loop turn when the
-  worker's last flush started or ended at least one broadcast tick ago, otherwise one tick after
-  that (`Config::withBroadcastTickMs()`, default 25 ms). Flushes of different scopes run side by
-  side, so a view that waits on I/O delays only its own scope, and a scope broadcast while its
-  fan-out runs is rendered by the first flush after that fan-out ends. What changes for apps:
+  worker's last flush started at least one broadcast tick ago and ended at least half a tick ago,
+  otherwise as soon as both have passed (`Config::withBroadcastTickMs()`, default 25 ms). Flushes
+  of different scopes run side by side, so a view that waits on I/O delays only its own scope, and
+  a scope broadcast while its fan-out runs is rendered by the first flush after that fan-out ends.
+  What changes for apps:
   - Views render the state at flush time. Several writes in one action send one frame instead of
     one per write, as long as the action does not wait on I/O between them: a database call in
     between lets the flush send a half-updated frame, so write first and broadcast last. A value an
@@ -25,8 +26,10 @@ All notable changes to php-via will be documented in this file.
     before the frame arrives. An error in the fan-out or in the broker publish is logged instead of
     failing the action.
   - Under sustained load a client gets about one frame per tick and skips the states in between.
-    The broadcast reaches clients up to one tick plus one flush later, and one more tick on another
-    worker.
+    Flushes that take F ms, with F over half the tick, start F plus half a tick apart instead. A
+    broadcast reaches clients at most that gap plus one flush after the call, and one more tick on
+    another worker. A request that reaches a worker while a flush renders without waiting on I/O
+    waits for that flush to end.
   - Dev Bar: fan-out renders appear as their own `broadcast {scope}` traces, and the action trace
     shows a `broadcast.schedule` span per call.
   - Two new warnings. "Broadcast chain limit reached" means views broadcast each other's scopes in
@@ -139,17 +142,19 @@ All notable changes to php-via will be documented in this file.
   signal write re-rendered every client in the scope inside the calling action and published once
   per call, so N clients and M actions cost N x M renders, and each action waited for its own
   fan-out. Each worker now renders a scope at most once per flush and starts a flush at least one
-  tick after the previous one started or ended, so flushes whose views render for F ms without
-  waiting on I/O use at most F / (F + tick) of the worker whatever the action rate.
+  tick after the previous one started and half a tick after it ended, so flushes whose views render
+  for F ms without waiting on I/O use at most F / max(tick, F + tick / 2) of the worker whatever
+  the action rate, that is F / tick while F is at most half the tick and two thirds when F equals
+  the tick. Between two flushes the worker always has half a tick for requests, timers and I/O.
   `MessageBroker::publish()` is called once per scope per flush, and never from two
   coroutines of one worker at the same time, so RedisBroker and NatsBroker no longer share their
   publish connection between coroutines. `$app->getStats()->getBroadcastStats()`, and
   `broadcast_stats` in the dev-mode `/_stats`, report per worker the broadcasts scheduled and
   coalesced, the flushes, the last, longest and total flush time, and the flushes that overran the
   tick. In a small `bench/contention/broadcast_storm.php` run (200 SSE clients, 50 actions from 10
-  connections, 1 worker) renders fell from 10,000 to 400, frames per client from 50 to 2, and the
-  action p50 from between 14 and 19 ms to under 1 ms. The last frame reached every client one
-  tick (25 ms) after the last action, against 12 to 19 ms before.
+  connections, 1 worker, 3 runs) renders fell from 10,000 to 400, frames per client from 50 to 2,
+  and the action p50 from about 11 ms to between 0.5 and 1.2 ms. The last frame reached every
+  client 17 to 28 ms after the last action, against 11 ms before.
 
 - **Contended `mutateGlobalState()` and `Signal::mutate()` scale with coroutines per worker.**
   Every waiting coroutine held its own ticket and read the whole row at reactor speed, because

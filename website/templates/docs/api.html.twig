@@ -72,10 +72,10 @@ $app->broadcast('room:lobby');
     <p>Inside a coroutine (actions, timers, SSE hooks, broker messages) the call only marks the scope. The
     worker's next flush re-renders it once and publishes it to other workers and nodes once, however many times
     it was broadcast in the meantime, so views show the state as it is then. That flush runs at the end of the
-    current event-loop turn when the worker's last flush started or ended at least one broadcast tick
-    (25&nbsp;ms by default) ago, otherwise one tick after that. Outside a coroutine and while the worker shuts
-    down, the call renders before it returns. See <a href="/docs/broadcasting#timing">Broadcasting → When the
-    update is sent</a>.</p>
+    current event-loop turn when the worker's last flush started at least one broadcast tick (25&nbsp;ms by
+    default) ago and ended at least half a tick ago, otherwise as soon as both have passed. Outside a coroutine
+    and while the worker shuts down, the call renders before it returns. See <a
+    href="/docs/broadcasting#timing">Broadcasting → When the update is sent</a>.</p>
 
     <h3 id="via-flush-broadcasts"><code>flushBroadcasts(): void</code></h3>
     <p>Run the broadcasts marked so far now, in the calling coroutine, without waiting for the tick. Use it when

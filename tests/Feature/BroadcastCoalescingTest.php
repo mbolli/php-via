@@ -150,27 +150,69 @@ describe('broadcast tick', function (): void {
         expect($r['final'])->toBe(2);
     });
 
-    test('a burst faster than the tick flushes at least one tick apart', function (): void {
+    test('a burst faster than the tick starts a flush one tick after the previous one started', function (): void {
         $r = coalescingCase('tick-gap');
 
-        // 200 ms of broadcasts every 2 ms against a 20 ms tick and a 3 ms fan-out: about 80 sent, 10 flushes.
+        // 200 ms of broadcasts every 2 ms against a 20 ms tick and an 8 ms fan-out: about 11 flushes.
         expect($r['sent'])->toBeGreaterThan(20);
         expect($r['flushes'])->toBeGreaterThanOrEqual(3, 'the burst is flushed as it goes, not only at its end');
-        expect($r['flushes'])->toBeLessThanOrEqual(12);
+        expect($r['flushes'])->toBeLessThanOrEqual(13);
         // OpenSwoole timers count whole milliseconds and fire up to about 1 ms early (measured 18.9 to 21 ms).
-        expect($r['minGapMs'])->toBeGreaterThanOrEqual(18.0);
+        expect($r['minStartGapMs'])->toBeGreaterThanOrEqual(18.0);
+        // Counting the tick from the end of the flush makes it 28 ms.
+        expect($r['medianStartGapMs'])->toBeLessThan(25.0);
 
         expect($r['stats']['flushes'])->toBe($r['flushes']);
         expect($r['stats']['scheduled'])->toBe($r['sent']);
         expect($r['stats']['coalesced'])->toBe($r['sent'] - $r['flushes']);
     });
 
-    test('a flush whose views wait on I/O still starts the next one a tick after it ended', function (): void {
+    test('a flush whose views wait on I/O starts the next one a tick after it started, once it has ended', function (): void {
         $r = coalescingCase('tick-gap-yielding');
 
         expect($r['flushes'])->toBeGreaterThanOrEqual(3);
-        // Broadcasts made during the 10 ms pass must not start the next flush a tick after it started.
-        expect($r['minGapMs'])->toBeGreaterThanOrEqual(18.0);
+        expect($r['minStartGapMs'])->toBeGreaterThanOrEqual(18.0);
+        expect($r['medianStartGapMs'])->toBeLessThan(25.0, 'a tick from the end of the 10 ms pass would be 30 ms');
+        expect($r['minIdleGapMs'])->toBeGreaterThanOrEqual(0.0, 'two passes of one scope never overlap');
+    });
+
+    test('a flush longer than half the tick is followed by half a tick for the rest of the worker', function (): void {
+        $r = coalescingCase('tick-floor');
+
+        // A 15 ms fan-out against a 20 ms tick: a tick from its start would leave 5 ms.
+        expect($r['minIdleGapMs'])->toBeGreaterThanOrEqual(8.0, 'half the tick, less timer slack');
+        expect($r['medianStartGapMs'])->toBeLessThan(30.0, 'a whole tick after the end would be 35 ms');
+    });
+
+    test('flushes longer than the tick leave half a tick to the rest of the worker and still coalesce', function (): void {
+        $r = coalescingCase('tick-overrun');
+
+        // A 30 ms fan-out against a 20 ms tick, under 300 ms of broadcasts every 2 ms: a flush every 40 ms.
+        expect($r['minIdleGapMs'])->toBeGreaterThanOrEqual(8.0, 'half the tick, less timer slack');
+        expect($r['medianIdleGapMs'])->toBeLessThan(16.0, 'a whole tick after the end would be 20 ms');
+        // Back-to-back flushes gave each other coroutine one step per flush: 1 broadcast and 1 wake.
+        expect($r['sent'] / $r['flushes'])->toBeGreaterThanOrEqual(3.0);
+        expect($r['wakes'] / $r['flushes'])->toBeGreaterThanOrEqual(4.0);
+        expect($r['flushes'])->toBeLessThanOrEqual(10);
+    });
+
+    test('a broadcast after a flush that overran the tick waits half a tick after that flush ended', function (): void {
+        $r = coalescingCase('overrun-follow-up');
+
+        expect($r['flushes'])->toBe(2);
+        expect($r['timer'])->toBeTrue('the tick counted from the start of the 60 ms flush has passed, the floor has not');
+        expect($r['waitMs'])->toBeGreaterThan(20.0, 'half the 50 ms tick after the flush ended');
+        expect($r['waitMs'])->toBeLessThan(35.0, 'a whole tick after the flush ended would be 50 ms');
+        expect($r['flags'])->toBe(COALESCE_IDLE);
+    });
+
+    test('a broadcast made while an overrunning flush waits on I/O is flushed half a tick after that flush ends', function (): void {
+        $r = coalescingCase('overrun-pending');
+
+        expect($r['flushes'])->toBe(2);
+        expect($r['minIdleGapMs'])->toBeGreaterThanOrEqual(8.0, 'half the 20 ms tick, less timer slack');
+        expect($r['minIdleGapMs'])->toBeLessThan(16.0, 'a whole tick after the 40 ms pass would be 20 ms');
+        expect($r['flags'])->toBe(COALESCE_IDLE);
     });
 
     test('a tick of 0 flushes every turn with no gap', function (): void {

@@ -163,8 +163,11 @@ class Via {
 
     private bool $publishing = false;
 
-    /** hrtime(true) when the last flush started or ended, whichever came later; null before the first one */
-    private ?int $lastFlushEdgeNs = null;
+    /** hrtime(true) when the worker's latest flush started; null before the first one */
+    private ?int $lastFlushStartNs = null;
+
+    /** hrtime(true) when the worker's latest flush ended; null before the first one */
+    private ?int $lastFlushEndNs = null;
 
     /** Set in workerStart: from then on the reactor can run a deferred flush even outside a coroutine. */
     private bool $workerStarted = false;
@@ -595,11 +598,11 @@ class Via {
      *
      * Inside a coroutine this only marks the scope. The worker's next flush renders it once and
      * publishes it once, however often it was broadcast: at the end of the current event-loop
-     * turn when the worker's last flush started or ended at least Config::getBroadcastTickMs()
-     * ago, otherwise that long after it. Views render the state as it is then; call
-     * flushBroadcasts() to force it. Outside a coroutine, during shutdown, or with
-     * Config::withBroadcastCoalescing(false), it renders before returning, and the publish is sent
-     * by this call or, when another coroutine is publishing, by that one.
+     * turn when the worker's last flush started at least Config::getBroadcastTickMs() ago and
+     * ended at least half that ago, otherwise as soon as both have passed. Views render the state
+     * as it is then; call flushBroadcasts() to force it. Outside a coroutine, during shutdown, or
+     * with Config::withBroadcastCoalescing(false), it renders before returning, and the publish is
+     * sent by this call or, when another coroutine is publishing, by that one.
      *
      * @param string $scope Scope to broadcast to
      */
@@ -2170,8 +2173,8 @@ class Via {
     }
 
     /**
-     * Schedule the next flush: at the end of this event-loop turn when the worker's last flush
-     * started or ended at least one broadcast tick ago, otherwise one tick after that.
+     * Schedule the next flush: one broadcast tick after the worker's last flush started and half a
+     * tick after it ended, or at the end of this event-loop turn when both have passed.
      */
     private function scheduleFlush(): void {
         // A scope whose fan-out is running is scheduled when it ends; shutdown drops what is left.
@@ -2214,12 +2217,17 @@ class Via {
      * 0 when a flush may start now, else the wait in ms (at least 1: Timer::after(0) fails).
      */
     private function msUntilNextTick(): int {
-        $tickMs = $this->config->getBroadcastTickMs();
-        if ($tickMs === 0 || $this->lastFlushEdgeNs === null) {
+        $tickNs = $this->config->getBroadcastTickMs() * 1_000_000;
+        if ($tickNs === 0 || $this->lastFlushStartNs === null) {
             return 0;
         }
 
-        $remainingNs = $tickMs * 1_000_000 - (hrtime(true) - $this->lastFlushEdgeNs);
+        $now = hrtime(true);
+        $remainingNs = $tickNs - ($now - $this->lastFlushStartNs);
+        if ($this->lastFlushEndNs !== null) {
+            // Flushes longer than the tick would otherwise run back to back and starve the worker's other coroutines.
+            $remainingNs = max($remainingNs, intdiv($tickNs, 2) - ($now - $this->lastFlushEndNs));
+        }
 
         return $remainingNs > 0 ? max(1, (int) ceil($remainingNs / 1_000_000)) : 0;
     }
@@ -2252,7 +2260,7 @@ class Via {
         $this->flushScheduled = false;
         $this->flushTimerId = null;
 
-        // A flush that was running when this was scheduled may have ended since, which moves the tick.
+        // Timers can fire early: never start more than 1 ms before the tick.
         if ($this->msUntilNextTick() > 1) {
             $this->scheduleFlush();
 
@@ -2274,7 +2282,7 @@ class Via {
 
         $this->dirtyScopes = array_diff_key($this->dirtyScopes, $batch);
         $this->runningFlushes[$cid] = 0;
-        $startNs = $this->lastFlushEdgeNs = hrtime(true);
+        $startNs = $this->lastFlushStartNs = hrtime(true);
 
         try {
             $this->runFlush($batch, $inlinePublish);
@@ -2283,8 +2291,8 @@ class Via {
             $this->log('error', 'Broadcast flush failed: ' . Logger::describe($e));
         } finally {
             unset($this->runningFlushes[$cid]);
-            $this->lastFlushEdgeNs = hrtime(true);
-            $this->stats->trackBroadcastFlush(($this->lastFlushEdgeNs - $startNs) / 1e6, $this->config->getBroadcastTickMs());
+            $this->lastFlushEndNs = hrtime(true);
+            $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->config->getBroadcastTickMs());
             $this->scheduleFlush();
         }
     }

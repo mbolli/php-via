@@ -412,15 +412,18 @@ class Config {
     }
 
     /**
-     * Set the broadcast tick: the minimum gap between two flushes of one worker (default 25 ms).
+     * Set the broadcast tick: the minimum gap between the starts of two flushes of one worker
+     * (default 25 ms). A flush also starts at least half a tick after the previous one ended.
      *
-     * A broadcast on a worker whose last flush started or ended at least this long ago is
-     * flushed at the end of the current event-loop turn, so an idle server adds no delay. Under
-     * load, a flush starts this long after the previous one started or ended (OpenSwoole timers
-     * resolve to 1 ms), so flushes whose views render for F ms without waiting on I/O take at
-     * most F / (F + tick) of a worker, however many actions arrive, and every broadcast in
-     * between shares the next flush. A flush does not wait for another scope's flush that waits
-     * on I/O. Larger values cost latency under load and save CPU.
+     * A broadcast on a worker whose last flush started at least a tick ago and ended at least
+     * half a tick ago is flushed at the end of the current event-loop turn, so an idle server
+     * adds no delay. Under load, flushes whose views render for F ms without waiting on I/O start
+     * max(tick, F + tick / 2) apart (OpenSwoole timers resolve to 1 ms), so they take at most
+     * F / max(tick, F + tick / 2) of a worker however many actions arrive, the worker keeps at
+     * least half a tick between two flushes for requests and timers, and every broadcast in
+     * between shares the next flush. A scope never renders in two flushes at once, and a flush
+     * does not wait for another scope's flush that waits on I/O. Larger values cost latency
+     * under load and save CPU.
      * Without coalescing (withBroadcastCoalescing(false)) there is no tick.
      *
      * @param int $ms gap in milliseconds; 0 flushes at the end of every event-loop turn with no gap

@@ -67,13 +67,15 @@ $c->action(function (Context $c) use ($shared): void {
         returns.
     </p>
     <p>
-        A flush runs at the end of the current event-loop turn when the worker's last flush started or ended at
-        least one broadcast tick ago, so on a quiet server the update goes out at once. Otherwise it runs one
-        tick after that, and every broadcast in between shares it. The tick is 25&nbsp;ms by default. The
-        re-rendering a worker does per second then depends on its clients and the tick, not on how many actions
-        arrive: flushes whose views render for F milliseconds without waiting on I/O use at most F / (F + 25) of
-        the worker. Under load, clients skip intermediate frames and still end on the latest state. Broadcasts
-        received from other workers and nodes go through the same flush.
+        A flush runs at the end of the current event-loop turn when the worker's last flush started at least
+        one broadcast tick ago and ended at least half a tick ago, so on a quiet server the update goes out at
+        once. Otherwise it runs as soon as both have passed, and every broadcast in between shares it. The tick
+        is 25&nbsp;ms by default. The re-rendering a worker does per second then depends on its clients and the
+        tick, not on how many actions arrive: flushes whose views render for F milliseconds without waiting on
+        I/O use at most F / 25 of the worker up to F = 12.5, and F / (F + 12.5) above that. After every flush
+        the worker has at least half a tick for requests, timers and I/O, so slow flushes slow requests down
+        but cannot starve them. Under load, clients skip intermediate frames and still end on the latest state.
+        Broadcasts received from other workers and nodes go through the same flush.
     </p>
     <p>
         Flushes of different scopes run side by side, so a view that waits on a slow database query delays only
@@ -92,8 +94,8 @@ $config = (new Config())
         and coalesced, flushes, the last, longest and total flush time, and <code>flush_overruns</code>, the
         flushes that took longer than the tick. Flush times are wall time, including time the views spend
         waiting on I/O while the worker does other work. When the views do not wait on I/O, flushes longer
-        than the tick mean the worker spends more than half its time in them under sustained load, so
-        climbing overruns are the signal to raise the tick or make the views cheaper.
+        than the tick mean the worker spends more than two thirds of its time in them under sustained load,
+        so climbing overruns are the signal to raise the tick or make the views cheaper.
     </p>
     <p>What this means for your code:</p>
     <ul>

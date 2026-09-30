@@ -231,6 +231,67 @@ function frames(Context $ctx): array {
     ));
 }
 
+/**
+ * A context in $scope whose view records each render's [start, end] in $flushes; $render does the work.
+ *
+ * @param list<array{0: int, 1: int}> $flushes
+ * @param callable(int): mixed        $render  gets the number of renders recorded so far
+ */
+function timedObserver(Via $app, string $scope, array &$flushes, callable $render): void {
+    $ctx = new Context('obs', '/obs', $app);
+    $ctx->scope($scope);
+    $app->contexts['obs'] = $ctx;
+    $ctx->view(static function () use (&$flushes, $render): string {
+        // Flushes run in a coroutine; the warm-up render below does not.
+        if (Coroutine::getCid() > 0) {
+            $start = hrtime(true);
+            $render(count($flushes));
+            $flushes[] = [$start, hrtime(true)];
+        }
+
+        return '<div id="obs">x</div>';
+    }, cacheUpdates: false);
+
+    // A first render loads classes, which would delay the first timed flush and shorten its gap.
+    $app->broadcast($scope);
+    patches($ctx);
+}
+
+/** Hold the worker for $ms without yielding, as a view rendering many contexts does. */
+function busy(int $ms): void {
+    $start = hrtime(true);
+    while (hrtime(true) - $start < $ms * 1_000_000);
+}
+
+/**
+ * Start gaps run from one flush start to the next, idle gaps from one flush end to the next start.
+ *
+ * @param list<array{0: int, 1: int}> $flushes [start, end] of each flush
+ *
+ * @return array{flushes: int, minStartGapMs: ?float, medianStartGapMs: ?float, minIdleGapMs: ?float, medianIdleGapMs: ?float}
+ */
+function flushGaps(array $flushes): array {
+    $starts = [];
+    $idle = [];
+    for ($i = 1; $i < count($flushes); ++$i) {
+        $starts[] = ($flushes[$i][0] - $flushes[$i - 1][0]) / 1e6;
+        $idle[] = ($flushes[$i][0] - $flushes[$i - 1][1]) / 1e6;
+    }
+    $median = static function (array $values): ?float {
+        sort($values);
+
+        return $values === [] ? null : $values[intdiv(count($values), 2)];
+    };
+
+    return [
+        'flushes' => count($flushes),
+        'minStartGapMs' => $starts === [] ? null : min($starts),
+        'medianStartGapMs' => $median($starts),
+        'minIdleGapMs' => $idle === [] ? null : min($idle),
+        'medianIdleGapMs' => $median($idle),
+    ];
+}
+
 $cases = [
     'one-turn' => static function (): array {
         $app = app();
@@ -346,21 +407,8 @@ $cases = [
 
     'tick-gap' => static function (): array {
         $app = app((new Config())->withBroadcastTickMs(20));
-
-        /** @var list<array{0: int, 1: int}> $flushes */
         $flushes = [];
-        $ctx = new Context('obs', '/obs', $app);
-        $ctx->scope('room:tick');
-        $app->contexts['obs'] = $ctx;
-        $ctx->view(static function () use (&$flushes): string {
-            // A fan-out that holds the worker for 3 ms.
-            $start = hrtime(true);
-            while (hrtime(true) - $start < 3_000_000);
-
-            $flushes[] = [$start, hrtime(true)];
-
-            return '<div id="obs">x</div>';
-        }, cacheUpdates: false);
+        timedObserver($app, 'room:tick', $flushes, static fn () => busy(8));
 
         $sent = 0;
         inCoroutine(static function () use ($app, &$sent): void {
@@ -372,30 +420,14 @@ $cases = [
             }
         });
 
-        $gaps = [];
-        for ($i = 1; $i < count($flushes); ++$i) {
-            $gaps[] = ($flushes[$i][0] - $flushes[$i - 1][1]) / 1e6;
-        }
-
-        return ['sent' => $sent, 'flushes' => count($flushes), 'minGapMs' => $gaps === [] ? null : min($gaps), 'stats' => $app->getStats()->getBroadcastStats()];
+        return ['sent' => $sent, ...flushGaps($flushes), 'stats' => $app->getStats()->getBroadcastStats()];
     },
 
     'tick-gap-yielding' => static function (): array {
         $app = app((new Config())->withBroadcastTickMs(20));
-
-        /** @var list<array{0: int, 1: int}> $flushes */
         $flushes = [];
-        $ctx = new Context('obs', '/obs', $app);
-        $ctx->scope('room:tick');
-        $app->contexts['obs'] = $ctx;
-        $ctx->view(static function () use (&$flushes): string {
-            // A fan-out that waits 10 ms on I/O, while the broadcasts keep coming.
-            $start = hrtime(true);
-            Coroutine::usleep(10_000);
-            $flushes[] = [$start, hrtime(true)];
-
-            return '<div id="obs">x</div>';
-        }, cacheUpdates: false);
+        // A fan-out that waits 10 ms on I/O, while the broadcasts keep coming.
+        timedObserver($app, 'room:tick', $flushes, static fn () => Coroutine::usleep(10_000));
 
         inCoroutine(static function () use ($app): void {
             $until = hrtime(true) + 200_000_000;
@@ -405,12 +437,92 @@ $cases = [
             }
         });
 
-        $gaps = [];
-        for ($i = 1; $i < count($flushes); ++$i) {
-            $gaps[] = ($flushes[$i][0] - $flushes[$i - 1][1]) / 1e6;
-        }
+        return flushGaps($flushes);
+    },
 
-        return ['flushes' => count($flushes), 'minGapMs' => $gaps === [] ? null : min($gaps)];
+    'tick-floor' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(20));
+        $flushes = [];
+        timedObserver($app, 'room:floor', $flushes, static fn () => busy(15));
+
+        inCoroutine(static function () use ($app): void {
+            $until = hrtime(true) + 200_000_000;
+            while (hrtime(true) < $until) {
+                $app->broadcast('room:floor');
+                Coroutine::usleep(2_000);
+            }
+        });
+
+        return flushGaps($flushes);
+    },
+
+    'tick-overrun' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(20));
+        $flushes = [];
+        timedObserver($app, 'room:over', $flushes, static fn () => busy(30));
+
+        $sent = 0;
+        $wakes = 0;
+        inCoroutine(static function () use ($app, &$sent, &$wakes): void {
+            $until = hrtime(true) + 300_000_000;
+            // Other work on the worker, such as a request or a timer, that wants to run every 1 ms.
+            Coroutine::create(static function () use ($until, &$wakes): void {
+                while (hrtime(true) < $until) {
+                    Coroutine::usleep(1_000);
+                    ++$wakes;
+                }
+            });
+            while (hrtime(true) < $until) {
+                $app->broadcast('room:over');
+                ++$sent;
+                Coroutine::usleep(2_000);
+            }
+        });
+
+        return ['sent' => $sent, 'wakes' => $wakes, ...flushGaps($flushes)];
+    },
+
+    'overrun-follow-up' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(50));
+        $flushes = [];
+        // Only the first flush overruns the tick.
+        timedObserver($app, 'room:follow', $flushes, static fn (int $i) => $i === 0 ? busy(60) : null);
+
+        $seen = inCoroutine(static function () use ($app): array {
+            $app->broadcast('room:follow');
+            // Wakes once the 60 ms flush is done.
+            Coroutine::usleep(1_000);
+
+            $markedAt = hrtime(true);
+            $app->broadcast('room:follow');
+            $flags = flags($app);
+            Coroutine::usleep(100_000);
+
+            return ['markedAt' => $markedAt, 'timer' => $flags['flushTimerId'] !== null];
+        });
+
+        return [
+            'flushes' => count($flushes),
+            'timer' => $seen['timer'],
+            'waitMs' => isset($flushes[1]) ? ($flushes[1][0] - $seen['markedAt']) / 1e6 : null,
+            'flags' => flags($app),
+        ];
+    },
+
+    'overrun-pending' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(20));
+        $flushes = [];
+        timedObserver($app, 'room:pending', $flushes, static fn (int $i) => $i === 0 ? Coroutine::usleep(40_000) : null);
+
+        inCoroutine(static function () use ($app): void {
+            $app->broadcast('room:pending');
+            Coroutine::usleep(5_000);
+            // Marked while the 40 ms pass waits on I/O, so still pending when it ends.
+            $app->broadcast('room:pending');
+            Coroutine::usleep(150_000);
+        });
+
+        return [...flushGaps($flushes), 'flags' => flags($app)];
     },
 
     'invalidate-after-pass' => static function (): array {
