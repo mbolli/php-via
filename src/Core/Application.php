@@ -11,6 +11,7 @@ use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SharedClientRegistry;
 use Mbolli\PhpVia\State\SharedContextDirectory;
+use Mbolli\PhpVia\State\SharedSessionStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
@@ -68,6 +69,9 @@ class Application {
 
     /** Cross-worker SSE client registry; null when running single-worker. */
     private ?SharedClientRegistry $clientRegistry = null;
+
+    /** Cross-worker session data; null when running single-worker. */
+    private ?SharedSessionStore $sessionStore = null;
 
     /** @var array<string, array<string, mixed>> Per-session key-value storage (sessionId => key => value) */
     private array $sessionData = [];
@@ -313,6 +317,36 @@ class Application {
     }
 
     /**
+     * Install the cross-worker session data store.
+     *
+     * @internal called from Via::start() in the master process, and by tests standing several
+     *           Via instances in for several workers
+     */
+    public function setSessionStore(?SharedSessionStore $store): void {
+        $this->sessionStore = $store;
+    }
+
+    public function getSessionStore(): ?SharedSessionStore {
+        return $this->sessionStore;
+    }
+
+    /**
+     * Evict the least recently used sessions from the shared store once it is over capacity.
+     *
+     * @internal run periodically on the leader worker
+     */
+    public function evictSharedSessions(): void {
+        if ($this->sessionStore === null) {
+            return;
+        }
+
+        $removed = $this->sessionStore->evict();
+        if ($removed > 0) {
+            $this->logger->log('warning', "Session data LRU eviction: removed {$removed} inactive sessions (cap: {$this->sessionStore->capacity()})");
+        }
+    }
+
+    /**
      * Get global state value.
      */
     public function getGlobalState(string $key, mixed $default = null): mixed {
@@ -409,13 +443,18 @@ class Application {
      * Get a per-session data value.
      *
      * Session data persists for the server process lifetime (not cleared on disconnect).
-     * It is shared across all browser tabs that belong to the same session.
+     * It is shared across all browser tabs that belong to the same session, and across
+     * workers when worker_num > 1.
      *
      * @param string $sessionId Session cookie ID
      * @param string $key       Data key
      * @param mixed  $default   Value returned if key is not set
      */
     public function getSessionData(string $sessionId, string $key, mixed $default = null): mixed {
+        if ($this->sessionStore !== null) {
+            return $this->sessionStore->get($sessionId, $key, $default);
+        }
+
         $this->sessionLastAccess[$sessionId] = time();
 
         return $this->sessionData[$sessionId][$key] ?? $default;
@@ -423,8 +462,20 @@ class Application {
 
     /**
      * Set a per-session data value.
+     *
+     * @throws \InvalidArgumentException with worker_num > 1, if the value cannot be serialized
+     * @throws \OverflowException        with worker_num > 1, if the session's serialized data would exceed
+     *                                   Config::withSessionTableSize()
+     * @throws \RuntimeException         with worker_num > 1, if the session's lock is not taken within
+     *                                   about 7 s (a worker died holding it or its event loop is blocked)
      */
     public function setSessionData(string $sessionId, string $key, mixed $value): void {
+        if ($this->sessionStore !== null) {
+            $this->sessionStore->set($sessionId, $key, $value);
+
+            return;
+        }
+
         $this->sessionLastAccess[$sessionId] = time();
         $this->sessionData[$sessionId][$key] = $value;
         $this->evictOldestSessionsIfNeeded();
@@ -435,8 +486,17 @@ class Application {
      *
      * @param string      $sessionId Session cookie ID
      * @param null|string $key       Key to remove, or null to clear the entire session bucket
+     *
+     * @throws \RuntimeException with worker_num > 1, if the session's lock is not taken within about
+     *                           7 s (a worker died holding it or its event loop is blocked)
      */
     public function clearSessionData(string $sessionId, ?string $key = null): void {
+        if ($this->sessionStore !== null) {
+            $this->sessionStore->clear($sessionId, $key);
+
+            return;
+        }
+
         if ($key === null) {
             unset($this->sessionData[$sessionId], $this->sessionLastAccess[$sessionId]);
         } else {

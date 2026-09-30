@@ -439,10 +439,13 @@ $c->getNamespace();       // component namespace, or null
     <h3 id="context-clear-session-data"><code>clearSessionData(?string $key = null): void</code></h3>
     <p>Per-session server-side storage, keyed on the session cookie. Survives page refreshes and context destruction — unlike signals, which reset on refresh.</p>
     <p>
-        Session data lives in the memory of one worker process. With <code>worker_num &gt; 1</code>, a request
-        served by another worker does not see it, and a load balancer cannot help because every worker sits
-        behind the same port. Run <code>worker_num = 1</code> when you rely on session data, or keep the value
-        in a <code>Scope::SESSION</code> signal, which is shared.
+        With <code>worker_num &gt; 1</code> session data lives in shared memory, so every worker sees it.
+        Values are serialized there: they must be serializable (<code>setSessionData()</code> throws
+        <code>\InvalidArgumentException</code> otherwise), an object comes back as a copy, and one
+        session's data is capped at 32&nbsp;KB by default, past which <code>setSessionData()</code> throws
+        <code>\OverflowException</code>. <code>Config::withSessionTableSize()</code> raises the cap and the
+        number of sessions kept. Each key is last-write-wins, so reading a key and writing it back from two
+        workers at once can lose one of the writes.
     </p>
     {% code 'php' %}{% verbatim %}
 $c->setSessionData('auth', ['user' => 'ada', 'role' => 'Engineer']);
@@ -552,6 +555,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withGlobalStateTableSize(2048, 65536)   // GlobalState rows × value bytes (default 1024 × 32768; rows is a floor)
     ->withScopedSignalTableSize(1024, 32768)  // shared values of scoped signals (defaults shown)
     ->withContextDirectorySize(4096)          // contexts reachable from every worker; size for peak tabs
+    ->withSessionTableSize(4096, 32768)       // sessions × bytes per session of shared session data (defaults shown)
     // GlobalState persistence
     ->withPersistentGlobalState(__DIR__ . '/state.sqlite', flushMs: 1000) // write-behind to SQLite
     // Multi-node broker (optional — required only for multi-worker / multi-server deployments)

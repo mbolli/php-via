@@ -75,6 +75,8 @@ final class TicketLock {
      * @return T
      *
      * @throws \RuntimeException if the lock is not taken within ACQUIRE_TIMEOUT_MS of taking a ticket
+     *
+     * @phpstan-impure
      */
     public function run(string $key, callable $critical): mixed {
         $gate = $this->enterGate($key);

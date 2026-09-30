@@ -63,8 +63,8 @@ $config = (new Config())
     <p>
         <strong>No sticky routing needed.</strong> Every worker sits behind the same port, so a load balancer
         cannot pick one anyway. An action or SSE reconnect that lands on a worker other than the one that
-        rendered the page rebuilds the context there. Scoped signal values, GlobalState and the client list are
-        shared; session data, server-owned TAB signals and PHP statics stay per worker. See
+        rendered the page rebuilds the context there. Scoped signal values, GlobalState, session data and the
+        client list are shared; server-owned TAB signals and PHP statics stay per worker. See
         <a href="/docs/deployment#same-machine">Deployment → Same machine</a> for the details and for the
         atomic update methods.
     </p>

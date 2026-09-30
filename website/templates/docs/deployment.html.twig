@@ -339,7 +339,7 @@ $config = (new Config())
         A tab's context lives on the worker that rendered the page. Every worker can still reach it:
         contexts are recorded in a shared-memory directory, and an action or SSE reconnect that lands on
         another worker rebuilds the context by re-running the route handler. Scoped signal values,
-        GlobalState and the connected-client list are in shared memory as well.
+        GlobalState, session data and the connected-client list are in shared memory as well.
     </p>
     <p>
         <strong>What stays per worker.</strong> The server logs these at start-up:
@@ -353,6 +353,9 @@ $config = (new Config())
             <code>#[Signal(..., atomic: true)]</code> in the composition API. During a broadcast each scoped
             signal is read from shared memory once and reused for every tab the flush renders, so a view that
             computes a new value from one needs <code>increment()</code> or <code>mutate()</code> as well.
+            Session data has no atomic update: two tabs of one session that read a key and write it back at
+            the same moment can lose one write, so keep a value several tabs change at once in a
+            <code>Scope::SESSION</code> signal and use <code>mutate()</code>.
         </li>
         <li>
             <strong>PHP statics and objects in your own code.</strong> A simulation held in a static diverges
@@ -362,10 +365,6 @@ $config = (new Config())
             <strong>Server-owned TAB signals.</strong> A rebuilt context starts them from the handler's initial
             value. Use a scoped signal for that state.
         </li>
-        <li>
-            <strong>Session data</strong> (<code>$c-&gt;sessionData()</code>). Each worker has its own copy.
-            Use a <code>Scope::SESSION</code> signal, or run one worker.
-        </li>
     </ul>
     <p>
         The shared tables are sized at startup. <code>Config::withGlobalStateTableSize()</code> (default
@@ -373,6 +372,22 @@ $config = (new Config())
         <code>withContextDirectorySize()</code> tune them. Row counts are a floor: OpenSwoole admits more keys
         than requested, then rejects by hash, and a full GlobalState table throws
         <code>\OverflowException</code>. GlobalState keys are at most 63 characters.
+    </p>
+    <p>
+        Session data takes one row per session, holding all of its keys, and
+        <code>withSessionTableSize()</code> sizes it (default 4&nbsp;096 sessions &times; 32&nbsp;KB per
+        session). A write that takes a session past its byte cap throws <code>\OverflowException</code>.
+        Past the session count, the first worker drops the least recently used sessions every second and
+        logs a warning. Values are serialized, so they must be serializable and an object comes back as a
+        copy.
+    </p>
+    <p>
+        The session table reserves about twice the session count, rounded up to a power of two, times the
+        bytes per session: 257&nbsp;MB at the defaults, 514&nbsp;MB for 5&nbsp;000 sessions. About
+        34&nbsp;MB of that is resident from start-up. The rest becomes resident as sessions store data and
+        stays resident after they are cleared or evicted, so set container memory limits for the full
+        reservation, or lower the bytes per session. If the kernel refuses the reservation, the server
+        fails at start-up.
     </p>
 
     <h3 id="independent-processes">Multiple independent processes (no broker)</h3>

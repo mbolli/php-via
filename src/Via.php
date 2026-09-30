@@ -27,6 +27,7 @@ use Mbolli\PhpVia\State\ReadEpochs;
 use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SharedClientRegistry;
 use Mbolli\PhpVia\State\SharedContextDirectory;
+use Mbolli\PhpVia\State\SharedSessionStore;
 use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
@@ -66,6 +67,9 @@ class Via {
 
     /** How often the leader drops registry rows of worker processes that no longer exist. */
     private const int DEAD_CLIENT_SWEEP_MS = 60_000;
+
+    /** How often the leader evicts sessions past Config::withSessionTableSize(); free while under it. */
+    private const int SESSION_EVICT_MS = 1000;
 
     /** Passes one fan-out of a scope runs in a row; a broadcast still owed then goes to the next flush. */
     private const int MAX_SYNC_PASSES = 8;
@@ -400,7 +404,7 @@ class Via {
      * Get a per-session data value.
      *
      * Session data persists for the server process lifetime and is shared across
-     * all browser tabs belonging to the same session.
+     * all browser tabs belonging to the same session, and across workers when worker_num > 1.
      *
      * @param string $sessionId Session ID from $c->getSessionId()
      * @param string $key       Data key
@@ -412,6 +416,12 @@ class Via {
 
     /**
      * Set a per-session data value.
+     *
+     * @throws \InvalidArgumentException with worker_num > 1, if the value cannot be serialized
+     * @throws \OverflowException        with worker_num > 1, if the session's serialized data would exceed
+     *                                   Config::withSessionTableSize()
+     * @throws \RuntimeException         with worker_num > 1, if the session's lock is not taken within
+     *                                   about 7 s (a worker died holding it or its event loop is blocked)
      */
     public function setSessionData(string $sessionId, string $key, mixed $value): void {
         $this->app->setSessionData($sessionId, $key, $value);
@@ -422,6 +432,9 @@ class Via {
      *
      * @param string      $sessionId Session ID from $c->getSessionId()
      * @param null|string $key       Key to remove, or null to clear all session data
+     *
+     * @throws \RuntimeException with worker_num > 1, if the session's lock is not taken within about
+     *                           7 s (a worker died holding it or its event loop is blocked)
      */
     public function clearSessionData(string $sessionId, ?string $key = null): void {
         $this->app->clearSessionData($sessionId, $key);
@@ -831,21 +844,21 @@ class Via {
                 );
             }
 
-            // Actions and scoped signal values now cross workers, but four things still do not,
+            // Actions, scoped signal values and session data cross workers, but three things do not,
             // and they fail quietly enough that an operator would not connect them to worker_num.
             if ($this->config->getWorkerNum() > 1) {
                 $this->log(
                     'warn',
-                    'worker_num > 1: actions, scoped signal values and the client list are shared across '
-                    . 'workers. Four things are not. (1) Mutating a scoped signal by reading it and calling '
-                    . 'setValue() loses updates — use Signal::increment() for counters and Signal::mutate() '
-                    . 'for anything else. (2) PHP statics in your own handlers are per-process, so a '
-                    . 'simulation kept in one diverges per worker. (3) A server-owned TAB signal '
-                    . '(clientWritable: false, or any TAB signal without clientWritable: true under '
+                    'worker_num > 1: actions, scoped signal values, session data and the client list are '
+                    . 'shared across workers. Three things are not. (1) Mutating a scoped signal by reading '
+                    . 'it and calling setValue() loses updates: use Signal::increment() for counters and '
+                    . 'Signal::mutate() for anything else. Reading a session data key and writing it back '
+                    . 'loses updates the same way and has no atomic form. (2) PHP statics in your own handlers are '
+                    . 'per-process, so a simulation kept in one diverges per worker. (3) A server-owned TAB '
+                    . 'signal (clientWritable: false, or any TAB signal without clientWritable: true under '
                     . 'withStrictTabSignals()) lives in one worker: an action another worker takes rebuilds '
                     . 'it from its initial value, so keep that state in a scoped signal or use worker_num = 1. '
-                    . '(4) Session data (sessionData()/setSessionData()) is per worker; use a Scope::SESSION '
-                    . 'signal or worker_num = 1. See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
+                    . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
                 );
             }
 
@@ -931,6 +944,12 @@ class Via {
                 // than whichever streams this worker happened to serve.
                 $this->app->setClientRegistry(new SharedClientRegistry(
                     $this->config->getContextDirectoryRows(),
+                ));
+
+                // A tab's next request can land on any worker, so its session data has to be there.
+                $this->app->setSessionStore(new SharedSessionStore(
+                    $this->config->getSessionTableRows(),
+                    $this->config->getSessionTableValueBytes(),
                 ));
             }
 
@@ -1053,6 +1072,20 @@ class Via {
 
                 if ($workerId === self::LEADER_WORKER_ID) {
                     $id = Timer::tick(self::DEAD_CLIENT_SWEEP_MS, fn () => $this->app->removeDeadClients());
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
+                    }
+                }
+
+                if ($workerId === self::LEADER_WORKER_ID && $this->app->getSessionStore() !== null) {
+                    $id = Timer::tick(self::SESSION_EVICT_MS, function (): void {
+                        try {
+                            $this->app->evictSharedSessions();
+                        } catch (\Throwable $e) {
+                            $this->log('error', 'Session eviction failed: ' . Logger::describe($e));
+                        }
+                    });
 
                     if ($id !== false) {
                         $this->serverIntervalIds[] = $id;

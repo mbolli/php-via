@@ -134,6 +134,10 @@ class Config {
 
     private int $scopedSignalTableValueBytes = 32768;
 
+    private int $sessionTableRows = 4096;
+
+    private int $sessionTableValueBytes = 32768;
+
     /**
      * Maximum number of rows in the GlobalState OpenSwoole\Table.
      * Each row holds one global-state key. Increase if you need more than 1024 distinct keys.
@@ -869,8 +873,8 @@ class Config {
      * RedisBroker or NatsBroker (multi-server). A RuntimeException is thrown at
      * start() if worker_num > 1 and InMemoryBroker is still in use.
      *
-     * Session data is NOT shared across workers — use a sticky-session load
-     * balancer when running multi-worker (e.g. Caddy sticky_cookie).
+     * Session data, GlobalState and scoped signal values move to shared-memory tables sized
+     * at start-up; see withSessionTableSize() and the other with*TableSize() methods.
      *
      * Example:
      * ```php
@@ -968,6 +972,40 @@ class Config {
         $this->contextDirectoryTtlSeconds = max(60, $ttlSeconds);
 
         return $this;
+    }
+
+    /**
+     * Tune the shared-memory table that holds session data when worker_num > 1.
+     *
+     * One row per session that has stored data, holding all of its keys serialized together, so
+     * $maxBytesPerSession caps the whole session and a write past it throws \OverflowException.
+     * Once more than $maxSessions sessions are held, the leader worker drops the least recently
+     * used ones every second, and a write that finds the table full drops them on its own worker
+     * first. Values must be serializable; one that is not throws \InvalidArgumentException. A single worker keeps session data in a PHP array with no byte cap
+     * and drops the least recently used past 10,000 sessions.
+     *
+     * The table reserves about 2 × $maxSessions (rounded up to a power of two) × $maxBytesPerSession
+     * of shared memory: 257 MB at the defaults, 514 MB for 5000 sessions. About 34 MB of it is
+     * resident from start-up whether or not the app stores session data. The rest becomes resident
+     * as sessions store data and stays resident after they are cleared or evicted, so size memory
+     * limits for the reservation. If the kernel refuses it, start-up fails with a fatal error.
+     *
+     * @param int $maxSessions        Sessions kept before eviction starts (default 4096)
+     * @param int $maxBytesPerSession Serialized byte cap for all of one session's data (default 32768)
+     */
+    public function withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 32768): self {
+        $this->sessionTableRows = max(1, $maxSessions);
+        $this->sessionTableValueBytes = max(64, $maxBytesPerSession);
+
+        return $this;
+    }
+
+    public function getSessionTableRows(): int {
+        return $this->sessionTableRows;
+    }
+
+    public function getSessionTableValueBytes(): int {
+        return $this->sessionTableValueBytes;
     }
 
     public function getContextDirectoryRows(): int {

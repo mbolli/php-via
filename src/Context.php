@@ -121,8 +121,8 @@ class Context {
      * Get a per-session data value for this context's session.
      *
      * Session data persists for the server process lifetime and is shared across
-     * all browser tabs belonging to the same session. Returns $default if this
-     * context has no session or the key is not set.
+     * all browser tabs belonging to the same session, and across workers when
+     * worker_num > 1. Returns $default if this context has no session or the key is not set.
      *
      * @param string $key     Data key
      * @param mixed  $default Value returned if key is not set
@@ -139,6 +139,12 @@ class Context {
      * Set a per-session data value.
      *
      * No-op if this context has no session.
+     *
+     * @throws \InvalidArgumentException with worker_num > 1, if the value cannot be serialized
+     * @throws \OverflowException        with worker_num > 1, if the session's serialized data would exceed
+     *                                   Config::withSessionTableSize()
+     * @throws \RuntimeException         with worker_num > 1, if the session's lock is not taken within
+     *                                   about 7 s (a worker died holding it or its event loop is blocked)
      */
     public function setSessionData(string $key, mixed $value): void {
         if ($this->sessionId === null) {
@@ -152,6 +158,9 @@ class Context {
      * Clear one key or all data from this context's session.
      *
      * @param null|string $key Key to remove, or null to clear all session data
+     *
+     * @throws \RuntimeException with worker_num > 1, if the session's lock is not taken within about
+     *                           7 s (a worker died holding it or its event loop is blocked)
      */
     public function clearSessionData(?string $key = null): void {
         if ($this->sessionId === null) {

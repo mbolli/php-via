@@ -27,7 +27,6 @@ use OpenSwoole\Http\Server;
  *
  * Limitations:
  * - Single machine only. For multi-server deployments use RedisBroker or NatsBroker.
- * - Session data is NOT shared across workers. Use a sticky-session load balancer.
  * - Worker restarts (SIGUSR1) temporarily disconnect workers — brief broadcast gaps
  *   are possible during hot reload. Acceptable for most use cases.
  */

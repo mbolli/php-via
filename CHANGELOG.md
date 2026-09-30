@@ -101,7 +101,37 @@ All notable changes to php-via will be documented in this file.
     made there are lost, and the old rows count against `withScopedSignalTableSize()` until the
     next full restart.
 
+- **With `worker_num > 1`, session data values must be serializable and come back as copies.**
+  `setSessionData()` with a closure, a PDO handle or another value that cannot be serialized now
+  throws `\InvalidArgumentException`, and changing a stored object in place no longer changes
+  what the session holds. See the session data entry under Fixed.
+
 ### Fixed
+
+- **With `worker_num > 1`, session data set in one request could be missing in the next.**
+  `sessionData()`, `setSessionData()` and `clearSessionData()` kept a copy in each worker, and a
+  tab's requests land on any worker, so a value an action stored was missing whenever the next
+  action or page load reached another worker. Session data now lives in shared memory, one row per
+  session, and each write holds a lock on that session, so writes from several workers to different
+  keys of one session all land (4 workers × 500 writes: 2,000 of 2,000 kept, about 680 without the
+  lock). A key written twice keeps the last write, as before. What changes for apps:
+  - Values are serialized, so they must be serializable and an object comes back as a copy. A
+    value that cannot be serialized throws `\InvalidArgumentException`.
+  - Reading a key and writing it back is not atomic across workers: two tabs adding to one cart
+    at the same moment on different workers can lose one of the adds.
+  - One session's data is capped at 32 KB serialized, and a write past it throws
+    `\OverflowException`. `Config::withSessionTableSize($maxSessions, $maxBytesPerSession)` raises
+    the cap.
+  - A write that cannot take the session's lock within about 7 s, because a worker died holding
+    it or its event loop is blocked, throws `\RuntimeException`.
+  - Past 4,096 sessions the first worker drops the least recently used ones every second and logs
+    a warning, and a write that finds the table full drops them on its own worker first; a single
+    worker still drops them past 10,000. `withSessionTableSize()` sets the count.
+  - The table reserves about twice the session count, rounded up to a power of two, times the
+    bytes per session: 257 MB of shared memory at the defaults. About 34 MB of it is resident from
+    start-up, and the rest becomes resident as sessions store data and is not returned.
+  - Session data survives a worker reload (`SIGUSR1`), since the master process holds it.
+  - With one worker nothing changes: session data stays in a PHP array with no byte cap.
 
 - **With `worker_num > 1`, a tab whose stream stayed busy could lose the ability to act on other
   workers.** The context directory entry that lets any worker rebuild a context expires after
