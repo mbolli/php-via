@@ -49,7 +49,7 @@ function parseArgs(array $argv): array {
         if (preg_match('/^--([a-z-]+)=(.*)$/', $arg, $m)) {
             $out[$m[1]] = $m[2];
         } elseif ($arg === '--help' || $arg === '-h') {
-            fwrite(STDERR, "see header of " . __FILE__ . "\n");
+            fwrite(STDERR, 'see header of ' . __FILE__ . "\n");
 
             exit(0);
         } else {

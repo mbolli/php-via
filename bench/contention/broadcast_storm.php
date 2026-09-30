@@ -285,8 +285,7 @@ function runServer(array $o): void {
             }
             if ($renderUs > 0) {
                 $end = hrtime(true) + $renderUs * 1000;
-                while (hrtime(true) < $end) {
-                }
+                while (hrtime(true) < $end);
             }
             $v = $sig !== null ? $sig->int() : (int) $app->globalState('bench_v', 0);
 
@@ -750,6 +749,7 @@ function streamChild(array $o, int $port, int $from, int $to, $sock): void {
 
         $sem = new Channel(max(4, intdiv((int) $o['setup-concurrency'], (int) $o['clients'])));
         $opened = new Channel(max(1, $count));
+
         /** @var list<SseConn> $conns */
         $conns = [];
         for ($i = $from; $i < $to; ++$i) {
@@ -1291,8 +1291,17 @@ function main(array $argv): int {
         return 1;
     }
     $params['port'] = $server['port'];
-    logErr(sprintf('server pid %d on port %d, %d worker(s), mode=%s state=%s n=%d k=%d c=%d',
-        $server['pid'], $server['port'], $o['workers'], $o['mode'], $o['state'], $o['n'], $o['k'], $o['concurrency']));
+    logErr(sprintf(
+        'server pid %d on port %d, %d worker(s), mode=%s state=%s n=%d k=%d c=%d',
+        $server['pid'],
+        $server['port'],
+        $o['workers'],
+        $o['mode'],
+        $o['state'],
+        $o['n'],
+        $o['k'],
+        $o['concurrency']
+    ));
 
     $watchdog = armWatchdog((int) $o['watchdog'], $server['pid'], $params);
 
