@@ -482,7 +482,8 @@ function fireAction(string $host, int $port, bool $ssl, string $actionPath, arra
  *   incrementally as they arrive.
  *
  * Signal key matching:
- *   Via namespaces scoped signals: "count__examples_counter__<hash>".
+ *   A TAB signal id starts with the name and the sanitised context id:
+ *   "count__examples_counter__<hash>____tssus".
  *   We match any key that equals $signalName OR starts with "{$signalName}__".
  */
 function openSseObserver(

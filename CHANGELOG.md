@@ -74,6 +74,33 @@ All notable changes to php-via will be documented in this file.
     its next wake, up to the keep-alive interval later, instead of within 100 ms. Context cleanup
     closes the channel, so this is a safety net only.
 
+- **Signals whose names differ only by punctuation no longer share an id.** A signal id replaced
+  every byte outside `[A-Za-z0-9]` with `_`, so `user-name` and `user_name` in one tab were one
+  signal, a page in `room:a-b` and `room:a.b` sent one browser value for both scopes' `topic`, a
+  component `cats` with a GLOBAL `votes` got the GLOBAL signal `cats_votes`, a component TAB
+  signal `q` in `search` took the id of a `q` in scope `search`, and a signal `ctx` in scope `via`
+  overwrote the browser's `via_ctx`. An id that could be read two ways now ends in `____` and one
+  code per `_` saying what that `_` stands for, so each signal has its own id. What changes for
+  apps:
+  - A scoped signal outside a component keeps its id when its name is letters and digits and its
+    scope is letters and digits joined by `:`, or a route path of letters and digits:
+    `global_count`, `room_lobby_messages`, `route__examples_counter_count`. A signal `ctx` in
+    scope `via` is the one exception.
+  - Every other id gains the suffix and still starts with the old id. That covers all TAB and
+    component signals and scopes or names with `_` or other punctuation: `search_q` becomes
+    `search_q____n`, `global_cats_votes` becomes `global_cats_votes____kn`. Templates that use
+    `$signal->id()`, `bind()` or `text()` need no change. A hardcoded id stops matching, and
+    `getScopedSignal()` returns null for it. Code outside a context, such as a timer, should look
+    the signal up by name with the new `Via::getScopedSignalByName($scope, $name)`, adding the
+    component namespace as a third argument for a component signal.
+  - A tab left open across the deploy reconnects with the old ids, so revival does not restore
+    its TAB and component values.
+  - With `worker_num > 1`, deploy this version with a full restart, not a reload (`SIGUSR1`). A
+    reload keeps the shared table: scoped signals whose ids changed start again from their
+    declared defaults, an old worker that is still draining keeps writing the old ids, so updates
+    made there are lost, and the old rows count against `withScopedSignalTableSize()` until the
+    next full restart.
+
 ### Fixed
 
 - **With `worker_num > 1`, a tab whose stream stayed busy could lose the ability to act on other

@@ -162,6 +162,19 @@ $app->onShutdown(function () use (&$timerId): void {
 $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000);
     {% endverbatim %}{% endcode %}
 
+    <h3 id="via-get-scoped-signal-by-name"><code>getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal</code></h3>
+    <p>
+        Find a scoped signal from code that runs outside a context, such as a timer. Pass the name the signal
+        was declared with, not its browser id, and a resolved scope: <code>Scope::routeScope('/path')</code>
+        rather than <code>Scope::ROUTE</code>. For a signal declared inside a component, also pass the
+        component's namespace. It returns <code>null</code> until a context on this worker has declared the signal.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->setInterval(function () use ($app): void {
+    $app->getScopedSignalByName('room:lobby', 'topic')?->setValue('Lunch');
+}, 5000);
+    {% endverbatim %}{% endcode %}
+
     <h3 id="via-group"><code>group(callable $fn): RouteGroup</code></h3>
     <p>
         Register multiple routes inside a closure and attach shared middleware to all of them in one call.
@@ -469,9 +482,9 @@ $s->increment();  // atomic across workers, returns the new value
 $s->mutate(fn (array $items) => [...$items, $item]); // read-modify-write under a lock
 
 // Template helpers
-$s->id();     // signal name, e.g. 'count'
-$s->bind();   // 'data-bind="count"'
-$s->text();   // '<span data-text="$count"></span>'
+$s->id();     // browser id, not the name: 'global_count' for a GLOBAL signal 'count'
+$s->bind();   // 'data-bind="global_count"'
+$s->text();   // '<span data-text="$global_count"></span>'
     {% endverbatim %}{% endcode %}
     <p>
         On a scoped signal with <code>worker_num &gt; 1</code>, <code>setValue($s-&gt;int() + 1)</code> loses
@@ -595,7 +608,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     </ul>
     <p>Non-TAB scopes are server-authoritative (the client cannot write them) and auto-broadcast to every
     context in the scope when the value changes. Component instances with the same property name get
-    independent signal IDs when a namespace is set (e.g. <code>cats_votes</code>, <code>dogs_votes</code>).</p>
+    independent signal IDs when a namespace is set (e.g. <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>).</p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Attributes\Signal;
 use Mbolli\PhpVia\Scope;

@@ -7,6 +7,7 @@ namespace Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
+use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Via;
 
 /**
@@ -80,15 +81,9 @@ class SignalFactory {
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
         // For TAB signals, use context ID to make them unique per context
         if ($scope !== null && $scope !== Scope::TAB) {
-            // Scoped signal: shared across contexts in this scope.
-            // When inside a named component (e.g. namespace="cats"), prefix the name so
-            // sibling component instances get independent counters (cats_votes vs dogs_votes)
-            // while still being globally shared across all users.
-            $namespace = $this->context->getNamespace();
-            $qualifiedName = $namespace !== null ? $namespace . '_' . $baseName : $baseName;
-            $signalId = $scope . ':' . $qualifiedName;
-            // Sanitize signal ID - only alphanumeric and underscore allowed
-            $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
+            // Scoped signal: shared across contexts in this scope. The component namespace is part
+            // of the id, so sibling instances (cats, dogs) get independent but shared counters.
+            $signalId = SignalId::scoped($scope, $this->context->getNamespace(), $baseName);
 
             // Check if signal already exists in this scope
             $existingSignal = $this->app->getScopedSignal($scope, $signalId);
@@ -115,11 +110,8 @@ class SignalFactory {
         }
 
         // TAB scope: context-specific signal, not shared
-        $namespace = $this->context->getNamespace();
-        $signalId = $namespace
-            ? $namespace . '.' . $baseName
-            : $baseName . '_' . $this->context->getId();
-        $signalId = preg_replace('/[^a-zA-Z0-9_]/', '_', $signalId);
+        // A namespace of '' or '0' counts as none here, as it always has for TAB signals.
+        $signalId = SignalId::tab($this->context->getNamespace() ?: null, $baseName, $this->context->getId());
 
         if (isset($this->signals[$signalId])) {
             $existing = $this->signals[$signalId];

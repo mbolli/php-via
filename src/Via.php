@@ -35,6 +35,7 @@ use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
+use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
@@ -733,12 +734,22 @@ class Via {
     }
 
     /**
-     * Get a scoped signal by scope and ID.
+     * Get a scoped signal by scope and browser id ($signal->id()).
      *
-     * Used by Context to retrieve scoped signals
+     * To find one by the name it was declared with, use getScopedSignalByName().
      */
     public function getScopedSignal(string $scope, string $signalId): ?Signal {
         return $this->signalManager->getSignal($scope, $signalId);
+    }
+
+    /**
+     * Get a scoped signal by the name it was declared with, for code outside a context such as a timer.
+     *
+     * @param string      $scope     a resolved scope: Scope::routeScope('/path'), not Scope::ROUTE
+     * @param null|string $namespace the component namespace, for a signal declared inside a component
+     */
+    public function getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal {
+        return $this->signalManager->getSignal($scope, SignalId::scoped($scope, $namespace, $name));
     }
 
     /**

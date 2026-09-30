@@ -28,7 +28,7 @@
             "name": "data-text uses the wrong signal ID",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Signal IDs are namespaced by the component hierarchy. A signal named 'votes' inside a component with namespace 'poll' gets the ID 'poll.votes'. Fix: always use $signal->id() in PHP and pass it to the template as a variable. Never hard-code signal IDs in HTML."
+                "text": "Signal IDs are namespaced by the component hierarchy. A TAB signal named 'votes' inside a component with namespace 'poll' gets an ID such as 'poll_votes____n', not 'votes'. Fix: always use $signal->id() in PHP and pass it to the template as a variable. Never hard-code signal IDs in HTML."
             }
         },
         {
@@ -175,28 +175,28 @@ $increment = $c->action(
     <details>
         <summary><strong>data-text uses the wrong signal ID</strong></summary>
         <p>
-            You write <code>data-text="$votes.tab"</code> in your template, but the counter never updates
+            You write <code>data-text="$votes"</code> in your template, but the counter never updates
             (or updates with empty/undefined).
         </p>
-        <p><strong>Why:</strong> Signal IDs are namespaced. A signal named <code>votes</code> inside a component
-        with namespace <code>poll</code> gets the ID <code>poll.votes</code> — but inside a component the dot
-        is rendered as-is in Datastar's signal store. If you hardcode the ID you'll likely get it wrong.
+        <p><strong>Why:</strong> Signal IDs are namespaced. A TAB signal named <code>votes</code> inside a component
+        with namespace <code>poll</code> gets an ID such as <code>poll_votes____n</code>, and the exact form is not
+        part of the API. If you hardcode the ID you'll likely get it wrong.
         </p>
         <p><strong>Fix:</strong> Always use <code>$signal->id()</code> in PHP and pass it to the template.
         Never hard-code signal IDs in HTML:</p>
         {% code 'php' %}{% verbatim %}
 $c->view(function () use ($votes, $twig) {
     return $twig->render('poll.html.twig', [
-        'votes_id' => $votes->id(), // e.g. "poll.votes"
+        'votes_id' => $votes->id(), // e.g. "poll_votes____n"
     ]);
 });
         {% endverbatim %}{% endcode %}
         {% code 'html' %}{% verbatim %}
 <!-- ❌ hard-coded, will break if namespace changes -->
-<span data-text="$poll.votes.tab">0</span>
+<span data-text="$poll_votes">0</span>
 
 <!-- ✅ dynamic, always correct -->
-<span data-text="${{ votes_id }}.tab">0</span>
+<span data-text="${{ votes_id }}">0</span>
         {% endverbatim %}{% endcode %}
     </details>
 

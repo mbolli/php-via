@@ -161,10 +161,10 @@ describe('Context revival', function (): void {
         $app->getApp()->destroyContext($contextId);
         unset($app->contexts[$contextId]);
 
-        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['search_q' => 'typed']);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['search_q____n' => 'typed']);
         $component = array_values($revived->getComponentManager()->getComponents())[0];
 
-        expect($component->getSignal('q')->id())->toBe('search_q')
+        expect($component->getSignal('q')->id())->toBe('search_q____n')
             ->and($component->getSignal('q')->getValue())->toBe('typed')
         ;
     });

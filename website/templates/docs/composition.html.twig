@@ -89,7 +89,7 @@ public function view(Context $ctx): void {
     $dogs    = $ctx->component(VoteWidget::class, 'dogs');
     $parrots = $ctx->component(VoteWidget::class, 'parrots');
 
-    // cats_votes, dogs_votes, parrots_votes — independent signal IDs
+    // independent signal IDs: global_cats_votes____kn, global_dogs_votes____kn, ...
     $ctx->view('page.html.twig', [
         'cats'    => $cats(),
         'dogs'    => $dogs(),

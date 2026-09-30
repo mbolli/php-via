@@ -52,8 +52,8 @@ $app->page('/', function (Context $c) use ($counterComponent): void {
 $counterA = $c->component($counterComponent, 'counter-a');
 $counterB = $c->component($counterComponent, 'counter-b');
 
-// counter-a has signal ID 'counter-a_count', action '/_action/counter-a_inc'
-// counter-b has signal ID 'counter-b_count', action '/_action/counter-b_inc'
+// counter-a has signal ID 'counter_a_count____dn', action '/_action/counter-a-inc'
+// counter-b has signal ID 'counter_b_count____dn', action '/_action/counter-b-inc'
 
 $c->view('page.html.twig', [
     'counterA' => $counterA(),

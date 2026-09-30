@@ -33,6 +33,7 @@ use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
@@ -311,7 +312,10 @@ function runServer(array $o): void {
         $c->view(static fn (): string => '<div id="actor"><button data-on:click="@post(\'' . $url . '\')">bump</button></div>');
     });
 
-    $signalId = (string) preg_replace('/[^a-zA-Z0-9_]/', '_', $broadcastScope . ':v');
+    // Older trees have no SignalId; their sanitiser gives the same id for these plain scopes.
+    $signalId = class_exists(SignalId::class)
+        ? SignalId::scoped($broadcastScope, null, 'v')
+        : (string) preg_replace('/[^a-zA-Z0-9_]/', '_', $broadcastScope . ':v');
     $app->notFound(static function ($req, $res) use ($app, $stats, $state, $broadcastScope, $signalId): void {
         if (($req->server['request_uri'] ?? '') !== '/_bench/stats') {
             $res->status(404);

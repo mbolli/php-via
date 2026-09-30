@@ -125,7 +125,7 @@ test('a worker joining an existing scope adopts the live value, not the default'
     expect($first->renderView())->toBe('count=2', 'and the first worker is not disturbed by the join');
 });
 
-test('scopes that sanitise to the same signal id do not share a value across workers', function (): void {
+test('scopes that differ only by punctuation get their own id and value across workers', function (): void {
     $store = new SharedSignalStore(maxRows: 64);
     $workerA = workerApp($store);
     $workerB = workerApp($store);
@@ -135,13 +135,28 @@ test('scopes that sanitise to the same signal id do not share a value across wor
     $draftA = $ctxA->signal('', 'draft', 'user:a-b@x.com');
     $draftB = $ctxB->signal('', 'draft', 'user:a.b@x.com');
 
-    // Both ids sanitise to the same string; the shared row must still be per scope.
-    expect($draftA->id())->toBe($draftB->id());
+    expect($draftA->id())->not->toBe($draftB->id());
 
     $draftA->setValue('private to a-b', false);
 
     expect($draftB->string())->toBe('');
     expect($draftA->string())->toBe('private to a-b');
+});
+
+test('the shared row is per scope even for two signals with the same id', function (): void {
+    $store = new SharedSignalStore(maxRows: 64);
+    $workerA = workerApp($store);
+    $workerB = workerApp($store);
+
+    $draftA = new Signal('draft', '', 'user:a', true, null, $workerA);
+    $draftB = new Signal('draft', '', 'user:b', true, null, $workerB);
+    $workerA->registerScopedSignal('user:a', $draftA);
+    $workerB->registerScopedSignal('user:b', $draftB);
+
+    $draftA->setValue('private to a', false);
+
+    expect($draftB->string())->toBe('');
+    expect($draftA->string())->toBe('private to a');
 });
 
 /*

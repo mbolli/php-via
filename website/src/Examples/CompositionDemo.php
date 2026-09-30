@@ -66,7 +66,7 @@ final class CompositionDemo {
                 '<strong>#[Signal(Scope::SESSION)]</strong> is a SESSION-scoped signal. Shared across all open tabs of the same browser session. Saving a name here auto-broadcasts to all other tabs instantly.',
                 '<strong>#[Signal(Scope::GLOBAL)]</strong> is a GLOBAL-scoped signal. Shared across every connected user. The <code>totalClicks</code> counter increments for all users simultaneously, regardless of which tab triggered it.',
                 '<strong>#[Action]</strong> marks a public method as a client-callable action. The optional <code>name:</code> argument overrides the URL slug — <code>resetTab</code> is exposed as <code>/_action/reset-tab</code>.',
-                '<strong>Components + GLOBAL signals</strong> — <code>VoteWidget</code> is mounted three times with <code>#[Signal(Scope::GLOBAL)] votes</code>. SignalFactory prefixes the component namespace to scoped signal IDs, giving each animal its own persistent global counter: <code>global_cats_votes</code>, <code>global_dogs_votes</code>, <code>global_parrots_votes</code>.',
+                '<strong>Components + GLOBAL signals</strong>: <code>VoteWidget</code> is mounted three times with <code>#[Signal(Scope::GLOBAL)] votes</code>. SignalFactory puts the component namespace into scoped signal IDs, giving each animal its own persistent global counter: <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>, <code>global_parrots_votes____kn</code>.',
             ],
             'anatomy' => [
                 'signals' => [
@@ -75,7 +75,7 @@ final class CompositionDemo {
                     ['name' => 'count', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Per-tab counter. Each click adds the current multiplier — grows +1, +2, +3… proving #[Persist] survives between actions.'],
                     ['name' => 'multiplier', 'type' => 'int', 'scope' => 'Persist', 'default' => '1', 'desc' => 'Server-only instance property (not a signal). Invisible to the client. Grows by 1 on each increment call.'],
                     ['name' => 'totalClicks', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Counts every action call by every user. GLOBAL scope auto-broadcasts to all connected sessions.'],
-                    ['name' => 'votes (VoteWidget)', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Per-animal vote counter. SignalFactory namespaces the ID: global_cats_votes, global_dogs_votes, global_parrots_votes. Persistent and shared across all users.'],
+                    ['name' => 'votes (VoteWidget)', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Per-animal vote counter. SignalFactory namespaces the ID: global_cats_votes____kn, global_dogs_votes____kn, global_parrots_votes____kn. Persistent and shared across all users.'],
                 ],
                 'actions' => [
                     ['name' => 'increment', 'desc' => 'Adds multiplier to count, then bumps both multiplier and totalClicks.'],

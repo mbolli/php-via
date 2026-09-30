@@ -69,8 +69,8 @@ class Signal {
     /**
      * Key of this signal's row in the shared store.
      *
-     * The id is sanitised, so two scopes such as user:a-b and user:a.b can share it; the raw
-     * scope keeps their values apart.
+     * Scoped ids already differ per scope; the raw scope keeps rows apart for a Signal built
+     * by hand with an id another scope uses.
      *
      * @internal
      */

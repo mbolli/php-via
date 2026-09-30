@@ -161,7 +161,7 @@ function reader(Via $app, string $id, array $scopes, SnapshotWorld $world): Cont
 }
 
 function shared(Via $app, string $name): Signal {
-    $signal = $app->getScopedSignal('room:data', 'room_data_' . $name);
+    $signal = $app->getScopedSignalByName('room:data', $name);
     if ($signal === null) {
         throw new RuntimeException("no scoped signal {$name}");
     }
