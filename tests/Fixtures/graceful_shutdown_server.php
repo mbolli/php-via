@@ -14,7 +14,8 @@ declare(strict_types=1);
  *           USR1 (reload, check the new workers serve, then TERM) or IDLE (TERM with no SSE
  *           stream, no interval and no GC timer)
  * argv[3] = marker file path
- * argv[4] = options as a query string: shutdownYieldMs, disconnectYieldMs
+ * argv[4] = options as a query string: shutdownYieldMs, disconnectYieldMs, orphanContext (drop
+ *           the stream's context from Via::$contexts on connect without closing its channel)
  *
  * onShutdown and onClientDisconnect yield first, then write, so a cut-off callback leaves no line.
  */
@@ -38,6 +39,7 @@ $marker = (string) ($argv[3] ?? sys_get_temp_dir() . '/via_shutdown_marker');
 parse_str((string) ($argv[4] ?? ''), $options);
 $shutdownYieldMs = (int) ($options['shutdownYieldMs'] ?? 0);
 $disconnectYieldMs = (int) ($options['disconnectYieldMs'] ?? 0);
+$orphanContext = (bool) ($options['orphanContext'] ?? false);
 $reloadFlag = $marker . '.reloaded';
 
 $config = (new Config())
@@ -69,6 +71,13 @@ $app->onClientDisconnect(static function () use ($marker, $disconnectYieldMs): v
     }
     file_put_contents($marker, 'disconnect ' . getmypid() . "\n", FILE_APPEND | LOCK_EX);
 });
+
+if ($orphanContext) {
+    // Runs in the stream's own worker, before its loop parks.
+    $app->onClientConnect(static function (Context $c) use ($app): void {
+        unset($app->contexts[$c->getId()]);
+    });
+}
 
 $masterPid = static fn (): int => (int) $app->getServer()?->master_pid;
 

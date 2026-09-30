@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
 use OpenSwoole\Timer;
@@ -15,8 +16,19 @@ use starfederation\datastar\enums\ElementPatchMode;
 
 /**
  * Handles Server-Sent Events (SSE) connections for real-time updates.
+ *
+ * An idle stream does not poll: it wakes on a patch, a closed channel or connection, a reset
+ * HTTP/2 stream or the keep-alive interval. Per-worker timers do the rest, see Via::start().
  */
 class SseHandler {
+    /** How often a server that speaks HTTP/2 looks for streams the client reset, in milliseconds. */
+    public const int RESET_CHECK_MS = 250;
+
+    /** Directory records a heartbeat refreshes before it yields to the event loop. */
+    private const int HEARTBEAT_BATCH = 1024;
+
+    private const string KEEP_ALIVE = ": keep-alive\n\n";
+
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
@@ -37,6 +49,16 @@ class SseHandler {
      * @var array<string, true>
      */
     private array $connectedContextIds = [];
+
+    /** @var array<int, SseStream> Running page streams by registration number */
+    private array $streams = [];
+
+    /** @var array<int, array<int, true>> Registration numbers by connection; one HTTP/2 connection carries several streams */
+    private array $streamsByFd = [];
+
+    private int $nextStreamId = 0;
+
+    private bool $heartbeating = false;
 
     public function __construct(Via $via) {
         $this->via = $via;
@@ -139,47 +161,52 @@ class SseHandler {
             return;
         }
 
-        // Track client info when SSE connects (not at page load)
-        if (!isset($this->via->clients[$contextId])) {
-            $clientId = $this->via->generateClientId();
-            $xff = $request->header['x-forwarded-for'] ?? null;
-            $ip = $xff !== null
-                ? trim(explode(',', $xff)[0])
-                : ($request->header['x-real-ip'] ?? $request->server['remote_addr'] ?? 'unknown');
-            $clientInfo = [
-                'id' => $clientId,
-                'identicon' => $this->via->generateIdenticon($clientId),
-                'connected_at' => time(),
-                'ip' => $ip,
-            ];
-            $this->via->clients[$contextId] = $clientInfo;
-            $this->via->getApp()->registerClient($contextId, $clientInfo);
-        }
-
-        $this->requestLogger?->logSseConnect($contextId);
-
-        // Cancel any pending cleanup timer for this context (reconnection)
-        $this->via->getApp()->cancelContextCleanup($contextId);
-        if (isset($this->via->cleanupTimers[$contextId])) {
-            unset($this->via->cleanupTimers[$contextId]);
-            $this->via->log('debug', "Cancelled cleanup timer for reconnected context: {$contextId}");
-        }
-
-        // Re-register context in all its scopes (in case cleanup partially ran)
-        // This ensures the context receives broadcasts after reconnection
-        foreach ($context->getScopes() as $scope) {
-            $this->via->registerContextInScope($context, $scope);
-        }
-
-        // Recreate the patch channel for the new coroutine (SSE reconnection)
-        // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
-        $context->getPatchManager()->recreatePatchChannel();
-
+        // Counted before the registrations below: recreatePatchChannel() ends a stream of this
+        // context that is still parked, and that stream must not undo them as the last one.
+        $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 0) + 1;
         ++$this->via->runningSseStreams;
 
         try {
+            // Track client info when SSE connects (not at page load)
+            if (!isset($this->via->clients[$contextId])) {
+                $clientId = $this->via->generateClientId();
+                $xff = $request->header['x-forwarded-for'] ?? null;
+                $ip = $xff !== null
+                    ? trim(explode(',', $xff)[0])
+                    : ($request->header['x-real-ip'] ?? $request->server['remote_addr'] ?? 'unknown');
+                $clientInfo = [
+                    'id' => $clientId,
+                    'identicon' => $this->via->generateIdenticon($clientId),
+                    'connected_at' => time(),
+                    'ip' => $ip,
+                ];
+                $this->via->clients[$contextId] = $clientInfo;
+                $this->via->getApp()->registerClient($contextId, $clientInfo);
+            }
+
+            $this->requestLogger?->logSseConnect($contextId);
+
+            // Cancel any pending cleanup timer for this context (reconnection)
+            $this->via->getApp()->cancelContextCleanup($contextId);
+            if (isset($this->via->cleanupTimers[$contextId])) {
+                unset($this->via->cleanupTimers[$contextId]);
+                $this->via->log('debug', "Cancelled cleanup timer for reconnected context: {$contextId}");
+            }
+
+            // Re-register context in all its scopes (in case cleanup partially ran)
+            // This ensures the context receives broadcasts after reconnection
+            foreach ($context->getScopes() as $scope) {
+                $this->via->registerContextInScope($context, $scope);
+            }
+
+            // Recreate the patch channel for the new coroutine (SSE reconnection)
+            // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
+            $context->getPatchManager()->recreatePatchChannel();
+
             $this->stream($context, $contextId, $response, $sse, $brotliWrite, $brotliFinish);
         } finally {
+            // Runs even if the loop throws, or the count never drops to zero.
+            $this->releaseStream($context, $contextId);
             --$this->via->runningSseStreams;
         }
     }
@@ -213,26 +240,127 @@ class SseHandler {
     }
 
     /**
+     * End the streams of a closed connection now: isWritable() stays true after the peer closes.
+     *
+     * @internal called from the server's close event
+     */
+    public function onConnectionClose(int $fd): void {
+        $contexts = [];
+        foreach ($this->streamsByFd[$fd] ?? [] as $key => $_) {
+            $stream = $this->streams[$key];
+            $stream->clientGone = true;
+            $contexts[spl_object_id($stream->context)] = $stream->context;
+        }
+
+        foreach ($contexts as $context) {
+            $context->getPatchManager()->wakeConsumers();
+        }
+    }
+
+    /**
+     * Close the patch channel of every running stream, including those whose context left Via::$contexts.
+     *
+     * @internal called by the worker shutdown
+     */
+    public function closeStreams(): void {
+        foreach ($this->streams as $stream) {
+            $stream->context->getPatchManager()->closePatchChannel();
+        }
+    }
+
+    /**
+     * Rewrite the cross-worker directory record of every context this worker streams to, busy or idle.
+     *
+     * @internal run by a per-worker timer, see Via::sseHeartbeatIntervalMs()
+     */
+    public function heartbeatStreams(): void {
+        if ($this->heartbeating) {
+            return;
+        }
+        $this->heartbeating = true;
+
+        try {
+            $touched = [];
+            foreach ($this->streams as $key => $stream) {
+                // Re-checked because the sweep yields: an ended stream or a destroyed context is left to expire.
+                if (!$this->isRunning($key) || isset($touched[$stream->contextId])
+                    || ($this->via->contexts[$stream->contextId] ?? null) !== $stream->context) {
+                    continue;
+                }
+
+                $touched[$stream->contextId] = true;
+                $this->via->getApp()->refreshContextRecord($stream->context);
+
+                if (\count($touched) % self::HEARTBEAT_BATCH === 0 && Coroutine::getCid() > 0) {
+                    Coroutine::usleep(1000);
+                }
+            }
+        } finally {
+            $this->heartbeating = false;
+        }
+    }
+
+    /**
+     * End the streams whose client reset them, which closes no connection and so fires no close event.
+     *
+     * @internal run every RESET_CHECK_MS by a per-worker timer when the server speaks HTTP/2
+     */
+    public function endResetStreams(): void {
+        foreach ($this->streams as $key => $stream) {
+            if ($stream->clientGone || !$this->isRunning($key) || $stream->response->isWritable()) {
+                continue;
+            }
+
+            $stream->clientGone = true;
+            $stream->context->getPatchManager()->wakeConsumers();
+        }
+    }
+
+    /**
      * Run the SSE loop for an authorised context until the client, the context or the server goes away.
      */
     private function stream(Context $context, string $contextId, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
-        // Track that this coroutine holds an active SSE connection for this context.
-        // Guards against a race where an older SSE coroutine exits *after* this one starts,
-        // scheduling a cleanup timer that would destroy the still-live context.
-        $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 0) + 1;
+        $key = $this->openStream($context, $contextId, $response);
 
-        // The exit bookkeeping must run even if the loop throws, or the count never drops to zero.
         try {
-            $this->runStream($context, $contextId, $response, $sse, $brotliWrite, $brotliFinish);
+            $this->runStream($this->streams[$key], $response, $sse, $brotliWrite, $brotliFinish);
         } finally {
-            $this->releaseStream($context, $contextId);
+            $this->closeStream($key);
+        }
+    }
+
+    private function openStream(Context $context, string $contextId, Response $response): int {
+        $key = ++$this->nextStreamId;
+        $stream = new SseStream($context, $contextId, $response);
+        // A connection that closed before this point had no stream to tell.
+        $stream->clientGone = $this->via->getServer()?->exists($stream->fd) === false;
+
+        $this->streams[$key] = $stream;
+        $this->streamsByFd[$stream->fd][$key] = true;
+
+        return $key;
+    }
+
+    private function isRunning(int $key): bool {
+        return isset($this->streams[$key]);
+    }
+
+    private function closeStream(int $key): void {
+        $fd = $this->streams[$key]->fd;
+        unset($this->streams[$key], $this->streamsByFd[$fd][$key]);
+
+        if ($this->streamsByFd[$fd] === []) {
+            unset($this->streamsByFd[$fd]);
         }
     }
 
     /**
      * Initial sync, then the patch loop until the client, the context or the server goes away.
      */
-    private function runStream(Context $context, string $contextId, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
+    private function runStream(SseStream $stream, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
+        $context = $stream->context;
+        $contextId = $stream->contextId;
+
         // Send initial sync (view + signals) on connection/reconnection
         // Do this AFTER starting the loop to ensure patches are consumed
         $synced = true;
@@ -254,8 +382,9 @@ class SseHandler {
         }
 
         // A tab whose sync fails never counts as connected, so a view that always throws
-        // does not fire a connect/disconnect pair on every retry.
-        if ($synced) {
+        // does not fire a connect/disconnect pair on every retry. A stream that replaces one
+        // still running keeps the tab connected, and the last one to end disconnects it.
+        if ($synced && !isset($this->connectedContextIds[$contextId])) {
             $this->connectedContextIds[$contextId] = true;
             $this->via->triggerClientConnect($context);
         }
@@ -264,6 +393,10 @@ class SseHandler {
         // records transitions rather than every dropped frame.
         $backedUp = false;
         $droppedFrames = 0;
+
+        // A tenth of slack: the park's millisecond timer can end just short of the full interval.
+        $keepAliveNs = $this->via->getConfig()->getSseKeepAliveMs() * 900_000;
+        $lastWriteNs = hrtime(true);
 
         // Keep connection alive and listen for patches
         while ($synced) {
@@ -274,13 +407,21 @@ class SseHandler {
                 break;
             }
 
-            if (!$response->isWritable()) {
+            // isWritable() stays true after the peer closes; clientGone is what reports that.
+            if ($stream->clientGone || !$response->isWritable()) {
                 break;
             }
 
             // Check for patches from the context
             $patch = $context->getPatch();
             if ($patch) {
+                // The client can leave while the loop is parked; the patch then waits for its next stream.
+                if ($this->connectionGone($stream, $response)) {
+                    $context->getPatchManager()->returnPatch($patch);
+
+                    break;
+                }
+
                 // Drop this frame rather than parking in write() behind a client that
                 // is not draining its socket. See shouldDropFrame().
                 if ($this->isBackedUp($response, $patch['type'])) {
@@ -299,20 +440,10 @@ class SseHandler {
                 $backedUp = false;
 
                 try {
-                    $output = $this->sendSSEPatch($sse, $patch);
-
-                    if ($brotliWrite !== null) {
-                        $compressed = $brotliWrite($output);
-                        if ($compressed === false) {
-                            // Compression failed — fall back to raw output for this chunk
-                            $compressed = $output;
-                        }
-                        if (!$response->write($compressed)) {
-                            break;
-                        }
-                    } elseif (!$response->write($output)) {
+                    if (!$this->writeOutput($response, $this->sendSSEPatch($sse, $patch), $brotliWrite)) {
                         break;
                     }
+                    $lastWriteNs = hrtime(true);
 
                     // Delivery acknowledgement. Signal patches carry deltas and are only
                     // marked synced here, once the bytes are actually on the wire — a patch
@@ -339,14 +470,12 @@ class SseHandler {
 
                 break;
             } else {
-                // Idle: getPatch() already parked for the poll interval, so the loop is
-                // paced without a separate sleep. Reaching here at all is the point —
-                // while pop() blocked unboundedly these liveness checks never ran.
+                // No patch: the keep-alive interval passed, or a closed connection or reset stream woke
+                // the park. Nothing else ends it, so an idle stream costs one wake per interval.
 
-                // Heartbeat the cross-worker directory entry. Without this a long-lived
-                // stream outlives its own record and the tab's next action 400s on any
-                // other worker. No-op single-worker.
-                $this->via->getApp()->touchContextRecord($contextId);
+                if ($this->connectionGone($stream, $response)) {
+                    break;
+                }
 
                 // Safety valve: if context was destroyed externally (e.g. cleanup race),
                 // send a reload so the client reinitialises instead of hanging silently.
@@ -358,12 +487,24 @@ class SseHandler {
                     // @phpstan-ignore if.alwaysTrue
                     if ($response->isWritable()) {
                         try {
-                            $response->write($sse->executeScript('window.location.reload()'));
+                            $this->writeOutput($response, $sse->executeScript('window.location.reload()'), $brotliWrite);
                         } catch (\Throwable) {
                         }
                     }
 
                     break;
+                }
+
+                // Skipped behind a backlog, so the comment never parks the loop in write().
+                if ($keepAliveNs > 0 && hrtime(true) - $lastWriteNs >= $keepAliveNs && !$this->isBackedUp($response, 'elements')) {
+                    try {
+                        if (!$this->writeOutput($response, self::KEEP_ALIVE, $brotliWrite)) {
+                            break;
+                        }
+                    } catch (\Throwable) {
+                        break;
+                    }
+                    $lastWriteNs = hrtime(true);
                 }
             }
         }
@@ -422,6 +563,32 @@ class SseHandler {
         } else {
             $this->via->log('debug', "Old SSE coroutine exited; {$this->via->activeSseCount[$contextId]} still active, skipping cleanup: {$contextId}", $context);
         }
+    }
+
+    /**
+     * Whether the client has left: its connection closed, or it reset this HTTP/2 stream.
+     * exists() is the backstop for a close this worker is not told about (dispatch_mode 1, 3 or 7).
+     */
+    private function connectionGone(SseStream $stream, Response $response): bool {
+        return $stream->clientGone || !$response->isWritable() || $this->via->getServer()?->exists($response->fd) === false;
+    }
+
+    /**
+     * Write SSE output through the stream's Brotli encoder when it has one, so every frame of a
+     * compressed stream, keep-alive comments included, goes through the same encoder.
+     *
+     * @param null|callable(string): (false|string) $brotliWrite
+     */
+    private function writeOutput(Response $response, string $output, ?callable $brotliWrite): bool {
+        if ($brotliWrite !== null) {
+            $compressed = $brotliWrite($output);
+            // On a compression failure the chunk goes out raw.
+            if ($compressed !== false) {
+                $output = $compressed;
+            }
+        }
+
+        return $response->write($output);
     }
 
     /**

@@ -71,8 +71,9 @@ test('the real PatchManager bounds its park and reports a closed channel', funct
     expect($kv['delivered'])->toBe('1');
     expect($kv['delivered_closed'])->toBe('0');
 
-    // Idle must park for roughly the configured 20ms and then RETURN, so the
-    // caller's liveness checks run. Parking forever is A1's stranding bug.
+    // Idle must park for roughly the configured 20ms keep-alive and then RETURN, so the
+    // caller's liveness checks run. Parking forever is A1's stranding bug. The fixture sets
+    // the poll interval to 1ms, which paces only the Dev Bar stream now.
     expect($kv['idle_null'])->toBe('1');
     expect($kv['idle_closed'])->toBe('0');
     expect((int) $kv['idle_ms'])->toBeGreaterThanOrEqual(15);
@@ -83,4 +84,36 @@ test('the real PatchManager bounds its park and reports a closed channel', funct
     expect($kv['closed_null'])->toBe('1');
     expect($kv['closed_flag'])->toBe('1');
     expect((int) $kv['closed_ms'])->toBeLessThan(10);
+});
+
+test('a parked PatchManager wakes on demand without closing its channel', function (): void {
+    $fixture = dirname(__DIR__) . '/Fixtures/patchmanager_channel.php';
+    $out = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture));
+
+    $kv = [];
+    foreach (explode("\n", trim($out)) as $line) {
+        if (str_contains($line, '=')) {
+            [$k, $v] = explode('=', $line, 2);
+            $kv[$k] = $v;
+        }
+    }
+
+    expect($kv)->toHaveKeys(
+        ['wake_unparked_left_nothing', 'woken_null', 'woken_closed', 'woken_ms', 'woken_then_delivered', 'backstop_s'],
+        'fixture output: ' . var_export($out, true)
+    );
+
+    // A wake with nobody parked must not leave a marker for the next getPatch() to return.
+    expect($kv['wake_unparked_left_nothing'])->toBe('1');
+
+    // Woken 50ms into a 5s park: null, not a close, so the loop re-checks and parks again.
+    expect($kv['woken_null'])->toBe('1');
+    expect($kv['woken_closed'])->toBe('0');
+    expect((int) $kv['woken_ms'])->toBeLessThan(1000);
+
+    // The channel stays usable, so patches queued after a disconnect still carry over.
+    expect($kv['woken_then_delivered'])->toBe('1');
+
+    // withSseKeepAliveMs(0) keeps a bound on the park.
+    expect($kv['backstop_s'])->toBe('60');
 });

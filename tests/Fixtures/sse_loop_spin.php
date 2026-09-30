@@ -22,7 +22,7 @@ require dirname(__DIR__, 2) . '/vendor/autoload.php';
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
 
-$timeout = 0.02; // stands in for ssePollIntervalMs
+$timeout = 0.02; // stands in for the SSE keep-alive interval
 
 Coroutine::run(static function () use ($timeout): void {
     // --- closed channel: must not spin ---

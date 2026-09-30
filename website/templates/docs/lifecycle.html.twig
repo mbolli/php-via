@@ -29,6 +29,26 @@
 $config->withContextCleanupDelay(60_000); // 60 seconds
 {% endverbatim %}{% endcode %}
 
+    <h3 id="disconnect-detection">How a closed tab is detected</h3>
+    <p>
+        An open SSE stream does nothing between events. It wakes when a patch is queued for it, when its
+        connection closes and when the worker stops, so <code>onClientDisconnect</code> runs about a
+        millisecond after the browser closes the connection, and the tab leaves <code>getClients()</code>
+        on every worker at the same moment. A stream that has sent nothing for 15 seconds writes an SSE
+        comment, which browsers and Datastar ignore, so proxies that close idle connections leave it open:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
+{% endverbatim %}{% endcode %}
+    <p>
+        A browser that cancels one HTTP/2 stream, as it does for a hidden tab, keeps the connection open, so
+        no close event fires. A server that speaks HTTP/2 checks its streams every 250 ms and ends the ones
+        the browser reset. With <code>dispatch_mode</code> 1, 3 or 7 set through <code>withSwooleSettings()</code>,
+        OpenSwoole has no close event, and a stream notices a closed connection at its next keep-alive
+        interval. A connection that drops without closing, such as a laptop leaving Wi-Fi, stays open until
+        TCP gives up on it.
+    </p>
+
     <h3 id="revival">Revival: reconnecting after cleanup, without a reload</h3>
     <p>
         When a tab is backgrounded, Datastar closes the <code>/_sse</code> stream (the right thing for

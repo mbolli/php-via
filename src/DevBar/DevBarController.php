@@ -250,8 +250,8 @@ final class DevBarController {
      *
      * The front-end consumes this with EventSource + addEventListener. The SSE
      * id carries both cursors as "{traceCursor}.{logCursor}" so a reconnect can
-     * resume each independently via Last-Event-ID. Mirrors the keep-alive/poll
-     * pattern of the main SseHandler (usleep is coroutine-safe under SWOOLE_HOOK_ALL).
+     * resume each independently via Last-Event-ID. Polls the buffers every
+     * Config::getSsePollIntervalMs() (usleep is coroutine-safe under SWOOLE_HOOK_ALL).
      */
     private function serveStream(Request $request, Response $response): void {
         $traceStore = $this->via->getTraceStore();

@@ -44,7 +44,51 @@ All notable changes to php-via will be documented in this file.
   of their own, so they reach clients before the streams close unless a view waits on I/O, which
   then cannot hold up the stop. The owed publishes go out before the broker disconnects.
 
+- **A closed tab is noticed when its connection closes.** OpenSwoole reports an HTTP/1.1 response
+  as writable after the client has gone, so a stream with nothing to send stayed in `getClients()`,
+  skipped `onClientDisconnect` and kept its context until a write to it failed, which for an idle
+  tab could be never. The server's close event now ends the stream about 1 ms after the browser
+  closes the connection. A browser that cancels one HTTP/2 stream keeps the connection, so no
+  close event fires; each worker of a server that speaks HTTP/2 looks for such streams every
+  250 ms and ends them, as 0.13.0 did within 100 ms. What changes for apps:
+  - `onClientDisconnect` and the removal from `getClients()` run when an idle tab closes, on every
+    worker, and `onDisconnect` / `onCleanup` follow after the cleanup delay
+    (`withContextCleanupDelay()`, 5 s by default). Hooks that never ran for idle tabs now do, and
+    their contexts are freed. A tab restored from the browser's back/forward cache after that delay
+    is revived or reloads, like any tab that comes back after cleanup.
+  - A stream that has sent nothing for 15 s writes the SSE comment `: keep-alive`, which browsers
+    and Datastar ignore. Proxies that cut idle connections, such as nginx with its 60 s default
+    `proxy_read_timeout`, therefore keep idle streams open. `Config::withSseKeepAliveMs()` sets the
+    interval and `0` turns the comment off. Code that reads the raw stream sees the comment.
+  - `Config::withSsePollIntervalMs()` now sets only how often the Dev Bar stream polls. Page
+    streams do not poll (see Performance).
+  - With `dispatch_mode` 1, 3 or 7 in `withSwooleSettings()`, OpenSwoole has no close event, and
+    the stream ends at its next keep-alive interval instead.
+  - A stream whose context was destroyed without closing its channel sends its reload script at
+    its next wake, up to the keep-alive interval later, instead of within 100 ms. Context cleanup
+    closes the channel, so this is a safety net only.
+
 ### Fixed
+
+- **With `worker_num > 1`, a tab whose stream stayed busy could lose the ability to act on other
+  workers.** The context directory entry that lets any worker rebuild a context expires after
+  `withContextDirectorySize()`'s TTL (3,600 s by default) unless it is refreshed, and only an idle
+  wake of the SSE loop refreshed it. A worker that destroys its copy of a context also cuts the
+  entry to the revival window (600 s by default), even when the tab has moved its stream to
+  another worker. A tab that got a frame at least every 100 ms for that long lost its entry, and
+  its actions landing on another worker answered 400 `Invalid context` until it reconnected. Each
+  worker now rewrites the entries of all its streams, busy or idle, from one timer every quarter
+  of the TTL or of the revival window, whichever is shorter (150 s by default), and restores an
+  entry that has gone.
+
+- **A tab that reconnected before its old stream ended dropped out of its scopes and
+  `getClients()`.** The new stream registered the tab, then ended the old stream, which still
+  counted as the tab's last one and unregistered it again, firing `onClientDisconnect`. The tab
+  then missed broadcasts to custom and session scopes until its next reconnect. In 0.13.0 this was
+  every reconnect of an idle HTTP/1.1 tab to the same worker, such as a tab the browser hid and
+  showed again, because the old stream never noticed its connection close. A tab whose new stream
+  replaces a running one now stays connected: `onClientConnect` fires once and
+  `onClientDisconnect` fires when its last stream ends.
 
 - **A `mutateGlobalState()` or `Signal::mutate()` call that timed out, or a worker that died while
   waiting in one, wedged the key.** Both left a ticket that the lock later served with no lease on
@@ -155,6 +199,19 @@ All notable changes to php-via will be documented in this file.
   clients, a call went from 2.4 ms to 0.1 µs, or 0.2 ms right after a connect, and a broadcast to
   100 tabs whose view counts the clients from 239 ms to 0.4 ms. With one worker a call went from
   36 µs to 0.1 µs. The idle SSE loop no longer writes the registry on each wake.
+
+- **Idle SSE streams cost nothing between events.** Every page stream woke every 100 ms to check
+  its connection, and with `worker_num > 1` each wake also wrote the context directory in shared
+  memory, so idle CPU grew with the number of open tabs. A stream now sleeps until a patch is
+  queued, its connection closes, the worker stops or the keep-alive interval passes, which is one
+  wake per 15 s instead of 150. The directory refresh moved to one timer per worker (see Fixed).
+  Patch latency does not change, because a queued patch always woke the stream at once.
+  In `bench/contention/idle_sse.php` with 1,000 idle streams, worker CPU went from 4% of a core
+  to below the 0.25% the run can resolve with one worker, and from 8.75% to below it with four.
+  The workers' voluntary context switches, a proxy for wakes, fell from about 440 to 1 per second
+  with one worker and from about 1,200 to 4 with four. A broadcast still reached all 1,000 streams,
+  and SIGTERM still stopped the server within 100 ms. A server that speaks HTTP/2 also checks its
+  streams for client resets every 250 ms, which took 75 µs per worker for 2,000 streams.
 
 ## [0.13.0] - 2026-09-29
 

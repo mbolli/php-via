@@ -122,6 +122,12 @@ describe('stopping a real server', function (): void {
         expect(explode(' ', $r['marker'][0])[0])->toBe('disconnect', var_export($r['marker'], true));
     });
 
+    test('a stream whose context already left Via::$contexts still ends on SIGTERM', function (): void {
+        // The shutdown closes the channels of Via::$contexts; an idle stream no longer polls, so
+        // one outside that list must be woken through the stream registry or it holds the worker.
+        expectCleanStop(runGracefulShutdownServer(2, 'TERM', 'orphanContext=1'), 2);
+    });
+
     test('an idle worker with no timers still runs onShutdown in a coroutine', function (): void {
         expectCleanStop(runGracefulShutdownServer(1, 'IDLE', 'shutdownYieldMs=10'), 1, streams: 0);
     });

@@ -27,8 +27,11 @@ class Config {
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
 
-    /** Poll interval for the SSE loop in milliseconds (default 100 ms). */
+    /** Poll interval of the Dev Bar's trace and log stream in milliseconds (default 100 ms). */
     private int $ssePollIntervalMs = 100;
+
+    /** Silence after which an idle page SSE stream sends an SSE comment, in milliseconds; 0 sends none. */
+    private int $sseKeepAliveMs = 15_000;
 
     /**
      * Unsent backlog per SSE connection, in bytes, above which idempotent element
@@ -330,9 +333,10 @@ class Config {
     }
 
     /**
-     * How long the SSE loop blocks waiting for a patch before looping again.
-     * Lower values increase responsiveness; higher values reduce CPU overhead.
-     * Default: 100 ms.
+     * How often the Dev Bar's trace and log stream checks for new records (default 100 ms).
+     *
+     * Page SSE streams do not poll: a stream wakes when a patch is queued for it, when its
+     * connection closes and when the worker stops. See withSseKeepAliveMs().
      */
     public function withSsePollIntervalMs(int $ms): self {
         $this->ssePollIntervalMs = max(1, $ms);
@@ -342,6 +346,26 @@ class Config {
 
     public function getSsePollIntervalMs(): int {
         return $this->ssePollIntervalMs;
+    }
+
+    /**
+     * Set how long a page SSE stream may stay silent before it sends an SSE comment (default 15 s).
+     *
+     * The comment keeps a proxy's idle timeout, such as nginx's 60 s proxy_read_timeout, from
+     * cutting streams that have nothing to send. Browsers and Datastar ignore it. Every idle
+     * stream wakes once per interval, also to check that its connection still exists, so values
+     * below 1000 cost CPU when many clients are connected.
+     *
+     * @param int $ms interval in milliseconds; 0 sends no comment, and idle streams then wake once a minute
+     */
+    public function withSseKeepAliveMs(int $ms): self {
+        $this->sseKeepAliveMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getSseKeepAliveMs(): int {
+        return $this->sseKeepAliveMs;
     }
 
     /**
@@ -922,8 +946,9 @@ class Config {
      * ceiling. Overflow is logged, not thrown: the affected context simply loses cross-worker
      * reachability and its actions fall back to HTTP 400.
      *
-     * $ttlSeconds bounds how long a record survives without a heartbeat. Live contexts are
-     * refreshed from the SSE loop, so this only governs entries left behind by a crashed worker.
+     * $ttlSeconds bounds how long a record survives without a heartbeat. Every worker rewrites
+     * the records of the contexts it streams to every quarter of $ttlSeconds or of the revival
+     * window, whichever is shorter, so this only governs entries left behind by a crashed worker.
      *
      * @param int $maxRows        Guaranteed number of tracked contexts (default 4096)
      * @param int $maxRecordBytes Serialized bytes per record (default 1024; real records are 92-341)

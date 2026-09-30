@@ -63,6 +63,13 @@ myapp.example.com {
 }
     {% endverbatim %}{% endcode %}
 
+    <p>
+        An idle <code>/_sse</code> stream writes an SSE comment after 15 seconds without output, so a proxy
+        idle timeout longer than that, such as nginx's default <code>proxy_read_timeout</code> of 60 seconds,
+        does not cut it. If you raise <code>Config::withSseKeepAliveMs()</code>, keep it below your proxy's
+        timeout.
+    </p>
+
     <h2 id="sub-path">Sub-path mounting</h2>
     <p>
         If your app is hosted at a sub-path (e.g. <code>example.com/myapp/</code>), tell php-via

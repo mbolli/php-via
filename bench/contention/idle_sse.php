@@ -19,8 +19,9 @@ declare(strict_types=1);
  *   php bench/contention/idle_sse.php [--n=2000] [--workers=1,4] [--idle=10]
  *       [--settle=3] [--concurrency=64] [--fire-timeout=10] [--poll-ms=<ms>] [--timeout=<s>]
  *
- * --poll-ms is optional and only for plausibility checks: without it the server
- * runs with the default SSE poll interval, which is what before/after compares.
+ * --poll-ms is optional and only for plausibility checks. It sets
+ * Config::withSsePollIntervalMs(), which paced page streams before they became
+ * event driven and now paces only the Dev Bar stream.
  * --timeout overrides the per-run watchdog (default: derived from the other options).
  *
  * Prints one JSON line on stdout. Logs go to stderr.
@@ -328,8 +329,23 @@ function runOne(array $o): void {
 
     $tck = clkTck();
 
-    Coroutine::run(function () use (&$result, $n, $port, $idle, $settle, $concurrency, $fireTimeout,
-        $setupTimeout, $shutdownTimeout, $budget, $masterPid, $managerPid, $workerPids, $killServer, $tck): void {
+    Coroutine::run(function () use (
+        &$result,
+        $n,
+        $port,
+        $idle,
+        $settle,
+        $concurrency,
+        $fireTimeout,
+        $setupTimeout,
+        $shutdownTimeout,
+        $budget,
+        $masterPid,
+        $managerPid,
+        $workerPids,
+        $killServer,
+        $tck
+    ): void {
         $watchdog = Timer::after((int) ($budget * 1000), static function () use (&$result, $killServer): void {
             logLine('watchdog fired, killing server and client');
             $killServer();

@@ -100,22 +100,6 @@ final class SharedContextDirectory {
         return self::decode((string) $row['record']);
     }
 
-    /**
-     * Push an existing entry's expiry forward. No-op when the context is not in the directory.
-     *
-     * Called from the SSE loop's idle branch, which is the natural heartbeat for "this context
-     * is still alive" — the alternative is an entry expiring underneath a connected tab.
-     */
-    public function touch(string $contextId, int $expiresAt): void {
-        $key = self::key($contextId);
-
-        if (!$this->table->exists($key)) {
-            return;
-        }
-
-        $this->table->set($key, ['expires' => $expiresAt]);
-    }
-
     public function forget(string $contextId): void {
         $this->table->del(self::key($contextId));
     }

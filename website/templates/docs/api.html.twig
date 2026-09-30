@@ -518,7 +518,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withStaticCacheControl('public, max-age=31536000, immutable')  // default: devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate'
     // ...or a closure(string $filePath, string $mimeType): string to fine-tune per file (see Deployment → Static assets)
     ->withBasePath('/')             // base path when mounted at a sub-path (see below)
-    ->withSsePollIntervalMs(50)     // SSE poll interval in ms
+    ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
     ->withSwooleSettings([...])     // raw OpenSwoole server settings
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag

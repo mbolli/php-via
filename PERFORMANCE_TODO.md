@@ -542,6 +542,16 @@ back the full poll latency. Not recommended — hoist the render instead.
 
 **Files:** `src/Http/SseHandler.php:180-250`, `src/Context/PatchManager.php:93-115`
 
+**Current state (perf/contention).** The 100 ms bounded park turned out to cost CPU per idle
+stream (about 6.5% of a core per 1,000 at one worker) and never caught a closed HTTP/1.1 tab,
+because `isWritable()` stays true after the peer closes. It did catch an HTTP/2 stream reset,
+which turns `isWritable()` false. The park is now the keep-alive interval
+(`withSseKeepAliveMs()`, 15 s, which also writes an SSE comment). The server's `close` event wakes
+the streams of a closed connection through their channel (`PatchManager::wakeConsumers()`), a
+per-worker check every 250 ms wakes reset HTTP/2 streams, the shutdown closes every running
+stream's channel, and the directory heartbeat is a per-worker timer.
+The liveness contract below still holds: `CHANNEL_CLOSED` exits, anything else re-checks.
+
 ### CORRECTION — there is no 100 ms poll in production (verified)
 
 The premise of the earlier draft was that `ssePollIntervalMs = 100` adds ~50 ms median
@@ -703,8 +713,12 @@ Blocked on item 3: dropping a *frame* requires a frame boundary to drop against.
 1. **The record must be written at context CREATION, not destruction.** Revival records existed
    only after `destroyContext()` — a returning tab whose context had been cleaned up. A context
    *alive* on another worker has no revival record at all, so "move `$revivableContexts` into
-   `SharedTable`" would not have fixed cross-worker actions. Entries are heartbeated from the SSE
-   loop's idle branch; without that a long-lived stream outlives its own record.
+   `SharedTable`" would not have fixed cross-worker actions. Each worker rewrites the entries of
+   all its SSE streams, busy or idle, from one timer every quarter of the TTL or of the revival
+   window, the shorter; without that a long-lived stream outlives its own record. The window
+   counts because a worker that destroys its copy cuts the entry to it while the tab may stream
+   from another worker. (0.13.0 heartbeated from the loop's idle branch only, so a busy stream
+   lost its entry.)
 2. **Item 7 was a prerequisite, not a follow-up.** Verified before building: a revived context
    re-runs the route handler on the receiving worker, so without shared scoped values it mutates
    a copy nobody is watching — a silent wrong answer instead of a loud 400. Confirmed end to end

@@ -135,19 +135,21 @@ test('a full registry logs which setting to raise, and the client still connects
     for ($filled = 0; $filled < 100_000 && $registry->register("fill-{$filled}", "client-{$filled}", '10.0.0.1', 1000); ++$filled) {
         // Fill the table.
     }
+    // A full table still takes a key whose hash slot is free, so reuse the key it just rejected.
+    $rejected = "fill-{$filled}";
     $logs = new LogBuffer();
     $via->getApp()->getLogger()->setBuffer($logs);
 
     ob_start();
 
     try {
-        $via->getApp()->registerClient('ctx-over', ['id' => 'client-over', 'identicon' => '', 'connected_at' => 1000, 'ip' => '10.0.0.2']);
+        $via->getApp()->registerClient($rejected, ['id' => 'client-over', 'identicon' => '', 'connected_at' => 1000, 'ip' => '10.0.0.2']);
     } finally {
         ob_end_clean();
     }
 
     $warnings = array_values(array_filter($logs->since(0), static fn (array $r): bool => $r['level'] === 'warn'));
     expect($warnings)->toHaveCount(1);
-    expect($warnings[0]['message'])->toContain('ctx-over')->toContain('Config::withContextDirectorySize()');
-    expect($via->getClients())->not->toHaveKey('ctx-over');
+    expect($warnings[0]['message'])->toContain($rejected)->toContain('Config::withContextDirectorySize()');
+    expect($via->getClients())->not->toHaveKey($rejected);
 });

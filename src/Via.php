@@ -173,6 +173,7 @@ class Via {
     private Router $router;
     private SessionManager $sessionManager;
     private RequestHandler $requestHandler;
+    private SseHandler $sseHandler;
     private Logger $logger;
     private RequestLogger $requestLogger;
     private Stats $stats;
@@ -249,12 +250,12 @@ class Via {
         $this->sessionManager = new SessionManager($this->logger);
 
         // Initialize HTTP handlers
-        $sseHandler = new SseHandler($this);
+        $this->sseHandler = new SseHandler($this);
         $actionHandler = new ActionHandler($this);
-        $this->requestHandler = new RequestHandler($this, $sseHandler, $actionHandler);
+        $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler);
 
         // Share request logger with HTTP handlers
-        $sseHandler->setRequestLogger($this->requestLogger);
+        $this->sseHandler->setRequestLogger($this->requestLogger);
         $actionHandler->setRequestLogger($this->requestLogger);
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
@@ -1042,6 +1043,35 @@ class Via {
                     }
                 }
 
+                if ($this->app->getContextDirectory() !== null) {
+                    $id = Timer::tick(self::sseHeartbeatIntervalMs($this->config), function (): void {
+                        try {
+                            $this->sseHandler->heartbeatStreams();
+                        } catch (\Throwable $e) {
+                            $this->log('error', 'SSE heartbeat failed: ' . Logger::describe($e));
+                        }
+                    });
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
+                    }
+                }
+
+                // A browser that cancels one HTTP/2 stream keeps the connection, so no close event tells the worker.
+                if ((self::serverSettings($this->config)['open_http2_protocol'] ?? false) === true) {
+                    $id = Timer::tick(SseHandler::RESET_CHECK_MS, function (): void {
+                        try {
+                            $this->sseHandler->endResetStreams();
+                        } catch (\Throwable $e) {
+                            $this->log('error', 'SSE reset check failed: ' . Logger::describe($e));
+                        }
+                    });
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
+                    }
+                }
+
                 // OpenSwoole only calls workerExit while the reactor has something alive. Without
                 // this an idle worker skipped it and ran the shutdown outside any coroutine.
                 Timer::tick(60_000, static function (): void {});
@@ -1093,6 +1123,18 @@ class Via {
             $this->server->on('request', function (Request $request, Response $response): void {
                 $this->requestHandler->handleRequest($request, $response);
             });
+
+            // Runs in the worker that owns the connection, about 1 ms after the client's FIN. OpenSwoole
+            // rejects it under dispatch_mode 1, 3 and 7; the SSE keep-alive wake covers those.
+            if (self::deliversCloseEvents(self::serverSettings($this->config))) {
+                $this->server->on('close', function (Server $server, int $fd): void {
+                    try {
+                        $this->sseHandler->onConnectionClose($fd);
+                    } catch (\Throwable $e) {
+                        $this->log('error', "Close handling failed for connection {$fd}: " . Logger::describe($e));
+                    }
+                });
+            }
         }
 
         $this->server->start();
@@ -1714,6 +1756,33 @@ class Via {
             'ssl_cert_file' => $config->getSslCertFile(),
             'ssl_key_file' => $config->getSslKeyFile(),
         ]));
+    }
+
+    /**
+     * Whether OpenSwoole delivers the close event under these settings: not in dispatch_mode 1, 3 or 7.
+     *
+     * @param array<string, mixed> $settings
+     *
+     * @internal
+     */
+    public static function deliversCloseEvents(array $settings): bool {
+        return !\in_array((int) ($settings['dispatch_mode'] ?? 2), [1, 3, 7], true);
+    }
+
+    /**
+     * How often each worker rewrites the directory records of the contexts it streams to: 150 s by default.
+     * A quarter of the TTL or of the revival window, which a worker that destroys its copy cuts the record to.
+     *
+     * @internal
+     */
+    public static function sseHeartbeatIntervalMs(Config $config): int {
+        $seconds = $config->getContextDirectoryTtlSeconds();
+        $windowMs = $config->getContextRevivalWindowMs();
+        if ($windowMs > 0) {
+            $seconds = min($seconds, (int) ceil($windowMs / 1000));
+        }
+
+        return max(1000, intdiv($seconds * 1000, 4));
     }
 
     /**
@@ -2424,6 +2493,7 @@ class Via {
         foreach ($this->contexts as $context) {
             $context->getPatchManager()->closePatchChannel();
         }
+        $this->sseHandler->closeStreams();
         $this->waitForSseStreams();
 
         foreach ($this->shutdownCallbacks as $callback) {

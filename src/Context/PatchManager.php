@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
 
 /**
@@ -25,12 +26,18 @@ use OpenSwoole\Coroutine\Channel;
 class PatchManager {
     private const int CHANNEL_CAPACITY = 50;
 
+    /** How long an idle SSE loop parks when the keep-alive comment is disabled. */
+    private const int IDLE_BACKSTOP_MS = 60_000;
+
+    /** Pushed by wakeConsumers(); getPatch() turns it into null, so it never reaches a client. */
+    private const string WAKE = 'via:wake';
+
     /** @var null|Channel|list<QueuedPatch> */
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
 
-    /** Blocking-pop timeout in seconds; bounds how long an idle SSE loop parks. */
-    private float $pollTimeout = 0.1;
+    /** Blocking-pop timeout in seconds: the keep-alive interval, which bounds how long an idle SSE loop parks. */
+    private float $pollTimeout = 15.0;
 
     /** Whether the last getPatch() found the channel closed rather than merely idle. */
     private bool $channelClosed = false;
@@ -44,7 +51,8 @@ class PatchManager {
         // In test mode (no OpenSwoole server running), use array instead of Channel
         $inTestMode = getenv('VIA_TEST_MODE') === '1';
 
-        $this->pollTimeout = max(1, $app->getConfig()->getSsePollIntervalMs()) / 1000;
+        $keepAliveMs = $app->getConfig()->getSseKeepAliveMs();
+        $this->pollTimeout = ($keepAliveMs > 0 ? $keepAliveMs : self::IDLE_BACKSTOP_MS) / 1000;
 
         if ($inTestMode) {
             $this->patchChannel = [];
@@ -105,7 +113,9 @@ class PatchManager {
     }
 
     /**
-     * Get next patch from the queue, parking for at most the poll timeout.
+     * Get next patch from the queue, parking for at most the keep-alive interval.
+     *
+     * Null means the park timed out, wakeConsumers() woke it, or the channel is closed (wasChannelClosed()).
      *
      * This loop has failed in both directions historically, so the contract is
      * deliberate. `pop(0)` does NOT mean "non-blocking": in OpenSwoole a timeout of
@@ -134,15 +144,53 @@ class PatchManager {
             return array_shift($this->patchChannel);
         }
 
-        $result = $this->patchChannel->pop($this->pollTimeout);
+        // Held locally so errCode is read from the channel that was popped, even once recreatePatchChannel() replaced it.
+        $channel = $this->patchChannel;
+        $result = $channel->pop($this->pollTimeout);
 
         if ($result === false) {
-            $this->channelClosed = $this->patchChannel->errCode === Channel::CHANNEL_CLOSED;
+            $this->channelClosed = $channel->errCode === Channel::CHANNEL_CLOSED;
 
             return null;
         }
 
-        return $result;
+        return $result === self::WAKE ? null : $result;
+    }
+
+    /**
+     * Wake every SSE loop parked in getPatch() on this context, so each re-checks its own state.
+     * The channel stays open, so patches queued afterwards still carry over to the next stream.
+     */
+    public function wakeConsumers(): void {
+        if ($this->useArray || !$this->patchChannel instanceof Channel || Coroutine::getCid() <= 0) {
+            return;
+        }
+
+        $channel = $this->patchChannel;
+        // A parked consumer implies an empty channel, so each push goes straight to the longest-parked
+        // consumer. Bounded by the first count, because a woken loop that parks again joins the back.
+        for ($left = self::parkedConsumers($channel); $left > 0 && self::parkedConsumers($channel) > 0; --$left) {
+            $channel->push(self::WAKE);
+        }
+    }
+
+    /**
+     * Put a patch that getPatch() returned but the SSE loop could not send back at the head of the queue.
+     *
+     * @param QueuedPatch $patch
+     */
+    public function returnPatch(array $patch): void {
+        $channel = $this->patchChannel;
+        $queued = [$patch, ...($channel instanceof Channel ? $this->drainChannel($channel) : $channel ?? [])];
+        if (\count($queued) > self::CHANNEL_CAPACITY) {
+            $queued = $this->evictOne($queued);
+        }
+
+        if ($channel instanceof Channel) {
+            $this->refillChannel($channel, $queued);
+        } else {
+            $this->patchChannel = $queued;
+        }
     }
 
     /**
@@ -415,10 +463,16 @@ class PatchManager {
             if ($patch === false) {
                 break;
             }
-            $drained[] = $patch;
+            if ($patch !== self::WAKE) {
+                $drained[] = $patch;
+            }
         }
 
         return $drained;
+    }
+
+    private static function parkedConsumers(Channel $channel): int {
+        return (int) ($channel->stats()['consumer_num'] ?? 0);
     }
 
     /**

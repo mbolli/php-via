@@ -566,15 +566,13 @@ class Application {
     }
 
     /**
-     * Push a live context's directory entry forward so it cannot expire under a connected tab.
+     * Rewrite a live context's directory entry with the full TTL, so it cannot expire under a connected tab.
+     * Rewritten, not extended: a worker that destroyed its own copy shortened it, and it may be gone since.
      *
-     * @internal called from the SSE loop's idle branch
+     * @internal called by SseHandler::heartbeatStreams() for every context with a running stream
      */
-    public function touchContextRecord(string $contextId): void {
-        $this->contextDirectory?->touch(
-            $contextId,
-            time() + $this->config->getContextDirectoryTtlSeconds()
-        );
+    public function refreshContextRecord(Context $context): void {
+        $this->publishContextRecord($context, $this->config->getContextDirectoryTtlSeconds());
     }
 
     /**

@@ -298,10 +298,11 @@ describe('SSE initial sync', function (): void {
         $request->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
         $response = new FakeStaticResponse();
 
+        $handler = new SseHandler($via);
         ob_start();
 
         try {
-            (new SseHandler($via))->handleSSE($request, $response);
+            $handler->handleSSE($request, $response);
         } finally {
             $log = (string) ob_get_clean();
             $timers = (new ReflectionProperty(Application::class, 'cleanupTimers'))->getValue($via->getApp());
@@ -312,6 +313,7 @@ describe('SSE initial sync', function (): void {
         expect($response->ended)->toBeTrue();
         expect($events)->toBe([]);
         expect($via->activeSseCount)->not->toHaveKey('ctx-sse');
+        expect((new ReflectionProperty(SseHandler::class, 'streams'))->getValue($handler))->toBe([]);
         expect($timers)->toHaveKey('ctx-sse');
         expect($log)->toContain('Initial SSE sync failed: RuntimeException: sync failed');
     });
@@ -335,10 +337,11 @@ describe('SSE loop', function (): void {
 
         $request = new FakeActionRequest('unused', ['via_ctx' => 'ctx-loop']);
         $request->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
+        $handler = new SseHandler($via);
         ob_start();
 
         try {
-            (new SseHandler($via))->handleSSE($request, new FakeStaticResponse());
+            $handler->handleSSE($request, new FakeStaticResponse());
         } catch (LogicException) {
             // The request guard in RequestHandler::handleRequest() answers this one.
         } finally {
@@ -348,6 +351,8 @@ describe('SSE loop', function (): void {
         }
 
         expect($via->activeSseCount)->not->toHaveKey('ctx-loop');
+        expect((new ReflectionProperty(SseHandler::class, 'streams'))->getValue($handler))->toBe([]);
+        expect((new ReflectionProperty(SseHandler::class, 'streamsByFd'))->getValue($handler))->toBe([]);
         expect($events)->toBe(['disconnect']);
         expect($timers)->toHaveKey('ctx-loop');
     });
