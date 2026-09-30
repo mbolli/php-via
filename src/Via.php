@@ -66,7 +66,7 @@ class Via {
     /** How often the leader drops registry rows of worker processes that no longer exist. */
     private const int DEAD_CLIENT_SWEEP_MS = 60_000;
 
-    /** Safety bound on coalesced fan-out re-runs for a single scope. */
+    /** Passes one fan-out of a scope runs in a row; a broadcast still owed then goes to the next flush. */
     private const int MAX_SYNC_PASSES = 8;
 
     /** Safety bound on flushes in a row caused by views broadcasting other scopes. */
@@ -130,14 +130,17 @@ class Via {
     /** Final GlobalState drain, run once in the master after every worker has stopped */
     private ?\Closure $finalGlobalStateDrain = null;
 
-    /** @var array<string, array{cid: int, since: int, warned: bool}> Scopes whose fan-out is running => its coroutine, hrtime start, whether it was reported as slow */
+    /** @var array<string, array{cid: int, lastCid: int, since: int, warned: bool}> Scopes whose fan-out is running => its coroutine, the highest coroutine id when it started, hrtime start, whether it was reported as slow */
     private array $syncInFlight = [];
 
     /** @var array<string, array<string, array{0: \Throwable, 1: Context, 2: int}>> Per scope: failure signature => first throwable, its context, count */
     private array $syncFailures = [];
 
-    /** @var array<string, true> Scopes broadcast while their fan-out was running, by that fan-out's own views when coalescing */
+    /** @var array<string, true> Scopes broadcast by another coroutine on the synchronous path while their fan-out was running */
     private array $syncPending = [];
+
+    /** @var array<string, true> Scopes broadcast by the views of their own running fan-out, or by coroutines those views start */
+    private array $syncReentered = [];
 
     /** @var array<string, int> Scopes waiting for a flush => hops of the render chain that marked them */
     private array $dirtyScopes = [];
@@ -598,7 +601,9 @@ class Via {
      * ended at least half that ago, otherwise as soon as both have passed. Views render the state
      * as it is then; call flushBroadcasts() to force it. Outside a coroutine, during shutdown, or
      * with Config::withBroadcastCoalescing(false), it renders before returning, and the publish is
-     * sent by this call or, when another coroutine is publishing, by that one.
+     * sent by this call or, when another coroutine is publishing, by that one. When the scope's
+     * fan-out is already running in another coroutine, that fan-out runs once more for it instead,
+     * and after 8 passes in a row the next flush renders it, except during shutdown, which drops it.
      *
      * @param string $scope Scope to broadcast to
      */
@@ -1932,16 +1937,21 @@ class Via {
         //
         // A broadcast that arrives mid-fan-out is therefore folded into a single
         // re-run afterwards, which also collapses broadcast storms into one extra
-        // pass. Note this bounds interleaving between fan-outs, not mutation of
-        // application state during one — a view reading a PHP static that an action
-        // changes mid-loop is beyond what the framework can snapshot.
+        // pass. After MAX_SYNC_PASSES passes one still owed goes to the next flush.
+        // Note this bounds interleaving between fan-outs, not mutation of application
+        // state during one: a view reading a PHP static that an action changes
+        // mid-loop is beyond what the framework can snapshot.
         if (isset($this->syncInFlight[$scope])) {
-            $this->syncPending[$scope] = true;
+            if ($this->isOwnPass($this->syncInFlight[$scope])) {
+                $this->syncReentered[$scope] = true;
+            } else {
+                $this->syncPending[$scope] = true;
+            }
 
             return;
         }
 
-        $this->syncInFlight[$scope] = ['cid' => Coroutine::getCid(), 'since' => hrtime(true), 'warned' => false];
+        $this->syncInFlight[$scope] = ['cid' => Coroutine::getCid(), 'lastCid' => (int) (Coroutine::stats()['coroutine_last_cid'] ?? PHP_INT_MAX), 'since' => hrtime(true), 'warned' => false];
 
         // Wrap fan-out in a "broadcast {scope}" root trace. Inside an action (the
         // synchronous path, or flushBroadcasts()) this is a no-op: the action trace is
@@ -1956,9 +1966,10 @@ class Via {
 
         try {
             $passes = 0;
+            $reenteredPasses = 0;
 
             do {
-                unset($this->syncPending[$scope]);
+                unset($this->syncPending[$scope], $this->syncReentered[$scope]);
                 $this->syncFailures[$scope] = [];
 
                 // A re-run exists because state changed mid-pass, so it reads and renders everything again. A scope
@@ -1975,21 +1986,61 @@ class Via {
                     $this->logSyncFailures($scope);
                 }
                 ++$passes;
-            } while (isset($this->syncPending[$scope]) && $passes < self::MAX_SYNC_PASSES);
+                if (isset($this->syncReentered[$scope])) {
+                    ++$reenteredPasses;
+                }
+            } while ((isset($this->syncPending[$scope]) || isset($this->syncReentered[$scope])) && $passes < self::MAX_SYNC_PASSES);
 
-            if (isset($this->syncPending[$scope])) {
-                // A view that broadcasts its own scope on every render would loop
-                // forever. Stop and say so rather than wedging the worker.
-                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\" — check for a view that broadcasts its own scope");
+            if ($reenteredPasses === self::MAX_SYNC_PASSES) {
+                // Another pass would broadcast again: stop rather than wedge the worker.
+                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\": a view it renders broadcasts it again on every pass, directly, through another scope or from a coroutine it starts, so its fan-out stopped after " . self::MAX_SYNC_PASSES . ' passes');
+            } elseif (isset($this->syncReentered[$scope])) {
+                // Not a loop, so owed like a broadcast from outside.
+                $this->syncPending[$scope] = true;
             }
         } finally {
-            unset($this->syncInFlight[$scope], $this->syncPending[$scope], $this->syncFailures[$scope]);
+            // Owed after the last pass: the next flush renders it, and this caller returns.
+            if (isset($this->syncPending[$scope])) {
+                $this->oweFlush($scope);
+            }
+            unset($this->syncInFlight[$scope], $this->syncPending[$scope], $this->syncReentered[$scope], $this->syncFailures[$scope]);
             $this->readEpochs->end($joinedEpoch);
 
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+
+            if (isset($this->dirtyScopes[$scope])) {
+                // Marked mid-pass, when invalidating would have split the frame, or handed on above.
+                $this->invalidateForBroadcast($scope);
+                $this->scheduleFlush();
+            }
         }
+    }
+
+    /**
+     * Whether the calling coroutine runs $pass, or is one that coroutine started during the pass,
+     * as a view broadcasting from a coroutine of its own does.
+     *
+     * @param array{cid: int, lastCid: int, since: int, warned: bool} $pass
+     */
+    private function isOwnPass(array $pass): bool {
+        $cid = Coroutine::getCid();
+
+        return $cid === $pass['cid'] || ($cid > $pass['lastCid'] && Coroutine::getPcid() === $pass['cid']);
+    }
+
+    /**
+     * Leave a frame a running fan-out of $scope still owes to the next flush, which renders the scope again.
+     * Shutdown drops it: no flush runs any more, and clients reconnect for fresh state.
+     */
+    private function oweFlush(string $scope): void {
+        if ($this->shuttingDown) {
+            return;
+        }
+
+        $this->dirtyScopes[$scope] ??= 0;
+        $this->scopeMarks[$scope] = $this->readEpochs->next();
     }
 
     /**
@@ -2084,10 +2135,10 @@ class Via {
         $cid = Coroutine::getCid();
         $pass = $this->syncInFlight[$scope] ?? null;
 
-        if ($pass !== null && $pass['cid'] === $cid) {
+        if ($pass !== null && $this->isOwnPass($pass)) {
             // A view broadcasting the scope its own pass renders: re-run the pass, at most MAX_SYNC_PASSES times.
-            $coalesced = isset($this->syncPending[$scope]);
-            $this->syncPending[$scope] = true;
+            $coalesced = isset($this->syncReentered[$scope]);
+            $this->syncReentered[$scope] = true;
         } else {
             $hops = isset($this->runningFlushes[$cid]) ? $this->runningFlushes[$cid] + 1 : 0;
 
@@ -2118,7 +2169,7 @@ class Via {
     }
 
     /**
-     * @param array{cid: int, since: int, warned: bool} $pass
+     * @param array{cid: int, lastCid: int, since: int, warned: bool} $pass
      */
     private function warnIfSlowPass(string $scope, array $pass): void {
         $runningMs = (hrtime(true) - $pass['since']) / 1e6;
@@ -2336,12 +2387,6 @@ class Via {
                     $this->syncLocally($scope, $rendered);
                 } catch (\Throwable $e) {
                     $this->log('error', "Broadcast of {$scope} failed: " . Logger::describe($e));
-                }
-
-                if (isset($this->dirtyScopes[$scope])) {
-                    // Marked mid-pass, when invalidating would have split the frame.
-                    $this->invalidateForBroadcast($scope);
-                    $this->scheduleFlush();
                 }
             }
         } finally {
@@ -2616,7 +2661,8 @@ class Via {
             }
 
             if ($attempt >= self::MAX_SYNC_PASSES) {
-                $this->log('warning', "Newer fan-outs finished context {$context->getId()} first {$attempt} times while its view waited, so its last frame can be out of date until the next broadcast of \"{$scope}\": check the view for slow I/O", $context);
+                $this->log('warning', "Newer fan-outs finished context {$context->getId()} first {$attempt} times while its view waited, so the next flush of \"{$scope}\" renders it again: check the view for slow I/O", $context);
+                $this->oweFlush($scope);
 
                 return;
             }

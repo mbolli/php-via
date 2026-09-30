@@ -38,14 +38,16 @@ All notable changes to php-via will be documented in this file.
     blocked on I/O.
 
   `Via::flushBroadcasts()` runs the pending flush in the calling coroutine, for code that needs the
-  frame before what it queues next. When another flush is rendering a scope the caller broadcast,
-  it waits for that fan-out up to 1 s; past that it logs a warning and returns, and the frame
-  follows on a later flush. `Config::withBroadcastCoalescing(false)` renders and publishes on every
-  call, as before. `withBroadcastTickMs(0)` keeps the coalescing but flushes every event-loop turn
-  with no gap. Outside a coroutine (CLI scripts, tests) and during worker shutdown `broadcast()`
-  stays synchronous. At shutdown the frames still waiting for the tick are rendered in a coroutine
-  of their own, so they reach clients before the streams close unless a view waits on I/O, which
-  then cannot hold up the stop. The owed publishes go out before the broker disconnects.
+  frame before what it queues next. When another flush is rendering a scope the caller broadcast, it
+  waits for that fan-out up to 1 s; past that it logs a warning and returns, and the frame follows
+  on a later flush. `Config::withBroadcastCoalescing(false)` renders and publishes on every call, as
+  before, except that a fan-out that other actions re-run 8 times in a row leaves the rest to a
+  flush paced by the tick, which `getBroadcastStats()` counts under `flushes`.
+  `withBroadcastTickMs(0)` keeps the coalescing but flushes every event-loop turn with no gap.
+  Outside a coroutine (CLI scripts, tests) and during worker shutdown `broadcast()` stays
+  synchronous. At shutdown the frames still waiting for the tick are rendered in a coroutine of
+  their own, so they reach clients before the streams close unless a view waits on I/O, which then
+  cannot hold up the stop. The owed publishes go out before the broker disconnects.
 
 - **A closed tab is noticed when its connection closes.** OpenSwoole reports an HTTP/1.1 response
   as writable after the client has gone, so a stream with nothing to send stayed in `getClients()`,
@@ -134,7 +136,22 @@ All notable changes to php-via will be documented in this file.
   The older frame then arrived last and stayed until the next broadcast to one of the tab's scopes,
   with one worker or several. A fan-out now renders the tab again when a fan-out that started
   after it finished that tab first, so the tab shows the older frame briefly and then the current
-  one. After 8 such renders in a row it stops and logs a warning.
+  one. After 8 such renders in a row it logs a warning and leaves the tab to the next flush of the
+  scope, which renders it again.
+
+- **With coalescing off, the last write under sustained load could be lost.** A broadcast that
+  finds its scope's fan-out running makes that fan-out run one more pass, and a fan-out stopped
+  after 8 passes in a row and dropped the broadcast still owed. When other actions kept
+  broadcasting that long, which happens under load once the views wait on I/O, clients could end
+  on an older state until the scope's next broadcast, and the log blamed a view that broadcasts its
+  own scope. 0.13.0 renders this way on every broadcast and has the same fault. After 8 passes the
+  fan-out now hands the owed broadcast to the next flush, paced by the tick, and returns; during
+  shutdown it drops it, since no flush runs any more. "Broadcast re-entrancy limit reached" is
+  logged only when the fan-out's own views broadcast its scope again in all 8 passes, directly or
+  from a coroutine they start during the fan-out, and that broadcast is still dropped, so such a
+  view cannot hold the worker. This holds with coalescing on too. A coroutine the action started
+  before it broadcast counts as another action. Coalesced broadcasts from other actions already
+  went to the next flush and were not affected.
 
 ### Performance
 

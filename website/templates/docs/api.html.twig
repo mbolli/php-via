@@ -533,7 +533,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
     ->withSseMaxQueuedBytes(1048576) // drop element patches for a client this far behind; 0 disables
     ->withBroadcastTickMs(25)       // minimum gap between two broadcast flushes of a worker; 0 = every event-loop turn
-    ->withBroadcastCoalescing(false) // render and publish on every broadcast() call, with no tick (default: coalesced)
+    ->withBroadcastCoalescing(false) // render and publish on every broadcast() call; a fan-out re-run 8 times in a row leaves the rest to a flush paced by the tick (default: coalesced)
     // Multi-worker (single machine)
     ->withWorkerNum(swoole_cpu_num())   // default: 1; requires SwooleBroker/RedisBroker/NatsBroker when > 1
     ->withGlobalStateTableSize(2048, 65536)   // GlobalState rows × value bytes (default 1024 × 32768; rows is a floor)

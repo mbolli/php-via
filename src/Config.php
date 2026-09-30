@@ -399,7 +399,9 @@ class Config {
      * the client before the broadcast's frame; call Via::flushBroadcasts() where that order
      * matters. Outside a coroutine and during shutdown broadcast() stays synchronous.
      *
-     * @param bool $enabled false renders and publishes synchronously on every call, as earlier releases did
+     * @param bool $enabled false renders and publishes synchronously on every call, as earlier releases did,
+     *                      except that a fan-out stopped after 8 passes in a row leaves what it still owes to a
+     *                      flush paced by the tick (see withBroadcastTickMs())
      */
     public function withBroadcastCoalescing(bool $enabled = true): self {
         $this->broadcastCoalescing = $enabled;
@@ -424,7 +426,10 @@ class Config {
      * between shares the next flush. A scope never renders in two flushes at once, and a flush
      * does not wait for another scope's flush that waits on I/O. Larger values cost latency
      * under load and save CPU.
-     * Without coalescing (withBroadcastCoalescing(false)) there is no tick.
+     * Without coalescing (withBroadcastCoalescing(false)) the tick only paces the frames a fan-out
+     * still owes when it stops: after other actions broadcast its scope during 8 passes in a row,
+     * or after newer fan-outs finished one of its contexts first 8 times. The next flush renders
+     * them, and Stats::getBroadcastStats() counts that as a flush while scheduled stays 0.
      *
      * @param int $ms gap in milliseconds; 0 flushes at the end of every event-loop turn with no gap
      */

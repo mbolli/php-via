@@ -308,6 +308,88 @@ describe('serialization', function (): void {
         expect($r['flags'])->toBe(COALESCE_IDLE);
     });
 
+    test('with coalescing off, a view that broadcasts its own scope stops after 8 passes and is not handed on', function (): void {
+        $r = coalescingCase('self-broadcast-sync');
+
+        expect($r['renders'])->toBe(8);
+        expect($r['logs'])->toHaveCount(1);
+        expect($r['logs'][0])->toContain('Broadcast re-entrancy limit reached for scope "room:self"');
+        expect($r['flags'])->toBe(COALESCE_IDLE);
+    });
+
+    test('a write that other actions broadcast during the last capped re-run still reaches clients', function (): void {
+        foreach (coalescingCase('writes-at-cap') as $mode => $r) {
+            // Coalescing off: 8 re-runs of the pass, then the next flush renders the last write.
+            expect($r['renders'])->toBe(9, $mode);
+            expect($r['lastSeen'])->toBe($r['final'], $mode);
+            expect($r['logs'])->toBe([], "{$mode}: no view broadcasts its own scope");
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('a writer the action started before it broadcast counts as another action', function (): void {
+        foreach (coalescingCase('writer-started-by-action') as $mode => $r) {
+            expect($r['renders'])->toBe(9, $mode);
+            expect($r['lastSeen'])->toBe($r['final'], $mode);
+            expect($r['logs'])->toBe([], $mode);
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('during shutdown a broadcast still owed after 8 passes is dropped and leaves nothing marked', function (): void {
+        foreach (coalescingCase('shutdown-at-cap') as $mode => $r) {
+            expect($r['renders'])->toBe(8, $mode);
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('a view that broadcasts its own scope on its first render only renders twice, with no warning', function (): void {
+        foreach (coalescingCase('self-broadcast-once') as $mode => $r) {
+            expect($r['renders'])->toBe(2, $mode);
+            expect($r['logs'])->toBe([], $mode);
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('a view that broadcasts its own scope from a coroutine it starts stops after 8 passes', function (): void {
+        foreach (coalescingCase('self-broadcast-spawned') as $mode => $r) {
+            expect($r['renders'])->toBe(8, $mode);
+            expect($r['logs'])->toHaveCount(1);
+            expect($r['logs'][0])->toContain('Broadcast re-entrancy limit reached for scope "room:spawn"');
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('a view that broadcasts its own scope in 7 of 8 passes is not a loop, and its last broadcast renders', function (): void {
+        foreach (coalescingCase('self-broadcast-after-outside-rerun') as $mode => $r) {
+            // Coalescing off: another action re-runs pass 1, the view re-runs passes 2 to 8, and the next flush renders the rest.
+            expect($r['renders'])->toBe(9, $mode);
+            expect($r['lastSeen'])->toBe($r['final'], $mode);
+            expect($r['logs'])->toBe([], $mode);
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('a context that newer fan-outs finish first 8 times in a row is rendered again by the next flush', function (): void {
+        foreach (coalescingCase('overtaken-at-cap') as $mode => $r) {
+            expect(end($r['frames']))->toBe("<div id=\"c\">{$r['final']}</div>", $mode);
+            expect($r['logs'])->toHaveCount(1);
+            expect($r['logs'][0])->toContain('Newer fan-outs finished context c first 8 times');
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
+    test('a view that broadcasts its own scope under load from other actions stops, and their last write still renders', function (): void {
+        foreach (coalescingCase('self-broadcast-under-load') as $mode => $r) {
+            // 8 passes while the writes come in, then 8 for the last one, each ending in the warning.
+            expect($r['renders'])->toBe(16, $mode);
+            expect($r['lastSeen'])->toBe($r['final'], $mode);
+            expect($r['logs'])->toHaveCount(2);
+            expect(implode("\n", $r['logs']))->toContain('Broadcast re-entrancy limit reached for scope "room:load"');
+            expect($r['flags'])->toBe(COALESCE_IDLE, $mode);
+        }
+    });
+
     test('views broadcasting each other\'s scopes stop after 8 flushes, and later broadcasts still flush', function (): void {
         $r = coalescingCase('ping-pong');
 

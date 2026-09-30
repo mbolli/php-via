@@ -132,7 +132,16 @@ $send = $c->action(function (Context $c) use ($app): void {
     </p>
     <p>
         To render and publish on every call instead, as earlier releases did, turn coalescing off:
-        <code>(new Config())-&gt;withBroadcastCoalescing(false)</code>. There is no tick then.
+        <code>(new Config())-&gt;withBroadcastCoalescing(false)</code>. There is no tick then, except under
+        sustained load: a broadcast that finds its scope's fan-out running makes that fan-out render once more
+        when it ends, and when other actions keep that going for 8 passes in a row, the rest goes to a flush
+        paced by the tick, so the action that started the fan-out can return. These flushes count under
+        <code>flushes</code> in <code>broadcast_stats</code>, while <code>scheduled</code> stays 0.
+    </p>
+    <p>
+        In both modes, a view that broadcasts its own scope while it renders, directly or from a coroutine it
+        starts, makes its fan-out render again. When it does that in 8 passes in a row, the fan-out stops and
+        the worker logs "Broadcast re-entrancy limit reached" with the scope's name.
     </p>
 
     <h2 id="connect-disconnect">Broadcasting on connect and disconnect</h2>

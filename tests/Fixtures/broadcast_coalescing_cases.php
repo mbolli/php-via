@@ -257,6 +257,82 @@ function timedObserver(Via $app, string $scope, array &$flushes, callable $rende
     patches($ctx);
 }
 
+/**
+ * One context whose every render reads the value, then waits on I/O while another action writes and
+ * broadcasts, for the first $writes renders. With coalescing off that re-runs the pass every time.
+ *
+ * @param bool $writerInAction the writes come from a coroutine the first broadcaster started before it broadcast
+ * @param bool $shutdown       the worker is shutting down before the first broadcast
+ *
+ * @return array{renders: int, lastSeen: int, final: int, logs: list<string>, flags: array<string, mixed>}
+ */
+function writesDuringRenders(bool $coalescing, bool $selfBroadcast, int $writes = 8, bool $writerInAction = false, bool $shutdown = false): array {
+    $app = app((new Config())->withBroadcastCoalescing($coalescing)->withBroadcastTickMs(5));
+    $logs = captureLogs($app);
+    $scope = 'room:load';
+    $value = 1;
+    $renders = 0;
+    $lastSeen = 0;
+    $rendering = new Channel(1);
+    $written = new Channel(1);
+
+    $ctx = new Context('load', '/load', $app);
+    $ctx->scope($scope);
+    $app->contexts['load'] = $ctx;
+    $ctx->view(static function () use ($app, $scope, $selfBroadcast, &$value, &$renders, &$lastSeen, $rendering, $written): string {
+        $seen = $value;
+        $rendering->push(++$renders, 1.0);
+        $written->pop(1.0);
+        $lastSeen = $seen;
+        if ($selfBroadcast) {
+            $app->broadcast($scope);
+        }
+
+        return "<div id=\"load\">{$seen}</div>";
+    }, cacheUpdates: false);
+
+    inCoroutine(static function () use ($app, $scope, $writes, $writerInAction, $shutdown, &$value, $rendering, $written): void {
+        if ($shutdown) {
+            (new ReflectionMethod($app, 'runWorkerShutdown'))->invoke($app);
+        }
+
+        $writer = static function (callable $send) use ($writes, &$value, $rendering, $written): void {
+            while (($render = $rendering->pop(0.2)) !== false) {
+                if ($render <= $writes) {
+                    ++$value;
+                    $send();
+                }
+                $written->push(true);
+            }
+        };
+
+        if ($writerInAction) {
+            Coroutine::create(static function () use ($app, $scope, $writer): void {
+                Coroutine::create(static fn () => $writer(static fn () => $app->broadcast($scope)));
+                $app->broadcast($scope);
+            });
+
+            return;
+        }
+
+        // Each write is an action of its own.
+        $send = static fn () => Coroutine::create(static fn () => $app->broadcast($scope));
+        $send();
+        $writer($send);
+    });
+
+    return ['renders' => $renders, 'lastSeen' => $lastSeen, 'final' => $value, 'logs' => problems($logs), 'flags' => flags($app)];
+}
+
+/**
+ * @param callable(bool): array<string, mixed> $scenario gets whether coalescing is on
+ *
+ * @return array{off: array<string, mixed>, on: array<string, mixed>}
+ */
+function bothModes(callable $scenario): array {
+    return ['off' => $scenario(false), 'on' => $scenario(true)];
+}
+
 /** Hold the worker for $ms without yielding, as a view rendering many contexts does. */
 function busy(int $ms): void {
     $start = hrtime(true);
@@ -829,6 +905,163 @@ $cases = [
 
         return ['renders' => $renders, 'logs' => (array) $logs, 'flags' => flags($app)];
     },
+
+    'self-broadcast-sync' => static function (): array {
+        $app = app((new Config())->withBroadcastCoalescing(false));
+        $logs = captureLogs($app);
+        $renders = 0;
+        $ctx = new Context('self', '/self', $app);
+        $ctx->scope('room:self');
+        $app->contexts['self'] = $ctx;
+        $ctx->view(static function () use (&$renders, $app): string {
+            ++$renders;
+            $app->broadcast('room:self');
+
+            return '<div id="self">x</div>';
+        }, cacheUpdates: false);
+
+        inCoroutine(static fn () => $app->broadcast('room:self'));
+
+        return ['renders' => $renders, 'logs' => problems($logs), 'flags' => flags($app)];
+    },
+
+    'writes-at-cap' => static fn (): array => [
+        'off' => writesDuringRenders(coalescing: false, selfBroadcast: false),
+        'on' => writesDuringRenders(coalescing: true, selfBroadcast: false),
+    ],
+
+    'self-broadcast-under-load' => static fn (): array => [
+        'off' => writesDuringRenders(coalescing: false, selfBroadcast: true),
+        'on' => writesDuringRenders(coalescing: true, selfBroadcast: true),
+    ],
+
+    'writer-started-by-action' => static fn (): array => bothModes(
+        static fn (bool $coalescing): array => writesDuringRenders($coalescing, selfBroadcast: false, writerInAction: true),
+    ),
+
+    'shutdown-at-cap' => static fn (): array => bothModes(
+        static fn (bool $coalescing): array => writesDuringRenders($coalescing, selfBroadcast: false, shutdown: true),
+    ),
+
+    'self-broadcast-once' => static fn (): array => bothModes(static function (bool $coalescing): array {
+        $app = app((new Config())->withBroadcastCoalescing($coalescing)->withBroadcastTickMs(5));
+        $logs = captureLogs($app);
+        $renders = 0;
+        $ctx = new Context('lazy', '/lazy', $app);
+        $ctx->scope('room:lazy');
+        $app->contexts['lazy'] = $ctx;
+        // Loads what it shows on its first render and broadcasts that.
+        $ctx->view(static function () use (&$renders, $app): string {
+            if (++$renders === 1) {
+                $app->broadcast('room:lazy');
+            }
+
+            return '<div id="lazy">x</div>';
+        }, cacheUpdates: false);
+
+        inCoroutine(static fn () => $app->broadcast('room:lazy'));
+
+        return ['renders' => $renders, 'logs' => problems($logs), 'flags' => flags($app)];
+    }),
+
+    'self-broadcast-spawned' => static fn (): array => bothModes(static function (bool $coalescing): array {
+        $app = app((new Config())->withBroadcastCoalescing($coalescing)->withBroadcastTickMs(5));
+        $logs = captureLogs($app);
+        $renders = 0;
+        $ctx = new Context('spawn', '/spawn', $app);
+        $ctx->scope('room:spawn');
+        $app->contexts['spawn'] = $ctx;
+        $ctx->view(static function () use (&$renders, $app): string {
+            // Bounded, so a loop that is not stopped still ends the fixture.
+            if (++$renders < 40) {
+                Coroutine::create(static fn () => $app->broadcast('room:spawn'));
+            }
+
+            return '<div id="spawn">x</div>';
+        }, cacheUpdates: false);
+
+        inCoroutine(static fn () => $app->broadcast('room:spawn'));
+
+        return ['renders' => $renders, 'logs' => problems($logs), 'flags' => flags($app)];
+    }),
+
+    'self-broadcast-after-outside-rerun' => static fn (): array => bothModes(static function (bool $coalescing): array {
+        $app = app((new Config())->withBroadcastCoalescing($coalescing)->withBroadcastTickMs(5));
+        $logs = captureLogs($app);
+        $scope = 'room:steps';
+        $value = 0;
+        $renders = 0;
+        $lastSeen = -1;
+        $rendering = new Channel(1);
+        $written = new Channel(1);
+        $ctx = new Context('steps', '/steps', $app);
+        $ctx->scope($scope);
+        $app->contexts['steps'] = $ctx;
+        // The first render waits on I/O while another action writes; renders 2 to 8 each load one more step and broadcast it.
+        $ctx->view(static function () use ($app, $scope, &$value, &$renders, &$lastSeen, $rendering, $written): string {
+            $seen = $value;
+            if (++$renders === 1) {
+                $rendering->push(true, 1.0);
+                $written->pop(1.0);
+            } elseif ($renders <= 8) {
+                ++$value;
+                $app->broadcast($scope);
+            }
+            $lastSeen = $seen;
+
+            return "<div id=\"steps\">{$seen}</div>";
+        }, cacheUpdates: false);
+
+        inCoroutine(static function () use ($app, $scope, &$value, $rendering, $written): void {
+            Coroutine::create(static fn () => $app->broadcast($scope));
+            if ($rendering->pop(1.0) !== false) {
+                ++$value;
+                Coroutine::create(static fn () => $app->broadcast($scope));
+                $written->push(true);
+            }
+        });
+
+        return ['renders' => $renders, 'lastSeen' => $lastSeen, 'final' => $value, 'logs' => problems($logs), 'flags' => flags($app)];
+    }),
+
+    'overtaken-at-cap' => static fn (): array => bothModes(static function (bool $coalescing): array {
+        $app = app((new Config())->withBroadcastCoalescing($coalescing)->withBroadcastTickMs(5));
+        $logs = captureLogs($app);
+        $value = 0;
+        $slowCid = null;
+        $waiting = new Channel(1);
+        $overtaken = new Channel(1);
+        $ctx = new Context('c', '/overtaken', $app);
+        $ctx->scope('room:slow');
+        $ctx->addScope('room:fast');
+        $app->contexts['c'] = $ctx;
+        // Waits on I/O only in the first fan-out of room:slow.
+        $ctx->view(static function () use (&$value, &$slowCid, $waiting, $overtaken): string {
+            $seen = $value;
+            $slowCid ??= Coroutine::getCid();
+            if (Coroutine::getCid() === $slowCid) {
+                $waiting->push(true, 1.0);
+                $overtaken->pop(1.0);
+            }
+
+            return "<div id=\"c\">{$seen}</div>";
+        }, cacheUpdates: false);
+
+        inCoroutine(static function () use ($app, &$value, $waiting, $overtaken): void {
+            Coroutine::create(static fn () => $app->broadcast('room:slow'));
+            // Every time it waits, another action writes and a fan-out of room:fast renders the context first.
+            while ($waiting->pop(0.2) !== false) {
+                if ($value < 8) {
+                    ++$value;
+                    $app->broadcast('room:fast');
+                    $app->flushBroadcasts();
+                }
+                $overtaken->push(true);
+            }
+        });
+
+        return ['final' => $value, 'frames' => frames($ctx), 'logs' => problems($logs), 'flags' => flags($app)];
+    }),
 
     'ping-pong' => static function (): array {
         $app = app();
