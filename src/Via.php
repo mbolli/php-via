@@ -196,9 +196,6 @@ class Via {
     /** Read epochs of this worker's fan-outs: the shared store's own, when there is one. */
     private ReadEpochs $readEpochs;
 
-    /** @var \WeakMap<Context, int> Context => read epoch of the newest fan-out frame queued for it */
-    private \WeakMap $frameEpochs;
-
     /** @var array<string, int> Scope => when it was last marked for a flush, from ReadEpochs::next() */
     private array $scopeMarks = [];
     private ActionRegistry $actionRegistry;
@@ -238,7 +235,6 @@ class Via {
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
         $this->readEpochs = new ReadEpochs();
-        $this->frameEpochs = new \WeakMap();
 
         // Initialize Core classes
         $this->app = new Application(
@@ -724,9 +720,10 @@ class Via {
         $this->sharedSignalStore = $store;
 
         // Signals backed by the store read under its epochs, so fan-outs take theirs from it.
-        // Epochs from the old counter do not compare with the new ones.
+        // Contexts keep the epoch of their newest frame, so the new counter continues past the old one.
+        $previous = $this->readEpochs;
         $this->readEpochs = $store?->readEpochs() ?? new ReadEpochs();
-        $this->frameEpochs = new \WeakMap();
+        $this->readEpochs->skipPast($previous->next());
         $this->scopeMarks = [];
     }
 
@@ -2004,7 +2001,7 @@ class Via {
 
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
-            $this->syncAllContexts($scope, $rendered, $skipRenderedAfter);
+            $this->syncContexts($this->contexts, null, $scope, $rendered, $skipRenderedAfter);
             $this->requestLogger->logBroadcast($scope, \count($this->contexts));
 
             return;
@@ -2017,10 +2014,10 @@ class Via {
 
             // If no specific route provided, broadcast to all routes
             if ($route === null) {
-                $this->syncAllContexts($scope, $rendered, $skipRenderedAfter);
+                $this->syncContexts($this->contexts, null, $scope, $rendered, $skipRenderedAfter);
                 $this->requestLogger->logBroadcast($scope, \count($this->contexts));
             } else {
-                $count = $this->syncContextsOnRoute($route, $scope, $rendered, $skipRenderedAfter);
+                $count = $this->syncContexts($this->contexts, $route, $scope, $rendered, $skipRenderedAfter);
                 $this->requestLogger->logBroadcast($scope, $count);
             }
 
@@ -2029,10 +2026,7 @@ class Via {
 
         // Handle custom scopes (with wildcard support)
         $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
-
-        foreach ($matchedContexts as $context) {
-            $this->syncContextSafely($context, $scope, $rendered, $skipRenderedAfter);
-        }
+        $this->syncContexts($matchedContexts, null, $scope, $rendered, $skipRenderedAfter);
 
         $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
     }
@@ -2325,7 +2319,7 @@ class Via {
         $rendered = [];
 
         // One read epoch for the whole flush: each scoped signal is read once for all its scopes.
-        // syncLocally() and syncContextSafely() catch up with writes that land meanwhile.
+        // syncLocally() and syncContexts() catch up with writes that land meanwhile.
         $joinedEpoch = $this->readEpochs->begin();
 
         try {
@@ -2545,71 +2539,78 @@ class Via {
     }
 
     /**
-     * Sync all contexts on a specific route.
+     * Sync each of $contexts for a fan-out, so a view that throws cannot stop the others from getting the frame.
+     * Failures are collected per signature and logged once per pass by logSyncFailures().
      *
+     * @param array<Context>       $contexts
+     * @param null|string          $route    skip the contexts on other routes
      * @param null|array<int, int> $rendered see syncLocally()
+     *
+     * @return int how many contexts it reached
      */
-    private function syncContextsOnRoute(string $route, string $scope, ?array &$rendered = null, int $skipRenderedAfter = PHP_INT_MAX): int {
+    private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
+        $epochs = $this->readEpochs;
+        $renewals = -1;
+        $epoch = 0;
         $count = 0;
-        foreach ($this->contexts as $context) {
-            if ($context->getRoute() === $route) {
-                $this->syncContextSafely($context, $scope, $rendered, $skipRenderedAfter);
-                ++$count;
+
+        foreach ($contexts as $context) {
+            if ($route !== null && $context->getRoute() !== $route) {
+                continue;
             }
+            ++$count;
+
+            // Only a renewal moves the epoch this coroutine holds, so it is looked up once per pass and after each renewal.
+            if ($epochs->renewals !== $renewals) {
+                $renewals = $epochs->renewals;
+                $epoch = $epochs->current();
+            }
+
+            if ($rendered !== null) {
+                $objectId = spl_object_id($context);
+                if (($rendered[$objectId] ?? 0) > $skipRenderedAfter) {
+                    continue;
+                }
+                $rendered[$objectId] = $epoch;
+            }
+
+            try {
+                if ($context->syncFanOut($epoch)) {
+                    continue;
+                }
+            } catch (\Throwable $e) {
+                $this->collectSyncFailure($scope, $e, $context);
+
+                continue;
+            }
+
+            $this->resyncOvertaken($context, $scope, $rendered);
         }
 
         return $count;
     }
 
     /**
-     * Sync all contexts across all routes.
-     *
-     * @param null|array<int, int> $rendered see syncLocally()
-     */
-    private function syncAllContexts(string $scope, ?array &$rendered = null, int $skipRenderedAfter = PHP_INT_MAX): void {
-        foreach ($this->contexts as $context) {
-            $this->syncContextSafely($context, $scope, $rendered, $skipRenderedAfter);
-        }
-    }
-
-    /**
-     * Sync one context of a fan-out, so a view that throws cannot stop the others from getting the frame.
-     * Failures are collected per signature and logged once per pass by logSyncFailures().
-     *
      * Two fan-outs can render one context at the same time when a view waits on I/O. When the one
      * whose read epoch began later queues its frame first, this renders the context again under a
      * new epoch, so the client does not end on the older frame.
      *
      * @param null|array<int, int> $rendered see syncLocally()
      */
-    private function syncContextSafely(Context $context, string $scope, ?array &$rendered = null, int $skipRenderedAfter = PHP_INT_MAX): void {
-        $objectId = spl_object_id($context);
-        if ($rendered !== null && ($rendered[$objectId] ?? 0) > $skipRenderedAfter) {
-            return;
-        }
-
-        for ($attempt = 1;; ++$attempt) {
+    private function resyncOvertaken(Context $context, string $scope, ?array &$rendered): void {
+        for ($attempt = 2;; ++$attempt) {
+            $this->readEpochs->renew();
             $epoch = $this->readEpochs->current();
             if ($rendered !== null) {
-                $rendered[$objectId] = $epoch;
+                $rendered[spl_object_id($context)] = $epoch;
             }
 
             try {
-                $context->sync();
-            } catch (\Throwable $e) {
-                $key = $e::class . '@' . $e->getFile() . ':' . $e->getLine();
-                if (isset($this->syncFailures[$scope][$key])) {
-                    ++$this->syncFailures[$scope][$key][2];
-                } else {
-                    $this->syncFailures[$scope][$key] = [$e, $context, 1];
+                if ($context->syncFanOut($epoch)) {
+                    return;
                 }
-
-                return;
-            }
-
-            $newest = $this->frameEpochs[$context] ?? 0;
-            if ($newest <= $epoch) {
-                $this->frameEpochs[$context] = $epoch;
+            } catch (\Throwable $e) {
+                $this->collectSyncFailure($scope, $e, $context);
 
                 return;
             }
@@ -2619,7 +2620,15 @@ class Via {
 
                 return;
             }
-            $this->readEpochs->renew();
+        }
+    }
+
+    private function collectSyncFailure(string $scope, \Throwable $e, Context $context): void {
+        $key = $e::class . '@' . $e->getFile() . ':' . $e->getLine();
+        if (isset($this->syncFailures[$scope][$key])) {
+            ++$this->syncFailures[$scope][$key][2];
+        } else {
+            $this->syncFailures[$scope][$key] = [$e, $context, 1];
         }
     }
 

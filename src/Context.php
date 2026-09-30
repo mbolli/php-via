@@ -85,6 +85,9 @@ class Context {
     /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued to be sent with the next response */
     private array $pendingCookies = [];
 
+    /** Read epoch of the newest broadcast frame queued for this context; see syncFanOut() */
+    private int $fanOutEpoch = 0;
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -1036,6 +1039,23 @@ class Context {
      */
     public function sync(): void {
         $this->patchManager->sync();
+    }
+
+    /**
+     * Sync for a broadcast fan-out that began reading state at read epoch $epoch.
+     *
+     * @internal Called by Via
+     *
+     * @return bool false when a fan-out that began later already queued its frame, so the one just queued is older
+     */
+    public function syncFanOut(int $epoch): bool {
+        $this->patchManager->sync();
+        if ($this->fanOutEpoch > $epoch) {
+            return false;
+        }
+        $this->fanOutEpoch = $epoch;
+
+        return true;
     }
 
     /**

@@ -91,6 +91,18 @@ test('a frame from an older fan-out that lands after a newer one is followed by 
     'one worker writes after the view read it' => ['local'],
 ]);
 
+test('the contexts after an overtaken one render once, under the renewed epoch', function (string $variant): void {
+    $r = readSnapshotCase('overtaken-frame', $variant, 'next');
+
+    expect($r['renders']['c2'])->toBe(2);
+    expect($r['frames']['c2'])->toBe(['<div id="c2">a n=2</div>', '<div id="c2">a n=2</div>']);
+    expect($r['frames']['c1'])->toBe(['<div id="c1">a n=2</div>', '<div id="c1">a n=1</div>', '<div id="c1">a n=2</div>']);
+    expect($r['open'])->toBe([]);
+})->with([
+    'another worker writes after the flush read the signal' => ['snapshot'],
+    'one worker writes after the view read it' => ['local'],
+]);
+
 test('a scope marked after a flush began, whose mark another flush took, is read and rendered again in full', function (): void {
     $r = readSnapshotCase('mark-taken-by-another-flush');
 

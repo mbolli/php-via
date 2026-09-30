@@ -18,6 +18,9 @@ use OpenSwoole\Coroutine;
  * @internal
  */
 final class ReadEpochs {
+    /** Bumped by every renew(): a fan-out looks its own epoch up again only after this moved. */
+    public private(set) int $renewals = 0;
+
     /** @var array<int, int> Coroutine id => epoch of the fan-out it is running */
     private array $open = [];
 
@@ -48,6 +51,7 @@ final class ReadEpochs {
         $cid = Coroutine::getCid();
         if (isset($this->open[$cid])) {
             $this->open[$cid] = ++$this->last;
+            ++$this->renewals;
         }
     }
 
@@ -72,5 +76,12 @@ final class ReadEpochs {
      */
     public function next(): int {
         return ++$this->last;
+    }
+
+    /**
+     * Hand out only epochs above $epoch from here on.
+     */
+    public function skipPast(int $epoch): void {
+        $this->last = max($this->last, $epoch);
     }
 }

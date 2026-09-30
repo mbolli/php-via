@@ -362,12 +362,13 @@ $cases = [
     // write and its room:data broadcast start a second flush that renders c1 first. argv[2]:
     // "snapshot": another worker writes after the flush read n at c0 and before c1 reads it.
     // "local": one worker without a store writes after c1 read n.
-    'overtaken-frame' => static function (string $variant = 'snapshot'): array {
+    // argv[3] = "next" adds c2, which both flushes render after c1.
+    'overtaken-frame' => static function (string $variant = 'snapshot', string $next = ''): array {
         $store = $variant === 'snapshot' ? new SharedSignalStore(maxRows: 64) : null;
         $app = snapshotApp($store, (new Config())->withBroadcastTickMs(0));
         $world = new SnapshotWorld();
         $contexts = [];
-        foreach (['c0', 'c1'] as $id) {
+        foreach ($next === 'next' ? ['c0', 'c1', 'c2'] : ['c0', 'c1'] as $id) {
             $contexts[$id] = reader($app, $id, ['room:a', 'room:data'], $world);
             frames($contexts[$id]);
         }

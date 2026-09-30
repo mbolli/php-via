@@ -77,6 +77,33 @@ describe('ReadEpochs', function (): void {
         expect($next)->toBeGreaterThan($renewed);
     });
 
+    test('renewals counts the renewals of an open epoch and nothing else', function (): void {
+        $epochs = new ReadEpochs();
+        $epochs->renew();
+
+        expect($epochs->renewals)->toBe(0);
+
+        $epochs->begin();
+        $epochs->next();
+        $epochs->renew();
+        $epochs->end(false);
+
+        expect($epochs->renewals)->toBe(1);
+    });
+
+    test('skipPast() hands out only epochs above the one given, and never moves back', function (): void {
+        $epochs = new ReadEpochs();
+        $epochs->skipPast(41);
+        $epochs->begin();
+
+        expect($epochs->current())->toBe(42);
+
+        $epochs->end(false);
+        $epochs->skipPast(10);
+
+        expect($epochs->next())->toBe(43);
+    });
+
     test('a store reads under its own epochs', function (): void {
         $store = new SharedSignalStore(maxRows: 16);
         $store->readEpochs()->begin();
@@ -215,5 +242,28 @@ describe('Signal reads under a snapshot', function (): void {
 
         expect($renders)->toBe(1);
         expect($store->get("room:snap\0room_snap_c"))->toBe(1);
+    });
+});
+
+describe('Frame epochs', function (): void {
+    test('a store installed after fan-outs does not make the next fan-out look older than their frames', function (): void {
+        $app = createVia();
+        $renders = 0;
+        $ctx = new Context(testContextId(), '/snap', $app);
+        $ctx->scope('room:snap');
+        $app->contexts[$ctx->getId()] = $ctx;
+        $ctx->view(static function () use (&$renders): string {
+            ++$renders;
+
+            return '<div id="snap"></div>';
+        }, cacheUpdates: false);
+
+        foreach (range(1, 3) as $_) {
+            $app->broadcast('room:snap');
+        }
+        $app->setSharedSignalStore(new SharedSignalStore(maxRows: 16));
+        $app->broadcast('room:snap');
+
+        expect($renders)->toBe(4);
     });
 });
