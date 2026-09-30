@@ -128,7 +128,9 @@ function runOnce(string $mode, int $workers, int $coroutines, int $opsPerWorker,
         $table->set(HOT_KEY, $initial);
     } else {
         $store = new SharedSignalStore(maxRows: 64);
-        $signalId = mountSignalWorker($store, '/bench_/master', $initial)->getSignal(SIGNAL_NAME)->id();
+        $signal = mountSignalWorker($store, '/bench_/master', $initial)->getSignal(SIGNAL_NAME);
+        // Since 0.13.0 the shared row is keyed by scope plus id; older trees key it by id.
+        $signalId = method_exists($signal, 'sharedKey') ? $signal->sharedKey() : $signal->id();
     }
 
     // Children stop a little before the parent's kill deadline so a timed-out round still reports.
