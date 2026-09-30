@@ -617,7 +617,7 @@ Not measured:
 
 The F sections ran with opcache and JIT off. This section repeats one or two
 configurations of each benchmark under four opcache and JIT settings. It comes
-from a later session (2026-09-30, 06:44 to 08:12 UTC) on other commits in both
+from a later session (2026-09-30, 06:44 to 08:53 UTC) on other commits in both
 trees, with both trees on btrfs, so its absolute numbers are not comparable
 with any table above. Base idle worker CPU at 5000 connections on one worker
 with opcache off is 25.11% here and 13.39% in F2. Compare within this section
@@ -655,7 +655,10 @@ of compiled code. broadcast_storm and shared_read also report the opcache and
 JIT state in their JSON, get_clients reports the opcache state, and every run
 matched its setting.
 
-Host, PHP and OpenSwoole are the same as above. Each configuration ran 3 reps.
+Host, PHP and OpenSwoole are the same as above. Each configuration ran 3 reps,
+except the broadcast_storm low-load check, which ran 5. The broadcast_storm
+4-worker, N=5000 and low-load configurations ran last, 08:42 to 08:53 UTC,
+with the same runner and order, at a load of 2.04 to 5.37 before each run.
 Within a rep the settings ran in the order off, opcache, jit-tracing,
 jit-function, each as B then A with identical arguments, one run at a time.
 The 1-minute load before a run was 0.78 to 5.80, except at lock_contention
@@ -663,10 +666,11 @@ W=16: each of those runs pushed the load to 8.71 to 12.47 with its own 16
 spinning workers, so 23 of the 24 waited 30 s (one waited 60 s) and started at
 5.15 to 7.47. The tables use the format described at the top of this file.
 
-All 156 invocations exited 0 and were correct in both trees under every
+All 244 invocations exited 0 and were correct in both trees under every
 setting, both JIT modes included, and none crashed. All 48 lock_contention
 invocations reached the expected final value in all 192 rounds, with no error
-or timeout. All 24 broadcast_storm runs converged all 1000 clients to the
+or timeout. All 112 broadcast_storm runs (24 each for the default, 4-worker
+and N=5000 storms, 40 for the low-load check) converged every client to the
 server value with no failed action. All 36 idle_sse invocations (72 server
 runs) connected all 5000 streams, delivered the broadcast to every one and shut
 down without a timeout. All 24 shared_read runs had 0 mismatched frames, and
@@ -790,9 +794,102 @@ overlap with off, whose storm and p99 ranges reach 75.317 and 53.91 ms through
 one slow run (rep 3). In the other direction, the branch's action p50 with
 opcache (0.499 to 0.896 ms) and jit-function (0.37 to 1.305 ms) lies below its
 off range (1.385 to 1.823 ms). JIT compile time inside a 40 to 60 ms storm is a
-possible cause, not a measured one. Only this configuration ran: the larger
-storm (N=5000), 4 workers and the low-load check (K=2, one actor) were not run
-under these settings.
+possible cause, not a measured one.
+
+4 workers, `--workers=4` (N=1000, K=200, concurrency 50), 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| storm to converge (ms) | off | 591.516 (485.996 to 726.823) | 49.75 (46.349 to 50.495) | 11.9x lower |
+| storm to converge (ms) | opcache | 523.787 (476.31 to 772.735) | 31.491 (31.318 to 42.888) | 16.6x lower |
+| storm to converge (ms) | jit-tracing | 434.925 (405.749 to 589.258) | 99.299 (82.06 to 105.943) | 4.38x lower |
+| storm to converge (ms) | jit-function | 533.489 (443.651 to 547.991) | 48.709 (30.746 to 50.025) | 11x lower |
+| converge after last send (ms) | off | 298.142 (243.345 to 430.365) | 30.076 (25.161 to 39.669) | 9.91x lower |
+| converge after last send (ms) | opcache | 290.053 (223.475 to 431.362) | 26.637 (25.64 to 35.36) | 10.9x lower |
+| converge after last send (ms) | jit-tracing | 188.604 (152.062 to 276.127) | 29.695 (20.901 to 32.419) | 6.35x lower |
+| converge after last send (ms) | jit-function | 250.679 (169.877 to 284.031) | 27.569 (25.501 to 33.702) | 9.09x lower |
+| worker CPU net of idle (s) | off | 1.925 (1.658 to 2.29) | 0.15 (0.14 to 0.16) | 12.8x lower |
+| worker CPU net of idle (s) | opcache | 1.715 (1.604 to 2.484) | 0.04 (0.03 to 0.05) | 42.9x lower |
+| worker CPU net of idle (s) | jit-tracing | 1.649 (1.486 to 2.051) | 0.23 (0.168 to 0.25) | 7.17x lower |
+| worker CPU net of idle (s) | jit-function | 1.818 (1.725 to 1.84) | 0.15 (0.05 to 0.16) | 12.1x lower |
+| action latency p99 (ms) | off | 330.612 (297.466 to 438.329) | 19.69 (9.928 to 25.214) | 16.8x lower |
+| action latency p99 (ms) | opcache | 298.539 (268.867 to 445.412) | 7.554 (6.09 to 8.899) | 39.5x lower |
+| action latency p99 (ms) | jit-tracing | 232.976 (182.196 to 256.662) | 61.375 (48.23 to 62.876) | 3.8x lower |
+| action latency p99 (ms) | jit-function | 307.026 (221.582 to 323.631) | 15.397 (6.51 to 28.131) | 19.9x lower |
+| frames per client | off | 200 | 2.75 (2.75 to 3) | 72.7x lower |
+| frames per client | opcache | 200 | 3 | 66.7x lower |
+| frames per client | jit-tracing | 200 | 3.75 (3.75 to 4) | 53.3x lower |
+| frames per client | jit-function | 200 | 3 (2.75 to 3) | 66.7x lower |
+
+Under jit-tracing the branch's 4-worker storm is slower than with opcache off,
+with ranges apart on four of the five metrics: 99.299 against 49.75 ms storm
+to converge, 0.23 against 0.15 s worker CPU, 61.375 against 19.69 ms action
+p99, and 3.75 against 2.75 frames per client. Converge after the last send is
+unchanged (29.695 against 30.076 ms, ranges overlap). It is still 4.38x faster than
+base under the same setting. Trace compilation in four workers during a storm
+of about 100 ms is a possible cause, not a measured one. With opcache and no
+JIT the branch uses less worker CPU than with opcache off (0.04 against 0.15 s,
+ranges apart), which fits workers that no longer compile the source files
+themselves; that is an inference.
+
+Larger storm, `--n=5000 --k=500 --concurrency=50 --converge-timeout=60
+--watchdog=240`, 1 worker, 3 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| storm to converge (ms) | off | 17806.237 (17756.617 to 19467.909) | 100.596 (97.387 to 152.664) | 177x lower |
+| storm to converge (ms) | opcache | 16057.823 (15920.414 to 16199.36) | 111.919 (98.09 to 127.455) | 143x lower |
+| storm to converge (ms) | jit-tracing | 15107.175 (13698.802 to 16311.573) | 131.827 (79.714 to 145.639) | 115x lower |
+| storm to converge (ms) | jit-function | 15712.059 (14742.779 to 15765.171) | 103.529 (98.543 to 106.432) | 152x lower |
+| converge after last send (ms) | off | 1801.953 (1774.962 to 1962.651) | 47.242 (45.343 to 95.08) | 38.1x lower |
+| converge after last send (ms) | opcache | 1688.496 (1607.52 to 1745.936) | 48.172 (40.273 to 53.752) | 35.1x lower |
+| converge after last send (ms) | jit-tracing | 1472.726 (1355.466 to 1543.688) | 35.555 (32.75 to 36.579) | 41.4x lower |
+| converge after last send (ms) | jit-function | 1485.998 (1034.544 to 1588.372) | 46.235 (41.425 to 51.432) | 32.1x lower |
+| worker CPU net of idle (s) | off | 13.56 (13.216 to 14.84) | 0.1 (0.09 to 0.14) | 136x lower |
+| worker CPU net of idle (s) | opcache | 12.697 (12.579 to 13.238) | 0.11 (0.08 to 0.13) | 115x lower |
+| worker CPU net of idle (s) | jit-tracing | 11.558 (11.244 to 12.246) | 0.12 (0.08 to 0.14) | 96.3x lower |
+| worker CPU net of idle (s) | jit-function | 12.282 (11.956 to 12.78) | 0.09 (0.09 to 0.1) | 136x lower |
+| action latency p99 (ms) | off | 1812.43 (1795.373 to 2427.502) | 46.967 (45.991 to 50.881) | 38.6x lower |
+| action latency p99 (ms) | opcache | 1726.324 (1607.341 to 1845.836) | 53.796 (45.75 to 79.525) | 32.1x lower |
+| action latency p99 (ms) | jit-tracing | 1551.365 (1407.705 to 2564.036) | 51.722 (41.551 to 71.354) | 30x lower |
+| action latency p99 (ms) | jit-function | 1612.839 (1508.68 to 2733.745) | 51.302 (45.709 to 52.776) | 31.4x lower |
+| frames per client | off | 500 | 2 (2 to 3) | 250x lower |
+| frames per client | opcache | 500 | 2 | 250x lower |
+| frames per client | jit-tracing | 500 | 3 (2 to 3) | 167x lower |
+| frames per client | jit-function | 500 | 2 | 250x lower |
+
+The branch stays 114.6x to 177x faster to converge under every setting. Base
+gains 9.8% (opcache) to 15.2% (jit-tracing) on storm to converge and renders
+and sends the same 2,500,000 views and 500 frames per client under every
+setting.
+
+Low load, `--n=1000 --k=2 --concurrency=1` (one actor, two actions), 1 worker,
+5 reps:
+
+| Metric | Setting | Base | Branch | Branch vs base |
+|---|---|---|---|---|
+| converge after last send (ms) | off | 12.462 (6.886 to 25.8) | 44.304 (37.038 to 68.889) | 3.56x higher |
+| converge after last send (ms) | opcache | 11.42 (6.783 to 18.371) | 47.228 (35.948 to 54.183) | 4.14x higher |
+| converge after last send (ms) | jit-tracing | 6.928 (5.888 to 17.08) | 37.809 (30.965 to 44.027) | 5.46x higher |
+| converge after last send (ms) | jit-function | 8.783 (5.609 to 27.123) | 42.652 (38.544 to 44.986) | 4.86x higher |
+| storm to converge (ms) | off | 36.676 (19.152 to 53.567) | 45.974 (37.577 to 69.846) | +25.4%, ranges overlap |
+| storm to converge (ms) | opcache | 35.266 (30.441 to 49.694) | 48.831 (37.867 to 55.773) | +38.5%, ranges overlap |
+| storm to converge (ms) | jit-tracing | 36.297 (27.85 to 39.479) | 38.969 (31.451 to 45.546) | +7.4%, ranges overlap |
+| storm to converge (ms) | jit-function | 31.283 (16.6 to 52.948) | 47.566 (43.66 to 49.186) | 1.52x higher, ranges overlap |
+| action latency p99 (ms) | off | 24.428 (12.26 to 27.753) | 22.757 (8.755 to 33.54) | -6.8%, ranges overlap |
+| action latency p99 (ms) | opcache | 24.527 (18.021 to 31.294) | 20.922 (12.411 to 33.656) | -14.7%, ranges overlap |
+| action latency p99 (ms) | jit-tracing | 22.351 (21.783 to 29.356) | 11.894 (7.584 to 20.29) | 1.88x lower |
+| action latency p99 (ms) | jit-function | 23.387 (10.986 to 27.192) | 15.098 (9.487 to 19.103) | 1.55x lower, ranges overlap |
+| worker CPU net of idle (s) | off | 0.02 (0.007 to 0.045) | 0.04 (0.02 to 0.05) | 2x higher, ranges overlap |
+| worker CPU net of idle (s) | opcache | 0.032 (0.01 to 0.047) | 0.03 (0.02 to 0.04) | -6.3%, ranges overlap |
+| worker CPU net of idle (s) | jit-tracing | 0.03 (0.012 to 0.044) | 0.02 (0.02 to 0.04) | 1.5x lower, ranges overlap |
+| worker CPU net of idle (s) | jit-function | 0.029 (0.02 to 0.047) | 0.03 (0.03 to 0.04) | +3.4%, ranges overlap |
+
+The tick trade-off from the F1 regression check holds under every setting: the
+second update reaches every client 3.56x to 5.46x later on the branch than on
+base, with ranges apart, while the whole two-action run converges within
+overlapping ranges. Both trees ran from btrfs here, so the FUSE penalty
+described under Protocol does not apply to these numbers.
 
 ### idle_sse under opcache and JIT
 
@@ -978,7 +1075,13 @@ jit-function (0.16 against 0.1 ms in every run).
   9.6% and the branch loses 16.5% (7.0% with opcache alone). In broadcast_storm
   the ratio of medians falls from 35.5x to 17.8x under jit-tracing, but only
   base getting 9.9 to 25.4% faster is clear of noise: every branch storm range
-  overlaps its off range. The advantage grows in shared_read under JIT.
+  overlaps its off range. At N=5000 the branch stays 114.6x to 177x faster
+  under every setting. With 4 workers the lead falls from 11.9x (off) to 4.38x
+  (jit-tracing), because the branch storm takes twice as long under
+  jit-tracing, ranges apart. The advantage grows in shared_read under JIT.
+- The F1 tick trade-off does not depend on the setting: a follow-up update
+  (K=2, one actor) reaches every client 3.56x to 5.46x later on the branch
+  than on base under all four settings.
 - Under jit-tracing the branch shows one difference clear of noise and two
   within overlapping ranges, none explained yet. Clear: a 1-worker server with
   5000 idle connections holds 34.7 MB more RSS than base (every branch run
