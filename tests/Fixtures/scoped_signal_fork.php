@@ -56,11 +56,11 @@ function mountWorker(SharedSignalStore $store, string $contextId, string $mode):
     return $ctx;
 }
 
-// Mount once in the master purely to learn the generated signal ID (scope-qualified and
-// sanitised), so the read-back below does not have to guess it.
+// Mount once in the master purely to learn the signal's shared-store key, so the read-back
+// below does not have to guess it.
 $listMode = $mode === 'append' || $mode === 'mutate';
-$signalId = mountWorker($store, '/probe_/master', $mode)
-    ->getSignal($listMode ? 'items' : 'count')->id()
+$signalKey = mountWorker($store, '/probe_/master', $mode)
+    ->getSignal($listMode ? 'items' : 'count')->sharedKey()
 ;
 
 $pids = [];
@@ -99,6 +99,6 @@ foreach ($pids as $pid) {
 }
 
 // Read back from the master, which never mounted the route at all.
-$final = $store->get($signalId, $listMode ? [] : 0);
+$final = $store->get($signalKey, $listMode ? [] : 0);
 echo 'final=', is_array($final) ? count($final) : var_export($final, true), "\n";
 echo 'expected=', $workers * $each, "\n";

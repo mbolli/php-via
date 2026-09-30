@@ -103,9 +103,9 @@ function mountWorker(SharedSignalStore $store, string $contextId, string $class)
     return $ctx;
 }
 
-// Mount once in the master purely to learn the generated signal ID (scope-qualified and
-// sanitised), so the read-back below does not have to guess it.
-$signalId = mountWorker($store, '/probe_/master', CLASSES[$mode])->getSignal('votes')->id();
+// Mount once in the master purely to learn the signal's shared-store key, so the read-back
+// below does not have to guess it.
+$signalKey = mountWorker($store, '/probe_/master', CLASSES[$mode])->getSignal('votes')->sharedKey();
 
 $pids = [];
 for ($w = 0; $w < $workers; ++$w) {
@@ -151,5 +151,5 @@ foreach ($pids as $pid) {
 }
 
 // Read back from the master, which never fired the action at all.
-echo 'final=', (int) $store->get($signalId, 0), "\n";
+echo 'final=', (int) $store->get($signalKey, 0), "\n";
 echo 'expected=', $workers * $each, "\n";

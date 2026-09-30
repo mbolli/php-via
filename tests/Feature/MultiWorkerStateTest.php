@@ -123,3 +123,22 @@ test('a worker joining an existing scope adopts the live value, not the default'
     expect($late->renderView())->toBe('count=2');
     expect($first->renderView())->toBe('count=2', 'and the first worker is not disturbed by the join');
 });
+
+test('scopes that sanitise to the same signal id do not share a value across workers', function (): void {
+    $store = new SharedSignalStore(maxRows: 64);
+    $workerA = workerApp($store);
+    $workerB = workerApp($store);
+
+    $ctxA = new Context('ctx-a', '/probe', $workerA, null, 'sess-a');
+    $ctxB = new Context('ctx-b', '/probe', $workerB, null, 'sess-b');
+    $draftA = $ctxA->signal('', 'draft', 'user:a-b@x.com');
+    $draftB = $ctxB->signal('', 'draft', 'user:a.b@x.com');
+
+    // Both ids sanitise to the same string; the shared row must still be per scope.
+    expect($draftA->id())->toBe($draftB->id());
+
+    $draftA->setValue('private to a-b', false);
+
+    expect($draftB->string())->toBe('');
+    expect($draftA->string())->toBe('private to a-b');
+});

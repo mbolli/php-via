@@ -64,6 +64,18 @@ class Signal {
     }
 
     /**
+     * Key of this signal's row in the shared store.
+     *
+     * The id is sanitised, so two scopes such as user:a-b and user:a.b can share it; the raw
+     * scope keeps their values apart.
+     *
+     * @internal
+     */
+    public function sharedKey(): string {
+        return ($this->scope ?? '') . "\0" . $this->id;
+    }
+
+    /**
      * Attach cross-worker backing and adopt the value already in force.
      *
      * A worker mounting a route another worker already serves must take the LIVE value, not
@@ -73,7 +85,7 @@ class Signal {
      */
     public function attachSharedStore(SharedSignalStore $store): void {
         $this->store = $store;
-        $this->value = $store->initialize($this->id, $this->value);
+        $this->value = $store->initialize($this->sharedKey(), $this->value);
     }
 
     /**
@@ -82,7 +94,7 @@ class Signal {
     public function getValue(): mixed {
         if ($this->store !== null) {
             // Read through: another worker may have moved it since this one last looked.
-            $this->value = $this->store->get($this->id, $this->value);
+            $this->value = $this->store->get($this->sharedKey(), $this->value);
         }
 
         return $this->value;
@@ -115,7 +127,7 @@ class Signal {
      */
     public function mutate(callable $mutator, bool $broadcast = true): mixed {
         $next = $this->store !== null
-            ? $this->store->mutate($this->id, $mutator)
+            ? $this->store->mutate($this->sharedKey(), $mutator)
             : $mutator($this->value);
 
         $this->value = $next;
@@ -145,7 +157,7 @@ class Signal {
      */
     public function increment(int $by = 1, bool $broadcast = true): int {
         if ($this->store !== null) {
-            $next = $this->store->increment($this->id, $by);
+            $next = $this->store->increment($this->sharedKey(), $by);
         } else {
             $current = $this->value;
             if (!\is_int($current)) {
@@ -177,10 +189,10 @@ class Signal {
     public function setValue(mixed $value, bool $markChanged = true, bool $broadcast = true): void {
         // Check if value actually changed. With a shared backing the comparison has to be
         // against what is actually stored, not against this worker's last-seen copy.
-        $oldValue = $this->store !== null ? $this->store->get($this->id, $this->value) : $this->value;
+        $oldValue = $this->store !== null ? $this->store->get($this->sharedKey(), $this->value) : $this->value;
 
         $this->value = $value;
-        $this->store?->set($this->id, $value);
+        $this->store?->set($this->sharedKey(), $value);
 
         if ($markChanged) {
             $this->changed = true;
