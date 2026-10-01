@@ -63,7 +63,9 @@ $app->middleware(new CorsMiddleware([...]));
     {% endverbatim %}{% endcode %}
 
     <h3 id="via-broadcast"><code>broadcast(string $scope): void</code></h3>
-    <p>Push updates to all contexts in a scope. Use after modifying global state outside an action.</p>
+    <p>Push updates to all contexts in a scope. Use after modifying global state outside an action. A bare
+    <code>Scope::ROUTE</code> reaches every context on every route, like <code>Scope::GLOBAL</code>; pass
+    <code>Scope::routeScope('/path')</code> to target one route.</p>
     {% code 'php' %}{% verbatim %}
 $app->broadcast(Scope::GLOBAL);
 $app->broadcast(Scope::routeScope('/'));

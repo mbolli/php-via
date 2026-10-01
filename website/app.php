@@ -40,12 +40,13 @@ $config = (new Config())
     // Sibling of chat.db/spreadsheet.db, and covered by the same website/*.db gitignore.
     ->withPersistentGlobalState(__DIR__ . '/state.db')
 
-    // Every demo action here is an unauthenticated POST, and several fan a broadcast out
-    // to every connected client (the poll, the shared counter, Game of Life) — so one IP
-    // can amplify. The ceiling has to clear the per-keystroke examples though: Type Race
-    // and the spreadsheet fire an action per key, so a fast typist alone sustains ~5/s and
-    // several people behind one NAT multiply that. 1200/60s = 20/s per IP leaves them
-    // untouched while still capping a flood.
+    // Every demo action here is an unauthenticated POST. Many re-render every viewer of their
+    // page (the poll, the shared counter, Game of Life), and All Scopes' status button and the
+    // Composition demo's GLOBAL signals reach every connected client, so one IP can amplify.
+    // The ceiling has to clear the per-keystroke examples though: Type Race and the
+    // spreadsheet fire an action per key, so a fast typist alone sustains ~5/s and several
+    // people behind one NAT multiply that. 1200/60s = 20/s per IP leaves them untouched while
+    // still capping a flood.
     ->withActionRateLimit((int) (getenv('VIA_ACTION_RATE_LIMIT') ?: 1200), 60)
 ;
 

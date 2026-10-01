@@ -40,18 +40,18 @@ final class GameOfLifeExample {
 
             $c->scope(Scope::ROUTE);
 
-            $toggleRunning = $c->action(function () use ($app): void {
+            $toggleRunning = $c->action(function (Context $ctx): void {
                 self::$running = !self::$running;
-                $app->broadcast(Scope::ROUTE);
+                $ctx->broadcast();
             }, 'toggleRunning');
 
-            $reset = $c->action(function () use ($app): void {
+            $reset = $c->action(function (Context $ctx): void {
                 self::$board = array_fill(0, self::BOARD_SIZE * self::BOARD_SIZE, 'dead');
                 self::$generation = 0;
-                $app->broadcast(Scope::ROUTE);
+                $ctx->broadcast();
             }, 'reset');
 
-            $tapCell = $c->action(function (Context $ctx) use ($app): void {
+            $tapCell = $c->action(function (Context $ctx): void {
                 $id = $ctx->input('id');
                 $sessionId = self::$sessionIds[$ctx->getId()] ?? 0;
                 if ($id !== null) {
@@ -59,7 +59,7 @@ final class GameOfLifeExample {
                     if (!self::$running) {
                         self::$running = true;
                     }
-                    $app->broadcast(Scope::ROUTE);
+                    $ctx->broadcast();
                 }
             }, 'tapCell');
 

@@ -74,12 +74,12 @@ final class AllScopesExample {
 
             $increment = $c->action(function () use ($app, $route): void {
                 ++self::$counters[$route];
-                $app->broadcast(Scope::ROUTE);
+                $app->broadcast(Scope::routeScope($route));
             }, 'increment_' . str_replace('/', '_', $route));
 
             $reset = $c->action(function () use ($app, $route): void {
                 self::$counters[$route] = 0;
-                $app->broadcast(Scope::ROUTE);
+                $app->broadcast(Scope::routeScope($route));
             }, 'reset_' . str_replace('/', '_', $route));
 
             $c->view(function () use ($route, $increment, $reset): string {

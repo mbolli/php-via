@@ -29,7 +29,7 @@ $increment = $c->action(function (Context $c) use ($app, $counter): void {
 // All connected clients everywhere
 $app->broadcast(Scope::GLOBAL);
 
-// All clients on a specific route
+// All clients on a specific route (a bare Scope::ROUTE would reach every route)
 $app->broadcast(Scope::routeScope('/dashboard'));
 
 // A custom scope (e.g. a chat room)
