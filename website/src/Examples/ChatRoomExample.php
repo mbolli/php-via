@@ -107,6 +107,8 @@ final class ChatRoomExample {
 
             $ctx->getSignal('messageInput')->setValue('');
             $ctx->getSignal('typingIndicator')->setValue('');
+            // Send the clear now: a keyup post landing before the room flush would put the old text back.
+            $ctx->syncSignals();
             self::$app?->broadcast($roomScope);
         }, 'sendMessage');
 
