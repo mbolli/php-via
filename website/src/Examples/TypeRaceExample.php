@@ -170,20 +170,7 @@ final class TypeRaceExample {
                     $racer['wpm'] = (float) $wpm;
                     ++$race['finishCount'];
                     $racer['finishRank'] = $race['finishCount'];
-
-                    // End race when all racers finish
-                    $allDone = array_reduce(
-                        $race['racers'],
-                        fn (bool $carry, array $r) => $carry && $r['finished'],
-                        true,
-                    );
-                    if ($allDone) {
-                        $race['status'] = 'done';
-                        if ($race['timerId'] !== null) {
-                            Timer::clear($race['timerId']);
-                            $race['timerId'] = null;
-                        }
-                    }
+                    self::endRaceIfAllFinished($raceId);
                 }
 
                 $app->broadcast($raceScope);
@@ -266,6 +253,7 @@ final class TypeRaceExample {
                     }
                     unset(self::$races[$raceId]);
                 } else {
+                    self::endRaceIfAllFinished($raceId);
                     $app->broadcast(Scope::build('example:typerace', $raceId));
                 }
             });
@@ -329,6 +317,24 @@ final class TypeRaceExample {
     /** @return array{name: string, progress: int, wpm: float, finished: bool, finishRank: int} */
     private static function newRacer(string $username): array {
         return ['name' => $username, 'progress' => 0, 'wpm' => 0.0, 'finished' => false, 'finishRank' => 0];
+    }
+
+    private static function endRaceIfAllFinished(string $raceId): void {
+        $race = &self::$races[$raceId];
+        if ($race['status'] !== 'racing' || $race['racers'] === []) {
+            return;
+        }
+        foreach ($race['racers'] as $racer) {
+            if (!$racer['finished']) {
+                return;
+            }
+        }
+
+        $race['status'] = 'done';
+        if ($race['timerId'] !== null) {
+            Timer::clear($race['timerId']);
+            $race['timerId'] = null;
+        }
     }
 
     private static function beginCountdown(string $raceId, Via $app): void {
