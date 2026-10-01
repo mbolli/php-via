@@ -499,7 +499,7 @@ describe('Revival from an action without signals', function (): void {
         ;
     });
 
-    test('a signal an action wrote keeps its value when a sibling component signal has the same id', function (): void {
+    test('a component signal an action wrote keeps its value, and the seed still reaches a sibling whose sanitised id was the same', function (): void {
         $app = createVia();
         $handler = function (Context $c): void {
             $c->component(function (Context $k): void {
@@ -526,6 +526,87 @@ describe('Revival from an action without signals', function (): void {
             $second->getSignal('c')->id() => 'typed',
         ]);
 
-        expect($first->getSignal('b_c')->getValue())->toBe('action');
+        expect($first->getSignal('b_c')->id())->not->toBe($second->getSignal('c')->id())
+            ->and($first->getSignal('b_c')->getValue())->toBe('action')
+            ->and($second->getSignal('c')->getValue())->toBe('typed')
+        ;
+    });
+});
+
+/**
+ * Run a scenario of Fixtures/revival_seed_cases.php: a flush only coalesces inside a coroutine,
+ * which needs a process of its own (see BroadcastCoalescingTest).
+ *
+ * @return array<string, mixed> what the scenario observed
+ */
+function revivalSeedCase(string $case, string ...$args): array {
+    $fixture = dirname(__DIR__) . '/Fixtures/revival_seed_cases.php';
+    $argv = implode(' ', array_map(escapeshellarg(...), [$case, ...$args]));
+    $out = trim((string) shell_exec(
+        'timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture) . ' ' . $argv . ' 2>&1'
+    ));
+    $lines = explode("\n", $out);
+    $data = json_decode((string) end($lines), true);
+
+    expect($data)->toBeArray('fixture output: ' . var_export($out, true));
+    expect($data)->not->toHaveKey('error', 'fixture output: ' . var_export($out, true));
+
+    return $data;
+}
+
+describe('Revival from an action without signals, with coalesced broadcasts', function (): void {
+    test('a context held through a coalesced flush gets the seeded frame from its SSE connect', function (): void {
+        $r = revivalSeedCase('flush-before-connect');
+
+        expect($r['status'])->toBe(200)
+            ->and($r['awaiting'])->toBeTrue()
+            ->and($r['observer'])->toBe(['<div id="page">count=0 total=1</div>'], 'the flush ran while the context was held')
+            ->and($r['whileHeld'])->toBe([])
+            ->and($r['rendersWhileHeld'])->toBe(0)
+            ->and($r['written'])->toContain("data: elements <div id=\"page\">count=42 total=1</div>\n")
+            ->and($r['written'])->toContain('data: signals {"' . $r['countId'] . '":42}')
+            ->and($r['written'])->not->toContain('count=0')
+            ->and($r['written'])->not->toContain('"' . $r['countId'] . '":0')
+        ;
+    });
+
+    test('a connect that seeds before the pending flush gets the flush frame with the seeded values', function (): void {
+        $r = revivalSeedCase('connect-before-flush');
+
+        expect($r['awaiting'])->toBeTrue()
+            ->and($r['seededBeforeFlush'])->toBeTrue()
+            ->and($r['observer'])->toBe(['<div id="page">count=0 total=1</div>'])
+            ->and($r['renders'])->toBe(2, 'the initial sync, then the flush')
+            ->and(substr_count($r['written'], "data: elements <div id=\"page\">count=42 total=1</div>\n"))->toBe(2)
+            ->and($r['written'])->not->toContain('count=0')
+            ->and($r['written'])->not->toContain('"' . $r['countId'] . '":0')
+        ;
+    });
+
+    test('an older flush that renders a context after its wait ended is followed by a fresh frame', function (): void {
+        // The flush that passed the held context still took its epoch, so the older flush renders h again.
+        $r = revivalSeedCase('older-flush-after-held-skip', 'seeded');
+
+        expect($r['awaiting'])->toBeTrue()
+            ->and($r['skippedBy'])->toBeGreaterThan(0)
+            ->and($r['queuedBySkip'])->toBeNull()
+            ->and($r['awaitingWhenF1Resumes'])->toBeFalse()
+            ->and($r['frames'])->toBe(['<div id="h">n=1 mine=typed</div>', '<div id="h">n=2 mine=typed</div>'])
+            ->and($r['renders'])->toBe(['g' => 1, '/r_/h' => 2])
+            ->and($r['renewals'])->toBe(1)
+            ->and($r['warnings'])->toBe([])
+        ;
+    });
+
+    test('an older flush that reaches a context still held retries once, queues nothing, and the connect sends the current frame', function (): void {
+        $r = revivalSeedCase('older-flush-after-held-skip', 'held');
+
+        expect($r['awaitingWhenF1Resumes'])->toBeTrue()
+            ->and($r['frames'])->toBe([])
+            ->and($r['renders'])->toBe(['g' => 1])
+            ->and($r['renewals'])->toBe(1, 'one retry under a renewed epoch, then the held sync takes it')
+            ->and($r['written'])->toContain("data: elements <div id=\"h\">n=2 mine=typed</div>\n")
+            ->and($r['warnings'])->toBe([])
+        ;
     });
 });

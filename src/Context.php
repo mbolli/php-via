@@ -1072,6 +1072,8 @@ class Context {
         if ($this->fanOutEpoch > $epoch) {
             return false;
         }
+        // A sync held for a seed queues nothing but still takes $epoch, so an older fan-out that
+        // renders this context once the wait ends renders it again.
         $this->fanOutEpoch = $epoch;
 
         return true;
@@ -1153,8 +1155,8 @@ class Context {
         }
 
         $this->seedWait = null;
-        // Sanitised ids can repeat across components, and the seed reaches every signal of an id,
-        // so a write to any of them keeps the seed off that id.
+        // Ids are injective, so $seed holds no written id; the diff keeps a write winning should
+        // two seeded signals ever share an id again.
         $this->signalFactory->injectSignals(array_diff_key($seed, $written));
     }
 
