@@ -1606,14 +1606,17 @@ class Via {
      * caller falls back to a full reload — when revival is disabled, no record exists, it expired,
      * the requester's session doesn't own the context, or the route is no longer registered.
      *
+     * @param bool $byConnect Whether an SSE connect revives it, which seeds the context itself
+     *
      * @internal used by SseHandler on reconnect to a missing context
      */
-    public function reviveContext(string $contextId, Request $request): ?Context {
+    public function reviveContext(string $contextId, Request $request, bool $byConnect = false): ?Context {
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
             self::readSignals($request),
             $request->cookie ?? [],
+            $byConnect,
         );
     }
 
@@ -1624,10 +1627,11 @@ class Via {
      * @param string                $requesterSession Session ID of the reconnecting client
      * @param array<string, mixed>  $clientSignals    Signal values the client still holds
      * @param array<string, string> $cookies          Request cookies (forwarded to the context)
+     * @param bool                  $byConnect        Whether an SSE connect revives it, which seeds the context itself
      *
      * @internal
      */
-    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = []): ?Context {
+    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false): ?Context {
         if ($this->config->getContextRevivalWindowMs() <= 0) {
             return null;
         }
@@ -1679,6 +1683,12 @@ class Via {
         // signal ID since the context ID was reused. Only client-writable signals take them.
         $context->injectSignals($clientSignals);
 
+        // An action that posts only via_ctx leaves every TAB signal at its default; the tab's
+        // values arrive with its next SSE connect, so syncs wait for that.
+        if (!$byConnect && array_diff_key($clientSignals, ['via_ctx' => true]) === [] && $context->awaitSeed()) {
+            $this->log('info', "Revived context {$contextId} without client signals, waiting for its SSE connect to seed it", $context);
+        }
+
         // Local record consumed — drop it so this worker's map never holds already-rebuilt
         // contexts. The SHARED directory entry deliberately survives: it is how every other
         // worker rebuilds this same context, and registerContext() above has just refreshed it.
@@ -1687,6 +1697,22 @@ class Via {
         $this->log('info', "Revived context {$contextId} on route {$route}", $context);
 
         return $context;
+    }
+
+    /**
+     * Seed a context that an action revived without client signals from its SSE connect; others ignore the call.
+     *
+     * @param array<string, mixed> $clientSignals Signal values the SSE connect carries
+     *
+     * @internal used by SseHandler for the context a connect attaches to
+     */
+    public function seedFromConnect(Context $context, array $clientSignals): void {
+        if (!$context->isAwaitingSeed()) {
+            return;
+        }
+
+        $context->seedFromClient($clientSignals);
+        $this->log('info', "Seeded context {$context->getId()} from its SSE connect", $context);
     }
 
     /**

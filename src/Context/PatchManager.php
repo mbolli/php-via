@@ -210,6 +210,10 @@ class PatchManager {
      * Sync current view and signals to the browser.
      */
     public function sync(): void {
+        if ($this->isHeldForSeed()) {
+            return;
+        }
+
         // Skip sync if view is not defined (e.g., during broadcast before client connects)
         if (!$this->context->hasView()) {
             // Still sync signals even without a view
@@ -285,6 +289,10 @@ class PatchManager {
      * Sync only signals to the browser.
      */
     public function syncSignals(): void {
+        if ($this->isHeldForSeed()) {
+            return;
+        }
+
         /** @var list<Signal> $pending */
         $pending = [];
         $updatedSignals = $this->prepareSignalsForPatch($pending);
@@ -381,6 +389,21 @@ class PatchManager {
             // In test mode the queue is a plain array; carry it across unchanged.
             $this->patchChannel = array_values($this->patchChannel);
         }
+    }
+
+    /**
+     * Whether the page this manager feeds waits for its SSE connect to seed it. Its signals still
+     * hold the defaults a revival declared, and anything queued now reaches the tab before the seed.
+     */
+    private function isHeldForSeed(): bool {
+        $page = $this->componentManager->getParentPageContext() ?? $this->context;
+        if (!$page->isAwaitingSeed()) {
+            return false;
+        }
+
+        $this->app->log('debug', "Sync held until the SSE connect seeds context {$page->getId()}");
+
+        return true;
     }
 
     /**

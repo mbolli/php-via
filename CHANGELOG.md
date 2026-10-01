@@ -220,6 +220,13 @@ All notable changes to php-via will be documented in this file.
   longer suggest returning `''` from a page view on updates: a revived tab mounts its components
   under new ids, and only the page frame can bring those into the page.
 
+- **A context revived by an action without signals reset the tab on its next connect.** An action
+  whose body carries only `via_ctx` (Datastar's `filterSignals`) revives the context with every TAB
+  signal at its declared default, and the SSE connect that followed sent those defaults to the
+  browser, so the tab lost every client value it held. Such a context now queues no sync until its
+  next SSE connect, which seeds the TAB signals from the values it carries. A signal an action
+  wrote in between keeps the action's value, and element patches still go out.
+
 ### Performance
 
 - **Broadcast storms cost a bounded number of renders.** Every `broadcast()` call and every scoped

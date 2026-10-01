@@ -88,6 +88,14 @@ class Context {
     /** Read epoch of the newest broadcast frame queued for this context; see syncFanOut() */
     private int $fanOutEpoch = 0;
 
+    /**
+     * While an action-revived context waits for its SSE connect to seed it: every TAB signal of
+     * this page and its components with its write count when the wait began. Null when not waiting.
+     *
+     * @var null|list<array{Signal, int}>
+     */
+    private ?array $seedWait = null;
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -461,6 +469,7 @@ class Context {
 
         // Clear references to prevent memory leaks
         $this->signalFactory->clearSignals();
+        $this->seedWait = null;
         $this->actionRegistry = [];
         $this->componentManager->clearComponents();
         $this->viewFn = null;
@@ -1083,7 +1092,70 @@ class Context {
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
      */
     public function injectSignals(array $signalsData): void {
+        // Values posted by an action seed the context as a revival would.
+        if ($this->seedWait !== null && array_diff_key($signalsData, ['via_ctx' => true]) !== []) {
+            $this->seedWait = null;
+        }
+
         $this->signalFactory->injectSignals($signalsData);
+    }
+
+    /**
+     * Hold this context's syncs until its next SSE connect seeds the TAB signals. A context
+     * without TAB signals has nothing to seed and does not wait.
+     *
+     * @internal set by Via when an action revived the context from a request without signals
+     *
+     * @return bool Whether the wait began
+     */
+    public function awaitSeed(): bool {
+        $signals = $this->collectTabSignals();
+        if ($signals === []) {
+            return false;
+        }
+
+        $this->seedWait = array_map(static fn (Signal $signal): array => [$signal, $signal->writeCount()], $signals);
+
+        return true;
+    }
+
+    /**
+     * Whether this context waits for its SSE connect to seed it.
+     *
+     * @internal read by PatchManager, which queues no sync while it waits
+     */
+    public function isAwaitingSeed(): bool {
+        return $this->seedWait !== null;
+    }
+
+    /**
+     * Give the client's values to the TAB signals no write has touched since the wait began, then
+     * end the wait. The usual clientWritable rules apply. Without a wait this does nothing.
+     *
+     * @internal called through Via::seedFromConnect()
+     *
+     * @param array<int|string, mixed> $clientSignals Signal values the SSE connect carries
+     */
+    public function seedFromClient(array $clientSignals): void {
+        if ($this->seedWait === null) {
+            return;
+        }
+
+        $seed = [];
+        $written = [];
+        foreach ($this->seedWait as [$signal, $writes]) {
+            $id = $signal->id();
+            if ($signal->writeCount() !== $writes) {
+                $written[$id] = true;
+            } elseif (\array_key_exists($id, $clientSignals)) {
+                $seed[$id] = $clientSignals[$id];
+            }
+        }
+
+        $this->seedWait = null;
+        // Sanitised ids can repeat across components, and the seed reaches every signal of an id,
+        // so a write to any of them keeps the seed off that id.
+        $this->signalFactory->injectSignals(array_diff_key($seed, $written));
     }
 
     /**
@@ -1175,5 +1247,19 @@ class Context {
      */
     private function hasAction(string $actionId): bool {
         return isset($this->actionRegistry[$actionId]);
+    }
+
+    /**
+     * TAB signals of this context and, recursively, of its components.
+     *
+     * @return list<Signal>
+     */
+    private function collectTabSignals(): array {
+        $signals = array_values($this->signalFactory->getTabSignals());
+        foreach ($this->componentManager->getComponents() as $component) {
+            array_push($signals, ...$component->collectTabSignals());
+        }
+
+        return $signals;
     }
 }

@@ -4,8 +4,13 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Http\ActionHandler;
+use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Http\Response;
+use Tests\Support\FakeActionRequest;
+use Tests\Support\FakeStaticResponse;
 
 /*
  * Context Revival (end-to-end, in-process)
@@ -15,9 +20,8 @@ use Mbolli\PhpVia\Via;
  * client still holds — instead of hard-reloading. This exercises the full server-side cycle:
  * initial load → user interaction → destroy (records revival snapshot) → reconnect → revive.
  *
- * OpenSwoole Request/Response are final C-extension classes (not constructible in tests), so we
- * drive Via::reviveContextFromClient() — the Request-free core of reviveContext() — directly, the
- * same way ActionAuthorizationTest reaches handlers without a live server.
+ * Most tests drive Via::reviveContextFromClient(), the Request-free core of reviveContext(), directly;
+ * the slim POST test runs ActionHandler and SseHandler on fake requests, as ActionThrowableTest does.
  */
 
 /**
@@ -195,5 +199,333 @@ describe('Context revival', function (): void {
         [$app] = reviveCounterApp();
 
         expect($app->reviveContextFromClient('/counter_/never', 'sess_owner', []))->toBeNull();
+    });
+});
+
+/**
+ * Destroy a context past its cleanup delay, leaving the record a returning tab revives it from.
+ */
+function reviveDropContext(Via $app, string $contextId): void {
+    $app->getApp()->destroyContext($contextId);
+    unset($app->contexts[$contextId]);
+}
+
+/**
+ * Run an SSE connect of the owner's session through SseHandler and return what reached the wire.
+ * The stream closes after a few polls, as a tab that goes away would.
+ *
+ * @param array<string, mixed> $signals
+ */
+function reviveConnect(Via $app, string $contextId, array $signals): string {
+    $connect = new FakeActionRequest('unused', []);
+    $connect->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
+    $connect->get = ['datastar' => (string) json_encode(['via_ctx' => $contextId] + $signals)];
+    $connect->cookie = ['via_session_id' => 'sess_owner'];
+    $stream = new class extends Response {
+        public string $written = '';
+        private int $polls = 0;
+
+        public function header(string $key, mixed $value, bool $ucwords = true): bool {
+            return true;
+        }
+
+        public function status(int $statusCode, string $reason = ''): bool {
+            return true;
+        }
+
+        public function write(string $data): bool {
+            $this->written .= $data;
+
+            return true;
+        }
+
+        public function isWritable(): bool {
+            return ++$this->polls <= 5;
+        }
+
+        public function end(mixed $data = null): bool {
+            return true;
+        }
+    };
+
+    try {
+        (new SseHandler($app))->handleSSE($connect, $stream);
+    } finally {
+        $app->getApp()->cancelContextCleanup($contextId);
+    }
+
+    return $stream->written;
+}
+
+/**
+ * What the logger printed while $fn ran.
+ */
+function reviveLogOutput(callable $fn): string {
+    ob_start();
+
+    try {
+        $fn();
+    } finally {
+        $out = (string) ob_get_clean();
+    }
+
+    return $out;
+}
+
+describe('Revival from an action without signals', function (): void {
+    test('a revival from via_ctx alone waits for a seed and holds the default', function (): void {
+        [$app, $handler] = reviveCounterApp();
+        $contextId = '/counter_/slim1';
+        reviveMintContext($app, $handler, $contextId, 'sess_owner')->getSignal('count')->setValue(42);
+        reviveDropContext($app, $contextId);
+
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+
+        expect($revived->isAwaitingSeed())->toBeTrue()
+            ->and($revived->getSignal('count')->int())->toBe(0)
+        ;
+    });
+
+    test('a context waiting for a seed queues no sync, but an element patch still goes out', function (): void {
+        [$app, $handler] = reviveCounterApp();
+        $contextId = '/counter_/slim2';
+        reviveMintContext($app, $handler, $contextId, 'sess_owner');
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+
+        $revived->sync();
+        $revived->syncSignals();
+        expect($revived->getPatch())->toBeNull();
+
+        $revived->getPatchManager()->queuePatch(['type' => 'elements', 'content' => '<div id="window"></div>']);
+        expect($revived->getPatch())->toBe(['type' => 'elements', 'content' => '<div id="window"></div>']);
+    });
+
+    test('the SSE connect seeds the waiting context and the next sync sends the client value', function (): void {
+        [$app, $handler] = reviveCounterApp();
+        $contextId = '/counter_/slim3';
+        $signalId = reviveMintContext($app, $handler, $contextId, 'sess_owner')->getSignal('count')->id();
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+
+        $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 42]);
+
+        expect($revived->getSignal('count')->int())->toBe(42)
+            ->and($revived->isAwaitingSeed())->toBeFalse()
+        ;
+
+        $revived->sync();
+        expect($revived->getPatch())->toBe(['type' => 'elements', 'content' => '42'])
+            ->and($revived->getPatch())->toMatchArray(['type' => 'signals', 'content' => [$signalId => 42]])
+            ->and($revived->getPatch())->toBeNull()
+        ;
+    });
+
+    test('a signal an action wrote between the revival and the connect keeps the action value', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $count = $c->signal(0, 'count');
+            $c->signal('', 'label');
+            $c->action(function () use ($count): void {
+                $count->setValue($count->int() + 1);
+            }, 'increment');
+            $c->view(fn (): string => '');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim4';
+        $ctx = reviveMintContext($app, $handler, $contextId, 'sess_owner');
+        $countId = $ctx->getSignal('count')->id();
+        $labelId = $ctx->getSignal('label')->id();
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+
+        // The slim POST that revived it: ActionHandler injects its body, then runs the action.
+        $revived->injectSignals(['via_ctx' => $contextId]);
+        $revived->executeAction('increment');
+        expect($revived->isAwaitingSeed())->toBeTrue();
+
+        $app->seedFromConnect($revived, ['via_ctx' => $contextId, $countId => 42, $labelId => 'typed']);
+
+        expect($revived->getSignal('count')->int())->toBe(1)
+            ->and($revived->getSignal('label')->string())->toBe('typed')
+            ->and($revived->isAwaitingSeed())->toBeFalse()
+        ;
+    });
+
+    test('a revival with client signals does not wait and ignores the connect', function (): void {
+        [$app, $handler] = reviveCounterApp();
+        $contextId = '/counter_/slim5';
+        $signalId = reviveMintContext($app, $handler, $contextId, 'sess_owner')->getSignal('count')->id();
+        reviveDropContext($app, $contextId);
+
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId, $signalId => 42]);
+        expect($revived->isAwaitingSeed())->toBeFalse();
+
+        $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 7]);
+        expect($revived->getSignal('count')->int())->toBe(42);
+    });
+
+    test('an action that posts a signal besides via_ctx ends the wait', function (): void {
+        [$app, $handler] = reviveCounterApp();
+        $contextId = '/counter_/slim6';
+        $signalId = reviveMintContext($app, $handler, $contextId, 'sess_owner')->getSignal('count')->id();
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+
+        $revived->injectSignals(['via_ctx' => $contextId, $signalId => 5]);
+        expect($revived->isAwaitingSeed())->toBeFalse();
+
+        $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 9]);
+        expect($revived->getSignal('count')->int())->toBe(5);
+    });
+
+    test('a server-owned signal keeps the server value through the seed', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->signal(0, 'count', clientWritable: false);
+            $c->view(fn (): string => '');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim7';
+        $signalId = reviveMintContext($app, $handler, $contextId, 'sess_owner')->getSignal('count')->id();
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+
+        $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 42]);
+
+        expect($revived->getSignal('count')->int())->toBe(0)
+            ->and($revived->isAwaitingSeed())->toBeFalse()
+        ;
+    });
+
+    test('the seed reaches a component signal, and a component sync waits with its page', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->component(function (Context $k): void {
+                $k->signal('', 'q');
+                $k->view(fn (): string => '');
+            }, 'search');
+            $c->view(fn (): string => '');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim8';
+        reviveMintContext($app, $handler, $contextId, 'sess_owner');
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+        $component = array_values($revived->getComponentManager()->getComponents())[0];
+
+        $component->sync();
+        expect($revived->getPatch())->toBeNull();
+
+        $app->seedFromConnect($revived, ['via_ctx' => $contextId, $component->getSignal('q')->id() => 'typed']);
+        expect($component->getSignal('q')->getValue())->toBe('typed');
+    });
+
+    test('a slim action POST revives the context and its SSE connect seeds it before the first sync', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $count = $c->signal(0, 'count');
+            $c->action(fn () => null, 'window');
+            $c->view(fn (): string => (string) $count->int());
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim9';
+        $signalId = reviveMintContext($app, $handler, $contextId, 'sess_owner')->getSignal('count')->id();
+        reviveDropContext($app, $contextId);
+
+        $post = new FakeActionRequest('window', ['via_ctx' => $contextId]);
+        $post->cookie = ['via_session_id' => 'sess_owner'];
+        $posted = new FakeStaticResponse();
+        (new ActionHandler($app))->handleAction($post, $posted, 'window');
+        $revived = $app->contexts[$contextId];
+
+        expect($posted->statusCode)->toBe(200)
+            ->and($revived->isAwaitingSeed())->toBeTrue()
+        ;
+
+        $written = reviveConnect($app, $contextId, [$signalId => 42]);
+
+        expect($revived->isAwaitingSeed())->toBeFalse()
+            ->and($revived->getSignal('count')->int())->toBe(42)
+            ->and($written)->toContain("data: elements 42\n")
+            ->and($written)->toContain('data: signals {"' . $signalId . '":42}')
+            ->and($written)->not->toContain('"' . $signalId . '":0')
+        ;
+    });
+
+    test('an SSE connect that revives the context seeds it itself and holds nothing', function (): void {
+        $app = new Via((new Config())->withLogLevel('info'));
+        $handler = function (Context $c): void {
+            $count = $c->signal(0, 'count');
+            $c->view(fn (): string => 'count ' . $count->int());
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim10';
+        reviveLogOutput(fn () => reviveMintContext($app, $handler, $contextId, 'sess_owner'));
+        reviveDropContext($app, $contextId);
+
+        $written = '';
+        $log = reviveLogOutput(function () use ($app, $contextId, &$written): void {
+            $written = reviveConnect($app, $contextId, []);
+        });
+
+        expect($app->contexts[$contextId]->isAwaitingSeed())->toBeFalse()
+            ->and($log)->toContain("Revived context {$contextId} on route")
+            ->and($log)->not->toContain('waiting for its SSE connect')
+            ->and($log)->not->toContain('Seeded context')
+            ->and($written)->toContain("data: elements count 0\n")
+        ;
+    });
+
+    test('a revival without signals of a page without TAB signals does not wait', function (): void {
+        $app = new Via((new Config())->withLogLevel('info'));
+        $handler = function (Context $c): void {
+            $c->view(fn (): string => 'static');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim11';
+        reviveLogOutput(fn () => reviveMintContext($app, $handler, $contextId, 'sess_owner'));
+        reviveDropContext($app, $contextId);
+
+        $revived = null;
+        $log = reviveLogOutput(function () use ($app, $contextId, &$revived): void {
+            $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+        });
+        $revived->sync();
+
+        expect($revived->isAwaitingSeed())->toBeFalse()
+            ->and($log)->not->toContain('waiting for its SSE connect')
+            ->and($revived->getPatch())->toBe(['type' => 'elements', 'content' => 'static'])
+        ;
+    });
+
+    test('a signal an action wrote keeps its value when a sibling component signal has the same id', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->component(function (Context $k): void {
+                $k->signal('', 'b_c');
+                $k->view(fn (): string => '');
+            }, 'a');
+            $c->component(function (Context $k): void {
+                $k->signal('', 'c');
+                $k->view(fn (): string => '');
+            }, 'a_b');
+            $c->view(fn (): string => '');
+        };
+        $app->page('/counter', $handler);
+        $contextId = '/counter_/slim12';
+        reviveMintContext($app, $handler, $contextId, 'sess_owner');
+        reviveDropContext($app, $contextId);
+        $revived = $app->reviveContextFromClient($contextId, 'sess_owner', ['via_ctx' => $contextId]);
+        [$first, $second] = array_values($revived->getComponentManager()->getComponents());
+
+        $first->getSignal('b_c')->setValue('action');
+        $app->seedFromConnect($revived, [
+            'via_ctx' => $contextId,
+            $first->getSignal('b_c')->id() => 'typed',
+            $second->getSignal('c')->id() => 'typed',
+        ]);
+
+        expect($first->getSignal('b_c')->getValue())->toBe('action');
     });
 });

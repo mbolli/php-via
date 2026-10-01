@@ -100,7 +100,7 @@ class SseHandler {
         // NOTE: brotli headers are intentionally NOT set on the reload path — we write raw SSE and
         // close immediately, so compression is pointless and would corrupt the payload.
         if (!isset($this->via->contexts[$contextId])) {
-            if ($this->via->reviveContext($contextId, $request) !== null) {
+            if ($this->via->reviveContext($contextId, $request, byConnect: true) !== null) {
                 // Rebuilt — clear any stale reload marker and continue with the revived context.
                 unset($this->reloadedContextIds[$contextId]);
             } else {
@@ -167,6 +167,9 @@ class SseHandler {
         ++$this->via->runningSseStreams;
 
         try {
+            // A context an action revived without signals takes the tab's values from this connect.
+            $this->via->seedFromConnect($context, $signals);
+
             // Track client info when SSE connects (not at page load)
             if (!isset($this->via->clients[$contextId])) {
                 $clientId = $this->via->generateClientId();
