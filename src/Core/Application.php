@@ -342,7 +342,7 @@ class Application {
 
         $removed = $this->sessionStore->evict();
         if ($removed > 0) {
-            $this->logger->log('warning', "Session data LRU eviction: removed {$removed} inactive sessions (cap: {$this->sessionStore->capacity()})");
+            $this->logger->log('warning', "Session data LRU eviction: removed {$removed} least recently used sessions (cap: {$this->sessionStore->capacity()}, raise with Config::withSessionTableSize())");
         }
     }
 

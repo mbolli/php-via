@@ -12,7 +12,8 @@ use OpenSwoole\Table;
  *
  * Allocated in the master process before the fork, like the other shared stores. One row per
  * session holds all of its keys as one serialized map, so the byte cap is per session and the
- * row count is the number of sessions. Every write and every eviction of a session holds the
+ * row count is the number of sessions holding data; clearing a session's last key frees its row.
+ * Every write and every eviction of a session holds the
  * ticket lock of its stripe, so two workers writing different keys of one session both land, a
  * key keeps its last write, and eviction never deletes a row while a write works on it.
  *
@@ -39,7 +40,7 @@ final class SharedSessionStore {
      * @param int $maxRows         Sessions kept before the least recently used are evicted
      * @param int $maxSessionBytes Serialized byte cap for all of one session's data
      */
-    public function __construct(private int $maxRows = 4096, private int $maxSessionBytes = 32768) {
+    public function __construct(private int $maxRows = 1024, private int $maxSessionBytes = 16384) {
         $meta = new Table($maxRows);
         $meta->column('at', Table::TYPE_INT, 8);
         $meta->column('size', Table::TYPE_INT, 8);
@@ -116,7 +117,7 @@ final class SharedSessionStore {
 
     /**
      * Drop the least recently used sessions once more than $maxRows are held, down to 1% below.
-     * Sessions without data go first.
+     * Rows without data go first: a read that races a clear can leave one behind.
      *
      * @return int sessions removed
      */
@@ -155,7 +156,7 @@ final class SharedSessionStore {
         return $removed;
     }
 
-    /** Number of sessions with a row. */
+    /** Number of sessions holding data. */
     public function count(): int {
         return \count($this->meta);
     }
@@ -194,8 +195,9 @@ final class SharedSessionStore {
 
         if ($map === []) {
             $this->data->del($key);
+            $this->meta->del($key);
 
-            return $this->setMeta($key, 0);
+            return true;
         }
 
         try {
@@ -225,8 +227,8 @@ final class SharedSessionStore {
         try {
             $this->data->set($key, ['map' => $serialized]);
         } catch (Exception) {
-            // Only a new row can fail to allocate, so the session had no data before.
-            $this->meta->set($key, ['size' => 0]);
+            // Only a new row can fail to allocate, so the session had no row before.
+            $this->meta->del($key);
 
             return false;
         }

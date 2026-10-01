@@ -118,16 +118,18 @@ All notable changes to php-via will be documented in this file.
   - Values must be serializable and come back as copies (see Breaking Changes).
   - Reading a key and writing it back is not atomic across workers: two tabs adding to one cart
     at the same moment on different workers can lose one of the adds.
-  - One session's data is capped at 32 KB serialized, and a write past it throws
+  - One session's data is capped at 16 KB serialized, and a write past it throws
     `\OverflowException`. `Config::withSessionTableSize($maxSessions, $maxBytesPerSession)` raises
     the cap.
   - A write that cannot take the session's lock within about 7 s, because a worker died holding
     it or its event loop is blocked, throws `\RuntimeException`.
-  - Past 4,096 sessions the first worker drops the least recently used ones every second and logs
-    a warning, and a write that finds the table full drops them on its own worker first; a single
-    worker still drops them past 10,000. `withSessionTableSize()` sets the count.
+  - Past 1,024 sessions holding data the first worker drops the least recently used ones every
+    second and logs a warning, and a write that finds the table full drops them on its own worker
+    first; a single worker still drops them past 10,000. `withSessionTableSize()` sets the count.
+    Rows have no age limit: a session holds its row from its first write until its last key is
+    cleared or it is dropped, so the count includes visitors who left long ago.
   - The table reserves about twice the session count, rounded up to a power of two, times the
-    bytes per session: 257 MB of shared memory at the defaults. About 34 MB of it is resident from
+    bytes per session: 33 MB of shared memory at the defaults. About 9 MB of it is resident from
     start-up, and the rest becomes resident as sessions store data and is not returned.
   - Session data survives a worker reload (`SIGUSR1`), since the master process holds it.
   - With one worker nothing changes: session data stays in a PHP array with no byte cap.

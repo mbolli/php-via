@@ -166,7 +166,8 @@ test('more new sessions than the table holds between eviction passes can still s
     expect($store->count())->toBeLessThan(128);
 });
 
-test('sessions without data are evicted before sessions with data', function (): void {
+test('clearing all of a session\'s data frees its row, so logouts do not trigger eviction', function (): void {
+    // Measured before: 75 rows over a cap of 64, and the leader evicted 12 of them with a warning.
     $store = new SharedSessionStore(maxRows: 64);
     $a = sessionWorker($store);
     $b = sessionWorker($store);
@@ -175,16 +176,47 @@ test('sessions without data are evicted before sessions with data', function ():
         $a->setSessionData("kept{$i}", 'n', $i);
     }
     for ($i = 0; $i < 10; ++$i) {
-        $a->setSessionData("emptied{$i}", 'n', $i);
-        $a->clearSessionData("emptied{$i}");
+        $a->setSessionData("loggedOut{$i}", 'n', $i);
+        $b->clearSessionData("loggedOut{$i}");
+    }
+    for ($i = 0; $i < 5; ++$i) {
+        $a->setSessionData("keyByKey{$i}", 'auth', 'ada');
+        $a->setSessionData("keyByKey{$i}", 'cart', [1]);
+        $b->clearSessionData("keyByKey{$i}", 'auth');
+        $b->clearSessionData("keyByKey{$i}", 'cart');
     }
 
-    $b->getApp()->evictSharedSessions();
+    expect($store->count())->toBe(60);
 
-    expect($store->count())->toBe(63);
+    ob_start();
+    $b->getApp()->evictSharedSessions();
+    expect(ob_get_clean())->toBe('');
+
     for ($i = 0; $i < 60; ++$i) {
         expect($a->getSessionData("kept{$i}", 'n'))->toBe($i);
     }
+
+    $a->setSessionData('loggedOut0', 'n', 'back');
+    expect($b->getSessionData('loggedOut0', 'n'))->toBe('back');
+    expect($store->count())->toBe(61);
+});
+
+test('the eviction warning names the Config method that raises the cap', function (): void {
+    $store = new SharedSessionStore(maxRows: 64);
+    $via = new Via((new Config())->withLogLevel('warning'));
+    $via->getApp()->setSessionStore($store);
+
+    for ($i = 0; $i < 70; ++$i) {
+        $via->setSessionData("ses_{$i}", 'n', $i);
+    }
+
+    ob_start();
+    $via->getApp()->evictSharedSessions();
+    $log = (string) ob_get_clean();
+
+    expect($log)->toContain('Session data LRU eviction: removed 7')
+        ->and($log)->toContain('Config::withSessionTableSize()')
+    ;
 });
 
 test('the least recently used sessions are evicted and a read keeps one', function (): void {

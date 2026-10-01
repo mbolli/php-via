@@ -134,9 +134,9 @@ class Config {
 
     private int $scopedSignalTableValueBytes = 32768;
 
-    private int $sessionTableRows = 4096;
+    private int $sessionTableRows = 1024;
 
-    private int $sessionTableValueBytes = 32768;
+    private int $sessionTableValueBytes = 16384;
 
     /**
      * Maximum number of rows in the GlobalState OpenSwoole\Table.
@@ -977,23 +977,26 @@ class Config {
     /**
      * Tune the shared-memory table that holds session data when worker_num > 1.
      *
-     * One row per session that has stored data, holding all of its keys serialized together, so
+     * One row per session that holds data, with all of its keys serialized together, so
      * $maxBytesPerSession caps the whole session and a write past it throws \OverflowException.
-     * Once more than $maxSessions sessions are held, the leader worker drops the least recently
-     * used ones every second, and a write that finds the table full drops them on its own worker
-     * first. Values must be serializable; one that is not throws \InvalidArgumentException. A single worker keeps session data in a PHP array with no byte cap
-     * and drops the least recently used past 10,000 sessions.
+     * Rows have no age limit: a session holds its row from its first write until its last key is
+     * cleared or it is evicted, so the count includes visitors who left long ago. Once more than
+     * $maxSessions sessions are held, the leader worker drops the least recently used ones every
+     * second and logs a warning, and a write that finds the table full drops them on its own worker
+     * first. Values must be serializable; one that is not throws \InvalidArgumentException. A single
+     * worker keeps session data in a PHP array with no byte cap and drops the least recently used
+     * past 10,000 sessions.
      *
      * The table reserves about 2 × $maxSessions (rounded up to a power of two) × $maxBytesPerSession
-     * of shared memory: 257 MB at the defaults, 514 MB for 5000 sessions. About 34 MB of it is
+     * of shared memory: 33 MB at the defaults, 260 MB for 5000 sessions. About 9 MB of it is
      * resident from start-up whether or not the app stores session data. The rest becomes resident
      * as sessions store data and stays resident after they are cleared or evicted, so size memory
      * limits for the reservation. If the kernel refuses it, start-up fails with a fatal error.
      *
-     * @param int $maxSessions        Sessions kept before eviction starts (default 4096)
-     * @param int $maxBytesPerSession Serialized byte cap for all of one session's data (default 32768)
+     * @param int $maxSessions        Sessions holding data kept before eviction starts (default 1024)
+     * @param int $maxBytesPerSession Serialized byte cap for all of one session's data (default 16384)
      */
-    public function withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 32768): self {
+    public function withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 16384): self {
         $this->sessionTableRows = max(1, $maxSessions);
         $this->sessionTableValueBytes = max(64, $maxBytesPerSession);
 

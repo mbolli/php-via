@@ -374,17 +374,20 @@ $config = (new Config())
         <code>\OverflowException</code>. GlobalState keys are at most 63 characters.
     </p>
     <p>
-        Session data takes one row per session, holding all of its keys, and
-        <code>withSessionTableSize()</code> sizes it (default 4&nbsp;096 sessions &times; 32&nbsp;KB per
+        Session data takes one row per session that holds data, with all of its keys, and
+        <code>withSessionTableSize()</code> sizes it (default 1&nbsp;024 sessions &times; 16&nbsp;KB per
         session). A write that takes a session past its byte cap throws <code>\OverflowException</code>.
-        Past the session count, the first worker drops the least recently used sessions every second and
-        logs a warning. Values are serialized, so they must be serializable and an object comes back as a
-        copy.
+        Rows have no age limit: a session holds its row from its first write until its last key is
+        cleared or it is evicted, so the count includes visitors who left long ago, not only the ones
+        online now. Past the session count, the first worker drops the least recently used sessions every
+        second and logs a warning, and their data is gone. Size the count for every session that stores
+        data in the time you want it kept, such as a login's lifetime. Values are serialized, so they must
+        be serializable and an object comes back as a copy.
     </p>
     <p>
         The session table reserves about twice the session count, rounded up to a power of two, times the
-        bytes per session: 257&nbsp;MB at the defaults, 514&nbsp;MB for 5&nbsp;000 sessions. About
-        34&nbsp;MB of that is resident from start-up. The rest becomes resident as sessions store data and
+        bytes per session: 33&nbsp;MB at the defaults, 260&nbsp;MB for 5&nbsp;000 sessions. About
+        9&nbsp;MB of that is resident from start-up. The rest becomes resident as sessions store data and
         stays resident after they are cleared or evicted, so set container memory limits for the full
         reservation, or lower the bytes per session. If the kernel refuses the reservation, the server
         fails at start-up.
