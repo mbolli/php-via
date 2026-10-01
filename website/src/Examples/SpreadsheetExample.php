@@ -16,11 +16,26 @@ final class SpreadsheetExample {
 
     private const string SCOPE = 'example:spreadsheet';
 
+    /** Matches the framework's cap on revival records. */
+    private const int MAX_POSITIONS = 10_000;
+
     /** @var array<string, array{row: int, col: int, hue: int}> contextId => cursor */
     private static array $cursors = [];
 
     /** @var array<string, array{r1: int, c1: int, r2: int, c2: int}> contextId => selection */
     private static array $selections = [];
+
+    /** @var array<string, true> contextId => an edit startEdit opened that no commit, Escape or move has ended yet */
+    private static array $openEdits = [];
+
+    /**
+     * Position of a destroyed context, for a revival. Focus and viewport are server-owned, so the
+     * revival snapshot the browser sends cannot restore them. Kept for the revival window. Without
+     * an entry (another worker, or past the window) a revived tab starts at A1 with no open edit.
+     *
+     * @var array<string, array{row: int, col: int, viewRow: int, viewCol: int, sel: array{r1: int, c1: int, r2: int, c2: int}, edit: bool, expiresAt: int}>
+     */
+    private static array $positions = [];
 
     private static ?\SQLite3 $db = null;
 
@@ -52,26 +67,27 @@ final class SpreadsheetExample {
             $contextId = $c->getId();
             $hue = self::hueForSession($sessionId);
 
-            // Initialize cursor for this context
-            if (!isset(self::$cursors[$contextId])) {
-                self::$cursors[$contextId] = ['row' => 0, 'col' => 0, 'hue' => $hue];
+            $pos = self::$positions[$contextId] ?? ['row' => 0, 'col' => 0, 'viewRow' => 0, 'viewCol' => 0, 'sel' => ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1], 'edit' => false];
+            unset(self::$positions[$contextId]);
+            if ($pos['edit']) {
+                self::$openEdits[$contextId] = true;
+            } else {
+                unset(self::$openEdits[$contextId]);
             }
 
-            $c->onDisconnect(function () use ($contextId, $app): void {
-                unset(self::$cursors[$contextId], self::$selections[$contextId]);
-
-                if ($app->getContextsByScope(self::SCOPE) !== []) {
-                    $app->broadcast(self::SCOPE);
-                }
-            });
+            // Initialize cursor for this context
+            if (!isset(self::$cursors[$contextId])) {
+                self::$cursors[$contextId] = ['row' => $pos['row'], 'col' => $pos['col'], 'hue' => $hue];
+            }
 
             $c->addScope(self::SCOPE);
 
-            // TAB-scoped signals: viewport + focus + editing
-            $c->signal(0, 'viewRow', Scope::TAB);
-            $c->signal(0, 'viewCol', Scope::TAB);
-            $c->signal(0, 'focusRow', Scope::TAB);
-            $c->signal(0, 'focusCol', Scope::TAB);
+            // TAB-scoped signals: viewport + focus + editing. Viewport and focus are server-owned:
+            // a POST sent before the browser got the last move's frame would otherwise undo the move.
+            $viewRowSignal = $c->signal($pos['viewRow'], 'viewRow', Scope::TAB, clientWritable: false);
+            $viewColSignal = $c->signal($pos['viewCol'], 'viewCol', Scope::TAB, clientWritable: false);
+            $focusRowSignal = $c->signal($pos['row'], 'focusRow', Scope::TAB, clientWritable: false);
+            $focusColSignal = $c->signal($pos['col'], 'focusCol', Scope::TAB, clientWritable: false);
             $c->signal(false, 'editing', Scope::TAB);
             $c->signal('', 'editValue', Scope::TAB);
 
@@ -97,8 +113,30 @@ final class SpreadsheetExample {
 
             // Selection range stored server-side per context (not as signals)
             if (!isset(self::$selections[$contextId])) {
-                self::$selections[$contextId] = ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1];
+                self::$selections[$contextId] = $pos['sel'];
             }
+
+            $c->onDisconnect(function () use ($contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
+                $windowMs = $app->getConfig()->getContextRevivalWindowMs();
+                if ($windowMs > 0) {
+                    self::$positions[$contextId] = [
+                        'row' => $focusRowSignal->int(),
+                        'col' => $focusColSignal->int(),
+                        'viewRow' => $viewRowSignal->int(),
+                        'viewCol' => $viewColSignal->int(),
+                        'sel' => self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1],
+                        'edit' => isset(self::$openEdits[$contextId]),
+                        'expiresAt' => time() + (int) ceil($windowMs / 1000),
+                    ];
+                }
+                self::prunePositions();
+
+                unset(self::$cursors[$contextId], self::$selections[$contextId], self::$openEdits[$contextId]);
+
+                if ($app->getContextsByScope(self::SCOPE) !== []) {
+                    $app->broadcast(self::SCOPE);
+                }
+            });
 
             // -- Actions --
 
@@ -122,12 +160,7 @@ final class SpreadsheetExample {
                 $col = $targetCol->int();
                 $isShift = $shift->bool();
 
-                // Commit any pending edit
-                if ($editing->bool()) {
-                    self::setCell($focusRow->int(), $focusCol->int(), $editValue->string());
-                    $editing->setValue(false, broadcast: false);
-                    $editValue->setValue('', broadcast: false);
-                }
+                self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
 
                 $focusRow->setValue($row, broadcast: false);
                 $focusCol->setValue($col, broadcast: false);
@@ -176,15 +209,8 @@ final class SpreadsheetExample {
                 $fr = $focusRow->int();
                 $fc = $focusCol->int();
 
-                // Commit on navigation if editing
-                if ($editing->bool() && $direction !== 'escape') {
-                    self::setCell($fr, $fc, $editValue->string());
-                    $editing->setValue(false, broadcast: false);
-                    $editValue->setValue('', broadcast: false);
-                }
+                self::endEdit($contextId, $editing, $editValue, $fr, $fc, commit: $direction !== 'Escape');
                 if ($direction === 'Escape') {
-                    $editing->setValue(false, broadcast: false);
-                    $editValue->setValue('', broadcast: false);
                     $ctx->sync();
 
                     return;
@@ -239,7 +265,7 @@ final class SpreadsheetExample {
                 $app->broadcast(self::SCOPE);
             }, 'navigate');
 
-            $c->action(function (Context $ctx): void {
+            $c->action(function (Context $ctx) use ($contextId): void {
                 /** @var Signal $key */ $key = $ctx->getSignal('key');
 
                 /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
@@ -254,10 +280,11 @@ final class SpreadsheetExample {
                 $currentValue = self::getCell($focusRow->int(), $focusCol->int());
                 $editing->setValue(true, broadcast: false);
                 $editValue->setValue($prefill !== '' ? $prefill : $currentValue, broadcast: false);
+                self::$openEdits[$contextId] = true;
                 $ctx->sync();
             }, 'startEdit');
 
-            $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function (Context $ctx) use ($app, $contextId): void {
                 /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
 
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
@@ -270,9 +297,7 @@ final class SpreadsheetExample {
                 if (!$editing->bool()) {
                     return;
                 }
-                self::setCell($focusRow->int(), $focusCol->int(), $editValue->string());
-                $editing->setValue(false, broadcast: false);
-                $editValue->setValue('', broadcast: false);
+                self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
                 $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'commitEdit');
@@ -302,12 +327,17 @@ final class SpreadsheetExample {
                 /** @var Signal $scrollToRow */ $scrollToRow = $ctx->getSignal('str');
 
                 /** @var Signal $scrollToCol */ $scrollToCol = $ctx->getSignal('stc');
-                $viewRow->setValue(max(0, $scrollToRow->int()), broadcast: false);
-                $viewCol->setValue(max(0, $scrollToCol->int()), broadcast: false);
+                // Each scrollbar sends -1 for the other axis, so it cannot undo a scroll there.
+                if ($scrollToRow->int() >= 0) {
+                    $viewRow->setValue($scrollToRow->int(), broadcast: false);
+                }
+                if ($scrollToCol->int() >= 0) {
+                    $viewCol->setValue($scrollToCol->int(), broadcast: false);
+                }
                 $ctx->sync();
             }, 'scrollTo');
 
-            $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function (Context $ctx) use ($app, $contextId): void {
                 /** @var Signal $focusRow */ $focusRow = $ctx->getSignal('focusRow');
 
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
@@ -340,8 +370,7 @@ final class SpreadsheetExample {
                     }
                 }
                 self::setCells($cells);
-                $editing->setValue(false, broadcast: false);
-                $editValue->setValue('', broadcast: false);
+                self::endEdit($contextId, $editing, $editValue, $startRow, $startCol, commit: false);
                 $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'paste');
@@ -602,9 +631,9 @@ final class SpreadsheetExample {
                     ],
                     'anatomy' => [
                         'signals' => [
-                            ['name' => 'viewRow / viewCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Top-left corner of the visible viewport. Private per tab.'],
-                            ['name' => 'focusRow / focusCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Currently focused cell coordinates.'],
-                            ['name' => 'editing', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Whether the focused cell is in edit mode.'],
+                            ['name' => 'viewRow / viewCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Top-left corner of the visible viewport. Private per tab and server-owned (clientWritable: false), so a POST carrying an older value cannot undo a scroll.'],
+                            ['name' => 'focusRow / focusCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Currently focused cell coordinates. Server-owned, so a key pressed before the last move reached the browser still applies from the new cell.'],
+                            ['name' => 'editing', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Whether the focused cell is in edit mode. A commit also needs the edit startEdit opened on the server, so a key pressed before the last commit or Escape arrived writes nothing.'],
                             ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '\"\"', 'desc' => 'Current cell editor input value.'],
                             ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted — client-writable action parameters for keyboard and mouse events.'],
                             ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20×10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
@@ -616,7 +645,7 @@ final class SpreadsheetExample {
                             ['name' => 'startEdit', 'desc' => 'Enters edit mode on the focused cell. Prefills with typed character or current value.'],
                             ['name' => 'commitEdit', 'desc' => 'Writes the edit value to SQLite and broadcasts the change.'],
                             ['name' => 'scroll', 'desc' => 'Mouse wheel scrolling — moves viewport by delta rows/columns.'],
-                            ['name' => 'scrollTo', 'desc' => 'Absolute viewport positioning — used by scrollbar drag and track clicks.'],
+                            ['name' => 'scrollTo', 'desc' => 'Absolute viewport positioning on one axis, used by scrollbar drag and track clicks.'],
                             ['name' => 'clearCells', 'desc' => 'Deletes the selected range of cells.'],
                             ['name' => 'paste', 'desc' => 'Pastes TSV clipboard data starting at the focused cell. Compatible with Excel/Sheets.'],
                             ['name' => 'jumpTo', 'desc' => 'Parses a cell reference like AB2000, centers viewport, and moves cursor.'],
@@ -793,12 +822,12 @@ final class SpreadsheetExample {
             . 'const rect = $ssTrackV.getBoundingClientRect();'
             . ' if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {'
             . ' el.closest(\'#spreadsheet\').__drag = \'v\'; document.body.style.userSelect = \'none\'; }'
-            . ' else { $' . $scrollToRowId . ' = Math.round(Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height)) * ' . $vMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . ' else { $' . $scrollToRowId . ' = Math.round(Math.max(0, Math.min(1, (evt.clientY - rect.top) / rect.height)) * ' . $vMax . '); $' . $scrollToColId . ' = -1; @post(\'' . $scrollToUrl . '\'); }"'
             . ' data-on:touchstart__prevent="'
             . 'const rect = $ssTrackV.getBoundingClientRect(); const t = evt.touches[0];'
             . ' if (evt.target === $ssThumbV || $ssThumbV.contains(evt.target)) {'
             . ' el.closest(\'#spreadsheet\').__drag = \'v\'; }'
-            . ' else { $' . $scrollToRowId . ' = Math.round(Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)) * ' . $vMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . ' else { $' . $scrollToRowId . ' = Math.round(Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)) * ' . $vMax . '); $' . $scrollToColId . ' = -1; @post(\'' . $scrollToUrl . '\'); }"'
             . '>';
         $out .= '<div class="ss-scrollbar-track" data-ref="ssTrackV">';
         $out .= '<div id="ss-vthumb" class="ss-scrollbar-thumb" data-ref="ssThumbV"'
@@ -815,12 +844,12 @@ final class SpreadsheetExample {
             . 'const rect = $ssTrackH.getBoundingClientRect();'
             . ' if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {'
             . ' el.closest(\'#spreadsheet\').__drag = \'h\'; document.body.style.userSelect = \'none\'; }'
-            . ' else { $' . $scrollToColId . ' = Math.round(Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) * ' . $hMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . ' else { $' . $scrollToColId . ' = Math.round(Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) * ' . $hMax . '); $' . $scrollToRowId . ' = -1; @post(\'' . $scrollToUrl . '\'); }"'
             . ' data-on:touchstart__prevent="'
             . 'const rect = $ssTrackH.getBoundingClientRect(); const t = evt.touches[0];'
             . ' if (evt.target === $ssThumbH || $ssThumbH.contains(evt.target)) {'
             . ' el.closest(\'#spreadsheet\').__drag = \'h\'; }'
-            . ' else { $' . $scrollToColId . ' = Math.round(Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width)) * ' . $hMax . '); @post(\'' . $scrollToUrl . '\'); }"'
+            . ' else { $' . $scrollToColId . ' = Math.round(Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width)) * ' . $hMax . '); $' . $scrollToRowId . ' = -1; @post(\'' . $scrollToUrl . '\'); }"'
             . '>';
         $out .= '<div class="ss-scrollbar-track" data-ref="ssTrackH">';
         $out .= '<div id="ss-hthumb" class="ss-scrollbar-thumb" data-ref="ssThumbH"'
@@ -833,6 +862,34 @@ final class SpreadsheetExample {
         $out .= '</div>'; // ss-dynamic
 
         return $out;
+    }
+
+    /**
+     * End this tab's edit, writing the draft only when the edit startEdit opened is still open:
+     * a POST sent before the last commit or Escape reached the browser still says editing=true.
+     */
+    private static function endEdit(string $contextId, Signal $editing, Signal $editValue, int $row, int $col, bool $commit): void {
+        $open = isset(self::$openEdits[$contextId]);
+        unset(self::$openEdits[$contextId]);
+        if (!$editing->bool()) {
+            return;
+        }
+        if ($commit && $open) {
+            self::setCell($row, $col, $editValue->string());
+        }
+        $editing->setValue(false, broadcast: false);
+        $editValue->setValue('', broadcast: false);
+    }
+
+    /** Drop expired entries, then the oldest past the cap. Entries are appended in expiry order. */
+    private static function prunePositions(): void {
+        $now = time();
+        foreach (self::$positions as $id => $entry) {
+            if ($entry['expiresAt'] > $now && \count(self::$positions) <= self::MAX_POSITIONS) {
+                break;
+            }
+            unset(self::$positions[$id]);
+        }
     }
 
     /**

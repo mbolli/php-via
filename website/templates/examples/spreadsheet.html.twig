@@ -25,8 +25,8 @@
             const now = Date.now();
             if (now - (el.__lastScroll || 0) < 100) return;
             el.__lastScroll = now;
-            if (axis === 'v') { ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }}); }
-            else { ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }}); }
+            if (axis === 'v') { ${{ scrollToRowId }} = Math.max(0, Math.round(ratio * {{ maxRow - viewportRows }})); ${{ scrollToColId }} = -1; }
+            else { ${{ scrollToColId }} = Math.max(0, Math.round(ratio * {{ maxCol - viewportCols }})); ${{ scrollToRowId }} = -1; }
             @post('{{ scrollToUrl }}');
         };
         el.__sbEnd = (cx, cy) => {
@@ -40,8 +40,8 @@
                 const ratio = axis === 'v'
                     ? Math.max(0, Math.min(1, (cy - rect.top) / rect.height))
                     : Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
-                if (axis === 'v') { ${{ scrollToRowId }} = Math.round(ratio * {{ maxRow - viewportRows }}); }
-                else { ${{ scrollToColId }} = Math.round(ratio * {{ maxCol - viewportCols }}); }
+                if (axis === 'v') { ${{ scrollToRowId }} = Math.max(0, Math.round(ratio * {{ maxRow - viewportRows }})); ${{ scrollToColId }} = -1; }
+                else { ${{ scrollToColId }} = Math.max(0, Math.round(ratio * {{ maxCol - viewportCols }})); ${{ scrollToRowId }} = -1; }
                 @post('{{ scrollToUrl }}');
             }
             el.__drag = null; document.body.style.userSelect = '';
