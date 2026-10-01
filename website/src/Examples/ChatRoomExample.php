@@ -7,6 +7,7 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Timer;
 
 final class ChatRoomExample {
     public const string SLUG = 'chat-room';
@@ -26,11 +27,11 @@ final class ChatRoomExample {
         'signals' => [
             ['name' => 'username', 'type' => 'string', 'scope' => 'SESSION', 'desc' => 'Persists across tabs. Same identity whether you switch rooms or open new tabs.'],
             ['name' => 'messageInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Current message draft. Private to this tab.'],
-            ['name' => 'typingIndicator', 'type' => 'string', 'scope' => 'Custom', 'desc' => 'Custom room scope. Shows "User is typing..." to everyone in the same room.'],
+            ['name' => 'typingIndicator', 'type' => 'array', 'scope' => 'Custom', 'desc' => 'Custom room scope. Who is typing and when that expires. Shows "User is typing..." to everyone in the same room until the server clears it.'],
         ],
         'actions' => [
-            ['name' => 'sendMessage', 'desc' => 'Appends message to the room, clears input, resets typing indicator, and broadcasts to room.'],
-            ['name' => 'updateTyping', 'desc' => 'Sets the typing indicator with username and broadcasts to room.'],
+            ['name' => 'sendMessage', 'desc' => 'Appends message to the room, clears input, clears the sender\'s typing indicator, and broadcasts to room.'],
+            ['name' => 'updateTyping', 'desc' => 'Sets the typing indicator with username and broadcasts to room. The server clears it 5 s after the last keystroke.'],
         ],
         'views' => [
             ['name' => 'chat_room.html.twig', 'desc' => 'Sidebar room list + chat panel with message list, user presence, and typing indicator. Uses onDisconnect for cleanup.'],
@@ -43,6 +44,11 @@ final class ChatRoomExample {
         ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/chat_room.html.twig'],
     ];
 
+    private const int TYPING_TIMEOUT_MS = 5000;
+
+    /** @var array{user: string, until: int} */
+    private const array NOBODY_TYPING = ['user' => '', 'until' => 0];
+
     /** @var array<string, array{name: string}> */
     private static array $rooms = [
         'lobby' => ['name' => 'Lobby'],
@@ -52,6 +58,15 @@ final class ChatRoomExample {
 
     /** @var array<string, array<string, string>> room => [sessionId => username] */
     private static array $roomUsers = [];
+
+    /** @var array<string, string> room => contextId that typed there last on this worker */
+    private static array $typingTabs = [];
+
+    /** @var array<string, int> room => this worker's timer for the room's typing expiry */
+    private static array $typingTimers = [];
+
+    /** @var array<string, string> contextId => the message that tab sent last */
+    private static array $lastSent = [];
 
     private static ?Via $app = null;
 
@@ -94,9 +109,9 @@ final class ChatRoomExample {
         $messageInput = $c->signal('', 'messageInput');
         $roomScope = Scope::build('example:chat', $room);
         $c->addScope($roomScope);
-        $typingIndicator = $c->signal('', 'typingIndicator', $roomScope, false);
+        $typingIndicator = $c->signal(self::NOBODY_TYPING, 'typingIndicator', $roomScope, false);
 
-        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $roomScope): void {
+        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
             $message = trim($ctx->getSignal('messageInput')->getValue());
             if ($message === '') {
                 return;
@@ -106,20 +121,37 @@ final class ChatRoomExample {
             $ctx->span('db.insert_message', fn () => self::addMessage($room, $username, $message), ['room' => $room]);
 
             $ctx->getSignal('messageInput')->setValue('');
-            $ctx->getSignal('typingIndicator')->setValue('');
+            self::$lastSent[$contextId] = $message;
+            self::stopTyping($room, $roomScope, $username);
             // Send the clear now: a keyup post landing before the room flush would put the old text back.
             $ctx->syncSignals();
             self::$app?->broadcast($roomScope);
         }, 'sendMessage');
 
-        $updateTyping = $c->action(function (Context $ctx) use ($username, $roomScope): void {
-            $ctx->getSignal('typingIndicator')->setValue($username);
+        $updateTyping = $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
+            $draft = trim($ctx->getSignal('messageInput')->getValue());
+            // A letter released after Enter posts a keyup carrying the sent text, or '' once the clear arrived.
+            if ($draft === '' || $draft === (self::$lastSent[$contextId] ?? null)) {
+                return;
+            }
+            $ctx->getSignal('typingIndicator')->setValue(['user' => $username, 'until' => self::nowMs() + self::TYPING_TIMEOUT_MS]);
+            self::$typingTabs[$room] = $contextId;
+            self::watchTyping($room, $roomScope);
             self::$app?->broadcast($roomScope);
         }, 'updateTyping');
 
-        $c->onDisconnect(function () use ($room, $roomScope, $contextId): void {
+        $c->onDisconnect(function () use ($room, $roomScope, $contextId, $username): void {
+            unset(self::$lastSent[$contextId]);
+            $changed = false;
             if (isset(self::$roomUsers[$room][$contextId])) {
                 unset(self::$roomUsers[$room][$contextId]);
+                $changed = true;
+            }
+            if ((self::$typingTabs[$room] ?? null) === $contextId) {
+                unset(self::$typingTabs[$room]);
+                $changed = self::stopTyping($room, $roomScope, $username) || $changed;
+            }
+            if ($changed) {
                 self::$app?->broadcast($roomScope);
             }
         });
@@ -155,9 +187,87 @@ final class ChatRoomExample {
             'updateTypingUrl' => $updateTyping->url(),
         ]), block: 'demo', cacheUpdates: false);
 
+        // The worker whose timer would clear the indicator may have restarted since.
+        self::watchTyping($room, $roomScope);
+
         if ($wasNewUser) {
             $app->broadcast($roomScope);
         }
+    }
+
+    /**
+     * Clear the room's typing indicator if it still names $username, so another user who typed
+     * since keeps theirs. Returns whether it was cleared.
+     */
+    private static function stopTyping(string $room, string $roomScope, string $username): bool {
+        $cleared = self::clearTyping($roomScope, static fn (array $entry): bool => $entry['user'] === $username);
+        self::watchTyping($room, $roomScope);
+
+        return $cleared;
+    }
+
+    /**
+     * Clear the room's typing indicator if it has expired, or arm this worker's timer for when it
+     * does. The expiry is part of the shared value, so a timer lost with its worker cannot pin it.
+     */
+    private static function watchTyping(string $room, string $roomScope): void {
+        if (isset(self::$typingTimers[$room])) {
+            Timer::clear(self::$typingTimers[$room]);
+            unset(self::$typingTimers[$room]);
+        }
+
+        $until = self::typingEntry(self::$app?->getScopedSignalByName($roomScope, 'typingIndicator')?->getValue())['until'];
+        if ($until === 0) {
+            return;
+        }
+
+        $remaining = $until - self::nowMs();
+        if ($remaining > 0) {
+            $timerId = Timer::after($remaining, static function () use ($room, $roomScope): void {
+                unset(self::$typingTimers[$room]);
+                self::watchTyping($room, $roomScope);
+            });
+            if (\is_int($timerId)) {
+                self::$typingTimers[$room] = $timerId;
+            }
+        } elseif (self::clearTyping($roomScope, static fn (array $entry): bool => $entry['until'] === $until)) {
+            self::$app?->broadcast($roomScope);
+        }
+    }
+
+    /**
+     * Clear the room's typing indicator if $matches accepts it, as one locked step so an entry
+     * another worker writes in between survives. Returns whether it was cleared.
+     *
+     * @param callable(array{user: string, until: int}): bool $matches
+     */
+    private static function clearTyping(string $roomScope, callable $matches): bool {
+        $indicator = self::$app?->getScopedSignalByName($roomScope, 'typingIndicator');
+        if ($indicator === null || !$matches(self::typingEntry($indicator->getValue()))) {
+            return false;
+        }
+
+        $cleared = false;
+        $indicator->mutate(static function (mixed $value) use ($matches, &$cleared): mixed {
+            $cleared = $matches(self::typingEntry($value));
+
+            return $cleared ? self::NOBODY_TYPING : $value;
+        });
+
+        return $cleared;
+    }
+
+    /**
+     * @return array{user: string, until: int}
+     */
+    private static function typingEntry(mixed $value): array {
+        return \is_array($value) && \is_string($value['user'] ?? null) && \is_int($value['until'] ?? null)
+            ? ['user' => $value['user'], 'until' => $value['until']]
+            : self::NOBODY_TYPING;
+    }
+
+    private static function nowMs(): int {
+        return (int) (microtime(true) * 1000);
     }
 
     private static function db(): \SQLite3 {
