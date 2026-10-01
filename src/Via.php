@@ -1581,6 +1581,22 @@ class Via {
     }
 
     /**
+     * Destroy a context that has no SSE stream on this worker unless one attaches within
+     * Config::getContextConnectTimeoutMs(). An SSE connect cancels it like any pending cleanup.
+     *
+     * @internal used by the page and action handlers
+     */
+    public function armConnectDeadline(string $contextId): void {
+        $timeoutMs = $this->config->getContextConnectTimeoutMs();
+        // Only a running server has an event loop to fire the timer; a CLI script or test would wait for it.
+        if ($timeoutMs <= 0 || $this->server === null || ($this->activeSseCount[$contextId] ?? 0) > 0) {
+            return;
+        }
+
+        $this->scheduleContextCleanup($contextId, $timeoutMs);
+    }
+
+    /**
      * Rebuild a destroyed context so a returning tab keeps its view instead of hard-reloading.
      *
      * When an SSE reconnect names a context that was already cleaned up, this re-creates it with

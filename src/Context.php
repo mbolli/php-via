@@ -425,8 +425,9 @@ class Context {
      *
      * This is an alias for onCleanup() with clearer semantics.
      * The callback is executed when:
-     * - SSE connection closes and remains closed for 60 seconds
-     * - Browser sends explicit session close beacon
+     * - the SSE connection closes and stays closed for the cleanup delay (Config::withContextCleanupDelay())
+     * - the browser sends the session close beacon
+     * - no SSE stream attaches within the connect timeout (Config::withContextConnectTimeout())
      *
      * @param callable(Context): void $callback Function to call on disconnect
      */

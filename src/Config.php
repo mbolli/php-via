@@ -179,6 +179,12 @@ class Config {
     private int $contextCleanupDelayMs = 5000;
 
     /**
+     * How long (milliseconds) a context without an SSE stream on this worker lives before it is
+     * destroyed. 0 keeps it until a stream disconnects or the tab-close beacon arrives.
+     */
+    private int $contextConnectTimeoutMs = 30_000;
+
+    /**
      * How long (milliseconds) after a context is destroyed a returning tab may rebuild an
      * equivalent one (same ID, handler re-run, signals re-seeded from the client) instead of
      * hard-reloading. 0 disables revival, falling back to a full page reload on reconnect.
@@ -668,6 +674,27 @@ class Config {
 
     public function getContextCleanupDelayMs(): int {
         return $this->contextCleanupDelayMs;
+    }
+
+    /**
+     * Configure how long a context may live without an SSE stream.
+     *
+     * A page load whose stream never connects (a crawler, a prefetch, a tab closed before it
+     * connected) and a context an action rebuilt on a worker the tab does not stream from are
+     * destroyed after this long, running their onCleanup/onDisconnect callbacks. An SSE connect
+     * cancels the timer, and every action on such a context starts it again. A tab that connects
+     * later than this is rebuilt by revival (see withContextRevivalWindow()).
+     *
+     * @param int $ms Lifetime in milliseconds. Pass 0 to keep such contexts until the worker stops.
+     */
+    public function withContextConnectTimeout(int $ms): self {
+        $this->contextConnectTimeoutMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getContextConnectTimeoutMs(): int {
+        return $this->contextConnectTimeoutMs;
     }
 
     /**

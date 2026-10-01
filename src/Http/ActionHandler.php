@@ -102,6 +102,10 @@ class ActionHandler {
             return;
         }
 
+        // A context this worker holds without a stream (a copy rebuilt for an action, or a tab whose
+        // stream is down) is freed unless a stream attaches or another action arrives in time.
+        $this->via->armConnectDeadline($contextId);
+
         // Open a Dev Bar trace for this action. render.regions spans from any
         // $c->sync()/broadcast() and user $c->span() calls nest under it.
         $tracer = $this->via->getTracer();

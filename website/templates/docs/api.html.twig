@@ -537,6 +537,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     // ...or a closure(string $filePath, string $mimeType): string to fine-tune per file (see Deployment → Static assets)
     ->withBasePath('/')             // base path when mounted at a sub-path (see below)
     ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
+    ->withContextConnectTimeout(30_000) // free a context whose SSE stream never connects; 0 = keep (default 30000)
     ->withSwooleSettings([...])     // raw OpenSwoole server settings
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag

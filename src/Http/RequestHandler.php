@@ -338,6 +338,9 @@ class RequestHandler {
             return;
         }
 
+        // A page whose SSE stream never connects (a crawler, a prefetch) is freed after the connect timeout.
+        $this->via->armConnectDeadline($contextId);
+
         // Set session cookie
         $this->via->setSessionCookie($response, $sessionId);
 

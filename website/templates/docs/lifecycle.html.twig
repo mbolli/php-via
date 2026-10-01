@@ -28,6 +28,14 @@
     {% code 'php' %}{% verbatim %}
 $config->withContextCleanupDelay(60_000); // 60 seconds
 {% endverbatim %}{% endcode %}
+    <p>
+        A context whose SSE stream never connects (a crawler, a prefetch, a tab closed before it
+        connected) is destroyed after the connect timeout, 30 seconds by default, and its
+        <code>onDisconnect</code> / <code>onCleanup</code> callbacks run. With several workers the same
+        applies to a copy an action rebuilt on a worker the tab does not stream from; every action on it
+        starts the timeout again. A tab that connects later is rebuilt by revival.
+        <code>Config::withContextConnectTimeout(0)</code> keeps such contexts until the worker stops.
+    </p>
 
     <h3 id="disconnect-detection">How a closed tab is detected</h3>
     <p>
