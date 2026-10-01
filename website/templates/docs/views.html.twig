@@ -85,22 +85,27 @@ $c->view(fn () => $c->render('todo.html.twig', ['todos' => $todos]), block: 'dem
         <summary>Advanced: the <code>$isUpdate</code> parameter</summary>
         <p>
             View callables receive <code>(bool $isUpdate, string $basePath)</code> as arguments.
-            Most views don't need these — <code>block:</code> handles the common case. But for
-            advanced scenarios (e.g. returning an empty string when components handle their own patches),
-            you can use <code>$isUpdate</code> directly:
+            Most views don't need these: <code>block:</code> handles the common case. When the part that
+            changes is rendered on its own, in PHP or in a separate template, <code>$isUpdate</code> lets
+            updates send only that part:
         </p>
         {% code 'php' %}{% verbatim %}
-// Page with components — skip page-level re-render entirely
-$c->view(function (bool $isUpdate) use ($c, $counter, $chat): string {
+// Updates send only <div id="live">; Datastar morphs it by its id
+$c->view(function (bool $isUpdate) use ($c, $data): string {
+    $live = $c->render('live.html.twig', $data);
     if ($isUpdate) {
-        return ''; // components handle their own patches
+        return $live;
     }
-    return $c->render('page.html.twig', [
-        'counter' => $counter(),
-        'chat' => $chat(),
-    ]);
+
+    return $c->render('page.html.twig', $data + ['live' => $live]);
 });
 {% endverbatim %}{% endcode %}
+        <p>
+            On a page with <a href="/docs/components">components</a>, render them inside the part an update
+            returns, and don't return <code>''</code> on updates. A revived tab mounts its components again
+            under new ids, and only the page frame can put those ids into the page. Without it, the
+            components' updates find no element to patch.
+        </p>
     </details>
 
     <h2 id="update-cycle">How updates work</h2>
@@ -155,7 +160,7 @@ $counter = $c->component(function (Context $c): void {
     $c->view('counter.html.twig');
 }, 'counter');
 
-$c->view('page.html.twig', ['counter' => $counter()]);
+$c->view(fn (): string => $c->render('page.html.twig', ['counter' => $counter()]));
 {% endverbatim %}{% endcode %}
 
     <h2 id="exec-script">Executing scripts on update</h2>

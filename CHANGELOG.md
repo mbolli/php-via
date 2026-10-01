@@ -209,6 +209,15 @@ All notable changes to php-via will be documented in this file.
   coroutine the action started before it broadcast counts as another action. Coalesced broadcasts
   from other actions already went to the next flush and were not affected.
 
+- **A page that embedded component HTML rendered in its handler reset the components on every
+  page re-render.** The docs passed `$counter()` to `$c->view('page.html.twig', [...])`, which
+  renders the component once, when the handler runs, so each broadcast that reached the page, each
+  reconnect and each revival sent the page-load HTML again. The docs now call the component
+  callables inside the view closure. A component the page frame already carries then sends only its
+  signals in that sync, instead of rendering again for a `#c-` frame of its own. The docs also no
+  longer suggest returning `''` from a page view on updates: a revived tab mounts its components
+  under new ids, and only the page frame can bring those into the page.
+
 ### Performance
 
 - **Broadcast storms cost a bounded number of renders.** Every `broadcast()` call and every scoped

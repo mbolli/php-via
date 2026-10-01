@@ -358,7 +358,7 @@ $counter = $c->component(function (Context $c): void {
 // Class form (composition API):
 $counter = $c->component(Counter::class, 'counter');
 
-$c->view('page.html.twig', ['counter' => $counter()]);
+$c->view(fn (): string => $c->render('page.html.twig', ['counter' => $counter()]));
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-get-signal"><code>getSignal(string $name): ?Signal</code></h3>

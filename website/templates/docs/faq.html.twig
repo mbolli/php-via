@@ -36,7 +36,7 @@
             "name": "Full-page patch overwrites component updates",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "A page-level view with a Twig template re-renders the whole page HTML on every broadcast and sends it as a patch with no selector, which can overwrite fresher component patches. Fix: either return '' from the page view when $isUpdate === true, or use the block: parameter on $c->view() to send only a named Twig block on updates."
+                "text": "A page-level view re-renders the whole page on every broadcast that reaches it, and on a reconnect or a revival. Component HTML rendered once in the page handler goes out with each of those frames and puts the page-load HTML back over the components. Fix: call the component callables inside the view closure, so each page render carries their current HTML. A page without components can use the block: parameter on $c->view() to send only a named Twig block on updates."
             }
         },
         {
@@ -206,26 +206,23 @@ $c->view(function () use ($votes, $twig) {
             You use <code>$c->component()</code> to build isolated sub-contexts but on every broadcast
             the entire page is replaced, wiping out or replacing the fresher component patches.
         </p>
-        <p><strong>Why:</strong> A page-level <code>$c->view()</code> with a Twig template re-renders the
-        whole page HTML on every broadcast and sends it as an <code>elements</code> patch with no selector —
-        Datastar morphs the entire body. Component patches target specific <code>#c-...</code> divs, but the
-        page patch can arrive after and overwrite them with stale embedded HTML.
+        <p><strong>Why:</strong> A page-level <code>$c->view()</code> re-renders the whole page on every
+        broadcast that reaches it, and on a reconnect or a revival, and Datastar morphs the page with it.
+        Component HTML rendered once in the handler, such as <code>'counter' => $counter()</code> passed to
+        <code>$c->view('page.html.twig', [...])</code>, goes out with each of those frames and puts the
+        page-load HTML back over the components.
         </p>
-        <p><strong>Fix:</strong> If your page doesn't use components and the template has a named block
-        around the dynamic content, use <code>block:</code> to send only that block on updates:</p>
+        <p><strong>Fix:</strong> Call the component callables inside the view closure, so each page render
+        carries their current HTML. A component the page frame carries then sends only its signals:</p>
         {% code 'php' %}{% verbatim %}
-// Preferred: send only the 'demo' block on SSE updates
-$c->view(fn() => $c->render('page.html.twig', $data), block: 'demo');
+$c->view(fn (): string => $c->render('page.html.twig', $data + [
+    'counter' => $counter(),
+]));
         {% endverbatim %}{% endcode %}
-        <p>If the page <em>does</em> use components, make the page-level view a no-op on updates instead.
-        Components own their own patches:</p>
+        <p>A page without components whose template has a named block around the dynamic content can send
+        only that block on updates:</p>
         {% code 'php' %}{% verbatim %}
-$c->view(function (bool $isUpdate) use ($c, $data): string {
-    if ($isUpdate) {
-        return ''; // components handle their own patches
-    }
-    return $c->render('page.html.twig', $data);
-});
+$c->view(fn() => $c->render('page.html.twig', $data), block: 'demo');
         {% endverbatim %}{% endcode %}
     </details>
 

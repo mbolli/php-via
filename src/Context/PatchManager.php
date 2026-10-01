@@ -219,14 +219,16 @@ class PatchManager {
             return;
         }
 
-        // Sync view with proper selector for components
-        $viewHtml = $this->context->renderView(isUpdate: true);
+        $isPage = !$this->componentManager->isComponent();
+        $render = fn (): string => $this->context->renderView(isUpdate: true);
+        [$viewHtml, $renderedWithPage] = $isPage ? $this->componentManager->renderCollecting($render) : [$render(), []];
 
         // A full document morphs <head> too: re-add the includes and the Dev Bar.
         $viewHtml = $this->app->decorateUpdate($viewHtml, $this->context);
+        $pageFrame = null;
 
         if (!empty(trim($viewHtml))) {
-            if ($this->componentManager->isComponent()) {
+            if (!$isPage) {
                 // Create valid CSS ID by replacing slashes and prefixing with 'c-'
                 $cssId = 'c-' . str_replace(['/', '_'], '-', $this->context->getId());
                 $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
@@ -241,6 +243,7 @@ class PatchManager {
                     'type' => 'elements',
                     'content' => $viewHtml,
                 ]);
+                $pageFrame = $viewHtml;
             }
         }
 
@@ -249,8 +252,15 @@ class PatchManager {
 
         // For page (non-component) contexts, also sync all registered component sub-contexts.
         // Component patches are automatically forwarded to this page's channel via queuePatch().
-        if (!$this->componentManager->isComponent()) {
-            foreach ($this->componentManager->getComponents() as $component) {
+        if ($isPage) {
+            foreach ($this->componentManager->getComponents() as $componentId => $component) {
+                // The page frame already carries this component as just rendered: only its signals are left.
+                if ($pageFrame !== null && isset($renderedWithPage[$componentId]) && str_contains($pageFrame, $renderedWithPage[$componentId])) {
+                    $component->syncSignals();
+
+                    continue;
+                }
+
                 // Skip components with no dirty signals whose view is a pure function
                 // of those signals (cacheUpdates=true). Components with cacheUpdates=false
                 // may read external state (e.g. globalState), so always sync them.

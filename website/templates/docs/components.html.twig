@@ -23,15 +23,16 @@ $counterComponent = function (Context $c): void {
     <h2 id="mounting">Mounting a component</h2>
     <p>
         Mount a component inside a page handler via <code>$c-&gt;component()</code>, giving it a namespace to prevent
-        signal ID collisions. The returned callable renders the component's initial HTML:
+        signal ID collisions. The returned callable renders the component's current HTML. Call it inside the page's
+        view closure, so every render of the page carries the component as it is now:
     </p>
     {% code 'php' %}{% verbatim %}
 $app->page('/', function (Context $c) use ($counterComponent): void {
     $counter = $c->component($counterComponent, 'counter');
 
-    $c->view('pages/home.html.twig', [
-        'counter' => $counter(), // initial HTML string
-    ]);
+    $c->view(fn (): string => $c->render('pages/home.html.twig', [
+        'counter' => $counter(), // rendered each time the page renders
+    ]));
 });
 {% endverbatim %}{% endcode %}
 
@@ -42,6 +43,18 @@ $app->page('/', function (Context $c) use ($counterComponent): void {
     {{ counter | raw }}
 </main>
 {% endverbatim %}{% endcode %}
+
+    <p>
+        The page view renders again on a broadcast that reaches the page, on a reconnect and on a revival. Passing
+        <code>$counter()</code> to <code>$c-&gt;view('pages/home.html.twig', [...])</code> renders the component once,
+        when the handler runs, so each of those renders would put the page-load HTML back. A component the page frame
+        carries sends only its signals in that update, so rendering it with the page does not render it twice.
+    </p>
+    <p>
+        Each component's wrapper id is unique to its tab, so the HTML of a page that embeds components differs per tab
+        and must not come from the shared update cache: keep the page's primary scope at TAB, or pass
+        <code>cacheUpdates: false</code> to <code>view()</code>.
+    </p>
 
     <h2 id="namespacing">Namespacing</h2>
     <p>
@@ -55,10 +68,10 @@ $counterB = $c->component($counterComponent, 'counter-b');
 // counter-a has signal ID 'counter_a_count____dn', action '/_action/counter-a-inc'
 // counter-b has signal ID 'counter_b_count____dn', action '/_action/counter-b-inc'
 
-$c->view('page.html.twig', [
+$c->view(fn (): string => $c->render('page.html.twig', [
     'counterA' => $counterA(),
     'counterB' => $counterB(),
-]);
+]));
 {% endverbatim %}{% endcode %}
 
     <h2 id="scoped-components">Scoped components</h2>

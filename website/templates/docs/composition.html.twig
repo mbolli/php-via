@@ -90,11 +90,12 @@ public function view(Context $ctx): void {
     $parrots = $ctx->component(VoteWidget::class, 'parrots');
 
     // independent signal IDs: global_cats_votes____kn, global_dogs_votes____kn, ...
-    $ctx->view('page.html.twig', [
+    // rendered inside the view closure, so each page render carries the current votes
+    $ctx->view(fn (): string => $ctx->render('page.html.twig', [
         'cats'    => $cats(),
         'dogs'    => $dogs(),
         'parrots' => $parrots(),
-    ]);
+    ]));
 }
     {% endverbatim %}{% endcode %}
 

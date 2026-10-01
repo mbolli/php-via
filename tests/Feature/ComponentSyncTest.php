@@ -294,3 +294,82 @@ describe('Components with no signals', function (): void {
         expect($renders)->toBe($baseline);
     });
 });
+
+describe('Components rendered with the page', function (): void {
+    /**
+     * @return list<array{type: string, content: mixed, selector?: string}>
+     */
+    $drain = static function (Context $page): array {
+        $patches = [];
+        while (($patch = $page->getPatchManager()->getPatch()) !== null) {
+            $patches[] = $patch;
+        }
+
+        return $patches;
+    };
+
+    $mount = static function (Context $page, int &$renders): callable {
+        return $page->component(function (Context $c) use (&$renders): void {
+            $count = $c->signal(0, 'count');
+            $c->view(function () use ($count, &$renders): string {
+                ++$renders;
+
+                return '<span>' . $count->int() . '</span>';
+            });
+        }, 'counter');
+    };
+
+    test('a component the page frame carries is rendered once and sends only its signals', function () use ($drain, $mount): void {
+        $page = new Context('page-embed', '/test', createVia());
+        $renders = 0;
+        $counter = $mount($page, $renders);
+        $page->view(fn (): string => '<main id="page">' . $counter() . '</main>');
+        $component = array_values($page->getComponentManager()->getComponents())[0];
+        $component->getSignal('count')->setValue(5);
+
+        $page->sync();
+        $patches = $drain($page);
+
+        $elements = array_values(array_filter($patches, fn (array $p): bool => $p['type'] === 'elements'));
+        $signals = array_merge(...array_map(
+            fn (array $p): array => $p['content'],
+            array_values(array_filter($patches, fn (array $p): bool => $p['type'] === 'signals')),
+        ));
+
+        expect($renders)->toBe(1)
+            ->and($elements)->toHaveCount(1)
+            ->and($elements[0])->not->toHaveKey('selector')
+            ->and($elements[0]['content'])->toContain('<span>5</span>')
+            ->and($signals)->toHaveKey($component->getSignal('count')->id())
+        ;
+    });
+
+    test('a component the page frame leaves out still gets its own frame', function () use ($drain, $mount): void {
+        $page = new Context('page-omit', '/test', createVia());
+        $renders = 0;
+        $counter = $mount($page, $renders);
+        // Rendered but not in the frame, like a component outside the block an update sends.
+        $page->view(function () use ($counter): string {
+            $counter();
+
+            return '<main id="page"></main>';
+        });
+
+        $page->sync();
+        $selectors = array_column($drain($page), 'selector');
+
+        expect($selectors)->toHaveCount(1)
+            ->and($selectors[0])->toStartWith('#c-')
+        ;
+    });
+
+    test('two overlapping syncs of one page each find the components they rendered', function (): void {
+        // Coroutine::run cannot run in the Pest process.
+        $fixture = dirname(__DIR__) . '/Fixtures/component_overlap_sync.php';
+        $out = (string) shell_exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture) . ' 2>&1');
+
+        expect($out)->toContain("renders=2\n")
+            ->and($out)->toContain("component_frames=0\n")
+        ;
+    });
+});

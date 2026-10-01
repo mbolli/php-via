@@ -7,6 +7,7 @@ namespace Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 
 /**
  * ComponentManager - Manages component creation and rendering.
@@ -22,6 +23,9 @@ class ComponentManager {
     private array $componentRegistry = [];
 
     private ?Context $parentPageContext = null;
+
+    /** @var array<int, array<string, string>> per collecting coroutine: the HTML of each component it rendered, by component ID */
+    private array $rendered = [];
 
     public function __construct(
         private Context $context,
@@ -91,13 +95,40 @@ class ComponentManager {
 
         $this->componentRegistry[$componentId] = $componentContext;
 
-        return function () use ($componentContext) {
+        return function () use ($componentContext, $componentId): string {
             $html = $componentContext->renderView();
             // Create valid CSS ID by replacing slashes and prefixing with 'c-'
             $cssId = 'c-' . str_replace(['/', '_'], '-', $componentContext->getId());
+            $wrapped = '<div id="' . $cssId . '">' . $html . '</div>';
+            $cid = Coroutine::getCid();
+            if (isset($this->rendered[$cid])) {
+                $this->rendered[$cid][$componentId] = $wrapped;
+            }
 
-            return '<div id="' . $cssId . '">' . $html . '</div>';
+            return $wrapped;
         };
+    }
+
+    /**
+     * Call $render and note the HTML of each component it renders in this coroutine.
+     *
+     * Kept per coroutine: two syncs of one page can render it at once.
+     *
+     * @param callable(): string $render
+     *
+     * @return array{string, array<string, string>} what $render returned, and each component's HTML by component ID
+     */
+    public function renderCollecting(callable $render): array {
+        $cid = Coroutine::getCid();
+        $this->rendered[$cid] = [];
+
+        try {
+            $html = $render();
+
+            return [$html, $this->rendered[$cid]];
+        } finally {
+            unset($this->rendered[$cid]);
+        }
     }
 
     /**
