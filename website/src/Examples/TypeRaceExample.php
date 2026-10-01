@@ -57,7 +57,7 @@ final class TypeRaceExample {
     private const array ANATOMY = [
         'signals' => [
             ['name' => 'username', 'type' => 'string', 'scope' => 'SESSION', 'desc' => 'Racer handle, auto-assigned. Persists across tabs.'],
-            ['name' => 'typedText', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Current textarea value. Sent to server on every input event; never broadcast.'],
+            ['name' => 'typedText', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Current textarea value. Sent to server on every input event; never broadcast. The server clears it when a race starts.'],
             ['name' => 'raceStatus', 'type' => 'string', 'scope' => 'Custom race scope', 'desc' => '"waiting" | "countdown" | "racing" | "done". Controls which UI panel renders.'],
             ['name' => 'countdown', 'type' => 'int', 'scope' => 'Custom race scope', 'desc' => '3…2…1 before start. Broadcast each tick.'],
         ],
@@ -127,11 +127,11 @@ final class TypeRaceExample {
 
             // ── Actions ───────────────────────────────────────────────────────
 
-            $updateProgress = $c->action(function (Context $ctx) use (
-                $raceId,
-                $contextId,
-                $app,
-            ): void {
+            $updateProgress = $c->action(function (Context $ctx) use ($contextId, $app): void {
+                $raceId = self::currentRace($contextId);
+                if ($raceId === null) {
+                    return;
+                }
                 $raceScope = Scope::build('example:typerace', $raceId);
                 $race = &self::$races[$raceId];
                 if ($race['status'] !== 'racing') {
@@ -177,8 +177,9 @@ final class TypeRaceExample {
                 unset($racer, $race);
             }, 'updateProgress');
 
-            $startRace = $c->action(function () use ($raceId, $app): void {
-                if (!isset(self::$races[$raceId])) {
+            $startRace = $c->action(function () use ($contextId, $app): void {
+                $raceId = self::currentRace($contextId);
+                if ($raceId === null) {
                     return;
                 }
                 $race = &self::$races[$raceId];
@@ -192,8 +193,8 @@ final class TypeRaceExample {
             }, 'startRace');
 
             $newRace = $c->action(function () use ($contextId, $app): void {
-                $raceId = self::$contextRace[$contextId] ?? null;
-                if ($raceId === null || !isset(self::$races[$raceId])) {
+                $raceId = self::currentRace($contextId);
+                if ($raceId === null) {
                     return;
                 }
                 $race = &self::$races[$raceId];
@@ -214,11 +215,13 @@ final class TypeRaceExample {
                 $race['finishCount'] = 0;
                 unset($race);
 
-                // Absorb lone waiters from other races so nobody is stuck waiting alone.
-                // Only pull from races still in 'waiting' state (not mid-race).
+                // Pull in racers waiting alone in another lobby, while this race has room.
                 $newScope = Scope::build('example:typerace', $raceId);
                 foreach (self::$races as $otherId => $otherRace) {
-                    if ($otherId === $raceId || $otherRace['status'] !== 'waiting') {
+                    if (\count(self::$races[$raceId]['racers']) >= self::MAX_RACERS_PER_RACE) {
+                        break;
+                    }
+                    if ($otherId === $raceId || $otherRace['status'] !== 'waiting' || \count($otherRace['racers']) !== 1) {
                         continue;
                     }
                     $oldScope = Scope::build('example:typerace', $otherId);
@@ -314,6 +317,13 @@ final class TypeRaceExample {
         return $raceId;
     }
 
+    /** Read at call time: newRace can move a racer into another race after the page mounted. */
+    private static function currentRace(string $contextId): ?string {
+        $raceId = self::$contextRace[$contextId] ?? null;
+
+        return $raceId !== null && isset(self::$races[$raceId]) ? $raceId : null;
+    }
+
     /** @return array{name: string, progress: int, wpm: float, finished: bool, finishRank: int} */
     private static function newRacer(string $username): array {
         return ['name' => $username, 'progress' => 0, 'wpm' => 0.0, 'finished' => false, 'finishRank' => 0];
@@ -362,6 +372,12 @@ final class TypeRaceExample {
                 if ($race['timerId'] !== null) {
                     Timer::clear($race['timerId']);
                     $race['timerId'] = null;
+                }
+                // The browser keeps the last race's text: clear it before the textarea renders.
+                // The countdown shows no input, so no stale post can overwrite this.
+                foreach ($app->getContextsByScope($scope) as $ctx) {
+                    $ctx->getSignal('typedText')?->setValue('');
+                    $ctx->syncSignals();
                 }
             }
 
