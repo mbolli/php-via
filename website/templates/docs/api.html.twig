@@ -299,6 +299,17 @@ $status = $c->signal('idle', 'status', clientWritable: false);
         shared across workers.
     </p>
     <p>
+        Every signal gets an id that is unique per tab: the browser uses it in <code>data-bind</code>,
+        <code>$name</code> expressions and the patches it receives. A scoped signal outside a component
+        whose name is letters and digits, in a scope of letters and digits joined by <code>:</code> or a
+        route path of letters and digits, keeps a readable id such as <code>global_count</code> or
+        <code>route__examples_counter_count</code>. Every other id, which includes all TAB and component
+        signals, ends in <code>____</code> plus one code per <code>_</code> saying what it stands for, so
+        two names that differ only in punctuation never share an id. Use <code>$signal-&gt;id()</code>,
+        <code>bind()</code> and <code>text()</code> in templates instead of writing ids by hand, and
+        <code>$app-&gt;getScopedSignalByName()</code> to find a scoped signal from code outside a context.
+    </p>
+    <p>
         Declaring a TAB signal again with the same name returns the existing signal and sets it to the
         new initial value. When that changes the live value, or the declaration asks for a different
         <code>clientWritable</code> (the first one is kept), php-via logs a warning once per name. The
@@ -499,6 +510,14 @@ $s->text();   // '<span data-text="$global_count"></span>'
         signal once and reuses the value for every tab it renders, so this applies to views as well: a view that
         computes a new value from a scoped signal computes it from the value the broadcast read.
     </p>
+    <p>
+        Concurrent <code>mutate()</code> calls on one key run in order within a worker and take turns across
+        workers. A call waits up to 2&nbsp;s behind earlier calls of its own worker and up to 5&nbsp;s for
+        its turn, then throws <code>\RuntimeException</code>. A holder that keeps the lock longer than its
+        2&nbsp;s lease, or a worker that is next in line but cannot run for 2&nbsp;s, is skipped, and the
+        skipped write can overlap the next one. While calls queue, each waiting worker keeps one core busy
+        polling, so keep callbacks short. <code>mutateGlobalState()</code> uses the same lock.
+    </p>
 
     ---
 
@@ -578,7 +597,9 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         file across restarts. Reads never touch SQLite: writes go to shared memory and mark the key dirty, and one
         worker writes the dirty keys in a single transaction every <code>$flushMs</code>, about 1&nbsp;µs per key.
         Anything written since the last flush is lost if the process dies, so lower <code>$flushMs</code> to
-        narrow that window.
+        narrow that window. That worker also flushes when it stops, and the master writes a final flush after
+        every worker has stopped. Integers keep their type in the snapshot, so <code>incrementGlobalState()</code>
+        keeps working on a restored counter.
     </p>
     <p>
         <code>withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true)</code> makes the

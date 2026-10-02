@@ -143,6 +143,12 @@ $send = $c->action(function (Context $c) use ($app): void {
         starts, makes its fan-out render again. When it does that in 8 passes in a row, the fan-out stops and
         the worker logs "Broadcast re-entrancy limit reached" with the scope's name.
     </p>
+    <p>
+        Two more warnings point at views. "Broadcast chain limit reached" means views broadcast each
+        other's scopes in a loop; the chain stops after 8 flushes. "The fan-out of scope ... has been
+        running for" means a broadcast found that scope's fan-out still rendering after more than a
+        second, which usually means a view is blocked on I/O.
+    </p>
 
     <h2 id="connect-disconnect">Broadcasting on connect and disconnect</h2>
     <p>

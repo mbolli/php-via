@@ -56,6 +56,12 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
         interval. A connection that drops without closing, such as a laptop leaving Wi-Fi, stays open until
         TCP gives up on it.
     </p>
+    <p>
+        A tab that reconnects while its old stream is still open stays connected: the old stream ends,
+        <code>onClientConnect</code> fires once, and <code>onClientDisconnect</code> fires only when the
+        tab's last stream ends. A tab restored from the browser's back/forward cache after the cleanup
+        delay is revived, as below, or reloads.
+    </p>
 
     <h3 id="revival">Revival: reconnecting after cleanup, without a reload</h3>
     <p>

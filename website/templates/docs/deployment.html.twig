@@ -247,6 +247,8 @@ $config->withAllowMissingOrigin();
     {% endverbatim %}{% endcode %}
     <p>
         The Dev Bar's <code>/_via/signal</code> and <code>/_via/reset</code> and the tab-close beacon <code>POST /_session/close</code> apply the same check.
+        A page served with <code>Referrer-Policy: no-referrer</code> sends its tab-close beacon with
+        <code>Origin: null</code>, which is denied; the SSE disconnect then schedules the cleanup instead.
     </p>
     <p>
         Note: <code>GET /_action/…</code> always returns <strong>405 Method Not Allowed</strong>
@@ -339,7 +341,23 @@ $config = (new Config())
         A tab's context lives on the worker that rendered the page. Every worker can still reach it:
         contexts are recorded in a shared-memory directory, and an action or SSE reconnect that lands on
         another worker rebuilds the context by re-running the route handler. Scoped signal values,
-        GlobalState, session data and the connected-client list are in shared memory as well.
+        GlobalState, session data and the connected-client list are in shared memory as well, and
+        <code>withActionRateLimit()</code> counts across workers.
+    </p>
+    <p>
+        Each worker rewrites the directory entries of its open streams every quarter of the directory TTL
+        or of the revival window, whichever is shorter (150&nbsp;s by default). A context that does not fit
+        in the directory is logged, and its actions on other workers answer 400. A copy that an action
+        rebuilt on a worker the tab does not stream from is freed after the connect timeout
+        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again.
+    </p>
+    <p>
+        Each worker keeps the <code>getClients()</code> list it built last, about 2.3&nbsp;KB per client,
+        and rebuilds it after a client connects or leaves on any worker. A broadcast reads the list once for
+        all the views it renders. A client past the capacity set by <code>withContextDirectorySize()</code>
+        is left out of the list with a warning. When a worker crashes, its clients leave the list as soon
+        as OpenSwoole restarts it, and every 60&nbsp;s the first worker drops the clients of processes that
+        no longer exist.
     </p>
     <p>
         <strong>What stays per worker.</strong> The server logs these at start-up:

@@ -87,6 +87,20 @@ $inc   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int(
 $dec   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int() - 1) & $c->sync(), 'dec');
 $reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->sync(), 'reset');
     {% endverbatim %}{% endcode %}
+    <p>
+        Registering a second TAB action under the same name in one context replaces the first and logs a
+        warning. A scoped action keeps its first registration.
+    </p>
+
+    <h2 id="errors">When an action throws</h2>
+    <p>
+        A throw from an action, a view or a timer never takes the worker down. An action that throws any
+        <code>\Throwable</code> answers 500 <code>Action failed</code>, the worker keeps running with
+        whatever the action changed before it threw, and the error is logged with its class, message and
+        <code>file:line</code>. A page whose handler or render throws answers 500 and its context is torn
+        down. A view that throws during a broadcast skips that one tab, and the other tabs still get the
+        frame. A per-tab <code>$c-&gt;setInterval()</code> keeps ticking after a throw.
+    </p>
 
     <h2 id="cleanup">Cleanup actions</h2>
     <p>
