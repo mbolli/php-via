@@ -24,7 +24,10 @@ use Psr\Http\Server\RequestHandlerInterface;
  *
  * WARNING: Do NOT store per-request state on middleware properties. Middleware
  * instances are long-lived across all requests in the Swoole worker process.
- * The brotli context is captured in closures (fresh per request, not on $this).
+ * The encoder lives in a BrotliStream created per request, not on $this.
+ *
+ * BrotliStream creates the encoder on the first write and releases it on brotli_finish,
+ * so a writer that outlives its response does not keep the encoder buffers alive.
  */
 class BrotliMiddleware implements SseAwareMiddleware {
     public function __construct(private int $level = 4) {}
@@ -36,12 +39,12 @@ class BrotliMiddleware implements SseAwareMiddleware {
             return $handler->handle($request);
         }
 
-        $ctx = brotli_compress_init($this->level);
+        $stream = new BrotliStream($this->level);
 
         return $handler->handle(
             $request
-                ->withAttribute('brotli_write', static fn (string $chunk): false|string => brotli_compress_add($ctx, $chunk, BROTLI_FLUSH))
-                ->withAttribute('brotli_finish', static fn (): false|string => brotli_compress_add($ctx, '', BROTLI_FINISH))
+                ->withAttribute('brotli_write', $stream->write(...))
+                ->withAttribute('brotli_finish', $stream->finish(...))
         );
     }
 }

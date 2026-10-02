@@ -307,9 +307,11 @@ class RequestHandler {
         // Make request cookies available to the page handler via $c->cookie()
         $context->setRequestCookies($request->cookie ?? []);
 
-        // Bridge PSR-7 request attributes from middleware into Context
-        if ($requestAttributes !== []) {
-            $context->setRequestAttributes($requestAttributes);
+        // Bridge PSR-7 request attributes from middleware into Context, minus the response's
+        // Brotli writers, which belong to this response and not to the tab.
+        $contextAttributes = array_diff_key($requestAttributes, ['brotli_write' => true, 'brotli_finish' => true]);
+        if ($contextAttributes !== []) {
+            $context->setRequestAttributes($contextAttributes);
         }
 
         try {
