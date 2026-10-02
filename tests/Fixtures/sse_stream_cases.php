@@ -11,6 +11,7 @@ declare(strict_types=1);
  *   returned    a patch is queued to a stream the client reset, then the tab reconnects
  *   gate        keep-alive 1000 ms: a wake 100 ms after the sync, then a quiet second
  *   off         keep-alive 0: a wake after the sync
+ *   quiet       a page that has nothing to send on connect
  *
  * Prints one "key=value" per line.
  */
@@ -164,6 +165,12 @@ Coroutine::run(static function () use ($case): void {
 
             $second = $s->open('tab', 52);
             echo 'reconnected_got_patch=', (int) str_contains($second->body, 'POKE'), "\n";
+        } elseif ($case === 'quiet') {
+            $context = $s->context('static');
+            $context->view(static fn (bool $isUpdate): string => $isUpdate ? '' : '<main>page</main>', cacheUpdates: false);
+            $response = $s->open('static', 71);
+            echo 'connect_event=', (int) str_contains($response->body, '"_disconnected":false'), "\n";
+            echo 'resent_page=', (int) str_contains($response->body, '<main>'), "\n";
         } else {
             $context = $s->context('tab');
             $response = $s->open('tab', 61);

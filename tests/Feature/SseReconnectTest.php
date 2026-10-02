@@ -64,6 +64,14 @@ describe('without a server', function (): void {
         expect($r['reconnected_got_patch'] ?? null)->toBe('1', $r['out']);
     });
 
+    test('a stream with nothing to sync still confirms the connection at once', function (): void {
+        $r = sseReconnectFixture('sse_stream_cases', 'quiet');
+
+        // The confirmation clears a reconnect banner and flushes the headers; the page stays put.
+        expect($r['connect_event'] ?? null)->toBe('1', $r['out']);
+        expect($r['resent_page'] ?? null)->toBe('0', $r['out']);
+    });
+
     test('a wake sends no keep-alive comment before the interval has passed', function (): void {
         $r = sseReconnectFixture('sse_stream_cases', 'gate');
 

@@ -370,6 +370,10 @@ class SseHandler {
 
         try {
             $context->sync();
+            // Confirm the connection even when the sync had nothing to send: it clears the
+            // shell's reconnect banner ($_disconnected) and flushes the headers now, not at
+            // the first keep-alive.
+            $context->getPatchManager()->queuePatch(['type' => 'signals', 'content' => ['_disconnected' => false]]);
         } catch (\Throwable $e) {
             // Skip the loop; releaseStream() still owns the counters and cleanup.
             $synced = false;
