@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Broker\RedisBroker;
 use Mbolli\PhpVia\Broker\ServerAwareBroker;
 use Mbolli\PhpVia\Composition\ClassMetadata;
 use Mbolli\PhpVia\Composition\PageMount;
@@ -57,6 +58,14 @@ use Twig\Environment;
  */
 class Via {
     public const string VERSION = '0.13.1';
+
+    /**
+     * The socket, stream, sleep and proc_open() hooks, without FILE and STDIO, so file and stdio I/O skip the AIO
+     * thread pool (1790 on OpenSwoole 26.2). Only for apps that run no exec(), system() or popen() and hold no
+     * flock() across a yield. It leaves out SWOOLE_HOOK_NATIVE_CURL, which crashes workers on libcurl 8.20 or newer.
+     */
+    public const int HOOK_FLAGS_NO_FILE_IO = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
+        | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
     /**
      * The worker that runs server-wide singleton work (see setInterval()).
@@ -245,7 +254,7 @@ class Via {
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...));
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->getDevMode());
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -903,13 +912,20 @@ class Via {
                 }
             }
 
+            $settings = self::serverSettings($this->config);
+            self::assertHookFlags($settings, $this->broker);
+            if (((int) ($settings['hook_flags'] ?? 0) & SWOOLE_HOOK_NATIVE_CURL) !== 0 && self::nativeCurlHookCrashes()) {
+                $this->log('warning', 'hook_flags include SWOOLE_HOOK_NATIVE_CURL, and with libcurl 8.20 or newer a curl '
+                    . 'request to any hostname crashes the worker. Remove the flag, see https://via.zweiundeins.gmbh/docs/deployment#hooks');
+            }
+
             $socketType = $this->config->isHttps()
                 ? (SWOOLE_SOCK_TCP | SWOOLE_SSL)
                 : SWOOLE_SOCK_TCP;
             $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::POOL_MODE, $socketType);
 
             // Configure OpenSwoole for SSE streaming
-            $this->server->set(self::serverSettings($this->config));
+            $this->server->set($settings);
 
             $this->requestHandler->setRoutes($this->router->getRoutes());
 
@@ -1894,7 +1910,7 @@ class Via {
             'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onShutdown
             'reload_async' => true,  // Enable async reload
             'enable_reuse_port' => true,  // Allow immediate rebind on restart
-            'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
+            'hook_flags' => self::defaultHookFlags(),  // Sockets, sleep and processes yield; file and stdio I/O go through the AIO thread pool
             'log_level' => 4,  // SWOOLE_LOG_WARNING: suppress NOTICE about sending to closed connections
             // Connection limits: prevent a burst of SSE connections from exhausting the
             // accept queue and making the server unresponsive. Callers can override via
@@ -1908,6 +1924,64 @@ class Via {
             'ssl_cert_file' => $config->getSslCertFile(),
             'ssl_key_file' => $config->getSslKeyFile(),
         ]));
+    }
+
+    /**
+     * The hook_flags Via sets unless Config::withSwooleSettings() overrides them: SWOOLE_HOOK_ALL, without
+     * SWOOLE_HOOK_NATIVE_CURL when nativeCurlHookCrashes().
+     */
+    public static function defaultHookFlags(): int {
+        return self::nativeCurlHookCrashes() ? SWOOLE_HOOK_ALL & ~SWOOLE_HOOK_NATIVE_CURL : SWOOLE_HOOK_ALL;
+    }
+
+    /**
+     * Whether OpenSwoole's native curl hook segfaults the worker on a curl request to any hostname, which it
+     * does with libcurl 8.20.0 or newer (curl#21558; OpenSwoole 26.2). False when OpenSwoole was built without
+     * the hook (no --enable-hook-curl), since the flag then hooks nothing.
+     *
+     * @internal
+     */
+    public static function nativeCurlHookCrashes(): bool {
+        if (!\function_exists('openswoole_native_curl_exec')) {
+            return false;
+        }
+        $curl = \function_exists('curl_version') ? curl_version() : false;
+
+        return \is_array($curl) && $curl['version_number'] >= 0x08_14_00;
+    }
+
+    /**
+     * Refuse hook_flags that break the server: STDIO without FILE, or a RedisBroker whose socket would not yield.
+     *
+     * @param array<string, mixed> $settings the effective server settings, see serverSettings()
+     *
+     * @throws \RuntimeException
+     *
+     * @internal
+     */
+    public static function assertHookFlags(array $settings, MessageBroker $broker): void {
+        $flags = (int) ($settings['hook_flags'] ?? 0);
+
+        if (($flags & SWOOLE_HOOK_STDIO) !== 0 && ($flags & SWOOLE_HOOK_FILE) === 0) {
+            throw new \RuntimeException(
+                'hook_flags has SWOOLE_HOOK_STDIO without SWOOLE_HOOK_FILE: include and require then yield '
+                . 'halfway through a file, and concurrent requests fail with "Class not found". Add SWOOLE_HOOK_FILE, '
+                . 'drop SWOOLE_HOOK_STDIO, or use Via::defaultHookFlags() or Via::HOOK_FLAGS_NO_FILE_IO.'
+            );
+        }
+
+        if ($broker instanceof RedisBroker && ($flags & $broker->requiredHookFlag()) === 0) {
+            $name = match ($broker->requiredHookFlag()) {
+                SWOOLE_HOOK_TLS => 'SWOOLE_HOOK_TLS',
+                SWOOLE_HOOK_UNIX => 'SWOOLE_HOOK_UNIX',
+                default => 'SWOOLE_HOOK_TCP',
+            };
+
+            throw new \RuntimeException(
+                "RedisBroker needs {$name} in hook_flags: without it every Redis call, including the endless "
+                . 'SUBSCRIBE read, blocks the whole worker. Add it, or use Via::defaultHookFlags() or Via::HOOK_FLAGS_NO_FILE_IO.'
+            );
+        }
     }
 
     /**
@@ -2072,10 +2146,11 @@ class Via {
         // Serialize fan-outs per scope.
         //
         // doSyncLocally() renders each context in a loop, and a render can suspend:
-        // a first-ever Twig compile, or any hooked file I/O in a view, yields under
-        // SWOOLE_HOOK_ALL. A second broadcast could then run its ENTIRE fan-out before
-        // the first resumed, so the first loop's remaining contexts rendered against
-        // newer state and some clients never saw the intervening frame at all.
+        // on hooked file or socket I/O (a first-ever Twig compile, a database query),
+        // a hooked sleep, Coroutine::usleep(), a Channel or a lock. A second broadcast
+        // could then run its ENTIRE fan-out before the first resumed, so the first
+        // loop's remaining contexts rendered against newer state and some clients
+        // never saw the intervening frame at all.
         //
         // This cannot be solved by rendering once and pushing that value to every
         // context: cacheUpdates=false exists precisely because those views may differ

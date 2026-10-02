@@ -12,6 +12,7 @@ declare(strict_types=1);
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
 use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Timer;
@@ -24,7 +25,7 @@ $server->set([
     'log_level' => 5,
     'send_yield' => true,
     'socket_buffer_size' => 1024 * 1024,
-    'hook_flags' => SWOOLE_HOOK_ALL,
+    'hook_flags' => Via::defaultHookFlags(),
 ]);
 
 $threshold = 1024 * 1024;

@@ -195,7 +195,8 @@ service. To fan out `broadcast()` calls across multiple servers or containers, s
 use Mbolli\PhpVia\Broker\RedisBroker;
 use Mbolli\PhpVia\Broker\NatsBroker;
 
-// Redis (requires ext-redis + SWOOLE_HOOK_ALL)
+// Redis (requires ext-redis and SWOOLE_HOOK_TCP, or SWOOLE_HOOK_TLS with tls: true; the default
+// hook_flags include both, see https://via.zweiundeins.gmbh/docs/deployment#hooks)
 $config->withBroker(new RedisBroker('127.0.0.1', 6379));
 
 // Redis with auth and TLS

@@ -391,13 +391,13 @@ session to one server with cookie-sticky load balancing.
 
 ### Capacity and memory
 
-Measured on the website (one worker, two cores, Brotli level 4): a page view costs 1.3 to 4.1 ms
-of CPU and 13 to 35 KB until its stream connects or the connect timeout (30 s) passes; an open tab
-costs 570 to 650 KB with Brotli level 4, 70 to 125 KB at level 1 and 45 to 75 KB without Brotli,
-mostly the stream encoder's window; a private action about 1 ms; a broadcast about 0.05 ms per
-receiving tab. A broadcast to a page's scope re-renders every component on the page, so give busy
-widgets a custom scope and broadcast to it, and keep presence indicators out of Scope::GLOBAL. A
-view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`, with
+Measured on the website (one worker, two cores at full clock, Brotli level 4): a page view costs
+1.3 to 4.2 ms of CPU and 14 to 37 KB until its stream connects or the connect timeout (30 s) passes;
+an open tab costs 570 to 650 KB with Brotli level 4, 65 to 125 KB at level 1 and 40 to 75 KB without
+Brotli, mostly the stream encoder's window; a private action about 0.2 ms; a broadcast about 0.05 ms
+per receiving tab. A broadcast to a page's scope re-renders every component on the page, so give
+busy widgets a custom scope and broadcast to it, and keep presence indicators out of Scope::GLOBAL.
+A view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`, with
 `cacheUpdates: false`) renders a static page once. Size the shared context directory for peak open
 tabs plus peak page views per second times 630. The harness is bench/capacity in the repository.
 
@@ -452,8 +452,47 @@ $config = (new Config())
     ->withAllowMissingOrigin()                // accept actions without an Origin header
     ->withActionRateLimit(100, 60)            // per IP, counted across workers
     ->withSecureCookie(true)
+    ->withSwooleSettings(['max_request' => 10_000]) // raw OpenSwoole settings, win over php-via's
 ;
 ```
+
+---
+
+## Coroutine Hooks
+
+A worker serves all its tabs from one thread, so a blocking call stops every stream on it.
+php-via sets `hook_flags` to `Via::defaultHookFlags()`: `SWOOLE_HOOK_ALL`, without
+`SWOOLE_HOOK_NATIVE_CURL` on libcurl 8.20 or newer, where that hook segfaults the worker on a
+curl request to any host name (curl#21558). MySQL (mysqlnd) and Redis (phpredis, predis) calls,
+HTTP calls over PHP streams, file access, `sleep()`/`usleep()`, `proc_open()` and shell commands
+then suspend the coroutine instead of blocking the worker. Curl requests (Guzzle's curl handlers,
+Symfony's `CurlHttpClient`) suspend only under `SWOOLE_HOOK_NATIVE_CURL`, so on libcurl 8.20 or
+newer each one blocks the worker until it returns. File and stdio calls go through a per-worker
+thread pool: a 91 KB read costs 142 µs instead of 4.5 µs.
+
+Never hooked, so they block the worker under any flags: pgsql/pdo_pgsql (use
+`OpenSwoole\Coroutine\PostgreSQL`), SQLite, the mongodb, amqp and grpc extensions, the stat
+family (`stat()`, `filemtime()`, `file_exists()`, `realpath()`), `include`, `echo` and
+`error_log()`. A hooked connection must not be shared by two coroutines at once.
+
+```php
+// No file, stdio or native curl hooks (1790 on OpenSwoole 26.2), so curl requests block.
+// Only for apps that run no exec()/system()/popen() and hold no flock() across a suspension.
+$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
+
+// Cap the file thread pool: setAio(), before start(); aio_* in withSwooleSettings() fail at start-up
+OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);
+```
+
+`start()` throws for `hook_flags` with `SWOOLE_HOOK_STDIO` but not `SWOOLE_HOOK_FILE` (includes
+would suspend halfway and concurrent requests fail with "Class not found") and for a
+`RedisBroker` without the socket hook it needs. The dev-mode `/_stats` shows the flags, the
+thread pool and the event loop lag under `runtime`. OpenSwoole 26.2 bugs: Guzzle 7.15's default
+client throws on every request under `SWOOLE_HOOK_NATIVE_CURL` (use its `StreamHandler`); that
+hook leaks about 2.8 KB per request with a header callback on PHP 8.4+; `mysqli_init()` plus a
+failed `real_connect()` crashes the worker (use `new mysqli()` or PDO); Symfony Lock's
+`FlockStore` hangs; `fsync()` returns false under the file or stdio hooks. Details:
+https://via.zweiundeins.gmbh/docs/deployment#hooks
 
 ---
 

@@ -92,6 +92,11 @@ class Application {
      */
     private array $revivableContexts = [];
 
+    /** Revival records evicted over the cap since the last warning, and when that was. */
+    private int $revivableEvicted = 0;
+
+    private int $revivableWarnedAt = 0;
+
     /** Context directory writes that found the table full, and when that was last logged. */
     private int $directoryWriteFailures = 0;
 
@@ -733,6 +738,8 @@ class Application {
             return;
         }
 
+        // Assigning to an existing key keeps its old position, and pruning relies on expiry order.
+        unset($this->revivableContexts[$context->getId()]);
         $this->revivableContexts[$context->getId()] = [
             'route' => $context->getRoute(),
             'params' => $context->getRouteParams(),
@@ -744,30 +751,42 @@ class Application {
     }
 
     /**
-     * Evict expired revival records, then the soonest-expiring ones if still over the cap.
-     * Called only from recordRevivable, so the overhead is paid only on cleanup.
+     * Evict expired revival records, then the soonest-expiring ones while over the cap.
+     *
+     * Every record is appended with the same window, so the map is in expiry order and the
+     * walk stops at the first record that stays. Called only from recordRevivable().
      */
     private function pruneRevivableIfNeeded(): void {
         $now = time();
+        $excess = \count($this->revivableContexts) - self::MAX_REVIVABLE;
+        $drop = [];
+        $evicted = 0;
         foreach ($this->revivableContexts as $id => $record) {
-            if ($record['expiresAt'] <= $now) {
-                unset($this->revivableContexts[$id]);
+            if ($record['expiresAt'] > $now) {
+                if ($excess <= 0) {
+                    break;
+                }
+                ++$evicted;
             }
+            $drop[] = $id;
+            --$excess;
         }
 
-        if (\count($this->revivableContexts) <= self::MAX_REVIVABLE) {
-            return;
-        }
-
-        uasort($this->revivableContexts, static fn (array $a, array $b): int => $a['expiresAt'] <=> $b['expiresAt']);
-        $evictCount = max(1, (int) (self::MAX_REVIVABLE * 0.01));
-        $toEvict = \array_slice(array_keys($this->revivableContexts), 0, $evictCount);
-
-        foreach ($toEvict as $id) {
+        // Unset after the loop: writing to the map while foreach holds it would copy it.
+        foreach ($drop as $id) {
             unset($this->revivableContexts[$id]);
         }
 
-        $this->logger->log('warning', "Revival record LRU eviction: removed {$evictCount} records (cap: " . self::MAX_REVIVABLE . ')');
+        if ($evicted === 0) {
+            return;
+        }
+
+        $this->revivableEvicted += $evicted;
+        if ($now - $this->revivableWarnedAt >= 10) {
+            $this->logger->log('warning', 'Revival records over the cap of ' . self::MAX_REVIVABLE . ": evicted {$this->revivableEvicted} since the last warning");
+            $this->revivableWarnedAt = $now;
+            $this->revivableEvicted = 0;
+        }
     }
 
     /**

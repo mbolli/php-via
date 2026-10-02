@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Broker\RedisBroker;
+use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Runtime;
 
@@ -15,9 +16,9 @@ use OpenSwoole\Runtime;
  * Must run inside an OpenSwoole coroutine context because RedisBroker::connect()
  * spawns a receive-loop coroutine via Coroutine::create().
  *
- * SWOOLE_HOOK_ALL must be enabled so ext-redis (phpredis) socket calls are
- * intercepted and made coroutine-compatible. Normally Via enables this at
- * server startup; in tests we enable it explicitly.
+ * SWOOLE_HOOK_TCP must be enabled so ext-redis (phpredis) socket calls are
+ * intercepted and made coroutine-compatible. Via's default hook flags include
+ * it at server startup; in tests we enable them explicitly.
  */
 function redisAvailable(): bool {
     $sock = @fsockopen('127.0.0.1', 6379, $errno, $errstr, 0.5);
@@ -37,9 +38,8 @@ describe('RedisBroker', function (): void {
         }
 
         // Enable coroutine TCP hook so ext-redis socket I/O yields coroutines
-        // instead of blocking the process. Mimics what Via::start() does via
-        // hook_flags => SWOOLE_HOOK_ALL in the server configuration.
-        Runtime::enableCoroutine(true, SWOOLE_HOOK_ALL);
+        // instead of blocking the process, as Via::start() does with its default hook_flags.
+        Runtime::enableCoroutine(true, Via::defaultHookFlags());
     });
 
     test('foreign message reaches subscriber on other broker instance', function (): void {

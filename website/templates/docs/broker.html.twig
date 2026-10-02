@@ -80,9 +80,13 @@ $config = (new Config())
     <h2 id="redisbroker">RedisBroker</h2>
     <p>
         Uses Redis pub/sub to relay scope invalidations across nodes. Requires the
-        <code>ext-redis</code> PHP extension and <code>SWOOLE_HOOK_ALL</code> (enabled automatically
-        by php-via). The broker opens two coroutine connections per worker: one for publish, one
-        for the subscribe loop.
+        <code>ext-redis</code> PHP extension and the coroutine hook for its connection:
+        <code>SWOOLE_HOOK_TCP</code>, <code>SWOOLE_HOOK_TLS</code> with <code>tls: true</code>, or
+        <code>SWOOLE_HOOK_UNIX</code> for a socket path. php-via's default <code>hook_flags</code> include
+        all three, and <code>start()</code> throws if flags set with <code>withSwooleSettings()</code>
+        leave out the one the broker needs, since every Redis call would then block the worker. See
+        <a href="/docs/deployment#hooks">Coroutine hooks</a>. The broker opens two coroutine connections
+        per worker: one for publish, one for the subscribe loop.
     </p>
 
     <h3 id="redis-basic">Basic setup</h3>

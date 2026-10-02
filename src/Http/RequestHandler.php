@@ -18,8 +18,10 @@ use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
 use Nyholm\Psr7\Response as Psr7Response;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
+use OpenSwoole\Runtime;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
@@ -29,6 +31,12 @@ use Psr\Http\Server\RequestHandlerInterface;
  * Handles incoming HTTP requests and routes them appropriately.
  */
 class RequestHandler {
+    /** Static files up to this size are served from memory; larger ones go out with sendfile(), uncompressed. */
+    private const int STATIC_CACHE_FILE_BYTES = 2 << 20;
+
+    /** Memory a worker spends on static file bodies, per encoding; files past it go out with sendfile(). */
+    private const int STATIC_CACHE_TOTAL_BYTES = 16 << 20;
+
     /** @var array<string, callable> */
     private array $routes = [];
 
@@ -41,12 +49,20 @@ class RequestHandler {
     private ?DevBarController $devBar = null;
 
     /**
-     * Lazy brotli-compressed cache for static assets.
-     * Keyed by file path; populated on first request and reused for worker lifetime.
+     * Static file bodies by encoding ('br' or 'identity') and path, kept while the file's mtime and size match.
      *
-     * @var array<string, string>
+     * @var array<string, array<string, array{mtime: int, size: int, body: string}>>
      */
-    private array $brotliCache = [];
+    private array $staticCache = ['br' => [], 'identity' => []];
+
+    /** @var array<string, int> Bytes the static cache holds per encoding */
+    private array $staticCacheBytes = ['br' => 0, 'identity' => 0];
+
+    /** @var array<string, int> When dev mode last dropped deleted and changed files from each encoding's cache */
+    private array $staticCacheSweptAt = ['br' => 0, 'identity' => 0];
+
+    /** @var null|array{0: string, 1: string} The configured static dir and its realpath, resolved once */
+    private ?array $staticBase = null;
 
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
@@ -152,23 +168,15 @@ class RequestHandler {
             return;
         }
 
-        // Serve static files from configured staticDir (if set)
+        // Serve static files from configured staticDir (if set). Only a path that looks like a file
+        // is looked up before routing; any other only once no route matched.
         $staticDir = $this->via->getConfig()->getStaticDir();
-        if ($staticDir !== null) {
-            // Prevent directory traversal
-            $relPath = ltrim(parse_url($path, PHP_URL_PATH) ?? '', '/');
-            $filePath = $staticDir . '/' . $relPath;
-            $realBase = realpath($staticDir);
-            $realFile = realpath($filePath);
+        $staticFirst = $staticDir !== null && self::looksLikeStaticFile($path);
+        if ($staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
+            $this->serveStaticFile($realFile, $request, $response);
+            $this->logRequest($method, $path, 200, $requestStart);
 
-            if ($realBase !== false && $realFile !== false
-                && str_starts_with($realFile, $realBase . '/')
-                && is_file($realFile)) {
-                $this->serveStaticFile($realFile, $request, $response);
-                $this->logRequest($method, $path, 200, $requestStart);
-
-                return;
-            }
+            return;
         }
 
         // Handle SSE connection (logged separately by SseHandler)
@@ -269,6 +277,14 @@ class RequestHandler {
                     return;
                 }
             }
+        }
+
+        // An extension-less static file, such as an ACME challenge token
+        if ($staticDir !== null && !$staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
+            $this->serveStaticFile($realFile, $request, $response);
+            $this->logRequest($method, $path, 200, $requestStart);
+
+            return;
         }
 
         // 404 Not Found
@@ -638,6 +654,15 @@ class RequestHandler {
                 'tick_ms' => $this->via->getConfig()->getBroadcastTickMs(),
                 ...$this->via->getStats()->getBroadcastStats(),
             ],
+            // Per worker: a call that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
+            'runtime' => [
+                'hook_flags' => Runtime::getHookFlags(),
+                ...array_intersect_key(Coroutine::stats(), array_flip(['aio_worker_num', 'aio_task_num'])),
+                ...array_intersect_key(
+                    $this->via->getServer()?->stats() ?: [],
+                    array_flip(['event_loop_lag_ms', 'event_loop_lag_max_ms', 'event_loop_lag_avg_ms']),
+                ),
+            ],
             'memory' => [
                 'current' => memory_get_usage(true),
                 'peak' => memory_get_peak_usage(true),
@@ -740,6 +765,46 @@ class RequestHandler {
     }
 
     /**
+     * Whether a request path is looked up in the static dir before routing: its last segment has
+     * an extension, and it is not under a framework endpoint (action names may contain dots).
+     */
+    private static function looksLikeStaticFile(string $path): bool {
+        if (str_starts_with($path, '/_action/') || str_starts_with($path, '/_via/') || str_starts_with($path, '/_session/')) {
+            return false;
+        }
+
+        return str_contains(substr($path, (int) strrpos($path, '/') + 1), '.');
+    }
+
+    /**
+     * The real path of the file a request path names in the static dir, or null when there is
+     * none or the path leads outside the dir.
+     */
+    private function resolveStaticFile(string $staticDir, string $path): ?string {
+        if ($this->staticBase === null || $this->staticBase[0] !== $staticDir) {
+            $realBase = realpath($staticDir);
+            if ($realBase === false) {
+                return null;
+            }
+            $this->staticBase = [$staticDir, $realBase];
+        }
+
+        $urlPath = parse_url($path, PHP_URL_PATH);
+        if (!\is_string($urlPath)) {
+            return null;
+        }
+
+        // Prevent directory traversal. Joined to the resolved base, so a symlink switched by a deploy keeps
+        // serving the old target until a reload instead of failing the prefix check.
+        $realFile = realpath($this->staticBase[1] . '/' . ltrim($urlPath, '/'));
+        if ($realFile === false || !str_starts_with($realFile, $this->staticBase[1] . '/') || !is_file($realFile)) {
+            return null;
+        }
+
+        return $realFile;
+    }
+
+    /**
      * Serve Via CSS file.
      */
     private function serveViaCss(Request $request, Response $response): void {
@@ -755,6 +820,10 @@ class RequestHandler {
      * @param bool $versioned The URL carries the file's current content version
      */
     private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response, bool $versioned = false): void {
+        if ($this->via->getConfig()->getDevMode()) {
+            // Under the file hooks PHP keeps stat() results across writes, which would hide an edit.
+            clearstatcache(true, $filePath);
+        }
         $mtime = filemtime($filePath);
         $size = filesize($filePath);
         $etag = ConditionalGet::etag($mtime, $size);
@@ -779,53 +848,88 @@ class RequestHandler {
 
         $response->header('Content-Type', $contentType);
 
-        $body = file_get_contents($filePath);
-        if ($compressible) {
-            // Cache key includes mtime so an edited file invalidates the in-memory
-            // brotli cache instead of serving stale compressed bytes until restart.
-            $this->sendCompressedStatic($request, $response, $body, $filePath . ':' . $mtime, true);
-        } else {
-            $response->end($body);
-        }
+        $brotli = $compressible && $this->via->getConfig()->getBrotli()
+            && str_contains($request->header['accept-encoding'] ?? '', 'br');
+        $this->sendStaticBody($response, $filePath, $mtime, $size, $brotli);
     }
 
     /**
-     * Send a static asset body, applying Brotli compression from the lazy cache.
+     * Send a static file's body from memory, reading and Brotli-compressing it only on a miss.
      *
-     * Compresses at level BROTLI_COMPRESS_LEVEL_MAX on first request per file, then
-     * serves from the in-memory cache on all subsequent requests at zero CPU cost.
-     *
-     * @param string $cacheKey Unique key for the brotli cache (file path or logical name)
-     * @param bool   $text     Use BROTLI_TEXT mode (UTF-8 text) vs BROTLI_GENERIC (binary)
+     * A file over STATIC_CACHE_FILE_BYTES, or one the cache has no room for, goes out with
+     * sendfile() uncompressed, so the worker never reads it.
      */
-    private function sendCompressedStatic(Request $request, Response $response, string $body, string $cacheKey, bool $text): void {
-        if (!$this->via->getConfig()->getBrotli()) {
-            $response->end($body);
+    private function sendStaticBody(Response $response, string $filePath, int $mtime, int $size, bool $brotli): void {
+        $encoding = $brotli ? 'br' : 'identity';
+        $cached = $this->staticCache[$encoding][$filePath] ?? null;
+        if ($cached !== null && $cached['mtime'] === $mtime && $cached['size'] === $size) {
+            if ($brotli) {
+                $response->header('Content-Encoding', 'br');
+            }
+            $response->end($cached['body']);
 
             return;
         }
 
-        $response->header('Vary', 'Accept-Encoding');
+        if ($cached !== null) {
+            unset($this->staticCache[$encoding][$filePath]);
+            $this->staticCacheBytes[$encoding] -= \strlen($cached['body']);
+        }
 
-        if (!str_contains($request->header['accept-encoding'] ?? '', 'br')) {
-            $response->end($body);
+        // The compressed size is unknown until compressing, so the raw size is checked against the budget.
+        $tooBig = $size > self::STATIC_CACHE_FILE_BYTES;
+        if (!$tooBig && $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES && $this->via->getConfig()->getDevMode()) {
+            $this->dropStaleStaticEntries($encoding);
+        }
+        if ($tooBig || $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES) {
+            $response->sendfile($filePath);
 
             return;
         }
 
-        if (!isset($this->brotliCache[$cacheKey])) {
-            $mode = $text ? BROTLI_TEXT : BROTLI_GENERIC;
-            $compressed = brotli_compress($body, $this->via->getConfig()->getBrotliStaticLevel(), $mode);
+        $body = file_get_contents($filePath);
+        if ($body === false) {
+            $response->header('Cache-Control', 'no-store');
+            $response->status(404);
+            $response->end('Not Found');
+
+            return;
+        }
+
+        if ($brotli) {
+            $compressed = brotli_compress($body, $this->via->getConfig()->getBrotliStaticLevel(), BROTLI_TEXT);
             if ($compressed === false) {
                 $response->end($body);
 
                 return;
             }
-            $this->brotliCache[$cacheKey] = $compressed;
+            $body = $compressed;
+            $response->header('Content-Encoding', 'br');
         }
 
-        $response->header('Content-Encoding', 'br');
-        $response->end($this->brotliCache[$cacheKey]);
+        $this->staticCache[$encoding][$filePath] = ['mtime' => $mtime, 'size' => $size, 'body' => $body];
+        $this->staticCacheBytes[$encoding] += \strlen($body);
+        $response->end($body);
+    }
+
+    /**
+     * Drop cached files that were deleted or changed since, such as the previous builds of a bundle with a
+     * content hash in its name. Runs at most once a second per encoding, since each entry costs a stat().
+     */
+    private function dropStaleStaticEntries(string $encoding): void {
+        $now = time();
+        if ($this->staticCacheSweptAt[$encoding] === $now) {
+            return;
+        }
+        $this->staticCacheSweptAt[$encoding] = $now;
+
+        foreach ($this->staticCache[$encoding] as $path => $entry) {
+            clearstatcache(true, $path);
+            if (!is_file($path) || filemtime($path) !== $entry['mtime'] || filesize($path) !== $entry['size']) {
+                unset($this->staticCache[$encoding][$path]);
+                $this->staticCacheBytes[$encoding] -= \strlen($entry['body']);
+            }
+        }
     }
 
     /**

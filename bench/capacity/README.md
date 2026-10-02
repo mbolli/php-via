@@ -25,8 +25,26 @@ not the bottleneck. Check the `harness CPU` figure in each line anyway.
 
 ## Running it
 
+Run from a checkout on a local disk. On a network or FUSE mount (a NAS share, a Docker Desktop
+bind mount, NFS) every file system call goes through user space or the network, and the figures
+pick up costs a production disk does not have.
+
 The server and the harness must not share cores. On a machine with enough cores, pin the server
-to the cores you want to emulate (two physical cores below) and the harness elsewhere:
+to the cores you want to emulate (two physical cores below, with their hyperthread siblings left
+idle; `lscpu -e` shows which logical CPUs share a core) and the harness elsewhere.
+
+Hold the server's cores at full clock. A core that waits between requests clocks down and sleeps,
+and each request then costs several times the CPU it costs on a busy core: at 100 private actions
+per second, an action measured 4 to 6 times its held-clock cost (RESULTS.md, "Held and free clock").
+A busy loop in the idle scheduling class keeps the cores up; the server preempts it whenever it has
+work, and its CPU time is not counted, because the harness reads only the server's processes:
+
+```bash
+for c in 2 4; do taskset -c $c chrt -i 0 sh -c 'while :; do :; done' & echo $! >> /tmp/capacity-spin.pids; done
+cat /sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq   # should stay near the top clock
+```
+
+Then start the server and run the scenarios:
 
 ```bash
 cd website
@@ -36,7 +54,10 @@ VIA_PORT=3999 VIA_ACTION_RATE_LIMIT=100000000 setsid taskset -c 2,4 \
 master=$(pgrep -f '^php .*app\.php' | sort -n | head -1)
 manager=$(pgrep -P "$master")
 worker=$(pgrep -P "$manager" | head -1)
-pids="$master,$manager,$worker"
+pids="$master,$manager,$(pgrep -P "$manager" | paste -sd,)"
+
+# Request each route first, so the figures leave out opcache and Twig compiling it.
+for i in 1 2 3; do curl -s -o /dev/null -H 'Accept-Encoding: br' http://127.0.0.1:3999/docs/api; done
 
 cd ../bench/capacity
 taskset -c 6-11 php capacity.php pages port=3999 pids=$pids worker=$worker route=/docs/api conc=16 secs=10
@@ -46,14 +67,18 @@ taskset -c 6-11 php capacity.php tabs port=3999 pids=$pids worker=$worker route=
 
 `VIA_ACTION_RATE_LIMIT` lifts the website's per-IP action limit, which would otherwise cap the
 harness at 20 actions per second. Restart the server between scenarios: memory figures are
-read from the worker's RSS, which does not shrink after a run.
+read from the worker's RSS, which does not shrink after a run. Stop the busy loops afterwards
+with `kill $(cat /tmp/capacity-spin.pids)`.
+
+The CPU figures come from `/proc/<pid>/stat` in 10 ms ticks, so give a scenario enough work to
+measure: 50 churn visitors rather than 10, for example.
 
 ## Scaling the numbers to another machine
 
 The CPU figures depend on the core. `calibrate.php` times Brotli and string work on one core:
 
 ```bash
-php -d opcache.enable_cli=1 calibrate.php
+taskset -c 2 php -d opcache.enable_cli=1 calibrate.php
 ```
 
 Divide the target machine's figures by the reference machine's (RESULTS.md lists them) and

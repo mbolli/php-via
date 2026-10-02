@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\SseHandler;
@@ -290,5 +291,268 @@ describe('Config::getStaticCacheControl() wired into withStaticDir() responses',
         expect($jsResponse->headers['Content-Type'])->toBe('application/javascript');
 
         @unlink($dir . '/other.js');
+    });
+});
+
+describe('the static file cache', function (): void {
+    $dir = null;
+
+    beforeEach(function () use (&$dir): void {
+        $dir = sys_get_temp_dir() . '/via-static-cache-' . bin2hex(random_bytes(6));
+        mkdir($dir);
+        file_put_contents($dir . '/app.css', 'body { color: red; }');
+    });
+
+    afterEach(function () use (&$dir): void {
+        array_map('unlink', glob($dir . '/*') ?: []);
+        rmdir($dir);
+    });
+
+    /** Rewrite a file with same-length bytes and its old mtime, so only a read could tell. */
+    $swapBytes = function (string $path, string $bytes): void {
+        $mtime = (int) filemtime($path);
+        expect(strlen($bytes))->toBe((int) filesize($path));
+        file_put_contents($path, $bytes);
+        touch($path, $mtime);
+    };
+
+    /** @return array<string, array<string, array{mtime: int, size: int, body: string}>> */
+    $cacheOf = fn (RequestHandler $handler): array => (new ReflectionProperty(RequestHandler::class, 'staticCache'))->getValue($handler);
+
+    /** @return array<string, int> */
+    $bytesOf = fn (RequestHandler $handler): array => (new ReflectionProperty(RequestHandler::class, 'staticCacheBytes'))->getValue($handler);
+
+    test('a Brotli hit is served from memory without reading the file', function () use (&$dir): void {
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()));
+        $first = new FakeStaticResponse();
+        $handler->handleRequest(fakeStaticRequest('/app.css', ['accept-encoding' => 'br']), $first);
+
+        // stat() still works on an unreadable file, file_get_contents() does not.
+        chmod($dir . '/app.css', 0);
+
+        try {
+            if (is_readable($dir . '/app.css')) {
+                $this->markTestSkipped('running as root, the file stays readable');
+            }
+            $second = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest('/app.css', ['accept-encoding' => 'br']), $second);
+        } finally {
+            chmod($dir . '/app.css', 0o644);
+        }
+
+        expect($second->statusCode)->toBe(200)
+            ->and($second->headers['Content-Encoding'])->toBe('br')
+            ->and(brotli_uncompress($second->body))->toBe('body { color: red; }')
+            ->and($second->headers['ETag'])->toBe($first->headers['ETag'])
+        ;
+    });
+
+    test('text for clients without Brotli and binary files are served from memory too', function () use (&$dir, $swapBytes): void {
+        file_put_contents($dir . '/dot.png', "\x89PNG-one");
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()));
+        foreach (['/app.css', '/dot.png'] as $path) {
+            $handler->handleRequest(fakeStaticRequest($path, ['accept-encoding' => 'br']), new FakeStaticResponse());
+            $handler->handleRequest(fakeStaticRequest($path), new FakeStaticResponse());
+        }
+
+        $swapBytes($dir . '/app.css', 'body { color: tan; }');
+        $swapBytes($dir . '/dot.png', "\x89PNG-two");
+        $css = new FakeStaticResponse();
+        $handler->handleRequest(fakeStaticRequest('/app.css'), $css);
+        $png = new FakeStaticResponse();
+        $handler->handleRequest(fakeStaticRequest('/dot.png', ['accept-encoding' => 'br']), $png);
+
+        expect($css->body)->toBe('body { color: red; }')
+            ->and($css->headers)->not->toHaveKey('Content-Encoding')
+            ->and($png->body)->toBe("\x89PNG-one")
+            ->and($png->headers)->not->toHaveKey('Content-Encoding')
+        ;
+    });
+
+    test('an edited file replaces its cached copy instead of adding one per mtime', function () use (&$dir, $cacheOf, $bytesOf): void {
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()->withDevMode()));
+        $etags = [];
+        foreach (['red', 'blue', 'green'] as $i => $color) {
+            file_put_contents($dir . '/app.css', "body { color: {$color}; }");
+            touch($dir . '/app.css', time() + $i + 1);
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest('/app.css', ['accept-encoding' => 'br']), $response);
+            expect(brotli_uncompress($response->body))->toBe("body { color: {$color}; }");
+            $etags[] = $response->headers['ETag'];
+        }
+
+        $br = $cacheOf($handler)['br'];
+        expect(array_unique($etags))->toHaveCount(3)
+            ->and($br)->toHaveCount(1)
+            ->and($bytesOf($handler)['br'])->toBe(strlen(reset($br)['body']))
+        ;
+    });
+
+    test('a file over 2 MiB goes out with sendfile(), uncompressed and uncached', function () use (&$dir, $cacheOf): void {
+        $big = str_repeat('a', (2 << 20) + 1) . '{}';
+        file_put_contents($dir . '/big.json', $big);
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()));
+        $response = new FakeStaticResponse();
+
+        $handler->handleRequest(fakeStaticRequest('/big.json', ['accept-encoding' => 'br']), $response);
+
+        expect($response->sentFile)->toBe(realpath($dir . '/big.json'))
+            ->and($response->headers)->not->toHaveKey('Content-Encoding')
+            ->and($response->headers['Content-Type'])->toBe('application/json')
+            ->and($response->body)->toBe($big)
+            ->and($cacheOf($handler)['br'])->toBe([])
+        ;
+    });
+
+    test('once 16 MiB are cached, further files go out with sendfile()', function () use (&$dir, $bytesOf): void {
+        for ($i = 0; $i < 9; ++$i) {
+            file_put_contents($dir . "/f{$i}.png", str_repeat((string) $i, 2 << 20));
+        }
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)));
+        $sent = [];
+        for ($i = 0; $i < 9; ++$i) {
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest("/f{$i}.png"), $response);
+            expect($response->body)->toBe(str_repeat((string) $i, 2 << 20));
+            $sent[] = $response->sentFile !== null;
+        }
+
+        expect($sent)->toBe([false, false, false, false, false, false, false, false, true])
+            ->and($bytesOf($handler)['identity'])->toBe(16 << 20)
+        ;
+    });
+
+    test('in dev mode, deleted files make room once the cache is full, and live ones stay', function () use (&$dir, $cacheOf, $bytesOf): void {
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withDevMode()));
+        $handler->handleRequest(fakeStaticRequest('/app.css'), new FakeStaticResponse());
+        $sent = [];
+        // A watch build writes app.<n>.js and deletes the previous one; 11 of them overflow 16 MiB.
+        for ($i = 0; $i < 15; ++$i) {
+            file_put_contents($dir . "/app.{$i}.js", str_repeat((string) ($i % 10), 3 << 19));
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest("/app.{$i}.js"), $response);
+            expect($response->body)->toBe(str_repeat((string) ($i % 10), 3 << 19));
+            $sent[] = $response->sentFile !== null;
+            unlink($dir . "/app.{$i}.js");
+        }
+
+        $identity = $cacheOf($handler)['identity'];
+        expect($sent)->not->toContain(true)
+            ->and($identity)->toHaveKey(realpath($dir . '/app.css'))
+            ->and($identity)->toHaveCount(6)
+            ->and($bytesOf($handler)['identity'])->toBe(strlen('body { color: red; }') + 5 * (3 << 19))
+        ;
+    });
+});
+
+describe('the static dir lookup', function (): void {
+    $dir = null;
+    $outside = null;
+
+    beforeEach(function () use (&$dir, &$outside): void {
+        $dir = sys_get_temp_dir() . '/via-static-lookup-' . bin2hex(random_bytes(6));
+        $outside = $dir . '-outside';
+        mkdir($dir . '/_action', 0o777, true);
+        mkdir($dir . '/_via');
+        mkdir($dir . '/.well-known/acme-challenge', 0o777, true);
+        mkdir($outside);
+        foreach (['_sse', 'about', '_action/save.draft', '_via/devbar.js', 'feed.xml', '.well-known/acme-challenge/tok3n'] as $file) {
+            file_put_contents($dir . '/' . $file, 'FILE ' . $file);
+        }
+        file_put_contents($outside . '/secret.css', 'SECRET');
+        file_put_contents($outside . '/secret', 'SECRET');
+        symlink($outside . '/secret.css', $dir . '/link.css');
+    });
+
+    afterEach(function () use (&$dir, &$outside): void {
+        exec('rm -rf ' . escapeshellarg($dir) . ' ' . escapeshellarg($outside));
+    });
+
+    /** A handler with the routes registered, as Via::start() wires it. */
+    $handlerWithRoutes = function (string $dir): RequestHandler {
+        $via = createVia((new Config())->withStaticDir($dir));
+        $via->page('/about', fn (Context $c) => $c->view(fn (): string => '<p>ROUTE about</p>'));
+        $via->page('/feed.xml', fn (Context $c) => $c->view(fn (): string => '<p>ROUTE feed</p>'));
+        $handler = requestHandlerFor($via);
+        $handler->setRoutes($via->getRouter()->getRoutes());
+
+        return $handler;
+    };
+
+    $get = function (RequestHandler $handler, string $path): FakeStaticResponse {
+        $request = new class extends Request {
+            public function getContent(): false|string {
+                return '';
+            }
+        };
+        $request->server = ['request_uri' => $path, 'request_method' => 'GET'];
+        $request->header = [];
+        $request->cookie = [];
+        $request->get = [];
+        $response = new FakeStaticResponse();
+        $handler->handleRequest($request, $response);
+
+        return $response;
+    };
+
+    test('/_sse, /_action, /_via and extension-less page routes never reach a same-named file', function () use (&$dir, $handlerWithRoutes, $get): void {
+        $handler = $handlerWithRoutes($dir);
+
+        $sse = $get($handler, '/_sse');
+        $action = $get($handler, '/_action/save.draft');
+        $devBar = $get($handler, '/_via/devbar.js');
+        $page = $get($handler, '/about');
+
+        expect([$sse->statusCode, $sse->body])->toBe([400, 'Invalid context'])
+            ->and($action->statusCode)->toBe(405)
+            ->and([$devBar->statusCode, $devBar->body])->toBe([404, 'Not Found'])
+            ->and($page->statusCode)->toBe(200)
+            ->and($page->body)->toContain('ROUTE about')
+        ;
+    });
+
+    test('a path with an extension is still served from the static dir before routing', function () use (&$dir, $handlerWithRoutes, $get): void {
+        $response = $get($handlerWithRoutes($dir), '/feed.xml');
+
+        expect($response->statusCode)->toBe(200)
+            ->and($response->body)->toBe('FILE feed.xml')
+        ;
+    });
+
+    test('an extension-less file is served when no route matches', function () use (&$dir, $handlerWithRoutes, $get): void {
+        $response = $get($handlerWithRoutes($dir), '/.well-known/acme-challenge/tok3n');
+
+        expect($response->statusCode)->toBe(200)
+            ->and($response->body)->toBe('FILE .well-known/acme-challenge/tok3n')
+        ;
+    });
+
+    test('paths leading outside the static dir are refused', function () use (&$dir, &$outside, $handlerWithRoutes, $get): void {
+        $handler = $handlerWithRoutes($dir);
+        $name = basename((string) $outside);
+
+        foreach (["/../{$name}/secret.css", "/../{$name}/secret", '/link.css', '/'] as $path) {
+            $response = $get($handler, $path);
+            expect([$path, $response->statusCode, $response->body])->toBe([$path, 404, 'Not Found']);
+        }
+    });
+
+    test('a static dir symlink switched by a deploy keeps serving its old target until a reload', function () use (&$dir, $handlerWithRoutes, $get): void {
+        foreach (['rel1' => 'one', 'rel2' => 'two'] as $release => $body) {
+            mkdir("{$dir}/{$release}");
+            file_put_contents("{$dir}/{$release}/app.css", $body);
+        }
+        symlink("{$dir}/rel1", "{$dir}/current");
+        $handler = $handlerWithRoutes("{$dir}/current");
+        $before = $get($handler, '/app.css');
+
+        unlink("{$dir}/current");
+        symlink("{$dir}/rel2", "{$dir}/current");
+        clearstatcache(true);
+        $after = $get($handler, '/app.css');
+
+        expect([$before->statusCode, $before->body])->toBe([200, 'one'])
+            ->and([$after->statusCode, $after->body])->toBe([200, 'one'])
+        ;
     });
 });

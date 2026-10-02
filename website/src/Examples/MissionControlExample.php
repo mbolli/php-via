@@ -480,7 +480,7 @@ final class MissionControlExample {
             ));
 
             if ($active === []) {
-                usleep(1_000_000);
+                Coroutine::usleep(1_000_000);
 
                 continue;
             }
@@ -494,7 +494,7 @@ final class MissionControlExample {
                 (string) json_encode(self::buildPayload($serviceKey, $eventType)),
             );
 
-            usleep(random_int(800_000, 2_500_000));
+            Coroutine::usleep(random_int(800_000, 2_500_000));
         }
     }
 
