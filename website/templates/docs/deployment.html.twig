@@ -507,15 +507,17 @@ $config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. 
     {% endverbatim %}{% endcode %}
     <p>
         Or pass a closure to fine-tune the value per file. It receives the absolute file path and the
-        resolved MIME type (no charset suffix, e.g. <code>text/css</code>):
+        resolved MIME type (no charset suffix, e.g. <code>text/css</code>), and returns
+        <code>null</code> to keep the default policy for that file, the year for
+        <code>/datastar.js?v=</code> included:
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withStaticCacheControl(function (string $filePath, string $mimeType): string {
+$config->withStaticCacheControl(function (string $filePath, string $mimeType): ?string {
     if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
         return 'public, max-age=31536000, immutable'; // fingerprinted assets and fonts
     }
 
-    return 'public, max-age=3600, must-revalidate';
+    return null;
 });
     {% endverbatim %}{% endcode %}
     <p>

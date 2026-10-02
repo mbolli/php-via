@@ -22,7 +22,7 @@ class Config {
     private string $basePath = '/';
     private ?string $staticDir = null;
 
-    /** @var null|\Closure(string, string): string|string */
+    /** @var null|\Closure(string, string): ?string|string */
     private \Closure|string|null $staticCacheControl = null;
 
     private bool $datastarRocket = false;
@@ -295,24 +295,25 @@ class Config {
      * Pass a string to apply one Cache-Control value to every static response, e.g.
      * 'public, max-age=31536000, immutable' if you fingerprint filenames yourself.
      *
-     * Pass a closure(string $filePath, string $mimeType): string to fine-tune per file:
+     * Pass a closure(string $filePath, string $mimeType): ?string to fine-tune per file:
      * $filePath is the absolute path being served, $mimeType is the resolved MIME type
-     * without a charset suffix (e.g. 'text/css', 'image/png'). A string is always taken
-     * literally (never invoked as a function name); use first-class callable syntax
-     * (`$obj->method(...)`, `SomeClass::method(...)`) to pass an existing method. For
-     * example, long-cache fingerprinted assets and fonts, short-cache everything else:
+     * without a charset suffix (e.g. 'text/css', 'image/png'). Returning null keeps the
+     * default for that file. A string is always taken literally (never invoked as a
+     * function name); use first-class callable syntax (`$obj->method(...)`,
+     * `SomeClass::method(...)`) to pass an existing method. For example, long-cache
+     * fingerprinted assets and fonts, and keep the default for everything else:
      *
      * ```php
-     * $config->withStaticCacheControl(function (string $filePath, string $mimeType): string {
+     * $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?string {
      *     if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
      *         return 'public, max-age=31536000, immutable';
      *     }
      *
-     *     return 'public, max-age=3600, must-revalidate';
+     *     return null;
      * });
      * ```
      *
-     * @param null|\Closure(string, string): string|string $value
+     * @param null|\Closure(string, string): ?string|string $value
      */
     public function withStaticCacheControl(\Closure|string|null $value): self {
         $this->staticCacheControl = $value;
@@ -327,10 +328,11 @@ class Config {
      */
     public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
         if ($this->staticCacheControl instanceof \Closure) {
-            return ($this->staticCacheControl)($filePath, $mimeType);
-        }
-
-        if ($this->staticCacheControl !== null) {
+            $value = ($this->staticCacheControl)($filePath, $mimeType);
+            if ($value !== null) {
+                return $value;
+            }
+        } elseif ($this->staticCacheControl !== null) {
             return $this->staticCacheControl;
         }
 
@@ -405,12 +407,13 @@ class Config {
      * );
      * ```
      *
-     * @param array<string, string> $imports   module specifier => URL, absolute or starting with '/', './' or '../';
-     *                                         a specifier ending in '/' maps a prefix and needs a URL ending in '/'
-     * @param array<string, string> $integrity module URL => Subresource Integrity value ('sha256-', 'sha384-' or
-     *                                         'sha512-' and the base64 digest), checked when the browser loads the module
+     * @param array<string, string> $imports   module specifier => URL, absolute or starting with '/' (with the base path
+     *                                         from getBasePath()); a specifier ending in '/' maps a prefix and needs a URL ending in '/'
+     * @param array<string, string> $integrity module URL, written as in $imports => Subresource Integrity value ('sha256-',
+     *                                         'sha384-' or 'sha512-' and the base64 digest), checked when the browser loads the module
      *
-     * @throws \InvalidArgumentException for an entry the browser would ignore, or one for 'datastar'
+     * @throws \InvalidArgumentException for an entry the browser would ignore, a URL starting with './' or '../',
+     *                                   which would resolve differently on every route, or an entry for 'datastar'
      */
     public function withImportMap(array $imports, array $integrity = []): self {
         $newImports = [];
@@ -1392,8 +1395,9 @@ class Config {
      */
     private static function importMapUrl(mixed $value, string $what): string {
         $url = self::importMapString($value, $what);
-        if (preg_match('#^(?:\.{0,2}/|[a-zA-Z][a-zA-Z0-9+.-]*:)#', $url) !== 1) {
-            throw new \InvalidArgumentException("Invalid import map {$what}: expected an absolute URL or one starting with '/', './' or '../', got '{$url}'");
+        // Every page gets the same map, and the browser resolves './' and '../' against each page's URL
+        if (preg_match('#^(?:/|[a-zA-Z][a-zA-Z0-9+.-]*:)#', $url) !== 1) {
+            throw new \InvalidArgumentException("Invalid import map {$what}: expected an absolute URL or one starting with '/', got '{$url}'");
         }
 
         return $url;

@@ -77,6 +77,18 @@ describe('Config::getStaticCacheControl() — callable', function (): void {
         ;
     });
 
+    test('keeps the default for a file the callable returns null for', function (bool $devMode): void {
+        $config = (new Config())->withDevMode($devMode)->withStaticCacheControl(
+            fn (string $filePath): ?string => str_contains($filePath, '/fonts/') ? 'public, max-age=31536000, immutable' : null
+        );
+
+        expect($config->getStaticCacheControl('/app/public/fonts/a.woff2', 'font/woff2'))->toBe('public, max-age=31536000, immutable')
+            ->and($config->getStaticCacheControl('/app/public/app.css', 'text/css'))->toBe($devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate')
+            ->and($config->getStaticCacheControl('/vendor/php-via/public/datastar.js', 'application/javascript', versioned: true))
+            ->toBe($devMode ? 'no-cache' : 'public, max-age=31536000, immutable')
+        ;
+    })->with(['production' => false, 'devMode' => true]);
+
     test('accepts a first-class callable reference to a named function', function (): void {
         $config = (new Config())->withStaticCacheControl(phpViaTestStaticCacheControlCallable(...));
         expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))

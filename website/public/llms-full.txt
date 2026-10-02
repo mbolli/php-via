@@ -550,11 +550,12 @@ document writes both itself:
 ```
 
 The map is an inline script: under a CSP without `'unsafe-inline'`, allow it by its sha256 or
-write it yourself with a nonce from `json_encode($config->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG)`.
+write it yourself with a nonce from `json_encode($config->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)`.
 
 **Own modules and integrity.** `Config::withImportMap(array $imports, array $integrity = [])`
-merges entries into php-via's map: specifier => URL (absolute or starting with `/`, `./`,
-`../`), and module URL => Subresource Integrity (`sha256-`/`sha384-`/`sha512-` + base64). Later
+merges entries into php-via's map: specifier => URL (absolute or starting with `/`; `./` and
+`../` throw, since every page gets the same map), and module URL => Subresource Integrity
+(`sha256-`/`sha384-`/`sha512-` + base64). Later
 calls replace entries with the same key. Invalid entries and the reserved `datastar` specifier
 throw `InvalidArgumentException`. `getImportMap()` returns the map, `getImportMapTag()` the
 tag. `getDatastarIntegrity()` is the served bundle's sha384; pin Datastar with
