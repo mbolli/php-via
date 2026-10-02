@@ -27,4 +27,14 @@ describe('file caches under the file hooks', function (): void {
             ->and($result['prod'])->toBe('old')
         ;
     });
+
+    test('a dev-mode static file edit yields a new ETag and body, with and without Brotli', function (): void {
+        $result = hookedStatCase('static');
+
+        expect($result['br_etag_changed'])->toBe('yes')
+            ->and($result['br_body'])->toBe('body { color: rebeccapurple; }')
+            ->and($result['identity_etag_changed'])->toBe('yes')
+            ->and($result['identity_body'])->toBe('body { color: rebeccapurple; }')
+        ;
+    });
 });

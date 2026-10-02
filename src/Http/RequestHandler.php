@@ -29,6 +29,12 @@ use Psr\Http\Server\RequestHandlerInterface;
  * Handles incoming HTTP requests and routes them appropriately.
  */
 class RequestHandler {
+    /** Static files up to this size are served from memory; larger ones go out with sendfile(), uncompressed. */
+    private const int STATIC_CACHE_FILE_BYTES = 2 << 20;
+
+    /** Memory a worker spends on static file bodies, per encoding; files past it go out with sendfile(). */
+    private const int STATIC_CACHE_TOTAL_BYTES = 16 << 20;
+
     /** @var array<string, callable> */
     private array $routes = [];
 
@@ -41,12 +47,14 @@ class RequestHandler {
     private ?DevBarController $devBar = null;
 
     /**
-     * Lazy brotli-compressed cache for static assets.
-     * Keyed by file path; populated on first request and reused for worker lifetime.
+     * Static file bodies by encoding ('br' or 'identity') and path, kept while the file's mtime and size match.
      *
-     * @var array<string, string>
+     * @var array<string, array<string, array{mtime: int, size: int, body: string}>>
      */
-    private array $brotliCache = [];
+    private array $staticCache = ['br' => [], 'identity' => []];
+
+    /** @var array<string, int> Bytes the static cache holds per encoding */
+    private array $staticCacheBytes = ['br' => 0, 'identity' => 0];
 
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
@@ -755,6 +763,10 @@ class RequestHandler {
      * @param bool $versioned The URL carries the file's current content version
      */
     private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response, bool $versioned = false): void {
+        if ($this->via->getConfig()->getDevMode()) {
+            // Under the file hooks PHP keeps stat() results across writes, which would hide an edit.
+            clearstatcache(true, $filePath);
+        }
         $mtime = filemtime($filePath);
         $size = filesize($filePath);
         $etag = ConditionalGet::etag($mtime, $size);
@@ -779,53 +791,64 @@ class RequestHandler {
 
         $response->header('Content-Type', $contentType);
 
-        $body = file_get_contents($filePath);
-        if ($compressible) {
-            // Cache key includes mtime so an edited file invalidates the in-memory
-            // brotli cache instead of serving stale compressed bytes until restart.
-            $this->sendCompressedStatic($request, $response, $body, $filePath . ':' . $mtime, true);
-        } else {
-            $response->end($body);
-        }
+        $brotli = $compressible && $this->via->getConfig()->getBrotli()
+            && str_contains($request->header['accept-encoding'] ?? '', 'br');
+        $this->sendStaticBody($response, $filePath, $mtime, $size, $brotli);
     }
 
     /**
-     * Send a static asset body, applying Brotli compression from the lazy cache.
+     * Send a static file's body from memory, reading and Brotli-compressing it only on a miss.
      *
-     * Compresses at level BROTLI_COMPRESS_LEVEL_MAX on first request per file, then
-     * serves from the in-memory cache on all subsequent requests at zero CPU cost.
-     *
-     * @param string $cacheKey Unique key for the brotli cache (file path or logical name)
-     * @param bool   $text     Use BROTLI_TEXT mode (UTF-8 text) vs BROTLI_GENERIC (binary)
+     * A file over STATIC_CACHE_FILE_BYTES, or one the cache has no room for, goes out with
+     * sendfile() uncompressed, so the worker never reads it.
      */
-    private function sendCompressedStatic(Request $request, Response $response, string $body, string $cacheKey, bool $text): void {
-        if (!$this->via->getConfig()->getBrotli()) {
-            $response->end($body);
+    private function sendStaticBody(Response $response, string $filePath, int $mtime, int $size, bool $brotli): void {
+        $encoding = $brotli ? 'br' : 'identity';
+        $cached = $this->staticCache[$encoding][$filePath] ?? null;
+        if ($cached !== null && $cached['mtime'] === $mtime && $cached['size'] === $size) {
+            if ($brotli) {
+                $response->header('Content-Encoding', 'br');
+            }
+            $response->end($cached['body']);
 
             return;
         }
 
-        $response->header('Vary', 'Accept-Encoding');
+        if ($cached !== null) {
+            unset($this->staticCache[$encoding][$filePath]);
+            $this->staticCacheBytes[$encoding] -= \strlen($cached['body']);
+        }
 
-        if (!str_contains($request->header['accept-encoding'] ?? '', 'br')) {
-            $response->end($body);
+        // The compressed size is unknown until compressing, so the raw size is checked against the budget.
+        if ($size > self::STATIC_CACHE_FILE_BYTES || $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES) {
+            $response->sendfile($filePath);
 
             return;
         }
 
-        if (!isset($this->brotliCache[$cacheKey])) {
-            $mode = $text ? BROTLI_TEXT : BROTLI_GENERIC;
-            $compressed = brotli_compress($body, $this->via->getConfig()->getBrotliStaticLevel(), $mode);
+        $body = file_get_contents($filePath);
+        if ($body === false) {
+            $response->header('Cache-Control', 'no-store');
+            $response->status(404);
+            $response->end('Not Found');
+
+            return;
+        }
+
+        if ($brotli) {
+            $compressed = brotli_compress($body, $this->via->getConfig()->getBrotliStaticLevel(), BROTLI_TEXT);
             if ($compressed === false) {
                 $response->end($body);
 
                 return;
             }
-            $this->brotliCache[$cacheKey] = $compressed;
+            $body = $compressed;
+            $response->header('Content-Encoding', 'br');
         }
 
-        $response->header('Content-Encoding', 'br');
-        $response->end($this->brotliCache[$cacheKey]);
+        $this->staticCache[$encoding][$filePath] = ['mtime' => $mtime, 'size' => $size, 'body' => $body];
+        $this->staticCacheBytes[$encoding] += \strlen($body);
+        $response->end($body);
     }
 
     /**

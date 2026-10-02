@@ -24,6 +24,9 @@ final class FakeStaticResponse extends Response {
 
     public bool $ended = false;
 
+    /** The file passed to sendfile(), whose contents become the body. */
+    public ?string $sentFile = null;
+
     public function header(string $key, mixed $value, bool $ucwords = true): bool {
         $this->headers[$key] = (string) $value;
 
@@ -45,5 +48,11 @@ final class FakeStaticResponse extends Response {
         $this->ended = true;
 
         return true;
+    }
+
+    public function sendfile(string $fileName, int $offset = 0, int $length = 0): bool {
+        $this->sentFile = $fileName;
+
+        return $this->end((string) file_get_contents($fileName));
     }
 }
