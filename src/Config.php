@@ -273,7 +273,10 @@ class Config {
 
     /**
      * Serve the files in $dir: a path with a file extension before routing, any other once no route matched.
-     * Compressible files get Brotli, see withBrotli().
+     *
+     * A path with a segment that starts with a dot (dotfiles, dot directories, '..'), except /.well-known/, and
+     * .php, .phtml and .phar files answer 404 without a look at the disk. Compressible files get Brotli, see
+     * withBrotli().
      */
     public function withStaticDir(string $dir): self {
         $this->staticDir = rtrim($dir, '/');

@@ -658,6 +658,45 @@ describe('the static dir lookup', function (): void {
         }
     });
 
+    test('dot segments, PHP files and NUL bytes answer 404 without a look at the disk, decoded or not', function () use (&$dir, &$outside, $handlerWithRoutes, $get): void {
+        mkdir($dir . '/.git');
+        mkdir($dir . '/assets/.cache', 0o777, true);
+        foreach (['.env', '.git/config', '.git/HEAD.css', 'assets/.cache/app.js', '.htpasswd', 'index.php', 'shell.PHTML', 'app.phar', 'a.css'] as $file) {
+            file_put_contents($dir . '/' . $file, 'SECRET ' . $file);
+        }
+        $name = basename((string) $outside);
+        $handler = $handlerWithRoutes($dir);
+
+        $paths = [
+            '/.env', '/%2eenv', '/%2Eenv', '/.git/config', '/.git/HEAD.css', '/%2egit/HEAD.css', '/assets/.cache/app.js',
+            '/assets/%2Ecache/app.js', '/.htpasswd', '/index.php', '/INDEX.PHP', '/index%2ephp', '/shell.PHTML', '/app.phar',
+            "/../{$name}/secret.css", "/%2e%2e/{$name}/secret.css", "/..%2f{$name}/secret.css", "/%2E%2E%2F{$name}%2Fsecret.css",
+            '/assets/../a.css', '/./a.css', '/.well-known/../.env', '/.well-known/.hidden', '/a.css%00.txt', '/%00',
+            '/sub/.well-known/x.txt',
+        ];
+        $statuses = [];
+        foreach ($paths as $path) {
+            $response = $get($handler, $path);
+            $statuses[$path] = [$response->statusCode, $response->body];
+        }
+
+        expect($statuses)->toBe(array_fill_keys($paths, [404, 'Not Found']))
+            // Nothing was looked up, not even the static dir itself.
+            ->and((new ReflectionProperty(RequestHandler::class, 'staticBase'))->getValue($handler))->toBeNull()
+        ;
+    });
+
+    test('a percent-encoded path is decoded, so files with spaces are found', function () use (&$dir, $handlerWithRoutes, $get): void {
+        file_put_contents($dir . '/my file.css', 'SPACED');
+        file_put_contents($dir . '/ünï.css', 'UNICODE');
+        $handler = $handlerWithRoutes($dir);
+
+        expect([$get($handler, '/my%20file.css')->statusCode, $get($handler, '/my%20file.css')->body])->toBe([200, 'SPACED'])
+            ->and($get($handler, '/' . rawurlencode('ünï.css'))->body)->toBe('UNICODE')
+            ->and($get($handler, '/.well-known/acme-challenge/tok3n')->body)->toBe('FILE .well-known/acme-challenge/tok3n')
+        ;
+    });
+
     test('a static dir symlink switched by a deploy keeps serving its old target until a reload', function () use (&$dir, $handlerWithRoutes, $get): void {
         foreach (['rel1' => 'one', 'rel2' => 'two'] as $release => $body) {
             mkdir("{$dir}/{$release}");

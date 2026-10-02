@@ -70,6 +70,9 @@ class RequestHandler {
         'woff' => ['font/woff', false],
     ];
 
+    /** Extensions never served from the static dir, so a PHP file put there by mistake does not leak its source. */
+    private const array REFUSED_EXTENSIONS = ['php', 'phtml', 'phar'];
+
     /** @var array<string, callable> */
     private array $routes = [];
 
@@ -178,6 +181,31 @@ class RequestHandler {
      */
     public static function viaCssPath(): string {
         return \dirname(__DIR__, 2) . '/public/via.css';
+    }
+
+    /**
+     * A request path, percent-decoded and relative to the static dir, or null for one never served from it: with a
+     * NUL byte, a segment that starts with a dot (dotfiles and dot directories, '.' and '..', but /.well-known/), or
+     * a PHP file.
+     *
+     * @internal
+     */
+    public static function staticRelativePath(string $path): ?string {
+        $query = strpos($path, '?');
+        $decoded = rawurldecode($query === false ? $path : substr($path, 0, $query));
+        if (str_contains($decoded, "\0")) {
+            return null;
+        }
+        foreach (explode('/', $decoded) as $i => $segment) {
+            if (str_starts_with($segment, '.') && !($i === 1 && $segment === '.well-known')) {
+                return null;
+            }
+        }
+        if (\in_array(strtolower(pathinfo($decoded, PATHINFO_EXTENSION)), self::REFUSED_EXTENSIONS, true)) {
+            return null;
+        }
+
+        return ltrim($decoded, '/');
     }
 
     private function dispatch(Request $request, Response $response): void {
@@ -803,9 +831,14 @@ class RequestHandler {
 
     /**
      * The real path of the file a request path names in the static dir, or null when there is
-     * none or the path leads outside the dir.
+     * none, the path leads outside the dir, or staticRelativePath() refuses it.
      */
     private function resolveStaticFile(string $staticDir, string $path): ?string {
+        $relative = self::staticRelativePath($path);
+        if ($relative === null) {
+            return null;
+        }
+
         if ($this->staticBase === null || $this->staticBase[0] !== $staticDir) {
             $realBase = realpath($staticDir);
             if ($realBase === false) {
@@ -814,14 +847,9 @@ class RequestHandler {
             $this->staticBase = [$staticDir, $realBase];
         }
 
-        $urlPath = parse_url($path, PHP_URL_PATH);
-        if (!\is_string($urlPath)) {
-            return null;
-        }
-
         // Prevent directory traversal. Joined to the resolved base, so a symlink switched by a deploy keeps
         // serving the old target until a reload instead of failing the prefix check.
-        $realFile = realpath($this->staticBase[1] . '/' . ltrim($urlPath, '/'));
+        $realFile = realpath($this->staticBase[1] . '/' . $relative);
         if ($realFile === false || !str_starts_with($realFile, $this->staticBase[1] . '/') || !is_file($realFile)) {
             return null;
         }
