@@ -280,7 +280,8 @@ class Config {
      *
      * null (default) = auto: 'no-cache' in devMode (always revalidate, so edits to a
      * withStaticDir() file are visible on the next refresh instead of waiting out a
-     * cached max-age), else 'public, max-age=3600, must-revalidate'.
+     * cached max-age), else 'public, max-age=3600, must-revalidate', and for
+     * /datastar.js?v=<version of the served bundle> 'public, max-age=31536000, immutable'.
      *
      * Pass a string to apply one Cache-Control value to every static response, e.g.
      * 'public, max-age=31536000, immutable' if you fingerprint filenames yourself.
@@ -311,10 +312,11 @@ class Config {
     }
 
     /**
-     * @param string $filePath absolute path of the file being served
-     * @param string $mimeType resolved MIME type without a charset suffix, e.g. 'text/css'
+     * @param string $filePath  absolute path of the file being served
+     * @param string $mimeType  resolved MIME type without a charset suffix, e.g. 'text/css'
+     * @param bool   $versioned the URL carries the file's current content version, such as getDatastarUrl()
      */
-    public function getStaticCacheControl(string $filePath, string $mimeType): string {
+    public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
         if ($this->staticCacheControl instanceof \Closure) {
             return ($this->staticCacheControl)($filePath, $mimeType);
         }
@@ -323,7 +325,11 @@ class Config {
             return $this->staticCacheControl;
         }
 
-        return $this->devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate';
+        if ($this->devMode) {
+            return 'no-cache';
+        }
+
+        return $versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=3600, must-revalidate';
     }
 
     /**

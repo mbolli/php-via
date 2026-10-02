@@ -495,7 +495,9 @@ $config->withStaticDir(__DIR__ . '/public');
         <code>Last-Modified</code>, and honors <code>If-None-Match</code> / <code>If-Modified-Since</code>
         with a <code>304</code>. The <code>Cache-Control</code> policy on top of that follows
         <code>devMode</code> by default (<code>no-cache</code> in dev, so edits show up on the next reload;
-        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly:
+        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly.
+        The default policy caches <code>/datastar.js?v=&lt;hash&gt;</code> with the served bundle's hash for a
+        year (<code>immutable</code>), since a new bundle gets a new URL.
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. if you fingerprint filenames yourself

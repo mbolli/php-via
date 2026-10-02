@@ -705,8 +705,11 @@ class RequestHandler {
      * Serve the Datastar bundle: the Rocket build with Config::withDatastarRocket(), else the plain one.
      */
     private function serveDatastarJs(Request $request, Response $response): void {
-        $path = DatastarBundle::path($this->via->getConfig()->isDatastarRocketEnabled());
-        $this->sendStaticFile($path, 'application/javascript', true, $request, $response);
+        $config = $this->via->getConfig();
+        $path = DatastarBundle::path($config->isDatastarRocketEnabled());
+        $version = $request->get['v'] ?? null;
+        $versioned = \is_string($version) && DatastarBundle::url($config->getBasePath(), $version) === $config->getDatastarUrl();
+        $this->sendStaticFile($path, 'application/javascript', true, $request, $response, $versioned);
     }
 
     /**
@@ -748,14 +751,16 @@ class RequestHandler {
      * support and the configured Cache-Control policy.
      *
      * Shared by /datastar.js, /via.css, and files served via Config::withStaticDir().
+     *
+     * @param bool $versioned The URL carries the file's current content version
      */
-    private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response): void {
+    private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response, bool $versioned = false): void {
         $mtime = filemtime($filePath);
         $size = filesize($filePath);
         $etag = ConditionalGet::etag($mtime, $size);
         $mimeType = explode(';', $contentType, 2)[0];
 
-        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType));
+        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType, $versioned));
         $response->header('ETag', $etag);
         $response->header('Last-Modified', ConditionalGet::lastModified($mtime));
         if ($compressible && $this->via->getConfig()->getBrotli()) {

@@ -118,6 +118,29 @@ describe('the Datastar bundle at /datastar.js', function (): void {
         ;
     });
 
+    test('caches the current versioned URL for a year and anything else for the configured time', function (): void {
+        $cacheControl = function (Config $config, ?string $version): string {
+            $request = fakeStaticRequest('/datastar.js');
+            if ($version !== null) {
+                $request->get = ['v' => $version];
+            }
+            $response = new FakeStaticResponse();
+            requestHandlerFor(createVia($config))->handleRequest($request, $response);
+
+            return $response->headers['Cache-Control'];
+        };
+        $current = fn (Config $config): string => substr($config->getDatastarUrl(), -10);
+        $rocket = (new Config())->withDatastarRocket();
+
+        expect($cacheControl(new Config(), $current(new Config())))->toBe('public, max-age=31536000, immutable')
+            ->and($cacheControl($rocket, $current($rocket)))->toBe('public, max-age=31536000, immutable')
+            ->and($cacheControl($rocket, $current(new Config())))->toBe('public, max-age=3600, must-revalidate')
+            ->and($cacheControl(new Config(), null))->toBe('public, max-age=3600, must-revalidate')
+            ->and($cacheControl((new Config())->withDevMode(true), $current(new Config())))->toBe('no-cache')
+            ->and($cacheControl((new Config())->withStaticCacheControl('no-store'), $current(new Config())))->toBe('no-store')
+        ;
+    });
+
     test('compresses the Rocket build like the plain one', function (): void {
         $response = new FakeStaticResponse();
         $via = createVia((new Config())->withDatastarRocket()->withBrotli());
