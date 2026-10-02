@@ -331,8 +331,8 @@ class Signal {
      * Bind this signal to a form field or custom element. Returns the data-bind attribute.
      *
      * $prop binds that element property instead, as data-bind__prop.<prop> (Datastar's own modifier).
-     * Use it for custom elements such as Rocket components ('value', 'checked'): when Datastar binds one
-     * before it is defined, it falls back to the value attribute, which a morph removes.
+     * Use it for custom elements such as Rocket components ('value', 'checked'): plain data-bind binds a
+     * custom element's value property only if its tag is already defined, and the value attribute if not.
      * A camelCase name is written in kebab case, which Datastar turns back into camelCase.
      *
      * @throws \InvalidArgumentException if $prop is not a property name

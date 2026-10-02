@@ -19,36 +19,28 @@ All notable changes to php-via will be documented in this file.
 
 - **Datastar 1.0.1 to 1.0.4.** PHP code needs no changes, and `starfederation/datastar-php` 1.0.1
   keeps working. In the browser:
-  - **Requests cancel per method and URL.** A request aborts the in-flight request with the same
-    method and URL, from any element. 1.0.1 aborted the same element's previous request, whatever
-    its URL. Two elements that post the same action URL can drop each other's request if the second
-    starts before the server has the first: add a query that tells them apart (`?from=button`) or
-    pass `{requestCancellation: 'disabled'}`. See [Actions](https://via.zweiundeins.gmbh/docs/actions#cancellation).
-  - **Retries.** A retry sends the signals as they are when it starts. After a network error
-    Datastar retries `retryMaxCount` times (10), where 1.0.1 stopped after 9. With `retry: 'error'`
-    or `'always'`, retries after an HTTP error count toward that limit and back off, where 1.0.1
-    repeated them without limit. See [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#reconnect).
+  - **Requests cancel per method and URL,** from any element, where 1.0.1 cancelled per element. Give
+    two elements that post the same action a query each (`?from=button`). See [Actions](https://via.zweiundeins.gmbh/docs/actions#cancellation).
+  - **Retries** send the current signals and stop after 10 attempts. With `retry: 'error'` or
+    `'always'`, HTTP errors count toward them. See [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#reconnect).
   - **The `retrying` fetch event** fires only when a retry is scheduled and carries no `message`.
     Datastar no longer logs each retry with `console.error`.
   - **`data-bind` on checkboxes and radios** updates the signal on `input` instead of `change`. A
-    script that dispatches `change` to update the signal has to dispatch `input`, or bind with
-    `__event.change`.
+    script that dispatches `change` has to dispatch `input`, or bind with `__event.change`.
   - **Deleting a signal,** by a patch or by assigning `null`, fires `data-on-signal-patch`.
-- **`Signal::bind()` takes an optional `?string $prop`.** A subclass that overrides `bind()` has to
-  declare the parameter.
+- **`Signal::bind()` and `Config::getStaticCacheControl()` take a new optional parameter.** A
+  subclass that overrides either has to declare it.
 
 ### New Features
 
 - **`Config::withDatastarRocket()`** serves Starbase's build of Datastar 1.0.4 with Rocket at
-  `/datastar.js`: 22 KB with Brotli, against 12 KB for the plain bundle. Unlike the official Rocket
-  bundle, it does not crash when a morph reorders keyed elements that contain a Rocket component.
-  Sources, patches and hashes are in `public/DATASTAR.md`.
-- **Versioned Datastar URL and import map.** `Config::getDatastarUrl()` returns `/datastar.js?v=`
-  plus the bundle's content hash. Twig templates get it as `datastarUrl`, custom shells as
-  `{{ datastar_url }}`, and `{{ datastar_import_map }}` maps the module name `datastar` to the same
-  URL, which Rocket components import. The default shell uses both. Pages whose custom shell or Twig
-  layout loads `datastar.js` without the version keep a cached 1.0.1 until its `Cache-Control`
-  lifetime ends, an hour by default. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
+  `/datastar.js` (22 KB with Brotli, against 12 KB), and the default shell adds the import map Rocket
+  components need. Unlike the official Rocket bundle, the build survives morphs that reorder keyed
+  components. Sources, patches and hashes are in `public/DATASTAR.md`.
+- **Versioned Datastar URL.** `Config::getDatastarUrl()` returns `/datastar.js?v=<content hash>`,
+  cached for a year by default. Load Datastar from it in custom shells (`{{ datastar_url }}`) and Twig
+  layouts (`datastarUrl`): an unversioned `datastar.js` stays cached for up to an hour after an
+  upgrade. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
 - **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
   on web components. The Twig `bind()` function takes the property as a second argument.
 - **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files

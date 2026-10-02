@@ -70,7 +70,9 @@ $config->withContextReconnectTimeout(60_000); // default; 0 uses the connect tim
         30 seconds (<code>retryMaxWait</code>), ten times in all (<code>retryMaxCount</code>). Each retry
         sends the tab's signals as they are at that moment, so a context revived by the retry starts from
         the current values. Once the retries run out, or when the stream ends, the shell's 15-second
-        interval opens a new stream. Datastar also closes the stream while the tab is hidden and opens it
+        interval opens a new stream. A request of your own with <code>retry: 'error'</code> or
+        <code>'always'</code> also retries after an HTTP error, on the same schedule and within the same
+        ten attempts. Datastar also closes the stream while the tab is hidden and opens it
         again when the tab is shown.
     </p>
 
