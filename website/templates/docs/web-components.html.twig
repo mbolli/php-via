@@ -1,0 +1,293 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Web components · php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Web components</h1>
+    <p>
+        php-via pages can use web components built with <a href="https://data-star.dev/reference/rocket" target="_blank" rel="noopener">Rocket</a>,
+        Datastar's component layer, such as the components in the
+        <a href="https://starbase.zweiundeins.gmbh" target="_blank" rel="noopener">Starbase</a> catalog.
+        A Rocket component is a JavaScript module that imports Datastar, so the page needs a Datastar
+        build that contains Rocket, and the component has to import the same copy of Datastar the page
+        runs. php-via serves that build when you ask for it, and its default shell adds the import map
+        that points the components at it.
+    </p>
+
+    <h2 id="enabling">Enabling the Rocket build</h2>
+    {% code 'php' %}{% verbatim %}
+$app = new Via(
+    (new Config())
+        ->withDatastarRocket()
+);
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>/datastar.js</code> then serves Datastar 1.0.4 with Rocket instead of the plain Datastar
+        1.0.4 bundle. The build comes from Starbase: Datastar 1.0.4 and Rocket built with Starbase's
+        fixes, which php-via ships because of the <a href="#keyed-lists">keyed-list crash</a> in the
+        official Rocket bundle. Configure it before <code>new Via()</code>, which sets the <code>datastarUrl</code>
+        Twig global.
+    </p>
+    <p>
+        The Rocket build is 21,958 bytes with Brotli, against 12,183 bytes for the plain bundle, and every
+        page of the app loads it, whether the page uses a component or not. Leave the option off unless
+        your pages use Rocket components.
+    </p>
+    <p>
+        A reverse proxy that serves <code>/datastar.js</code> from disk has to serve
+        <code>vendor/mbolli/php-via/public/datastar-rocket.js</code> instead, or pass the request on to
+        php-via. With the plain bundle, every component module fails to load, because the bundle has no
+        <code>rocket</code> export.
+    </p>
+
+    <h2 id="one-engine">One Datastar engine per page</h2>
+    <p>
+        Rocket components import Datastar by name, <code>import { rocket } from 'datastar'</code>. The
+        browser resolves the name through the page's import map, which has to map <code>datastar</code>
+        to exactly the URL the page loads Datastar from, query string included. A module is identified by
+        its URL, so <code>/datastar.js</code> and <code>/datastar.js?v=f602fbe19d</code> are two modules.
+        If the map and the script tag differ, the components import a second copy and start a second
+        Datastar engine on the same page, with signals of its own. The import map also has to come before the first module script, so that it
+        is in place when the first import resolves.
+    </p>
+    <p>
+        The default shell does both. It writes the map right after the viewport meta, ahead of everything
+        <code>appendToHead()</code> adds, and loads Datastar from the same URL at the end of the body:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<script type="importmap">{"imports":{"datastar":"/datastar.js?v=f602fbe19d"}}</script>
+...
+<script type="module" src="/datastar.js?v=f602fbe19d"></script>
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>v</code> is the first 10 hex digits of the served bundle's SHA-256, so a new bundle gets a
+        new URL and browsers fetch it instead of using a cached copy. <code>Config::getDatastarUrl()</code>
+        returns the URL, including the base path; in a page handler that is
+        <code>$c-&gt;getConfig()-&gt;getDatastarUrl()</code>. The default shell writes the map in both
+        modes; with the plain bundle, nothing imports through it.
+    </p>
+
+    <h2 id="own-shell">The import map in a custom shell or Twig layout</h2>
+    <h3 id="custom-shell">Custom shell</h3>
+    <p>
+        A shell set with <code>withShellTemplate()</code> gets two placeholders:
+        {% verbatim %}<code>{{ datastar_import_map }}</code>{% endverbatim %} is the whole import map tag,
+        and {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the URL. Put the map in the
+        head, before {% verbatim %}<code>{{ head_content }}</code>{% endverbatim %} and any module script
+        of your own:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    {{ datastar_import_map }}
+    <meta data-signals='{{ signals_json }}'>
+    <!-- the SSE bootstrap metas from the default shell.html -->
+    {{ head_content }}
+</head>
+<body>
+    {{ content }}
+    {{ foot_content }}
+    <script type="module" src="{{ datastar_url }}"></script>
+</body>
+</html>
+    {% endverbatim %}{% endcode %}
+    <p>
+        A shell that loads {% verbatim %}<code>{{ base_path }}datastar.js</code>{% endverbatim %} and has
+        no import map still works with the plain bundle, but Rocket components fail on it, and browsers
+        keep a cached bundle until its <code>Cache-Control</code> lifetime ends.
+    </p>
+
+    <h3 id="twig-layout">Twig layout</h3>
+    <p>
+        php-via never adds the Datastar script or the import map to a view that renders its own
+        <code>&lt;html&gt;</code> document (see <a href="/docs/twig#twig-shell">Twig as the shell</a>), so
+        the layout writes both tags from the <code>datastarUrl</code> global:
+    </p>
+    {% code 'twig' %}{% verbatim %}
+{# templates/base.html.twig #}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
+    <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
+    <meta data-indicator="_connecting"
+        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
+    <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ basePath }}_session/close', '{{ contextId }}'); });">
+    <title>{% block title %}{% endblock %}</title>
+</head>
+<body>
+    {% block content %}{% endblock %}
+    <script type="module" src="{{ datastarUrl }}"></script>
+</body>
+</html>
+    {% endverbatim %}{% endcode %}
+    <p>
+        The URL contains only letters, digits and <code>/ . _ - ? =</code>, so
+        {% verbatim %}<code>{{ datastarUrl }}</code>{% endverbatim %} prints the same bytes inside the JSON
+        and inside the attribute.
+    </p>
+
+    <h2 id="loading">Loading a Starbase component</h2>
+    <p>
+        Every Starbase component page has an Installation section with four tabs of snippets. Each snippet
+        starts with an import map whose <code>imports</code> entry points <code>datastar</code> at
+        Starbase's own copy of the build. Leave that entry out on a php-via page: php-via's map already
+        points <code>datastar</code> at the build php-via serves.
+    </p>
+
+    <h3 id="catalog">From the catalog</h3>
+    <p>
+        The <em>This component</em> tab pins one component version: its minified module at an immutable
+        URL, with an <code>integrity</code> hash, so the browser refuses the file if a single byte changes.
+        With the default shell, add that tab's script tag with <code>appendToHead()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->appendToHead(
+    '<script type="module" src="https://starbase.zweiundeins.gmbh/c/slider@<hash>/slider.min.js" integrity="sha384-<hash>"></script>',
+);
+    {% endverbatim %}{% endcode %}
+    <p>
+        The <code>integrity</code> attribute covers that one file. A component that imports files of its
+        own, such as <code>sb-code-editor</code> with its vendored Prism, lists their hashes under
+        <code>integrity</code> in the tab's import map. They have to go into the same map as the
+        <code>datastar</code> entry, because a browser that supports one import map per page ignores a
+        second one. Write that map yourself in a custom shell or layout, with php-via's URL:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<script type="importmap">
+  {
+    "imports": { "datastar": "{{ datastar_url }}" },
+    "integrity": {
+      "https://starbase.zweiundeins.gmbh/c/code-editor@<hash>/vendor/prism.min.js": "sha384-<hash>"
+    }
+  }
+</script>
+    {% endverbatim %}{% endcode %}
+    <p>
+        The <em>Autoloader</em> and <em>Pinned</em> tabs load Starbase's autoloader instead, which imports
+        each <code>&lt;sb-*&gt;</code> component the first time its tag appears on the page, including
+        tags a morph adds later. <code>/c/autoloader.js</code> always loads the latest version of each
+        component. The <em>Pinned</em> tab's autoloader belongs to one snapshot of the catalog, and
+        <code>/c/@&lt;catalog&gt;/importmap.json</code> holds the integrity hashes of every file that
+        snapshot can load, for the import map above.
+    </p>
+
+    <h3 id="vendoring">Copied into your app</h3>
+    <p>
+        Components import only <code>datastar</code> and files from their own folder, so copying the
+        folder is enough. Download the files the <em>Self-host</em> tab lists into your
+        <code>withStaticDir()</code> directory, keeping each component's folder, and load the module from
+        there:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withStaticDir(__DIR__ . '/public');  // public/js/slider/slider.min.js
+
+$app->appendToHead('<script type="module" src="/js/slider/slider.min.js"></script>');
+    {% endverbatim %}{% endcode %}
+    <p>
+        php-via serves <code>.js</code> and <code>.mjs</code> files as JavaScript. The <em>Self-host</em>
+        tab's import map points at a copy of <code>datastar-rocket.js</code> you would host yourself; leave
+        it out, since php-via serves the build at <code>/datastar.js</code>.
+    </p>
+
+    <h2 id="binding">Binding signals to component properties</h2>
+    <p>
+        <code>$signal-&gt;bind('value')</code>, or {% verbatim %}<code>{{ bind(signal, 'value') }}</code>{% endverbatim %}
+        in Twig, writes the property form of Datastar's <code>data-bind</code>, which binds the element's
+        <code>value</code> property:
+    </p>
+    {% code 'twig' %}{% verbatim %}
+<sb-slider label="Thrust" unit="%" {{ bind(thrust, 'value') }}></sb-slider>
+{# renders data-bind__prop.value="<thrust's id>" #}
+    {% endverbatim %}{% endcode %}
+    <p>
+        Use the property form for web components. Datastar can bind an element before its module has
+        defined the tag, and plain <code>bind()</code> then falls back to the element's <code>value</code>
+        attribute: the component does not update that attribute, so the signal stops following what the
+        user sets, and the next morph removes the attribute. With the property form, Datastar always reads
+        and writes the property, and updates the signal on the element's <code>input</code> and
+        <code>change</code> events. Starbase's docs bind every component this way.
+    </p>
+    <p>
+        A camelCase name is written in kebab case, which Datastar turns back:
+        <code>bind('selectedIndex')</code> gives <code>data-bind__prop.selected-index</code>. For further
+        modifiers, such as the <code>__event.change</code> that Starbase's docs use on toggles, write the
+        attribute with the signal's id:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<sb-toggle label="Thrusters" data-bind__prop.checked__event.change="{{ thrusters.id }}"></sb-toggle>
+    {% endverbatim %}{% endcode %}
+    <p>
+        The usual rules for client values apply: a TAB signal takes the value the browser posts with the
+        next action, and a scoped signal ignores it unless it is declared <code>clientWritable: true</code>
+        (see <a href="/docs/api#context-signal">signal()</a>).
+    </p>
+
+    <h2 id="server-state">Keeping state on the server</h2>
+    <p>
+        A component holds what only the browser needs: whether a menu is open, where the focus is, a drag
+        in progress. Everything else stays in php-via. The view renders the server's values into the
+        component's attributes, every <code>sync()</code> and broadcast renders them again, and the
+        component reports a change with an event that posts to an action. The action decides what the
+        value becomes:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->page('/thrust', function (Context $c): void {
+    $thrust = $c->signal(40, 'thrust');
+
+    $c->action(function (Context $c) use ($thrust): void {
+        $thrust->setValue(min($thrust->int(), 80));
+        $c->sync();
+    }, 'setThrust');
+
+    $c->view('thrust.html.twig');
+});
+    {% endverbatim %}{% endcode %}
+    {% code 'twig' %}{% verbatim %}
+{# thrust.html.twig #}
+<div id="thrust">
+    <sb-slider label="Thrust" unit="%" value="{{ thrust.int }}" {{ bind(thrust, 'value') }}
+        data-on:change="@post('{{ setThrust.url }}')"></sb-slider>
+    <p>The server holds {{ thrust.int }}.</p>
+</div>
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>sb-slider</code> updates the bound signal while it is dragged and fires <code>change</code>
+        when the user lets go. The post carries the signal, the action caps it at 80 and syncs, and the
+        thumb moves back to 80. Starbase's form components take a new <code>value</code> attribute from
+        the server as their value, and keep the user's edit when the server sends the same markup again,
+        so a re-render for an unrelated reason does not reset them. Every commit posts to the same URL,
+        and each post cancels the one before it if it is still in flight, which suits a slider: the last
+        post carries the latest value. With <code>confirm</code>, Starbase's value components also show a
+        value as pending until the server's attribute matches it, and <code>revert()</code> goes back to
+        the server's value; Starbase's
+        <a href="https://starbase.zweiundeins.gmbh/contribute#commands-and-components" target="_blank" rel="noopener">commands and components</a>
+        guide describes the contract.
+    </p>
+
+    <h2 id="keyed-lists">Rocket components inside keyed lists</h2>
+    <p>
+        Datastar's morph matches elements by <code>id</code>, so a list whose items carry ids keeps its
+        elements when a sync or broadcast reorders it. With the official Datastar 1.0.4 Rocket bundle, a
+        morph that reorders keyed elements containing a Rocket component overflows the stack
+        (<code>Maximum call stack size exceeded</code>). When the same patch also inserts or removes
+        elements, a <code>HierarchyRequestError</code> stops the morph halfway and leaves the page out of
+        step with the server. Two of Starbase's patches, 0002 and 0008, fix it (upstream issues
+        <a href="https://github.com/starfederation/datastar/issues/1218" target="_blank" rel="noopener">#1218</a> and
+        <a href="https://github.com/starfederation/datastar/issues/1209" target="_blank" rel="noopener">#1209</a>),
+        which is why <code>withDatastarRocket()</code> serves Starbase's build.
+        <a href="https://github.com/mbolli/php-via/blob/master/public/DATASTAR.md" target="_blank" rel="noopener">public/DATASTAR.md</a>
+        lists all twelve patches, the source commits and the hashes the test suite checks.
+    </p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/twig">Templates</a>: shells, Twig layouts and binding</li>
+        <li><a href="/docs/actions#cancellation">Actions</a>: requests that cancel each other</li>
+        <li><a href="/docs/api#config">API reference</a>: <code>withDatastarRocket()</code> and <code>getDatastarUrl()</code></li>
+        <li><a href="https://starbase.zweiundeins.gmbh" target="_blank" rel="noopener">Starbase</a>: the component catalog</li>
+    </ul>
+</article>
+{% endblock %}

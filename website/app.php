@@ -505,6 +505,11 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         StaticPage::view($c, 'docs/twig.html.twig');
     });
 
+    $app->page('/web-components', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/web-components'));
+        StaticPage::view($c, 'docs/web-components.html.twig');
+    });
+
     $app->page('/development', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/development'));
         StaticPage::view($c, 'docs/development.html.twig');

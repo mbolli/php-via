@@ -483,6 +483,12 @@ $config->withStaticDir(__DIR__ . '/public');
 
     <p>In production, serve static files from Caddy (or nginx) directly: it's faster and avoids passing binary content through PHP.</p>
     <p>
+        Leave <code>/datastar.js</code> to php-via: it serves the plain Datastar bundle, or the Rocket build
+        with <code>withDatastarRocket()</code>. A proxy that serves it from disk has to pick the matching
+        file, <code>datastar.js</code> or <code>datastar-rocket.js</code> from
+        <code>vendor/mbolli/php-via/public/</code>.
+    </p>
+    <p>
         If you do serve <code>withStaticDir()</code> files through php-via itself (no reverse proxy, or a
         proxy that isn't handling <code>/public/*</code>), every response, including the framework's own
         <code>/datastar.js</code> and <code>/via.css</code>, carries an <code>ETag</code> and

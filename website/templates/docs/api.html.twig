@@ -506,8 +506,17 @@ $s->mutate(fn (array $items) => [...$items, $item]); // read-modify-write under 
 // Template helpers
 $s->id();     // browser id, not the name: 'global_count' for a GLOBAL signal 'count'
 $s->bind();   // 'data-bind="global_count"'
+$s->bind('value');  // 'data-bind__prop.value="global_count"': binds a property, for web components
 $s->text();   // '<span data-text="$global_count"></span>'
     {% endverbatim %}{% endcode %}
+    <p>
+        <code>bind(?string $prop = null)</code> with a property name binds that element property
+        instead of the element's value. A camelCase name is written in kebab case
+        (<code>'selectedIndex'</code> becomes <code>data-bind__prop.selected-index</code>), and a name
+        that is not a property name throws <code>\InvalidArgumentException</code>. In Twig:
+        {% verbatim %}<code>{{ bind(volume, 'value') }}</code>{% endverbatim %}. See
+        <a href="/docs/web-components#binding">Web components</a>.
+    </p>
     <p>
         On a scoped signal with <code>worker_num &gt; 1</code>, <code>setValue($s-&gt;int() + 1)</code> loses
         updates when two workers read the same value. Use <code>increment()</code> for counters and
@@ -561,6 +570,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withStaticCacheControl('public, max-age=31536000, immutable')  // default: devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate'
     // ...or a closure(string $filePath, string $mimeType): string to fine-tune per file (see Deployment → Static assets)
     ->withBasePath('/')             // base path when mounted at a sub-path (see below)
+    ->withDatastarRocket()          // serve Datastar with Rocket for web components (see below)
     ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
     ->withContextConnectTimeout(30_000) // free a context whose SSE stream never connects; 0 = keep (default 30000)
     ->withContextReconnectTimeout(60_000) // keep a tab whose stream is down this long after an action; 0 = connect timeout (default 60000)
@@ -622,8 +632,21 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         (e.g. <code>example.com/myapp/</code>). The value must be a relative path such as <code>/</code>,
         <code>/myapp</code>, or <code>/sub/path</code>. An <code>\InvalidArgumentException</code> is thrown
         at startup for invalid inputs (absolute URLs, protocol-relative paths, etc.).
-        The basePath is exposed to every Twig template as <code>{{ basePath }}</code>.
+        The basePath is exposed to every Twig template as <code>{% verbatim %}{{ basePath }}{% endverbatim %}</code>.
         See <a href="/docs/deployment#sub-path">Deployment &rarr; Sub-path mounting</a> for a Caddy example.
+    </p>
+    <p>
+        <code>withDatastarRocket(bool $enabled = true)</code> serves Starbase's build of Datastar 1.0.4
+        with Rocket at <code>/datastar.js</code> instead of the plain Datastar 1.0.4 bundle, so Rocket web
+        components work on the page. It costs 22&nbsp;KB with Brotli against 12&nbsp;KB.
+        <code>isDatastarRocketEnabled()</code> reports the setting. <code>getDatastarUrl()</code> returns
+        the URL pages load Datastar from: the base path, <code>datastar.js</code> and the first 10 hex
+        digits of the served bundle's SHA-256 as <code>v</code>, such as
+        <code>/datastar.js?v=727844adfc</code>. Twig templates get it
+        as <code>{% verbatim %}{{ datastarUrl }}{% endverbatim %}</code>, set when <code>Via</code> is
+        constructed, and custom shells as <code>{% verbatim %}{{ datastar_url }}{% endverbatim %}</code>
+        next to the import map placeholder <code>{% verbatim %}{{ datastar_import_map }}{% endverbatim %}</code>.
+        See <a href="/docs/web-components">Web components</a>.
     </p>
     ---
 

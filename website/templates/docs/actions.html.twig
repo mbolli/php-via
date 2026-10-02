@@ -92,6 +92,25 @@ $reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->syn
         warning. A scoped action keeps its first registration.
     </p>
 
+    <h2 id="cancellation">Requests that cancel each other</h2>
+    <p>
+        Datastar cancels an in-flight request when the page sends another one with the same method and
+        URL, from any element. A request cancelled before it reaches the server never runs its action.
+        One that has reached php-via still runs, and its patches arrive over the SSE stream as usual.
+        Cancellation suits a value where the latest post wins, such as a slider. Where every request
+        counts, or where two elements post the same action URL for different reasons, such as the Enter
+        key in a field and a send button, tell the requests apart with a query string (Datastar compares
+        the URL as written in the expression), or pass <code>requestCancellation: 'disabled'</code>:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<input data-bind="{{ message.id }}"
+    data-on:keydown="evt.key === 'Enter' && @post('{{ send.url }}?from=enter')">
+<button data-on:click="@post('{{ send.url }}?from=button')">Send</button>
+
+<!-- every click counts, so none may cancel another -->
+<button data-on:click="@post('{{ paint.url }}', {requestCancellation: 'disabled'})">Paint</button>
+    {% endverbatim %}{% endcode %}
+
     <h2 id="errors">When an action throws</h2>
     <p>
         A throw from an action, a view or a timer never takes the worker down. An action that throws any

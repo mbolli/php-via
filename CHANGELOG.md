@@ -2,6 +2,67 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.14.0] - Unreleased
+
+### Highlights
+
+- **Datastar 1.0.4.** php-via serves Datastar 1.0.4 instead of 1.0.1. The SSE format is the same,
+  but Datastar now cancels an in-flight request when any element sends another one to the same URL,
+  so check pages where two elements post the same action. Breaking Changes lists the rest.
+- **Web components.** `Config::withDatastarRocket()` serves Datastar with Rocket, so Rocket
+  components such as Starbase's run on php-via pages. See
+  [Web components](https://via.zweiundeins.gmbh/docs/web-components).
+- **A versioned Datastar URL.** The default shell loads `/datastar.js?v=<hash>`, so browsers fetch
+  the new bundle after an upgrade instead of reusing the cached one.
+
+### Breaking Changes
+
+- **Datastar 1.0.1 to 1.0.4.** PHP code needs no changes, and `starfederation/datastar-php` 1.0.1
+  keeps working. In the browser:
+  - **Requests cancel per method and URL.** A request aborts the in-flight request with the same
+    method and URL, from any element. 1.0.1 aborted the same element's previous request, whatever
+    its URL. Two elements that post the same action URL can drop each other's request if the second
+    starts before the server has the first: add a query that tells them apart (`?from=button`) or
+    pass `{requestCancellation: 'disabled'}`. See [Actions](https://via.zweiundeins.gmbh/docs/actions#cancellation).
+  - **Retries.** A retry sends the signals as they are when it starts. After a network error
+    Datastar retries `retryMaxCount` times (10), where 1.0.1 stopped after 9. With `retry: 'error'`
+    or `'always'`, retries after an HTTP error count toward that limit and back off, where 1.0.1
+    repeated them without limit. See [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#reconnect).
+  - **The `retrying` fetch event** fires only when a retry is scheduled and carries no `message`.
+    Datastar no longer logs each retry with `console.error`.
+  - **`data-bind` on checkboxes and radios** updates the signal on `input` instead of `change`. A
+    script that dispatches `change` to update the signal has to dispatch `input`, or bind with
+    `__event.change`.
+  - **Deleting a signal,** by a patch or by assigning `null`, fires `data-on-signal-patch`.
+- **`Signal::bind()` takes an optional `?string $prop`.** A subclass that overrides `bind()` has to
+  declare the parameter.
+
+### New Features
+
+- **`Config::withDatastarRocket()`** serves Starbase's build of Datastar 1.0.4 with Rocket at
+  `/datastar.js`: 22 KB with Brotli, against 12 KB for the plain bundle. Unlike the official Rocket
+  bundle, it does not crash when a morph reorders keyed elements that contain a Rocket component.
+  Sources, patches and hashes are in `public/DATASTAR.md`.
+- **Versioned Datastar URL and import map.** `Config::getDatastarUrl()` returns `/datastar.js?v=`
+  plus the bundle's content hash. Twig templates get it as `datastarUrl`, custom shells as
+  `{{ datastar_url }}`, and `{{ datastar_import_map }}` maps the module name `datastar` to the same
+  URL, which Rocket components import. The default shell uses both. Pages whose custom shell or Twig
+  layout loads `datastar.js` without the version keep a cached 1.0.1 until its `Cache-Control`
+  lifetime ends, an hour by default. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
+- **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
+  on web components. The Twig `bind()` function takes the property as a second argument.
+- **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
+  as `application/json`.
+
+### Fixed
+
+- `.json` files from `withStaticDir()` were served as `application/octet-stream`, which breaks JSON
+  module imports. They are now `application/json`.
+
+### Docs
+
+- New [Web components](https://via.zweiundeins.gmbh/docs/web-components) page.
+
 ## [0.13.1] - 2026-10-02
 
 ### Highlights

@@ -18,7 +18,11 @@
                 <strong>not Twig</strong>.
                 Besides the ones below it fills {% verbatim %}<code>{{ name }}</code>{% endverbatim %}
                 with a signal's JSON value (HTML-escaped) and {% verbatim %}<code>{{ name.id }}</code>{% endverbatim %}
-                with its id, where <code>name</code> is the name passed to <code>signal()</code>. The shell is sent once per page load and never re-sent over SSE.
+                with its id, where <code>name</code> is the name passed to <code>signal()</code>.
+                {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the versioned Datastar URL and
+                {% verbatim %}<code>{{ datastar_import_map }}</code>{% endverbatim %} the import map that
+                <a href="/docs/web-components#one-engine">web components</a> need.
+                The shell is sent once per page load and never re-sent over SSE.
                 Use it for the outer chrome: doctype, nav, scripts, footer.
             </p>
             {% code 'html' %}{% verbatim %}
@@ -26,14 +30,15 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    {{ datastar_import_map }}
     <meta data-signals='{{ signals_json }}'>
     {{ head_content }}
 </head>
 <body>
     {{ content }}
-    <script type="module"
-        src=".../datastar.js"></script>
     {{ foot_content }}
+    <script type="module"
+        src="{{ datastar_url }}"></script>
 </body>
 </html>
             {% endverbatim %}{% endcode %}
@@ -79,9 +84,11 @@ $c->view(function () use ($count): string {
     </p>
     <p>
         Your layout still has to carry the SSE bootstrap: the <code>@get('_sse')</code> meta, the
-        <code>sendBeacon</code> meta for closing the session and <code>datastar.js</code>. php-via never
+        <code>sendBeacon</code> meta for closing the session and Datastar, loaded from the
+        <code>datastarUrl</code> global with an import map for the same URL. php-via never
         injects them into a full document, because a second copy would break the page. Copy them from
-        the default <code>shell.html</code>.
+        the default <code>shell.html</code>; <a href="/docs/web-components#twig-layout">Web components</a>
+        explains the import map.
     </p>
     {% code 'twig' %}{% verbatim %}
 {# templates/base.html.twig: you create this #}
@@ -89,6 +96,7 @@ $c->view(function () use ($count): string {
 <html>
 <head>
     <meta charset="UTF-8">
+    <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
     <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
     <meta data-indicator="_connecting"
         data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
@@ -98,7 +106,7 @@ $c->view(function () use ($count): string {
 <body>
     <nav>...shared nav...</nav>
     <main>{% block content %}{% endblock %}</main>
-    <script type="module" src="{{ basePath }}datastar.js"></script>
+    <script type="module" src="{{ datastarUrl }}"></script>
 </body>
 </html>
     {% endverbatim %}{% endcode %}
@@ -183,6 +191,12 @@ $c->view('counter.html.twig', [
 <!-- Or use the bind() Twig function with the auto-injected Signal: -->
 <input {{ bind(name) }} type="text">
     {% endverbatim %}{% endcode %}
+    <p>
+        On a web component, bind a property: {% verbatim %}<code>{{ bind(volume, 'value') }}</code>{% endverbatim %}
+        renders <code>data-bind__prop.value</code>. See
+        <a href="/docs/web-components#binding">Web components</a> for why plain <code>data-bind</code>
+        can lose track of a component.
+    </p>
 
     <h2 id="actions">Triggering actions</h2>
     <p>Use Datastar's event attributes to POST to an action URL:</p>

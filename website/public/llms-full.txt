@@ -170,6 +170,16 @@ An action that throws answers 500 `Action failed`; the worker keeps running and 
 is logged. Registering a second TAB action under the same name replaces the first with a
 warning.
 
+Datastar cancels an in-flight request when the page sends another one with the same method
+and URL, from any element. A request cancelled before it reaches the server never runs its
+action. Where every request counts, or two elements post the same action for different
+reasons, give each a query string or turn cancellation off:
+
+```html
+<button data-on:click="@post('/_action/send?from=button')">Send</button>
+<button data-on:click="@post('/_action/paint', {requestCancellation: 'disabled'})">Paint</button>
+```
+
 ### 3. Views
 
 Views render a context's HTML. They run on page load, on `$c->sync()` and on every
@@ -337,6 +347,9 @@ $c->onDisconnect(function (Context $c): void { /* ... */ });
 - **Revival.** A tab that comes back after its context was cleaned up is rebuilt with the
   same id and the signal values it still holds, within the revival window
   (`withContextRevivalWindow()`, 10 minutes by default), instead of reloading.
+- **Reconnects.** After a network error Datastar retries the stream after 1, 2, 4, 8 and
+  16 s, then every 30 s, ten times in all, each time with the tab's current signals. Once
+  the retries run out or the stream ends, the default shell opens a new one within 15 s.
 
 ---
 
@@ -421,6 +434,7 @@ $config = (new Config())
     ->withH2c()                               // HTTP/2 cleartext (behind a TLS proxy)
     ->withCertificate($crt, $key)             // HTTPS directly
     ->withBasePath('/app/')                   // when mounted at a sub-path
+    ->withDatastarRocket()                    // Datastar + Rocket for web components
     ->withWorkerNum(4)                        // default 1
     ->withBroker(new SwooleBroker())          // or RedisBroker / NatsBroker
     ->withBroadcastTickMs(25)                 // broadcast flush tick; 0 = every turn
@@ -483,6 +497,7 @@ passes the context's signals and actions to the template by name, plus:
 | `contextId` | The tab's context id |
 | `currentRoute` | The matched route, e.g. `/docs/signals` |
 | `basePath` | Base URL path, always ends with `/` (default: `/`) |
+| `datastarUrl` | URL of the Datastar bundle, versioned by content, e.g. `/datastar.js?v=727844adfc` |
 
 Datastar attributes in templates, with ids written from the signal objects:
 ```twig
@@ -492,12 +507,66 @@ Datastar attributes in templates, with ids written from the signal objects:
 {# Two-way bind an input to a signal #}
 <input data-bind="{{ name.id }}" type="text">
 
+{# Bind a web component's property: renders data-bind__prop.value="<id>" #}
+<sb-slider {{ bind(volume, 'value') }}></sb-slider>
+
 {# Trigger an action on click #}
 <button data-on:click="@post('{{ increment.url }}')">+1</button>
 
 {# Show/hide based on a signal #}
 <div data-show="${{ loggedIn.id }}">Protected content</div>
 ```
+
+---
+
+## Web Components (Rocket, Starbase)
+
+Rocket is Datastar's web component layer; Starbase (https://starbase.zweiundeins.gmbh) is a
+catalog of Rocket components. `Config::withDatastarRocket()` makes `/datastar.js` serve
+Starbase's build of Datastar 1.0.4 with Rocket (22 KB with Brotli, against 12 KB for the
+plain bundle). Configure it before `new Via()`.
+
+**One engine per page.** Components `import { rocket } from 'datastar'`, so the page needs an
+import map that maps `datastar` to exactly the URL of the Datastar `<script type="module">`,
+query string included, before any module script. Another URL loads a second Datastar
+engine. The default shell writes both from `Config::getDatastarUrl()`
+(`/datastar.js?v=<10 hex digits of the bundle's sha256>`). A custom shell uses the
+placeholders `{{ datastar_import_map }}` (in `<head>`, before `{{ head_content }}`) and
+`<script type="module" src="{{ datastar_url }}">`. A Twig layout that renders the whole
+document writes both itself:
+
+```twig
+<head>
+    <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
+    ...
+</head>
+<body>
+    ...
+    <script type="module" src="{{ datastarUrl }}"></script>
+</body>
+```
+
+**Loading components.** Take the script tag from a Starbase component page's Installation
+section (pinned version with `integrity`) and add it with `$app->appendToHead(...)`, leaving
+out that snippet's `imports` entry. Or copy the component's files into `withStaticDir()`;
+`.js` and `.mjs` are served as JavaScript.
+
+**Binding.** Use `$signal->bind('value')` / `{{ bind(signal, 'value') }}`
+(`data-bind__prop.value`) on components. Plain `data-bind` on an element not yet defined
+falls back to the `value` attribute, which the component does not update and the next morph
+removes.
+
+**Server state.** Render the server's value into the component's attribute in the view and
+post the component's `change` event to an action, which decides the value and syncs:
+
+```twig
+<sb-slider label="Thrust" value="{{ thrust.int }}" {{ bind(thrust, 'value') }}
+    data-on:change="@post('{{ setThrust.url }}')"></sb-slider>
+```
+
+**Keyed lists.** The official Datastar 1.0.4 Rocket bundle crashes when a morph reorders
+keyed elements that contain a Rocket component; Starbase's build fixes it, which is why
+php-via serves that build.
 
 ---
 
@@ -555,6 +624,12 @@ php-via.
     layout logic in `{% extends %}` / `{% block %}` templates.
 13. **Action returns 403**: a POST without an `Origin` header when `withTrustedOrigins()` is
     set; browsers always send one, scripts need `withAllowMissingOrigin()`.
+14. **Rocket component fails or the page runs two Datastar engines**: enable
+    `withDatastarRocket()`, and map `datastar` in the import map to exactly the Datastar
+    script's URL (`{{ datastarUrl }}` in both places).
+15. **Two elements post the same action and one request is lost**: Datastar cancels
+    in-flight requests per method and URL; add a query string (`?from=button`) or pass
+    `{requestCancellation: 'disabled'}`.
 
 ---
 

@@ -63,6 +63,17 @@ $config->withContextReconnectTimeout(60_000); // default; 0 uses the connect tim
         <code>execScript()</code> is gone.
     </p>
 
+    <h3 id="reconnect">How the default shell reconnects</h3>
+    <p>
+        The default shell opens the stream with <code>@get('_sse')</code> and Datastar's default retry settings.
+        When the connection fails, Datastar retries after 1, 2, 4, 8 and 16 seconds and then every
+        30 seconds (<code>retryMaxWait</code>), ten times in all (<code>retryMaxCount</code>). Each retry
+        sends the tab's signals as they are at that moment, so a context revived by the retry starts from
+        the current values. Once the retries run out, or when the stream ends, the shell's 15-second
+        interval opens a new stream. Datastar also closes the stream while the tab is hidden and opens it
+        again when the tab is shown.
+    </p>
+
     <h3 id="disconnect-detection">How a closed tab is detected</h3>
     <p>
         An open SSE stream does nothing between events. It wakes when a patch is queued for it, when its
