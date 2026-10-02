@@ -21,6 +21,10 @@ All notable changes to php-via will be documented in this file.
 - **Cheaper page views and static files.** A small page view costs half the CPU (0.048 instead of
   0.091 ms) and a cached stylesheet about a quarter (0.054 instead of 0.193 ms), because php-via no
   longer reads the shell template or the file from disk on every request.
+- **Brotli level 11 for static files by default.** Static files and php-via's own bundles go out at
+  level 11 whenever ext-brotli is loaded, compressed before the server listens or by a helper
+  process, never in a worker. A `.br` file next to an asset is sent as it is.
+  See [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
 
 ### Breaking Changes
 
@@ -37,6 +41,14 @@ All notable changes to php-via will be documented in this file.
   - **Deleting a signal,** by a patch or by assigning `null`, fires `data-on-signal-patch`.
 - **`Signal::bind()` and `Config::getStaticCacheControl()` take a new optional parameter.** A
   subclass that overrides either has to declare it.
+- **Static files get Brotli without `withBrotli()`.** Whenever ext-brotli is loaded, compressible
+  static files go out at level 11 to clients that accept it, with `Vary: Accept-Encoding`, and the
+  server opens its port only after compressing the files present at start (at most 2 s, 0.4 s for
+  the website). `withBrotli(false, staticLevel: 0)` turns it off. `withBrotli()`'s `$enabled` covers
+  pages and SSE only, and a static level of 0 now means none instead of Brotli level 0.
+- **`worker_num` in `withSwooleSettings()` throws** at `start()` when it differs from
+  `withWorkerNum()`. php-via set up shared state, tables and the broker check for one worker while
+  N started. Pass the count to `withWorkerNum()`.
 - **Routes win over extension-less static files.** A path without a file extension, such as
   `/about`, that matches both a route and a file in `withStaticDir()` now serves the route. Paths
   with an extension are still served from the static directory first.
@@ -61,7 +73,10 @@ All notable changes to php-via will be documented in this file.
 - **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
   on web components. The Twig `bind()` function takes the property as a second argument.
 - **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
-  as `application/json`.
+  as `application/json`. `.webmanifest`, `.wasm`, `.ttf`, `.otf`, `.md`, `.csv`, `.rss` and `.atom`
+  get their content types too, and Brotli.
+- **`.br` sidecars.** A `foo.css.br` at least as new as `foo.css` is sent to Brotli clients as it is,
+  even without ext-brotli, so large assets need no compression at run time.
 - **`Via::HOOK_FLAGS_NO_FILE_IO`** is the hook set without file, stdio and native curl hooks, for
   apps that run no shell commands and hold no `flock()` across a suspension.
   `Via::defaultHookFlags()` returns the default. See [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks-narrow).
@@ -80,19 +95,30 @@ All notable changes to php-via will be documented in this file.
 - **Static files are served from worker memory** and read again only when they change: a 91 KB
   stylesheet costs 0.054 ms of CPU per request instead of 0.193 ms with Brotli, and 0.040 ms instead
   of 0.161 ms without. Each worker keeps files up to 2 MiB, 16 MiB per encoding. Bigger files go out
-  with `sendfile()` and are no longer Brotli-compressed.
-  See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
+  with `sendfile()`. See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
+- **Level 11 never runs in a worker.** The first Brotli request for a 700 KB bundle held its worker
+  for 1.3 s. Files present at start are now compressed in the master process and shared by all
+  workers; a file that changes later goes to a helper process while workers send it at level 4, or
+  uncompressed above 256 KB. Files up to 8 MiB get level 11, where 2 MiB was the limit.
 - **Only paths with a file extension are looked up in `withStaticDir()` before routing,** and the
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
   `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.
-- **Dev Bar assets** are served from memory with an ETag, and with Brotli when it is on. A page view
+- **Dev Bar assets** are served from memory with an ETag, and with Brotli level 11. A page view
   revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
   download is 6.8 KB with Brotli.
 
 ### Fixed
 
-- `.json` files from `withStaticDir()` were served as `application/octet-stream`, which breaks JSON
-  module imports. They are now `application/json`.
+- `.json`, `.txt`, `.html` and `.xml` files from `withStaticDir()` were served as
+  `application/octet-stream`, which breaks JSON module imports. They get their content types now.
+- `withStaticDir()` served dotfiles such as `.env` and `.git/config`, and the source of `.php` files.
+  Paths with a dot segment, except `/.well-known/`, and `.php`, `.phtml` and `.phar` files answer
+  404 now, before any look at the disk.
+- A percent-encoded path, such as a file name with a space, never found its file in `withStaticDir()`.
+- After the worker was busy, the contexts whose cleanup timers fired meanwhile were destroyed in one
+  pass of the event loop, up to 160 ms after each GC pause in a 250,000-view burst. They are destroyed
+  in 10 ms slices now. The longer pauses in such a burst are PHP's cycle collector walking every live
+  context.
 - A burst of page views that never opened a stream froze a worker once their contexts expired: each
   destroyed context walked every revival record and, above 10,000, sorted them all. After 250,000
   page views in 15 s a worker stopped answering for 60 to 74 s, and any client could cause it with
@@ -112,6 +138,9 @@ All notable changes to php-via will be documented in this file.
 - New [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks) section in Deployment:
   what each hook covers, what no hook covers, OpenSwoole 26.2 bugs and their workarounds, the
   narrow flag set and capping the thread pool.
+- New [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression) and
+  [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-allowlist) sections in
+  Deployment.
 
 ## [0.13.1] - 2026-10-02
 

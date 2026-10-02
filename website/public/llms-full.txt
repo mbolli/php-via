@@ -427,16 +427,17 @@ $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort(3000)                          // default 3000
     ->withTemplateDir(__DIR__ . '/templates')
-    ->withStaticDir(__DIR__ . '/public')      // serves static files
+    ->withStaticDir(__DIR__ . '/public')      // serves static files, see Static Files
     ->withDevMode(true)                       // verbose logging, no cache headers
     ->withLogLevel('info')                    // debug | info | warn | error
-    ->withBrotli()                            // requires ext-brotli and HTTPS or h2c
+    ->withBrotli()                            // pages and SSE; requires ext-brotli and HTTPS or h2c
+    ->withBrotli(false, staticLevel: 0)       // also no Brotli for static files (default level 11)
     ->withH2c()                               // HTTP/2 cleartext (behind a TLS proxy)
     ->withCertificate($crt, $key)             // HTTPS directly
     ->withBasePath('/app/')                   // when mounted at a sub-path
     ->withDatastarRocket()                    // Datastar + Rocket for web components
     ->withImportMap(['charts' => '/js/charts.js'], ['/js/charts.js' => 'sha384-...'])
-    ->withWorkerNum(4)                        // default 1
+    ->withWorkerNum(4)                        // default 1; never worker_num in withSwooleSettings()
     ->withBroker(new SwooleBroker())          // or RedisBroker / NatsBroker
     ->withBroadcastTickMs(25)                 // broadcast flush tick; 0 = every turn
     ->withBroadcastCoalescing(true)           // false = synchronous broadcasts
@@ -455,6 +456,33 @@ $config = (new Config())
     ->withSwooleSettings(['max_request' => 10_000]) // raw OpenSwoole settings, win over php-via's
 ;
 ```
+
+`start()` throws when `withSwooleSettings()` carries a `worker_num` that differs from
+`withWorkerNum()`: php-via sets up its shared tables and the broker check for `withWorkerNum()`
+only, so N workers started that way would each keep their own sessions and contexts.
+
+---
+
+## Static Files
+
+`withStaticDir()` serves a path with a file extension before routing and any other once no route
+matched. A path with a segment that starts with a dot (`/.env`, `/.git/config`, `%2e` included),
+except `/.well-known/`, and `.php`, `.phtml` and `.phar` files answer 404 without a look at the
+disk. Paths are percent-decoded, so `/my%20file.css` finds `my file.css`.
+
+Whenever ext-brotli is loaded, compressible files (css, js, mjs, json, map, webmanifest, wasm,
+svg, ico, ttf, otf, txt, md, csv, html, xml, rss, atom), `/datastar.js`, `/via.css` and the Dev
+Bar assets go out with Brotli level 11 to clients that accept it, with or without `withBrotli()`,
+with `Vary: Accept-Encoding` and one weak ETag for every encoding. woff2, woff and images are sent
+as they are. A worker never compresses at level 11 itself: files present at start are compressed
+in the master process before the port opens (at most 2 s, the website takes 0.4 s; not in dev
+mode) and shared by all workers; a file that changes later goes to a helper process, and until
+the result arrives workers send it at level 4 up to 256 KB, uncompressed above. A sidecar
+`foo.css.br` next to `foo.css`, at least as new, is sent as it is, even without ext-brotli: the
+way to ship large assets (`brotli --best app.js`). Memory: 32 MiB of Brotli forms from start,
+shared; per worker 16 MiB uncompressed and 16 MiB of Brotli forms, 2 MiB per file; files over
+8 MiB, or whose Brotli form exceeds 2 MiB, go out uncompressed without a sidecar.
+`withBrotli(false, staticLevel: 0)` turns static Brotli off.
 
 ---
 

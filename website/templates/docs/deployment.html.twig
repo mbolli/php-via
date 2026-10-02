@@ -96,10 +96,11 @@ example.com {
 
     <h2 id="brotli">Brotli compression</h2>
     <p>
-        php-via can compress pages, static assets, and live SSE streams with Brotli.
+        <code>withBrotli()</code> compresses pages and live SSE streams with Brotli.
         It requires the <a href="https://github.com/kjdev/php-ext-brotli" target="_blank" rel="noopener">ext-brotli</a>
         PHP extension and HTTP/2 (needed for streaming compression to work in browsers).
-        A hard error is thrown at startup if either requirement is missing.
+        A hard error is thrown at startup if either requirement is missing. Static assets get Brotli whenever
+        ext-brotli is loaded, without <code>withBrotli()</code>: see <a href="#static-compression">Static compression</a>.
     </p>
     <p>
         Each SSE stream holds its own Brotli encoder, which grows with the traffic it carries and never
@@ -153,7 +154,7 @@ $config = (new Config())
     <p>Compression levels:</p>
     <ul>
         <li><strong>Pages and SSE</strong>: level 4 (fast; runs in the hot path)</li>
-        <li><strong>Static assets</strong>: level 11 (max ratio; compressed once per worker and kept in memory until the file changes; files over 2&nbsp;MiB are sent uncompressed)</li>
+        <li><strong>Static assets</strong>: level 11 (max ratio; never compressed in a worker's event loop, see <a href="#static-compression">Static compression</a>)</li>
     </ul>
 
     <h2 id="production-config">Production config</h2>
@@ -680,10 +681,10 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
         first-class callable syntax (<code>$obj->method(...)</code>) for an existing method.
     </p>
     <p>
-        Each worker keeps a file in memory after its first request, as sent to Brotli clients and as sent to
-        the others, and reads it again only when its modification time or size changes. It keeps files up to
-        2&nbsp;MiB, and up to 16&nbsp;MiB for each of the two forms; a bigger file, or one that no longer
-        fits, goes out with <code>sendfile()</code> and uncompressed. Dev mode checks the file on every
+        Each worker keeps a file in memory after its first request and reads it again only when its modification
+        time or size changes. It keeps files up to 2&nbsp;MiB, and up to 16&nbsp;MiB in all; a bigger file, or one
+        that no longer fits, goes out with <code>sendfile()</code>. Brotli forms have their own memory, see
+        <a href="#static-compression">Static compression</a>. Dev mode checks the file on every
         request, so an edit shows up on the next reload, and when the memory is used up it first drops files
         that were deleted or changed, such as earlier builds of a bundle with a hash in its name. In
         production, reload the workers after changing files (see <a href="#graceful-restart">Graceful restart</a>).
@@ -696,6 +697,68 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
         <code>/_session/</code> are never looked up before routing, even with a dot in them. php-via
         resolves the directory's real path once per worker, so a static directory behind a symlink that a
         deployment switches keeps serving the old target until the workers reload.
+    </p>
+
+    <h3 id="static-allowlist">Paths never served</h3>
+    <p>
+        php-via answers 404 without a look at the disk for a path with a segment that starts with a dot, such as
+        <code>/.env</code>, <code>/.git/config</code> or <code>/assets/.cache/app.js</code>, and for
+        <code>.php</code>, <code>.phtml</code> and <code>.phar</code> files. <code>/.well-known/</code> is the
+        exception, for ACME challenges and similar. The path is percent-decoded first, so <code>/%2eenv</code> is
+        refused too and <code>/my%20file.css</code> finds <code>my file.css</code>. A route with such a path still
+        works.
+    </p>
+
+    <h3 id="static-compression">Static compression</h3>
+    <p>
+        Whenever ext-brotli is loaded, php-via sends compressible static files with Brotli at level 11 to clients
+        that accept it: <code>withStaticDir()</code> files of the types below, <code>/datastar.js</code>,
+        <code>/via.css</code> and the Dev Bar assets. This needs neither <code>withBrotli()</code> nor HTTP/2, since
+        a static response is compressed whole, but browsers ask for Brotli over HTTPS only. Each of these responses carries <code>Vary: Accept-Encoding</code>
+        and the same weak <code>ETag</code> for every encoding, so a revalidation gets a <code>304</code> whichever
+        form the client holds.
+    </p>
+    <ul>
+        <li><strong>Compressed</strong>: css, js, mjs, json, map, webmanifest, wasm, svg, ico, ttf, otf, txt, md, csv, html, xml, rss, atom.</li>
+        <li><strong>Sent as they are</strong>: woff2, woff, png, jpg, webp and other types, which are compressed already.</li>
+    </ul>
+    <p>
+        Level 11 takes about 150&nbsp;ms per 100&nbsp;KB of JavaScript or CSS, so a worker never compresses at that
+        level itself:
+    </p>
+    <ul>
+        <li>
+            <strong>At start</strong>, php-via compresses the files that exist in the master process, so every
+            worker inherits them without a copy of its own. It stops after 2&nbsp;s and leaves the rest for later.
+            The port opens after this step, so a restart takes that much longer: the website (11 files, 300&nbsp;KB)
+            takes 0.4&nbsp;s. Dev mode skips it.
+        </li>
+        <li>
+            <strong>Later</strong>, a file that changed or did not fit into the 2&nbsp;s goes to a helper process,
+            which php-via starts with <code>withStaticDir()</code> or in dev mode. Until its result arrives, a worker
+            sends the file compressed at level 4 when it is up to 256&nbsp;KB, and uncompressed when it is bigger.
+            The helper compresses one file at a time, about 6&nbsp;s for a 4&nbsp;MB bundle.
+        </li>
+    </ul>
+    <p>
+        To skip that work for a file, ship it precompressed: <code>foo.css.br</code> next to <code>foo.css</code>.
+        php-via sends the sidecar as it is when it is at least as new as the file, even without ext-brotli. That is
+        the way to ship large assets:
+    </p>
+    {% code 'bash' %}{% verbatim %}
+brotli --best public/js/app.js    # writes public/js/app.js.br; rerun after each build
+    {% endverbatim %}{% endcode %}
+    <p>
+        Memory stays bounded: up to 32&nbsp;MiB of Brotli forms compressed at start, shared by all workers; per
+        worker up to 16&nbsp;MiB of Brotli forms of files compressed later, 2&nbsp;MiB each; the helper keeps
+        16&nbsp;MiB of results for the other workers and needs about 50&nbsp;MB more while it compresses. A file
+        over 8&nbsp;MiB, or one whose Brotli form exceeds 2&nbsp;MiB, goes out uncompressed unless it has a sidecar,
+        and a sidecar over 2&nbsp;MiB goes out with <code>sendfile()</code>.
+    </p>
+    <p>
+        Turn static Brotli off with <code>withBrotli(false, staticLevel: 0)</code>, for example when a CDN
+        compresses. A proxy in front needs no change: Caddy's <code>encode</code> and nginx's <code>gzip</code>
+        leave a response alone that already carries a <code>Content-Encoding</code>.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

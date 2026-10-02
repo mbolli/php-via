@@ -579,7 +579,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withLogLevel('info')          // 'debug' | 'info' | 'error'
     ->withTemplateDir(__DIR__ . '/templates')
     ->withShellTemplate(__DIR__ . '/shell.html')
-    ->withStaticDir(__DIR__ . '/public')
+    ->withStaticDir(__DIR__ . '/public')  // dot paths (but /.well-known/) and .php, .phtml, .phar files answer 404
     ->withStaticCacheControl('public, max-age=31536000, immutable')  // default: devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate'
     // ...or a closure(string $filePath, string $mimeType): string to fine-tune per file (see Deployment → Static assets)
     ->withBasePath('/')             // base path when mounted at a sub-path (see below)
@@ -599,7 +599,8 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     // HTTPS / HTTP2 / Brotli compression (requires ext-brotli)
     ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
     ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
-    ->withBrotli()                  // enable Brotli; withBrotli(dynamicLevel: 4, staticLevel: 11)
+    ->withBrotli()                  // Brotli for pages and SSE; withBrotli(dynamicLevel: 4, staticLevel: 11)
+    ->withBrotli(false, staticLevel: 0) // no Brotli at all: static files get staticLevel whenever ext-brotli is loaded
     ->withSseMaxQueuedBytes(1048576) // drop element patches for a client this far behind; 0 disables
     ->withBroadcastTickMs(25)       // minimum gap between two broadcast flushes of a worker; 0 = every event-loop turn
     ->withBroadcastCoalescing(false) // render and publish on every broadcast() call; a fan-out re-run 8 times in a row leaves the rest to a flush paced by the tick (default: coalesced)
@@ -618,10 +619,18 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     {% endverbatim %}{% endcode %}
 
     <p>
-        <code>withBrotli()</code> requires either <code>withCertificate()</code> (direct HTTPS) or <code>withH2c()</code>
-        (proxy with Caddy/Nginx handling TLS). A hard error is thrown at <code>start()</code> if <code>ext-brotli</code>
-        is missing or neither HTTPS mode is configured.
+        <code>withBrotli(bool $enabled = true, int $dynamicLevel = 4, int $staticLevel = 11)</code>: <code>$enabled</code>
+        turns on Brotli for pages and the SSE stream at <code>$dynamicLevel</code>. That requires either
+        <code>withCertificate()</code> (direct HTTPS) or <code>withH2c()</code> (proxy with Caddy/Nginx handling TLS),
+        and <code>start()</code> throws if <code>ext-brotli</code> is missing or neither HTTPS mode is configured.
         See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
+    </p>
+    <p>
+        <code>$staticLevel</code> applies to static files whatever <code>$enabled</code> says: compressible
+        <code>withStaticDir()</code> files, <code>/datastar.js</code>, <code>/via.css</code> and the Dev Bar assets get
+        Brotli at that level whenever <code>ext-brotli</code> is loaded, and a <code>.br</code> sidecar is sent even
+        without it. <code>0</code> turns static Brotli off. See
+        <a href="/docs/deployment#static-compression">Deployment → Static compression</a>.
     </p>
     <p>
         <code>withSwooleSettings(array $settings)</code> passes settings to OpenSwoole's
@@ -629,7 +638,9 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         to <a href="#via-hook-flags"><code>Via::defaultHookFlags()</code></a>. <code>start()</code> throws
         <code>\RuntimeException</code> before it binds the port when <code>hook_flags</code> has
         <code>SWOOLE_HOOK_STDIO</code> without <code>SWOOLE_HOOK_FILE</code>, or lacks the socket hook a
-        <code>RedisBroker</code> needs, and logs a warning when it keeps <code>SWOOLE_HOOK_NATIVE_CURL</code>
+        <code>RedisBroker</code> needs, or when <code>worker_num</code> differs from <code>withWorkerNum()</code>:
+        php-via sets up its shared tables for <code>withWorkerNum()</code>, so pass the worker count there. It logs a
+        warning when <code>hook_flags</code> keep <code>SWOOLE_HOOK_NATIVE_CURL</code>
         on libcurl 8.20 or newer. The thread pool limits (<code>aio_*</code>) are not server settings: set
         them with <code>OpenSwoole\Util::setAio()</code>. See
         <a href="/docs/deployment#hooks">Deployment → Coroutine hooks</a>.
