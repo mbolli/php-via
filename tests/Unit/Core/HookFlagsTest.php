@@ -22,23 +22,24 @@ describe('hook flag sets', function (): void {
         expect(Via::serverSettings(new Config())['hook_flags'])->toBe(Via::defaultHookFlags());
     });
 
-    test('the narrow set hooks sockets, sleep, proc_open and native curl, and no file or stdio I/O', function (): void {
+    test('the narrow set hooks sockets, sleep and proc_open, and no file or stdio I/O and no native curl', function (): void {
         $expected = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG | SWOOLE_HOOK_SSL
-            | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC | SWOOLE_HOOK_NATIVE_CURL;
+            | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
         expect(Via::HOOK_FLAGS_NO_FILE_IO)->toBe($expected);
         expect(Via::HOOK_FLAGS_NO_FILE_IO & SWOOLE_HOOK_FILE)->toBe(0);
         expect(Via::HOOK_FLAGS_NO_FILE_IO & SWOOLE_HOOK_STDIO)->toBe(0);
+        expect(Via::HOOK_FLAGS_NO_FILE_IO & SWOOLE_HOOK_NATIVE_CURL)->toBe(0);
         // Everything else it hooks is part of SWOOLE_HOOK_ALL.
         expect(Via::HOOK_FLAGS_NO_FILE_IO & ~SWOOLE_HOOK_ALL)->toBe(0);
     });
 
-    test('the narrow set is 5886 on OpenSwoole 26.2', function (): void {
+    test('the narrow set is 1790 on OpenSwoole 26.2', function (): void {
         if (!str_starts_with((string) phpversion('openswoole'), '26.2.')) {
             $this->markTestSkipped('bit values checked against OpenSwoole 26.2');
         }
 
-        expect(Via::HOOK_FLAGS_NO_FILE_IO)->toBe(5886);
+        expect(Via::HOOK_FLAGS_NO_FILE_IO)->toBe(1790);
         expect(SWOOLE_HOOK_ALL)->toBe(2147457023);
     });
 

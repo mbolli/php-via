@@ -255,13 +255,13 @@ $app->log('debug', 'Action fired', $c);
     <p>
         <code>defaultHookFlags()</code> returns the <code>hook_flags</code> php-via sets:
         <code>SWOOLE_HOOK_ALL</code>, without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or
-        newer. <code>HOOK_FLAGS_NO_FILE_IO</code> is the socket, stream, sleep, <code>proc_open()</code> and
-        native curl hooks without file and stdio I/O, 5886 on OpenSwoole 26.2, for apps that run no shell
-        commands and hold no file lock across a suspension. See
+        newer. <code>HOOK_FLAGS_NO_FILE_IO</code> is the socket, stream, sleep and <code>proc_open()</code>
+        hooks, without file and stdio I/O and without native curl, 1790 on OpenSwoole 26.2, for apps that run
+        no shell commands and hold no file lock across a suspension. See
         <a href="/docs/deployment#hooks-narrow">Deployment → Coroutine hooks</a>.
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO & Via::defaultHookFlags()]);
+$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
     {% endverbatim %}{% endcode %}
 
     ---

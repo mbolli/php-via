@@ -60,12 +60,12 @@ class Via {
     public const string VERSION = '0.13.1';
 
     /**
-     * SWOOLE_HOOK_ALL without FILE and STDIO, so file and stdio I/O skip the AIO thread pool (5886 on OpenSwoole 26.2).
-     * Only for apps that run no exec(), system() or popen() and hold no flock() across a yield.
+     * The socket, stream, sleep and proc_open() hooks, without FILE and STDIO, so file and stdio I/O skip the AIO
+     * thread pool (1790 on OpenSwoole 26.2). Only for apps that run no exec(), system() or popen() and hold no
+     * flock() across a yield. It leaves out SWOOLE_HOOK_NATIVE_CURL, which crashes workers on libcurl 8.20 or newer.
      */
     public const int HOOK_FLAGS_NO_FILE_IO = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
-        | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC
-        | SWOOLE_HOOK_NATIVE_CURL;
+        | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
     /**
      * The worker that runs server-wide singleton work (see setInterval()).
@@ -1936,11 +1936,15 @@ class Via {
 
     /**
      * Whether OpenSwoole's native curl hook segfaults the worker on a curl request to any hostname, which it
-     * does with libcurl 8.20.0 or newer (curl#21558; OpenSwoole 26.2).
+     * does with libcurl 8.20.0 or newer (curl#21558; OpenSwoole 26.2). False when OpenSwoole was built without
+     * the hook (no --enable-hook-curl), since the flag then hooks nothing.
      *
      * @internal
      */
     public static function nativeCurlHookCrashes(): bool {
+        if (!\function_exists('openswoole_native_curl_exec')) {
+            return false;
+        }
         $curl = \function_exists('curl_version') ? curl_version() : false;
 
         return \is_array($curl) && $curl['version_number'] >= 0x08_14_00;

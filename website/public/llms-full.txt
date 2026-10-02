@@ -463,8 +463,10 @@ A worker serves all its tabs from one thread, so a blocking call stops every str
 php-via sets `hook_flags` to `Via::defaultHookFlags()`: `SWOOLE_HOOK_ALL`, without
 `SWOOLE_HOOK_NATIVE_CURL` on libcurl 8.20 or newer, where that hook segfaults the worker on a
 curl request to any host name (curl#21558). MySQL (mysqlnd) and Redis (phpredis, predis) calls,
-HTTP calls, file access, `sleep()`/`usleep()`, `proc_open()` and shell commands then suspend
-the coroutine instead of blocking the worker. File and stdio calls go through a per-worker
+HTTP calls over PHP streams, file access, `sleep()`/`usleep()`, `proc_open()` and shell commands
+then suspend the coroutine instead of blocking the worker. Curl requests (Guzzle's curl handlers,
+Symfony's `CurlHttpClient`) suspend only under `SWOOLE_HOOK_NATIVE_CURL`, so on libcurl 8.20 or
+newer each one blocks the worker until it returns. File and stdio calls go through a per-worker
 thread pool: a 91 KB read costs 142 µs instead of 4.5 µs.
 
 Never hooked, so they block the worker under any flags: pgsql/pdo_pgsql (use
@@ -473,9 +475,9 @@ family (`stat()`, `filemtime()`, `file_exists()`, `realpath()`), `include`, `ech
 `error_log()`. A hooked connection must not be shared by two coroutines at once.
 
 ```php
-// No file and stdio hooks (5886 on OpenSwoole 26.2), minus native curl where the default drops it.
+// No file, stdio or native curl hooks (1790 on OpenSwoole 26.2), so curl requests block.
 // Only for apps that run no exec()/system()/popen() and hold no flock() across a suspension.
-$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO & Via::defaultHookFlags()]);
+$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
 
 // Cap the file thread pool: setAio(), before start(); aio_* in withSwooleSettings() fail at start-up
 OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);

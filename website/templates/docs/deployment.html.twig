@@ -233,8 +233,11 @@ opcache.jit_buffer_size=32M
         newer, where that hook crashes workers (see <a href="#hooks-bugs">the bug list</a>). The framework
         itself needs only the socket hooks, for <a href="/docs/broker#redisbroker">RedisBroker</a>: the rest
         of it uses OpenSwoole's coroutine APIs, and it reads its shell template, static files and Dev Bar
-        assets once per worker. The other hooks are for your code, so that database queries, HTTP calls,
-        file access, sleeps and shell commands in actions and views suspend instead of stopping the worker.
+        assets once per worker. The other hooks are for your code, so that database queries, HTTP calls
+        over PHP streams, file access, sleeps and shell commands in actions and views suspend instead of
+        stopping the worker. Curl requests, such as Guzzle's curl handlers and Symfony's
+        <code>CurlHttpClient</code>, suspend only under <code>SWOOLE_HOOK_NATIVE_CURL</code>: on libcurl 8.20
+        or newer the default leaves it out, and each curl request blocks the worker until it returns.
     </p>
     <p>
         File and stdio hooks cost CPU: each hooked file call is handed to a thread pool and back, 6 to
@@ -254,7 +257,7 @@ opcache.jit_buffer_size=32M
             <tr><td><code>SWOOLE_HOOK_STDIO</code></td><td>Every stream on a file descriptor: <code>STDIN</code>, <code>STDOUT</code>, <code>STDERR</code>, temporary files, and the pipes of <code>exec()</code>, <code>system()</code>, <code>passthru()</code>, <code>shell_exec()</code>, backticks and <code>popen()</code></td></tr>
             <tr><td><code>SWOOLE_HOOK_SLEEP</code></td><td><code>sleep()</code>, <code>usleep()</code> and <code>time_nanosleep()</code>, which become timers</td></tr>
             <tr><td><code>SWOOLE_HOOK_PROC</code></td><td><code>proc_open()</code> and the other <code>proc_*</code> functions</td></tr>
-            <tr><td><code>SWOOLE_HOOK_NATIVE_CURL</code></td><td>All <code>curl_*</code> functions, so Guzzle's curl handlers and Symfony's <code>CurlHttpClient</code> run on the event loop</td></tr>
+            <tr><td><code>SWOOLE_HOOK_NATIVE_CURL</code></td><td>All <code>curl_*</code> functions, so Guzzle's curl handlers and Symfony's <code>CurlHttpClient</code> run on the event loop. Only in an OpenSwoole built with <code>--enable-hook-curl</code>: <code>php --ri openswoole</code> then shows <code>hook-curl =&gt; enabled</code>.</td></tr>
         </tbody>
     </table>
     <p>
@@ -296,9 +299,9 @@ opcache.jit_buffer_size=32M
 
     <h3 id="hooks-narrow">Hooks without file and stdio I/O</h3>
     <p>
-        <code>Via::HOOK_FLAGS_NO_FILE_IO</code> (5886 on OpenSwoole 26.2) keeps the socket, stream, sleep,
-        <code>proc_open()</code> and native curl hooks and drops <code>SWOOLE_HOOK_FILE</code> and
-        <code>SWOOLE_HOOK_STDIO</code>. File and stdio calls then run on the worker's own thread: a 1.3&nbsp;KB
+        <code>Via::HOOK_FLAGS_NO_FILE_IO</code> (1790 on OpenSwoole 26.2) keeps the socket, stream, sleep and
+        <code>proc_open()</code> hooks and drops <code>SWOOLE_HOOK_FILE</code>, <code>SWOOLE_HOOK_STDIO</code>
+        and <code>SWOOLE_HOOK_NATIVE_CURL</code>. File and stdio calls then run on the worker's own thread: a 1.3&nbsp;KB
         read takes 2&nbsp;µs instead of 44&nbsp;µs and <code>flock()</code> 0.7&nbsp;µs instead of 28&nbsp;µs,
         <code>fsync()</code> works, and workers start no thread pool for files. A connection by host name still
         starts one for DNS.
@@ -306,8 +309,7 @@ opcache.jit_buffer_size=32M
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Via;
 
-// "& Via::defaultHookFlags()" also drops the native curl hook on libcurl 8.20 or newer
-$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO & Via::defaultHookFlags()]);
+$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
     {% endverbatim %}{% endcode %}
     <p>
         It suits an app that runs no shell commands, holds no file lock across a suspension and reads only
@@ -318,6 +320,9 @@ $config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO & Via::d
         <li>A <code>flock()</code> held across a database query, an HTTP call or a sleep deadlocks the worker for good once a second request on it waits for the same lock: the waiting request blocks the worker, so the holder never resumes to release it. A lock around a write with nothing in between is fine.</li>
         <li>Large reads and reads from slow volumes such as NFS or FUSE block the worker: a 64&nbsp;MB read held it for 36&nbsp;ms.</li>
         <li>Writes to <code>STDERR</code> block when the pipe behind it backs up, as Docker's and supervisord's log capture can.</li>
+        <li>Curl requests block the worker until they return. On libcurl older than 8.20,
+            <code>Via::HOOK_FLAGS_NO_FILE_IO | SWOOLE_HOOK_NATIVE_CURL</code> makes them suspend, and the other two
+            native curl bugs in <a href="#hooks-bugs">the list above</a> then apply.</li>
     </ul>
     <p>
         Never drop <code>SWOOLE_HOOK_FILE</code> alone. With <code>SWOOLE_HOOK_STDIO</code> still on,
