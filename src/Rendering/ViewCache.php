@@ -11,6 +11,8 @@ namespace Mbolli\PhpVia\Rendering;
  * to avoid re-rendering identical views for multiple clients.
  */
 class ViewCache {
+    private const int MAX_GENERATIONS = 10_000;
+
     /** @var array<string, string> Cached HTML by scope */
     private array $cache = [];
 
@@ -60,6 +62,13 @@ class ViewCache {
     public function invalidate(string $scope): void {
         unset($this->cache[$this->getCacheKey($scope, false)], $this->cache[$this->getCacheKey($scope, true)]);
         $this->generations[$scope] = ($this->generations[$scope] ?? 0) + 1;
+
+        // Per-entity scopes (one per room or visitor) would grow the map for the life of the worker.
+        // A new epoch voids every token handed out, which costs at most one extra render each.
+        if (\count($this->generations) > self::MAX_GENERATIONS) {
+            $this->generations = [];
+            ++$this->epoch;
+        }
     }
 
     /**
