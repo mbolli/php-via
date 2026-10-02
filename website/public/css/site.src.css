@@ -87,6 +87,20 @@
   --glass-bg:     var(--surface-2);
   --glass-border: var(--border);
   --glass-blur:   none;
+
+  /* The tokens the Starbase components read (public/vendor/starbase). They follow the scheme
+     through the tokens above; the code boxes set their own below. */
+  --sb-brand:          var(--px-violet);
+  --sb-surface-raised: var(--surface-2);
+  --sb-border:         var(--border);
+  --sb-border-strong:  var(--border-strong);
+  --sb-text-1:         var(--text-1);
+  --sb-text-2:         var(--text-2);
+  --sb-ok:             var(--live);
+  --sb-danger:         var(--danger);
+  --sb-text-on-danger: var(--on-brand);
+  --sb-radius-sm:      0;
+  --sb-focus-ring:     0 0 0 2px var(--surface-1), 0 0 0 4px var(--brand-accent);
 }
 
 @media (prefers-color-scheme: light) {
@@ -2917,18 +2931,32 @@ stock-chart {
   border: none;
   padding: 0;
 }
-.px-install-copy {
-  flex: none;
-  font-family: var(--font-ui);
-  font-size: 0.72rem;
-  font-weight: var(--font-weight-6);
-  padding: 0.3rem 0.65rem;
-  border: 1px solid var(--code-border);
-  background: var(--code-head);
-  color: #b9bde3;
-  cursor: pointer;
+
+/* sb-copy-button in the code boxes, which stay dark in both schemes */
+.px-install,
+.px-pair-link {
+  --sb-surface-raised: var(--code-head);
+  --sb-border:         var(--code-border);
+  --sb-border-strong:  var(--px-blue);
+  --sb-text-1:         #ffffff;
+  --sb-text-2:         #b9bde3;
+  --sb-ok:             var(--px-green);
+  --sb-danger:         var(--px-red);
+  --sb-text-on-danger: var(--px-navy-0);
+  --sb-focus-ring:     0 0 0 2px var(--code-bg), 0 0 0 4px var(--px-yellow);
 }
-.px-install-copy:hover { color: #ffffff; border-color: #5b9bf5; }
+sb-copy-button { flex: none; }
+/* The size of the defined button, so the box does not grow when the module loads */
+sb-copy-button:not(:defined) { display: inline-block; inline-size: calc(2rem + 2px); block-size: calc(2rem + 2px); }
+sb-copy-button::part(tip) {
+  border-radius: 0;
+  font-family: var(--font-ui);
+  box-shadow: 2px 2px 0 0 var(--shadow-hard);
+}
+sb-copy-button::part(manual) {
+  font-family: var(--font-ui);
+  box-shadow: 4px 4px 0 0 var(--shadow-hard);
+}
 @media (max-width: 400px) {
   .px-install { font-size: 0.8rem; gap: 0.5rem; }
 }
@@ -3020,8 +3048,17 @@ stock-chart {
   border: 2px solid var(--border-strong);
   box-shadow: 4px 4px 0 0 var(--shadow-hard);
 }
-/* The QR code is 41 modules at 5 px (px-qr.js); the box is reserved before the script draws it */
-px-qr { display: block; inline-size: 205px; aspect-ratio: 1; background: #f3f4fa; }
+/* 41 modules at 5 px for the live pairing URL, reserved before sb-qr-code draws them. Dark modules
+   on a light ground in both schemes, because some phone cameras do not read inverted codes. */
+.px-qr sb-qr-code {
+  --sb-qr-color: #10122e;
+  --sb-qr-background: #f3f4fa;
+  --sb-qr-accent: #5a3fd6;
+  display: block;
+  inline-size: 205px;
+  aspect-ratio: 1;
+  background: #f3f4fa;
+}
 
 .px-pair-link {
   display: flex;

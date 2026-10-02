@@ -12,6 +12,7 @@ use OpenSwoole\Timer;
 use PhpVia\Website\Pairing\PairingDemo;
 use PhpVia\Website\Pairing\PairingStore;
 use PhpVia\Website\Pairing\RequestOrigin;
+use PhpVia\Website\StarbaseComponents;
 use PhpVia\Website\StaticPage;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
@@ -53,6 +54,9 @@ $config = (new Config())
     // still capping a flood.
     ->withActionRateLimit((int) (getenv('VIA_ACTION_RATE_LIMIT') ?: 1200), 60)
 ;
+
+// The Datastar + Rocket build, and the Starbase components the site copies into public/vendor/starbase
+StarbaseComponents::register($config->withDatastarRocket());
 
 if (!$isDev) {
     // Production hardening: Secure cookie flag (HTTPS) + explicit trusted origins.
@@ -133,8 +137,6 @@ $cssPath = __DIR__ . '/public/css/site.css';
 $twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
 $workerPath = __DIR__ . '/public/upload-worker.js';
 $twig->addGlobal('workerVersion', (string) (file_exists($workerPath) ? filemtime($workerPath) : time()));
-$qrPath = __DIR__ . '/public/js/px-qr.js';
-$twig->addGlobal('qrVersion', (string) (file_exists($qrPath) ? filemtime($qrPath) : time()));
 $siteOrigin = 'https://via.zweiundeins.gmbh';
 $twig->addGlobal('siteUrl', $siteOrigin . '/');
 

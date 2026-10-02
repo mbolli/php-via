@@ -4,7 +4,7 @@
         <code class="px-tag px-tag--scope">{{ scope }}</code>
     </div>
     <div class="px-pair-body">
-        <div class="px-qr" role="img" aria-label="QR code for {{ url }}"><px-qr value="{{ url }}"></px-qr></div>
+        <div class="px-qr" role="img" aria-label="QR code for {{ url }}"><sb-qr-code value="{{ url }}" border="4" accent aria-hidden="true"></sb-qr-code></div>
         <div class="px-pair-text">
             <h2 id="px-pair-title">
                 <span class="px-pair-desktop">Pair this tab with your phone</span>
@@ -22,8 +22,8 @@
         </div>
     </div>
     <div class="px-pair-link">
-        <code id="px-pair-url">{{ url }}</code>
-        <button type="button" class="px-install-copy" data-copy="px-pair-url">Copy</button>
+        <code>{{ url }}</code>
+        <sb-copy-button value="{{ url }}" label="Copy the pairing link"></sb-copy-button>
     </div>
     <p class="px-pair-alt">
         <span class="px-pair-desktop">No phone at hand?</span>

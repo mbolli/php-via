@@ -56,8 +56,8 @@
 
             <div class="px-install">
                 <span class="px-install-prompt" aria-hidden="true">$</span>
-                <code id="px-install-cmd">composer require mbolli/php-via</code>
-                <button type="button" class="px-install-copy" data-copy="px-install-cmd">Copy</button>
+                <code>composer require mbolli/php-via</code>
+                <sb-copy-button value="composer require mbolli/php-via" label="Copy the install command"></sb-copy-button>
             </div>
 
             <div class="px-hero-status">
@@ -458,27 +458,14 @@ $app->start();
     </div>
 </section>
 
-<script>
-(function () {
-    if (!navigator.clipboard) {
-        document.querySelectorAll('[data-copy]').forEach(function (btn) { btn.hidden = true; });
-        return;
-    }
-    // Delegated, so the button in the pairing panel keeps working after Datastar morphs it
-    document.addEventListener('click', function (event) {
-        var btn = event.target.closest('[data-copy]');
-        var source = btn && document.getElementById(btn.dataset.copy);
-        if (!source) return;
-        navigator.clipboard.writeText(source.textContent.trim()).then(function () {
-            btn.textContent = 'Copied';
-            setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
-        });
-    });
-}());
-</script>
-
 {% endblock %}
 
 {% block foot_scripts %}
-<script type="module" src="{{ basePath }}js/px-qr.js?v={{ qrVersion }}"></script>
+<script type="module">import 'sb-copy-button'</script>
+<script type="module">
+// site.css hides the QR code on phones, where there is nothing to scan
+const narrow = matchMedia('(max-width: 640px)')
+const load = () => import('sb-qr-code')
+narrow.matches ? narrow.addEventListener('change', load, { once: true }) : load()
+</script>
 {% endblock %}

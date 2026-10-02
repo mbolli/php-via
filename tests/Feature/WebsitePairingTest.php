@@ -192,17 +192,18 @@ describe('PairingStore', function (): void {
 });
 
 describe('Pairing a homepage tab with the phone page', function (): void {
-    test('the homepage shows a link and a QR code element for the URL of its own code', function (): void {
+    test('the homepage shows a link, a copy button and a QR code element for the URL of its own code', function (): void {
         [$app] = pairingApp(new PairingStore());
         [$desk, $html] = pairingOpen($app, '/', '/_/desk1', attributes: [RequestOrigin::ATTRIBUTE => 'http://192.168.1.20:3000']);
         $code = pairingCode($desk);
         $url = 'http://192.168.1.20:3000/pair/' . $code;
 
         expect(PairingStore::isWellFormed($code))->toBeTrue()
-            ->and($html)->toContain('<code id="px-pair-url">' . $url . '</code>')
+            ->and($html)->toContain('<code>' . $url . '</code>')
+            ->and($html)->toContain('<sb-copy-button value="' . $url . '" label="Copy the pairing link"></sb-copy-button>')
             ->and($html)->toContain('href="' . $url . '"')
-            // The browser draws the code (public/js/px-qr.js); the server sends only the URL.
-            ->and($html)->toContain('<div class="px-qr" role="img" aria-label="QR code for ' . $url . '"><px-qr value="' . $url . '"></px-qr></div>')
+            // The browser draws the code (sb-qr-code); the server sends only the URL.
+            ->and($html)->toContain('<div class="px-qr" role="img" aria-label="QR code for ' . $url . '"><sb-qr-code value="' . $url . '" border="4" accent aria-hidden="true"></sb-qr-code></div>')
             ->and($html)->not->toContain('<svg')
             ->and(pairingShownColour($html))->toBe(PairingStore::DEFAULT_COLOUR)
         ;
@@ -228,7 +229,7 @@ describe('Pairing a homepage tab with the phone page', function (): void {
         expect($deskFrames)->toHaveCount(1)
             ->and(pairingShownColour($deskFrames[0]))->toBe('orange')
             // The same value, so the morph leaves the drawn code alone
-            ->and($deskFrames[0])->toContain('<px-qr value="https://example.test/pair/' . $code . '"></px-qr>')
+            ->and($deskFrames[0])->toContain('<sb-qr-code value="https://example.test/pair/' . $code . '" border="4" accent aria-hidden="true"></sb-qr-code>')
             ->and($deskFrames[0])->toMatch('/aria-pressed="true"\s+data-on:click="@post\(\'\/_action\/pairing-pick\?colour=orange\'\)"/')
             ->and($phoneFrames)->toHaveCount(1)
             ->and($phoneFrames[0])->toStartWith('<div id="pair-widget"')
@@ -339,7 +340,7 @@ describe('Pairing a homepage tab with the phone page', function (): void {
 
         expect($revived)->not->toBeNull()
             ->and(pairingCode($revived))->toBe($code)
-            ->and($app->buildHtmlDocument($revived))->toContain('<px-qr value="http://192.168.1.20:3000/pair/' . $code . '"></px-qr>')
+            ->and($app->buildHtmlDocument($revived))->toContain('<sb-qr-code value="http://192.168.1.20:3000/pair/' . $code . '"')
         ;
 
         pairingFrames($revived);
@@ -350,7 +351,7 @@ describe('Pairing a homepage tab with the phone page', function (): void {
             ->and(pairingShownColour($frames[0]))->toBe('yellow')
         ;
     });
-    test('a revived tab whose pair is gone gets a new code, and the connect sends its URL to the QR element', function (): void {
+    test('a revived tab whose pair is gone gets a new code, and the connect sends its URL to the QR element and the copy button', function (): void {
         $now = 1_000_000;
         $store = new PairingStore(function () use (&$now): int {
             return $now;
@@ -371,8 +372,10 @@ describe('Pairing a homepage tab with the phone page', function (): void {
         pairingFrames($revived);
         $revived->sync();
 
+        $frames = implode('', pairingFrames($revived));
         expect($newCode)->not->toBe($code)
-            ->and(implode('', pairingFrames($revived)))->toContain('<px-qr value="https://example.test/pair/' . $newCode . '"></px-qr>')
+            ->and($frames)->toContain('<sb-qr-code value="https://example.test/pair/' . $newCode . '"')
+            ->and($frames)->toContain('<sb-copy-button value="https://example.test/pair/' . $newCode . '"')
         ;
     });
 });
