@@ -46,11 +46,24 @@ class Application {
      */
     private const int MAX_REVIVABLE = 10_000;
 
+    /** Longest stretch destroyExpired() runs before it lets the event loop serve requests again. */
+    private const int DESTROY_SLICE_NS = 10_000_000;
+
     /** @var array<string, Context> */
     private array $contexts = [];
 
     /** @var array<string, int> Cleanup timer IDs for contexts */
     private array $cleanupTimers = [];
+
+    /** @var array<string, array{0: int, 1: null|callable(): bool}> Contexts whose cleanup timer fired: delay and active check by ID */
+    private array $expired = [];
+
+    private bool $destroyingExpired = false;
+
+    private bool $destroyExpiredScheduled = false;
+
+    /** @var \Closure(\Closure(): void): void runs the rest of destroyExpired() in a later pass of the event loop */
+    private \Closure $defer;
 
     /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}> Client info by context ID */
     private array $clients = [];
@@ -116,6 +129,9 @@ class Application {
         private ActionRegistry $actionRegistry,
     ) {
         $this->initializeTwig();
+        $this->defer = static function (\Closure $next): void {
+            Timer::after(1, $next);
+        };
     }
 
     /**
@@ -530,30 +546,30 @@ class Application {
     public function scheduleContextCleanup(string $contextId, ?int $delayMs = null, ?callable $isActiveCheck = null): void {
         $delayMs ??= $this->config->getContextCleanupDelayMs();
 
-        // Cancel any existing cleanup timer
-        if (isset($this->cleanupTimers[$contextId])) {
-            Timer::clear($this->cleanupTimers[$contextId]);
-            unset($this->cleanupTimers[$contextId]);
-        }
+        $this->cancelContextCleanup($contextId);
 
-        // Schedule cleanup after delay
         $timerId = Timer::after($delayMs, function () use ($contextId, $delayMs, $isActiveCheck): void {
-            try {
-                if ($isActiveCheck !== null && $isActiveCheck()) {
-                    // SSE still connected: reschedule instead of destroying.
-                    $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
-                    $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
-
-                    return;
-                }
-
-                $this->destroyContext($contextId);
-            } catch (\Throwable $e) {
-                $this->logger->log('error', "Context cleanup failed for {$contextId}: " . Logger::describe($e));
-            }
+            $this->cleanupTimerFired($contextId, $delayMs, $isActiveCheck);
         });
 
         $this->cleanupTimers[$contextId] = $timerId;
+    }
+
+    /**
+     * Queue a context whose cleanup timer fired. destroyExpired() empties the queue in later passes of the event
+     * loop, so thousands of timers firing in one pass cannot hold it.
+     *
+     * @param null|callable(): bool $isActiveCheck see scheduleContextCleanup()
+     *
+     * @internal called by the cleanup timer, and by tests
+     */
+    public function cleanupTimerFired(string $contextId, int $delayMs, ?callable $isActiveCheck): void {
+        unset($this->cleanupTimers[$contextId]);
+        $this->expired[$contextId] = [$delayMs, $isActiveCheck];
+        if (!$this->destroyingExpired && !$this->destroyExpiredScheduled) {
+            $this->destroyExpiredScheduled = true;
+            ($this->defer)(fn () => $this->destroyExpired());
+        }
     }
 
     /**
@@ -586,6 +602,7 @@ class Application {
      * Cancel scheduled context cleanup.
      */
     public function cancelContextCleanup(string $contextId): void {
+        unset($this->expired[$contextId]);
         if (isset($this->cleanupTimers[$contextId])) {
             Timer::clear($this->cleanupTimers[$contextId]);
             unset($this->cleanupTimers[$contextId]);
@@ -665,6 +682,43 @@ class Application {
     public function releaseComponent(Context $component): void {
         $component->cleanup();
         $this->scopeRegistry->unregisterContextFromAllScopes($component);
+    }
+
+    /**
+     * Destroy the contexts whose cleanup timer fired, giving the event loop back every DESTROY_SLICE_NS.
+     */
+    private function destroyExpired(): void {
+        $this->destroyExpiredScheduled = false;
+        $this->destroyingExpired = true;
+        $sliceEnd = hrtime(true) + self::DESTROY_SLICE_NS;
+
+        try {
+            while (($contextId = array_key_first($this->expired)) !== null) {
+                [$delayMs, $isActiveCheck] = $this->expired[$contextId];
+                unset($this->expired[$contextId]);
+
+                try {
+                    if ($isActiveCheck !== null && $isActiveCheck()) {
+                        // SSE still connected: reschedule instead of destroying.
+                        $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
+                        $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
+                    } else {
+                        $this->destroyContext($contextId);
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->log('error', "Context cleanup failed for {$contextId}: " . Logger::describe($e));
+                }
+
+                if ($this->expired !== [] && hrtime(true) >= $sliceEnd) {
+                    $this->destroyExpiredScheduled = true;
+                    ($this->defer)(fn () => $this->destroyExpired());
+
+                    return;
+                }
+            }
+        } finally {
+            $this->destroyingExpired = false;
+        }
     }
 
     /**
