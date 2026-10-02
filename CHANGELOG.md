@@ -46,6 +46,8 @@ All notable changes to php-via will be documented in this file.
   cached for a year by default. Load Datastar from it in custom shells (`{{ datastar_url }}`) and Twig
   layouts (`datastarUrl`): an unversioned `datastar.js` stays cached for up to an hour after an
   upgrade. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
+- **A `withStaticCacheControl()` closure can return `null`** to keep the default policy for a file,
+  so per-file rules no longer lose the year-long cache of `/datastar.js?v=`.
 - **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
   on web components. The Twig `bind()` function takes the property as a second argument.
 - **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
