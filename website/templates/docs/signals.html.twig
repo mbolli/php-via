@@ -25,19 +25,20 @@ $count->setValue(42); // update — queues a patch to every subscribed client
     {% endverbatim %}{% endcode %}
 
     <h2 id="binding-in-templates">Binding in templates</h2>
-    <p>In a Twig template, use Datastar attributes to bind signals to the DOM:</p>
+    <p>
+        In a Twig template, use Datastar attributes to bind signals to the DOM. A signal's id includes
+        the tab, so always write it from the signal object (<code>{% verbatim %}{{ count.id }}{% endverbatim %}</code>),
+        never by hand:
+    </p>
     {% code 'html' %}{% verbatim %}
-<!-- Display value (one-way, signal named 'count') -->
-<span data-text="${count}"></span>
+<!-- Display value (one-way); data-text takes a $ expression -->
+<span data-text="${{ count.id }}"></span>
 
-<!-- Two-way binding for input (signal named 'step') -->
-<input data-bind="step" type="number">
+<!-- Two-way binding for an input -->
+<input data-bind="{{ step.id }}" type="number">
 
 <!-- Conditional visibility -->
-<div data-show="$visible">...</div>
-
-<!-- Use signal.id() when the name is auto-generated -->
-<span data-text="{{ count.id() }}"></span>
+<div data-show="${{ visible.id }}">...</div>
     {% endverbatim %}{% endcode %}
 
     <h2 id="scopes">Scopes &amp; sharing</h2>
