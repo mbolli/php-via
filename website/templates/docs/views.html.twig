@@ -101,10 +101,11 @@ $c->view(function (bool $isUpdate) use ($c, $data): string {
 });
 {% endverbatim %}{% endcode %}
         <p>
-            On a page with <a href="/docs/components">components</a>, render them inside the part an update
-            returns, and don't return <code>''</code> on updates. A revived tab mounts its components again
-            under new ids, and only the page frame can put those ids into the page. Without it, the
-            components' updates find no element to patch.
+            On a page with <a href="/docs/components">components</a>, give each component a name
+            (<code>$c->component($fn, 'cart')</code>). A named component gets the same id every time its page
+            is built, so a revived tab's component updates find the elements the browser still has, even when
+            the page returns <code>''</code> on updates. An unnamed component gets a new id on revival, and only
+            a page frame that renders it again can put that id into the page.
         </p>
     </details>
 
@@ -134,8 +135,10 @@ $c->action(function (Context $c) use ($status): void {
     <h2 id="caching">View caching</h2>
     <p>
         Update renders are cached per scope: when a broadcast reaches a scope, the first context renders its
-        view and every other context in the scope receives the same HTML. Each broadcast renders afresh, so a
-        view that reads state outside signals, such as <code>$app->getClients()</code>, is still current.
+        view and every other context in the scope receives the same HTML. A broadcast drops the cached update
+        of every context it reaches, whether through its primary scope, another scope, a wildcard or
+        <code>Scope::GLOBAL</code>, so a view that reads state outside signals, such as
+        <code>$app->getClients()</code>, is current after each broadcast.
     </p>
     <p>
         Turn caching off with <code>cacheUpdates: false</code> when the view differs per client (it reads TAB

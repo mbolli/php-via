@@ -295,7 +295,7 @@ Co::run(function () use ($o, $port, $pids, $worker, $origin, $browser): void {
     $sharedSig = $o['shared'] ?? 'home_counter_shared_counter_counter____ckdn';
     $tabSig = $o['tabsig'] ?? 'session_counter_count____dn';
     $tabAction = $o['tabaction'] ?? '/_action/session-counter-increment';
-    $bcAction = $o['bcaction'] ?? '/_action/increment';
+    $bcAction = $o['bcaction'] ?? '/_action/shared-counter-increment';
     $stop = false;
     $stopFn = static function () use (&$stop): bool { return $stop; };
 

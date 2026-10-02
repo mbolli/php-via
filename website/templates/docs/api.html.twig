@@ -316,7 +316,13 @@ $status = $c->signal('idle', 'status', clientWritable: false);
         warning gives the type and size of both values, not their content.
     </p>
 
-    <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>
+    <h3 id="context-action"><code>action(callable $fn, ?string $name = null, ?string $scope = null): Action</code></h3>
+    <p>
+        The action belongs to <code>$scope</code>, or to the context's primary scope when it is null. A TAB
+        action is the context's own; a scoped action is shared by every context in its scope and needs a
+        name. Inside a component, the action reads the page's request through <code>$c->input()</code>,
+        <code>$c->file()</code> and <code>$c->cookie()</code>.
+    </p>
     {% code 'php' %}{% verbatim %}
 $inc = $c->action(function (Context $c) use ($count): void {
     $count->setValue($count->int() + 1);
