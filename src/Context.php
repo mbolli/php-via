@@ -471,6 +471,10 @@ class Context {
         $this->signalFactory->clearSignals();
         $this->seedWait = null;
         $this->actionRegistry = [];
+        // A component that joined a scope is registered there itself and would outlive the page.
+        foreach ($this->componentManager->getComponents() as $component) {
+            $this->app->getApp()->releaseComponent($component);
+        }
         $this->componentManager->clearComponents();
         $this->viewFn = null;
     }

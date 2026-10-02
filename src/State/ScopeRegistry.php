@@ -18,6 +18,14 @@ class ScopeRegistry {
     private array $registry = [];
 
     /**
+     * Where each context is registered, so teardown finds every entry. A context's own scope list
+     * can miss some: scope() replaces the list, and the TAB entry is added outside it.
+     *
+     * @var array<string, array<string, true>> contextId => [scope => true]
+     */
+    private array $scopesByContext = [];
+
+    /**
      * Register a context under a specific scope.
      *
      * @param Context $context Context to register
@@ -28,6 +36,7 @@ class ScopeRegistry {
             $this->registry[$scope] = [];
         }
         $this->registry[$scope][$context->getId()] = $context;
+        $this->scopesByContext[$context->getId()][$scope] = true;
     }
 
     /**
@@ -39,6 +48,12 @@ class ScopeRegistry {
      * @return bool True if scope became empty after unregistration
      */
     public function unregisterContext(Context $context, string $scope): bool {
+        $contextId = $context->getId();
+        unset($this->scopesByContext[$contextId][$scope]);
+        if (($this->scopesByContext[$contextId] ?? null) === []) {
+            unset($this->scopesByContext[$contextId]);
+        }
+
         if (isset($this->registry[$scope])) {
             unset($this->registry[$scope][$context->getId()]);
 
@@ -54,7 +69,7 @@ class ScopeRegistry {
     }
 
     /**
-     * Unregister a context from all its scopes.
+     * Unregister a context from every scope it is registered in.
      *
      * @param Context $context Context to unregister
      *
@@ -62,8 +77,9 @@ class ScopeRegistry {
      */
     public function unregisterContextFromAllScopes(Context $context): array {
         $emptyScopes = [];
+        $scopes = array_keys($this->scopesByContext[$context->getId()] ?? []);
 
-        foreach ($context->getScopes() as $scope) {
+        foreach (array_unique([...$context->getScopes(), ...$scopes]) as $scope) {
             if ($this->unregisterContext($context, $scope)) {
                 $emptyScopes[] = $scope;
             }

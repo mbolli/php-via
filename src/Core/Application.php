@@ -636,6 +636,16 @@ class Application {
     }
 
     /**
+     * Tear down a component context with its page: run its cleanup and leave its scopes.
+     *
+     * @internal called by Context::cleanup() for each of its components
+     */
+    public function releaseComponent(Context $component): void {
+        $component->cleanup();
+        $this->releaseScopes($component);
+    }
+
+    /**
      * Remove a context from all its scopes and clear the signals and actions of scopes left empty.
      */
     private function releaseScopes(Context $context): void {
