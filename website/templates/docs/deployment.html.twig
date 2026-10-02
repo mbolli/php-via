@@ -153,7 +153,7 @@ $config = (new Config())
     <p>Compression levels:</p>
     <ul>
         <li><strong>Pages and SSE</strong>: level 4 (fast; runs in the hot path)</li>
-        <li><strong>Static assets</strong>: level 11 (max ratio; compressed once and cached for the worker lifetime)</li>
+        <li><strong>Static assets</strong>: level 11 (max ratio; compressed once per worker and kept in memory until the file changes; files over 2&nbsp;MiB are sent uncompressed)</li>
     </ul>
 
     <h2 id="production-config">Production config</h2>
@@ -214,11 +214,161 @@ opcache.jit_buffer_size=32M
         <li>
             <strong>Never use <code>opcache.jit=function</code> with OpenSwoole.</strong> Function-mode
             JIT compiles <code>usleep()</code> / <code>sleep()</code> as regular blocking calls, bypassing
-            OpenSwoole's coroutine hook (<code>SWOOLE_HOOK_ALL</code>). This turns a non-blocking 2 ms
+            OpenSwoole's sleep hook (<code>SWOOLE_HOOK_SLEEP</code>, see <a href="#hooks">Coroutine hooks</a>). This turns a non-blocking 2 ms
             yield into a thread-blocking sleep and reduces IO concurrency by ~89%.
             Use <code>jit=tracing</code> instead: it does not have this regression.
         </li>
     </ul>
+
+    <h2 id="hooks">Coroutine hooks</h2>
+    <p>
+        A worker serves all its tabs from one thread, so a call that blocks the thread stops every stream,
+        action and page view on that worker until it returns. OpenSwoole's coroutine hooks replace blocking
+        PHP functions with versions that suspend only the calling coroutine, and the
+        <code>hook_flags</code> server setting picks which ones.
+    </p>
+    <p>
+        php-via sets <code>hook_flags</code> to <code>Via::defaultHookFlags()</code>:
+        <code>SWOOLE_HOOK_ALL</code>, without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or
+        newer, where that hook crashes workers (see <a href="#hooks-bugs">the bug list</a>). The framework
+        itself needs only the socket hooks, for <a href="/docs/broker#redisbroker">RedisBroker</a>: the rest
+        of it uses OpenSwoole's coroutine APIs, and it reads its shell template, static files and Dev Bar
+        assets once per worker. The other hooks are for your code, so that database queries, HTTP calls,
+        file access, sleeps and shell commands in actions and views suspend instead of stopping the worker.
+    </p>
+    <p>
+        File and stdio hooks cost CPU: each hooked file call is handed to a thread pool and back, 6 to
+        8&nbsp;µs per handoff, and a 91&nbsp;KB read takes 142&nbsp;µs instead of 4.5&nbsp;µs. Change the flags
+        with <code>withSwooleSettings(['hook_flags' =&gt; ...])</code>, which wins over the default.
+    </p>
+
+    <h3 id="hooks-flags">What each hook covers</h3>
+    <table>
+        <thead>
+            <tr><th>Flag</th><th>Makes these suspend instead of block</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>SWOOLE_HOOK_TCP</code>, <code>_UDP</code>, <code>_UNIX</code>, <code>_UDG</code>, <code>_SSL</code>, <code>_TLS</code></td><td>PHP stream sockets: PDO MySQL and mysqli (mysqlnd), phpredis, predis, php-amqplib, <code>file_get_contents('https://...')</code>. Host names resolve on the thread pool. RedisBroker needs <code>TCP</code>, <code>TLS</code> with <code>tls: true</code>, or <code>UNIX</code> for a socket path.</td></tr>
+            <tr><td><code>SWOOLE_HOOK_STREAM_FUNCTION</code></td><td><code>stream_select()</code> and <code>stream_socket_pair()</code></td></tr>
+            <tr><td><code>SWOOLE_HOOK_FILE</code></td><td>Opening, reading, writing and seeking files, <code>fstat()</code>, <code>unlink()</code>, <code>mkdir()</code>, <code>rename()</code> and directory reads, each on the thread pool. <code>stat()</code>, <code>realpath()</code>, <code>include</code> and <code>fclose()</code> still block.</td></tr>
+            <tr><td><code>SWOOLE_HOOK_STDIO</code></td><td>Every stream on a file descriptor: <code>STDIN</code>, <code>STDOUT</code>, <code>STDERR</code>, temporary files, and the pipes of <code>exec()</code>, <code>system()</code>, <code>passthru()</code>, <code>shell_exec()</code>, backticks and <code>popen()</code></td></tr>
+            <tr><td><code>SWOOLE_HOOK_SLEEP</code></td><td><code>sleep()</code>, <code>usleep()</code> and <code>time_nanosleep()</code>, which become timers</td></tr>
+            <tr><td><code>SWOOLE_HOOK_PROC</code></td><td><code>proc_open()</code> and the other <code>proc_*</code> functions</td></tr>
+            <tr><td><code>SWOOLE_HOOK_NATIVE_CURL</code></td><td>All <code>curl_*</code> functions, so Guzzle's curl handlers and Symfony's <code>CurlHttpClient</code> run on the event loop</td></tr>
+        </tbody>
+    </table>
+    <p>
+        <code>SWOOLE_HOOK_ALL</code> leaves out <code>SWOOLE_HOOK_BLOCKING_FUNCTION</code>
+        (<code>gethostbyname()</code> and <code>exec()</code> on the thread pool), <code>SWOOLE_HOOK_SOCKETS</code>
+        (ext-sockets) and <code>SWOOLE_HOOK_CURL</code>, which has no effect in OpenSwoole 26.2.
+    </p>
+
+    <h3 id="hooks-never">Calls no hook covers</h3>
+    <p>These block the worker under every flag set, and every tab on it waits:</p>
+    <ul>
+        <li>PostgreSQL through <code>pgsql</code> or <code>pdo_pgsql</code>. OpenSwoole's own <code>OpenSwoole\Coroutine\PostgreSQL</code> client suspends; <code>php --ri openswoole</code> shows <code>postgresql =&gt; enabled</code> when the extension has it.</li>
+        <li>SQLite. Short queries on a local file are fine.</li>
+        <li>Extensions with their own network client, such as <code>mongodb</code>, <code>amqp</code> and <code>grpc</code>.</li>
+        <li>The stat family: <code>stat()</code>, <code>filemtime()</code>, <code>file_exists()</code>, <code>is_file()</code>, <code>realpath()</code>.</li>
+        <li><code>include</code> and <code>require</code>.</li>
+        <li><code>echo</code> and <code>error_log()</code>. php-via's logger writes with <code>echo</code>, so a log pipe that backs up stalls the worker.</li>
+    </ul>
+    <p>
+        A hooked connection belongs to one coroutine at a time. When two coroutines use the same PDO or Redis
+        connection at once, OpenSwoole stops the worker with a "bound to another coroutine" error, so give each
+        coroutine its own connection or take one from a pool.
+    </p>
+
+    <h3 id="hooks-bugs">OpenSwoole 26.2 bugs and workarounds</h3>
+    <table>
+        <thead>
+            <tr><th>Bug</th><th>Workaround</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>With libcurl 8.20 or newer, the native curl hook segfaults the worker on a curl request to any host name, whether it resolves or not (<a href="https://github.com/curl/curl/issues/21558" target="_blank" rel="noopener">curl#21558</a>). IP addresses work.</td><td><code>Via::defaultHookFlags()</code> leaves <code>SWOOLE_HOOK_NATIVE_CURL</code> out on these versions, so a curl request blocks the worker until it returns. Flags you pass need the same, and <code>start()</code> logs a warning when they keep it. Guzzle's <code>StreamHandler</code> and <code>OpenSwoole\Coroutine\Http\Client</code> use the socket hooks and still suspend.</td></tr>
+            <tr><td>The hooked <code>curl_setopt()</code> rejects <code>CURLOPT_PREREQFUNCTION</code>, so with <code>SWOOLE_HOOK_NATIVE_CURL</code> on, Guzzle 7.15's default client throws a <code>ValueError</code> on every request, sync and async.</td><td>Guzzle's <code>StreamHandler</code>, Symfony's <code>CurlHttpClient</code>, or <code>OpenSwoole\Coroutine\Http\Client</code></td></tr>
+            <tr><td>With <code>SWOOLE_HOOK_NATIVE_CURL</code> on PHP 8.4 or newer, every request with a header callback leaks about 2.8&nbsp;KB (OpenSwoole issue #391). Guzzle's curl handlers and Symfony's <code>CurlHttpClient</code> always set one.</td><td>Recycle workers with the <code>max_request</code> setting, or use a client without curl</td></tr>
+            <tr><td><code>mysqli_init()</code> followed by a failed <code>real_connect()</code> corrupts the heap and crashes the worker, so a database restart takes workers down.</td><td><code>new mysqli(...)</code> or PDO MySQL, which survive a refused connection</td></tr>
+            <tr><td>The coroutine <code>flock()</code> treats <code>LOCK_UN | LOCK_NB</code> as a lock request, so Symfony Lock's <code>FlockStore</code> hangs on its second acquire in a worker.</td><td>A Redis or database lock store</td></tr>
+            <tr><td><code>fsync()</code> returns <code>false</code> with the warning "Can't fsync this stream!" under <code>SWOOLE_HOOK_FILE</code> or <code>SWOOLE_HOOK_STDIO</code>, and the file is not synced.</td><td>Call it in a process whose flags have neither, such as <code>Via::HOOK_FLAGS_NO_FILE_IO</code></td></tr>
+        </tbody>
+    </table>
+
+    <h3 id="hooks-narrow">Hooks without file and stdio I/O</h3>
+    <p>
+        <code>Via::HOOK_FLAGS_NO_FILE_IO</code> (5886 on OpenSwoole 26.2) keeps the socket, stream, sleep,
+        <code>proc_open()</code> and native curl hooks and drops <code>SWOOLE_HOOK_FILE</code> and
+        <code>SWOOLE_HOOK_STDIO</code>. File and stdio calls then run on the worker's own thread: a 1.3&nbsp;KB
+        read takes 2&nbsp;µs instead of 44&nbsp;µs and <code>flock()</code> 0.7&nbsp;µs instead of 28&nbsp;µs,
+        <code>fsync()</code> works, and workers start no thread pool for files. A connection by host name still
+        starts one for DNS.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Via;
+
+// "& Via::defaultHookFlags()" also drops the native curl hook on libcurl 8.20 or newer
+$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO & Via::defaultHookFlags()]);
+    {% endverbatim %}{% endcode %}
+    <p>
+        It suits an app that runs no shell commands, holds no file lock across a suspension and reads only
+        small local files. Under it:
+    </p>
+    <ul>
+        <li><code>exec()</code>, <code>system()</code>, <code>passthru()</code>, <code>shell_exec()</code>, backticks and <code>popen()</code> block the worker while the command runs: a command that takes one second froze it for 1&nbsp;002&nbsp;ms, against 1.5&nbsp;ms under the default. <code>proc_open()</code> still suspends.</li>
+        <li>A <code>flock()</code> held across a database query, an HTTP call or a sleep deadlocks the worker for good once a second request on it waits for the same lock: the waiting request blocks the worker, so the holder never resumes to release it. A lock around a write with nothing in between is fine.</li>
+        <li>Large reads and reads from slow volumes such as NFS or FUSE block the worker: a 64&nbsp;MB read held it for 36&nbsp;ms.</li>
+        <li>Writes to <code>STDERR</code> block when the pipe behind it backs up, as Docker's and supervisord's log capture can.</li>
+    </ul>
+    <p>
+        Never drop <code>SWOOLE_HOOK_FILE</code> alone. With <code>SWOOLE_HOOK_STDIO</code> still on,
+        <code>include</code> reads through the thread pool and suspends halfway through a file, and a concurrent
+        request then fails with "Class not found". In a load test, php-via's website lost about half its requests that way.
+        <code>start()</code> throws a <code>\RuntimeException</code> for that combination before it binds the
+        port, and for a <code>RedisBroker</code> whose flags lack the socket hook its connection needs.
+    </p>
+
+    <h3 id="hooks-aio">Capping the AIO thread pool</h3>
+    <p>
+        With <code>SWOOLE_HOOK_FILE</code> or <code>SWOOLE_HOOK_STDIO</code> on, each worker starts a thread pool
+        on its first hooked file call: one thread per CPU core, growing to eight per core while tasks wait
+        longer than 1&nbsp;ms, with the extra threads exiting after a second idle. With <code>worker_num</code>
+        at the core count, the thread count grows with the square of the cores. Cap it with
+        <code>OpenSwoole\Util::setAio()</code> before <code>start()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);
+$app->start();
+    {% endverbatim %}{% endcode %}
+    <p>
+        The same keys in <code>withSwooleSettings()</code> stop the server at start-up with "Invalid server
+        option". <code>setAio()</code> accepts misspelled keys without an error, so check the thread count in
+        <code>/_stats</code>.
+    </p>
+
+    <h3 id="hooks-check">Checking the flags at runtime</h3>
+    <p>
+        <code>OpenSwoole\Runtime::getHookFlags()</code> returns the flags in effect in a worker; test one hook
+        with <code>(OpenSwoole\Runtime::getHookFlags() &amp; SWOOLE_HOOK_FILE) !== 0</code>. In dev mode,
+        <code>/_stats</code> reports them under <code>runtime</code>, with the worker's thread pool
+        (<code>aio_worker_num</code> threads, <code>aio_task_num</code> tasks) and its event loop lag, which
+        grows when a call blocks the worker:
+    </p>
+    {% code 'json' %}{% verbatim %}
+"runtime": {
+    "hook_flags": 2147452927,
+    "aio_task_num": 0,
+    "aio_worker_num": 2,
+    "event_loop_lag_ms": 0,
+    "event_loop_lag_max_ms": 0,
+    "event_loop_lag_avg_ms": 0
+}
+    {% endverbatim %}{% endcode %}
+    <p>
+        2147452927 is <code>SWOOLE_HOOK_ALL</code> without <code>SWOOLE_HOOK_NATIVE_CURL</code> on OpenSwoole
+        26.2. Scripts and tests that call <code>Coroutine::run()</code> get <code>SWOOLE_HOOK_ALL</code> when
+        no flags are set, and <code>Coroutine::set(['hook_flags' =&gt; 0])</code> does not turn it off; only a
+        server runs under exactly the flags it is given.
+    </p>
 
     <h2 id="security">Security hardening</h2>
 
@@ -518,6 +668,23 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): s
     <p>
         A string is always taken literally, never invoked as a function name. Pass a closure, or
         first-class callable syntax (<code>$obj->method(...)</code>) for an existing method.
+    </p>
+    <p>
+        Each worker keeps a file in memory after its first request, as sent to Brotli clients and as sent to
+        the others, and reads it again only when its modification time or size changes. It keeps files up to
+        2&nbsp;MiB, and up to 16&nbsp;MiB for each of the two forms; a bigger file, or one that no longer
+        fits, goes out with <code>sendfile()</code> and uncompressed. Dev mode checks the file on every
+        request, so an edit shows up on the next reload; in production, reload the workers after changing
+        files (see <a href="#graceful-restart">Graceful restart</a>).
+    </p>
+    <p>
+        A request path whose last segment has a file extension, such as <code>/css/site.css</code>, is
+        looked up in the static directory before routing. A path without one, such as an ACME challenge
+        token, is looked up only when no route matches, so a route and an extension-less file with the same
+        path serve the route. Paths under <code>/_action/</code>, <code>/_via/</code> and
+        <code>/_session/</code> are never looked up before routing, even with a dot in them. php-via
+        resolves the directory's real path once per worker, so a static directory behind a symlink that a
+        deployment switches needs a reload too.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

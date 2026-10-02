@@ -251,6 +251,19 @@ $app->log('debug', 'Action fired', $c);
     <h3 id="via-start"><code>start(): void</code></h3>
     <p>Start the OpenSwoole server. Call this last, after all routes are registered.</p>
 
+    <h3 id="via-hook-flags"><code>Via::defaultHookFlags(): int</code> and <code>Via::HOOK_FLAGS_NO_FILE_IO</code></h3>
+    <p>
+        <code>defaultHookFlags()</code> returns the <code>hook_flags</code> php-via sets:
+        <code>SWOOLE_HOOK_ALL</code>, without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or
+        newer. <code>HOOK_FLAGS_NO_FILE_IO</code> is the socket, stream, sleep, <code>proc_open()</code> and
+        native curl hooks without file and stdio I/O, 5886 on OpenSwoole 26.2, for apps that run no shell
+        commands and hold no file lock across a suspension. See
+        <a href="/docs/deployment#hooks-narrow">Deployment → Coroutine hooks</a>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO & Via::defaultHookFlags()]);
+    {% endverbatim %}{% endcode %}
+
     ---
 
     <h2 id="context">Context</h2>
@@ -574,7 +587,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
     ->withContextConnectTimeout(30_000) // free a context whose SSE stream never connects; 0 = keep (default 30000)
     ->withContextReconnectTimeout(60_000) // keep a tab whose stream is down this long after an action; 0 = connect timeout (default 60000)
-    ->withSwooleSettings([...])     // raw OpenSwoole server settings
+    ->withSwooleSettings([...])     // raw OpenSwoole server settings, e.g. ['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
@@ -608,6 +621,17 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         (proxy with Caddy/Nginx handling TLS). A hard error is thrown at <code>start()</code> if <code>ext-brotli</code>
         is missing or neither HTTPS mode is configured.
         See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
+    </p>
+    <p>
+        <code>withSwooleSettings(array $settings)</code> passes settings to OpenSwoole's
+        <code>Server::set()</code>, and they win over php-via's defaults. <code>hook_flags</code> defaults
+        to <a href="#via-hook-flags"><code>Via::defaultHookFlags()</code></a>. <code>start()</code> throws
+        <code>\RuntimeException</code> before it binds the port when <code>hook_flags</code> has
+        <code>SWOOLE_HOOK_STDIO</code> without <code>SWOOLE_HOOK_FILE</code>, or lacks the socket hook a
+        <code>RedisBroker</code> needs, and logs a warning when it keeps <code>SWOOLE_HOOK_NATIVE_CURL</code>
+        on libcurl 8.20 or newer. The thread pool limits (<code>aio_*</code>) are not server settings: set
+        them with <code>OpenSwoole\Util::setAio()</code>. See
+        <a href="/docs/deployment#hooks">Deployment → Coroutine hooks</a>.
     </p>
     <p>
         <code>withPersistentGlobalState(string $path, int $flushMs = 1000)</code> keeps GlobalState in a SQLite
