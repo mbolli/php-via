@@ -2157,6 +2157,8 @@ class Via {
 
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
+            // Every context renders, each under its own primary scope's cache entry.
+            $this->viewCache->clear();
             $this->syncContexts($this->contexts, null, $scope, $rendered, $skipRenderedAfter);
             $this->requestLogger->logBroadcast($scope, \count($this->contexts));
 
@@ -2170,9 +2172,11 @@ class Via {
 
             // If no specific route provided, broadcast to all routes
             if ($route === null) {
+                $this->invalidatePrimaryScopes($this->contexts);
                 $this->syncContexts($this->contexts, null, $scope, $rendered, $skipRenderedAfter);
                 $this->requestLogger->logBroadcast($scope, \count($this->contexts));
             } else {
+                $this->invalidatePrimaryScopes(array_filter($this->contexts, static fn (Context $c): bool => $c->getRoute() === $route));
                 $count = $this->syncContexts($this->contexts, $route, $scope, $rendered, $skipRenderedAfter);
                 $this->requestLogger->logBroadcast($scope, $count);
             }
@@ -2182,6 +2186,7 @@ class Via {
 
         // Handle custom scopes (with wildcard support)
         $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
+        $this->invalidatePrimaryScopes($matchedContexts);
         $this->syncContexts($matchedContexts, null, $scope, $rendered, $skipRenderedAfter);
 
         $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
@@ -2795,5 +2800,23 @@ class Via {
      */
     private function invalidateViewCache(string $scope): void {
         $this->viewCache->invalidate($scope);
+    }
+
+    /**
+     * Drop the cached update of each primary scope among $contexts. A context that a broadcast reaches
+     * through a secondary scope, a wildcard or its route renders under its primary scope's entry,
+     * which the broadcast's own scope name does not cover.
+     *
+     * @param array<Context> $contexts
+     */
+    private function invalidatePrimaryScopes(array $contexts): void {
+        $seen = [];
+        foreach ($contexts as $context) {
+            $primary = $context->getPrimaryScope();
+            if ($primary !== Scope::TAB && !isset($seen[$primary])) {
+                $seen[$primary] = true;
+                $this->invalidateViewCache($primary);
+            }
+        }
     }
 }
