@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\ConditionalGet;
+use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Tracing\Tracer;
@@ -701,10 +702,11 @@ class RequestHandler {
     }
 
     /**
-     * Serve Datastar JavaScript file.
+     * Serve the Datastar bundle: the Rocket build with Config::withDatastarRocket(), else the plain one.
      */
     private function serveDatastarJs(Request $request, Response $response): void {
-        $this->sendStaticFile(__DIR__ . '/../../public/datastar.js', 'application/javascript', true, $request, $response);
+        $path = DatastarBundle::path($this->via->getConfig()->isDatastarRocketEnabled());
+        $this->sendStaticFile($path, 'application/javascript', true, $request, $response);
     }
 
     /**
@@ -714,7 +716,8 @@ class RequestHandler {
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
         $contentType = match ($ext) {
             'css' => 'text/css; charset=utf-8',
-            'js' => 'application/javascript',
+            'js', 'mjs' => 'application/javascript',
+            'json', 'map' => 'application/json',
             'svg' => 'image/svg+xml',
             'png' => 'image/png',
             'jpg', 'jpeg' => 'image/jpeg',
@@ -726,7 +729,7 @@ class RequestHandler {
         };
 
         $compressible = match ($ext) {
-            'css', 'js', 'svg', 'json', 'txt', 'html', 'xml' => true,
+            'css', 'js', 'mjs', 'svg', 'json', 'map', 'txt', 'html', 'xml' => true,
             default => false,
         };
 

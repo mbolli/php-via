@@ -55,14 +55,15 @@ class HtmlBuilder {
      * A view that renders its own `<html>` document is completed by injectIntoDocument(); any other
      * view is placed into the shell template.
      *
-     * @param string  $content   Rendered HTML content
-     * @param Context $context   Context for signal injection
-     * @param string  $contextId Context ID for initial signals
-     * @param string  $basePath  Base path for URLs
+     * @param string      $content     Rendered HTML content
+     * @param Context     $context     Context for signal injection
+     * @param string      $contextId   Context ID for initial signals
+     * @param string      $basePath    Base path for URLs
+     * @param null|string $datastarUrl URL of the Datastar bundle, '<basePath>datastar.js' when null
      *
      * @return string Complete HTML document
      */
-    public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
+    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null): string {
         if (stripos($content, '<html') !== false) {
             return $this->injectIntoDocument($content, $context, initial: true);
         }
@@ -85,10 +86,13 @@ class HtmlBuilder {
             $replacements['{{ ' . $name . '.id }}'] = $signal->id();
         }
 
+        $datastarUrl ??= $basePath . 'datastar.js';
         $replacements = [
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
+            '{{ datastar_url }}' => htmlspecialchars($datastarUrl, ENT_QUOTES, 'UTF-8'),
+            '{{ datastar_import_map }}' => self::datastarImportMap($datastarUrl),
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
             '{{ foot_content }}' => implode("\n", $footIncludes),
@@ -213,6 +217,16 @@ class HtmlBuilder {
     }
 
     /**
+     * Import map that resolves the bare specifier 'datastar' (what Rocket components import) to the
+     * module the page loads from $datastarUrl, so the page runs one Datastar engine.
+     */
+    private static function datastarImportMap(string $datastarUrl): string {
+        $json = json_encode(['imports' => ['datastar' => $datastarUrl]], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR);
+
+        return '<script type="importmap">' . $json . '</script>';
+    }
+
+    /**
      * JSON for a value that ends up in a Datastar attribute.
      */
     private function encodeJson(mixed $value): ?string {
@@ -221,8 +235,8 @@ class HtmlBuilder {
             return null;
         }
 
-        // Datastar compiles attributes as JS: it rewrites `@name(` inside strings, misreads `\\"` when splitting
-        // on `;`, and treats its emoji markers as raw code, so those characters stay \u-escaped.
+        // Datastar compiles attributes as JS and splits statements on `;` with a pattern that misreads `\\"`.
+        // `@` stays escaped for layouts on Datastar before 1.0.4, which rewrote `@name(` inside strings.
         return strtr($json, ['@' => '\u0040', ';' => '\u003b', '\\\\' => '\u005c']);
     }
 

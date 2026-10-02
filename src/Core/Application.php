@@ -812,6 +812,7 @@ class Application {
 
         // Add global variables
         $this->twig->addGlobal('basePath', $this->config->getBasePath());
+        $this->twig->addGlobal('datastarUrl', $this->config->getDatastarUrl());
 
         $this->addTwigFunctions();
     }
@@ -822,7 +823,7 @@ class Application {
     private function addTwigFunctions(): void {
         $this->twig->addFunction(new TwigFunction(
             'bind',
-            fn (Signal $signal) => new Markup($signal->bind(), 'html')
+            fn (Signal $signal, ?string $prop = null) => new Markup($signal->bind($prop), 'html')
         ));
 
         $this->twig->addFunction(

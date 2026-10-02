@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Support\DatastarBundle;
 
 /**
  * Configuration class with fluent API.
@@ -23,6 +24,11 @@ class Config {
 
     /** @var null|\Closure(string, string): string|string */
     private \Closure|string|null $staticCacheControl = null;
+
+    private bool $datastarRocket = false;
+
+    /** @var array<string, ?string> Bundle path => content version, hashed once per path */
+    private array $datastarVersions = [];
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -318,6 +324,42 @@ class Config {
         }
 
         return $this->devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate';
+    }
+
+    /**
+     * Serve Datastar with Rocket, its web component layer, at /datastar.js instead of the plain
+     * Datastar bundle, so Rocket components such as Starbase's work on the page.
+     *
+     * The bundle is Starbase's patched build of Datastar 1.0.4 + Rocket (public/DATASTAR.md): about
+     * 22 KB brotli against 12 KB for the plain bundle, so leave it off unless pages use Rocket.
+     *
+     * A page must run exactly one Datastar module. Rocket components import it by the bare specifier
+     * 'datastar', so an import map has to map 'datastar' to the URL Datastar is loaded from, byte for
+     * byte, query string included, before any module script; another URL loads a second engine. The
+     * default shell emits both from getDatastarUrl(); a custom shell uses the {{ datastar_import_map }}
+     * and {{ datastar_url }} placeholders, a Twig layout the datastarUrl global.
+     */
+    public function withDatastarRocket(bool $enabled = true): self {
+        $this->datastarRocket = $enabled;
+
+        return $this;
+    }
+
+    public function isDatastarRocketEnabled(): bool {
+        return $this->datastarRocket;
+    }
+
+    /**
+     * URL of the Datastar bundle served at /datastar.js, versioned by its content so a new bundle
+     * busts caches, e.g. '/datastar.js?v=727844adfc'. The hash is computed once per bundle.
+     */
+    public function getDatastarUrl(): string {
+        $path = DatastarBundle::path($this->datastarRocket);
+        if (!\array_key_exists($path, $this->datastarVersions)) {
+            $this->datastarVersions[$path] = DatastarBundle::version($path);
+        }
+
+        return DatastarBundle::url($this->basePath, $this->datastarVersions[$path]);
     }
 
     public function withShellTemplate(string $path): self {

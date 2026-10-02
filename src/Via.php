@@ -1777,7 +1777,7 @@ class Via {
     public function buildHtmlDocument(Context $context): string {
         $content = $context->renderView();
 
-        $html = $this->htmlBuilder->buildDocument($content, $context, $context->getId(), $this->config->getBasePath());
+        $html = $this->htmlBuilder->buildDocument($content, $context, $context->getId(), $this->config->getBasePath(), $this->config->getDatastarUrl());
 
         // Inject the Dev Bar overlay before </body> when tracing is enabled.
         if ($this->devBarInjector !== null) {

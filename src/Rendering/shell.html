@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{ datastar_import_map }}
     <meta data-signals='{{ signals_json }}'>
     <meta data-indicator="_connecting"
         data-on-interval__duration.15s.leading="!$_connecting && @get('{{ base_path }}_sse')"
@@ -29,6 +30,6 @@
         </aside>
     </div>
     {{ foot_content }}
-    <script type="module" src="{{ base_path }}datastar.js"></script>
+    <script type="module" src="{{ datastar_url }}"></script>
 </body>
 </html>

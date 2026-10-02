@@ -94,6 +94,41 @@ describe('framework-bundled static assets (/datastar.js, /via.css)', function ()
     });
 });
 
+describe('the Datastar bundle at /datastar.js', function (): void {
+    test('serves the plain bundle by default', function (): void {
+        $response = new FakeStaticResponse();
+        requestHandlerFor(createVia())->handleRequest(fakeStaticRequest('/datastar.js'), $response);
+
+        expect($response->statusCode)->toBe(200)
+            ->and($response->headers['Content-Type'])->toBe('application/javascript')
+            ->and($response->body)->toBe(file_get_contents(__DIR__ . '/../../public/datastar.js'))
+        ;
+    });
+
+    test('serves the Rocket build with withDatastarRocket(), under its own ETag', function (): void {
+        $plain = new FakeStaticResponse();
+        requestHandlerFor(createVia())->handleRequest(fakeStaticRequest('/datastar.js'), $plain);
+        $rocket = new FakeStaticResponse();
+        requestHandlerFor(createVia((new Config())->withDatastarRocket()))->handleRequest(fakeStaticRequest('/datastar.js'), $rocket);
+
+        expect($rocket->statusCode)->toBe(200)
+            ->and($rocket->headers['Content-Type'])->toBe('application/javascript')
+            ->and($rocket->body)->toBe(file_get_contents(__DIR__ . '/../../public/datastar-rocket.js'))
+            ->and($rocket->headers['ETag'])->not->toBe($plain->headers['ETag'])
+        ;
+    });
+
+    test('compresses the Rocket build like the plain one', function (): void {
+        $response = new FakeStaticResponse();
+        $via = createVia((new Config())->withDatastarRocket()->withBrotli());
+        requestHandlerFor($via)->handleRequest(fakeStaticRequest('/datastar.js', ['accept-encoding' => 'br']), $response);
+
+        expect($response->headers['Content-Encoding'])->toBe('br')
+            ->and(brotli_uncompress($response->body))->toBe(file_get_contents(__DIR__ . '/../../public/datastar-rocket.js'))
+        ;
+    });
+});
+
 describe('Config::getStaticCacheControl() wired into withStaticDir() responses', function (): void {
     $dir = null;
 
@@ -190,6 +225,30 @@ describe('Config::getStaticCacheControl() wired into withStaticDir() responses',
 
         expect(brotli_uncompress($second->body))->toBe('body { color: blue; }');
         expect($second->headers['ETag'])->not->toBe($first->headers['ETag']);
+    });
+
+    test('JavaScript modules and JSON get their MIME types and are compressed', function () use (&$dir): void {
+        file_put_contents($dir . '/component.mjs', 'export const x = 1;');
+        file_put_contents($dir . '/data.json', '{"a":1}');
+        file_put_contents($dir . '/component.js.map', '{"version":3}');
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()));
+
+        $types = [];
+        foreach (['/component.mjs', '/data.json', '/component.js.map'] as $path) {
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest($path, ['accept-encoding' => 'br']), $response);
+            $types[$path] = [$response->headers['Content-Type'], $response->headers['Content-Encoding'] ?? null];
+        }
+
+        expect($types)->toBe([
+            '/component.mjs' => ['application/javascript', 'br'],
+            '/data.json' => ['application/json', 'br'],
+            '/component.js.map' => ['application/json', 'br'],
+        ]);
+
+        @unlink($dir . '/component.mjs');
+        @unlink($dir . '/data.json');
+        @unlink($dir . '/component.js.map');
     });
 
     test('ETag reflects both files independently under a shared RequestHandler instance', function () use (&$dir): void {
