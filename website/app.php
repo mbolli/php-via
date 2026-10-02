@@ -144,7 +144,7 @@ $app->notFound(function ($request, $response) use ($twig, $cssPath): void {
     $html = $twig->render('pages/404.html.twig', [
         'basePath' => '/',
         'assetVersion' => $assetVersion,
-        'requestedPath' => htmlspecialchars($requestedPath, ENT_QUOTES, 'UTF-8'),
+        'requestedPath' => $requestedPath,
     ]);
     $response->status(404);
     $response->header('Content-Type', 'text/html; charset=utf-8');

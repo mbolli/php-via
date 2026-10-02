@@ -42,7 +42,7 @@
                     <p class="px-error-code" aria-hidden="true">404</p>
                     <h1 class="px-page-title">Page not found</h1>
                     <p class="px-hero-lead">
-                        This site has no page at <code>{{ requestedPath|raw }}</code>. The page may have
+                        This site has no page at <code>{{ requestedPath }}</code>. The page may have
                         moved, or the link may contain a typo.
                     </p>
                     <div class="px-actions">
@@ -53,7 +53,7 @@
                 </div>
                 <div class="px-terminal" role="group" aria-label="The request and the server's answer">
                     <div class="px-terminal-bar">HTTP</div>
-                    <pre class="px-terminal-body"><span class="px-terminal-prompt" aria-hidden="true">&gt; </span>GET {{ requestedPath|raw }} HTTP/1.1
+                    <pre class="px-terminal-body"><span class="px-terminal-prompt" aria-hidden="true">&gt; </span>GET {{ requestedPath }} HTTP/1.1
 <span class="px-terminal-err"><span aria-hidden="true">&lt; </span>HTTP/1.1 404 Not Found</span></pre>
                 </div>
             </div>

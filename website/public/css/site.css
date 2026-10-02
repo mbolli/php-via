@@ -550,12 +550,15 @@ main { position: relative; }
 /* ─── Code + result split ──────────────────────────────── */
 .code-result-split {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--size-5);
   align-items: start;
 }
+/* A full listing beside a small live result: the result gets a narrow column */
+.code-result-split--demo { grid-template-columns: minmax(0, 1fr) minmax(13rem, 16rem); }
 @media (max-width: 768px) {
-  .code-result-split { grid-template-columns: minmax(0, 1fr); }
+  .code-result-split,
+  .code-result-split--demo { grid-template-columns: minmax(0, 1fr); }
 }
 .code-result-demo { align-self: center; }
 .code-result-body {
@@ -1738,6 +1741,9 @@ docs-toc {
   margin-block: var(--size-6);
 }
 .docs-demo-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   background: var(--surface-2);
   border-block-end: 1px solid var(--border);
   padding: var(--size-2) var(--size-4);
@@ -1745,6 +1751,15 @@ docs-toc {
   font-size: var(--font-size-0);
   font-weight: var(--font-weight-7);
   color: var(--text-2);
+}
+/* Pixel ▶: the character renders as a colour emoji on many systems */
+.docs-demo-header::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 10px;
+  background: var(--brand-secondary);
+  clip-path: polygon(0 0, 2px 0, 2px 2px, 4px 2px, 4px 4px, 6px 4px, 6px 6px, 4px 6px, 4px 8px, 2px 8px, 2px 10px, 0 10px);
 }
 .docs-demo-body {
   padding: var(--size-5);
@@ -2957,8 +2972,10 @@ stock-chart {
 }
 
 /* ── Phone pairing ── */
-/* The hero panel: a QR code with the pairing link, and the widget the phone shares with this tab */
-.px-pair {
+/* The hero panel: a QR code with the pairing link, and the widget the phone shares with this tab.
+   .px-panel (support page) shares its frame. */
+.px-pair,
+.px-panel {
   background: var(--surface-2);
   border: 2px solid var(--border-strong);
   box-shadow: 8px 8px 0 0 color-mix(in srgb, var(--px-violet) 60%, transparent);
@@ -3558,12 +3575,7 @@ stock-chart {
   text-shadow: 3px 3px 0 color-mix(in srgb, var(--px-violet) 70%, transparent);
 }
 
-/* A titled panel, like the pairing box on the homepage */
-.px-panel {
-  background: var(--surface-2);
-  border: 2px solid var(--border-strong);
-  box-shadow: 8px 8px 0 0 color-mix(in srgb, var(--px-violet) 60%, transparent);
-}
+/* A titled panel: the frame is defined with .px-pair */
 .px-panel-bar {
   display: flex;
   align-items: center;
@@ -3685,6 +3697,8 @@ stock-chart {
   align-items: center;
   min-block-size: calc(100dvh - var(--nav-height) - 5rem);
 }
+/* As a grid item with auto margins the wrapper would shrink to its content */
+.px-error > .px-wrap { width: 100%; }
 .px-terminal-err { color: #ff8a7a; }
 @media (prefers-color-scheme: dark){
 

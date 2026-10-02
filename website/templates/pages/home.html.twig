@@ -118,9 +118,10 @@ $app->page('/', function (Context $c): void {
     // TAB scope (default): each visitor has their own counter
     $count = $c->signal(0);
 
-    $increment = $c->action(
-        fn() => $count->setValue($count->int() + 1)
-    );
+    $increment = $c->action(function () use ($c, $count): void {
+        $count->setValue($count->int() + 1);
+        $c->syncSignals(); // push the new value to this tab
+    });
 
     $c->view(fn() => <<<HTML
         <p>Count: <strong data-text="\${$count->id()}">
@@ -153,10 +154,13 @@ $app->page('/', function (Context $c): void {
     $c->scope(Scope::GLOBAL);+}
     $count = $c->signal(0);
 
-    $increment = $c->action(
-{-        fn() => $count->setValue($count->int() + 1)-}
-{+        fn() => $count->increment()+}
-    );
+{-    $increment = $c->action(function () use ($c, $count): void {
+        $count->setValue($count->int() + 1);
+        $c->syncSignals(); // push the new value to this tab-}
+{+    $increment = $c->action(function () use ($count): void {
+        $count->increment(); // atomic, and broadcasts to the scope+}
+{-    });-}
+{+    }, 'increment'); // a scoped action needs a name+}
 
     $c->view(fn() => <<<HTML
         <p>Count: <strong data-text="\${$count->id()}">
@@ -359,7 +363,7 @@ $app->start();
 <section class="px-section" id="features">
     <div class="px-wrap">
         <header class="px-section-head">
-            <h2>Features</h2>
+            <h2>What php-via includes</h2>
         </header>
         <div class="px-specs">
             <div class="px-spec">

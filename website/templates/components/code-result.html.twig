@@ -1,4 +1,4 @@
-<div class="code-result-split" id="code-result-demo">
+<div class="code-result-split code-result-split--demo" id="code-result-demo">
     <div class="code-panel">
         <div class="code-panel-header">
             <span>app.php</span>
@@ -16,9 +16,10 @@ $app = new Via(new Config());
 $app->page('/', function (Context $c): void {
     $count = $c->signal(0);
 
-    $increment = $c->action(
-        fn() => $count->setValue($count->int() + 1)
-    );
+    $increment = $c->action(function () use ($c, $count): void {
+        $count->setValue($count->int() + 1);
+        $c->syncSignals(); // push the new value to this tab
+    });
 
     $c->view(fn() => <<<HTML
         <p>Count: <strong data-text="\${$count->id()}">
