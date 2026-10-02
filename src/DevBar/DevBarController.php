@@ -6,7 +6,9 @@ namespace Mbolli\PhpVia\DevBar;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\OriginPolicy;
+use Mbolli\PhpVia\Support\ConditionalGet;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
 
@@ -28,7 +30,10 @@ use OpenSwoole\Http\Response;
 final class DevBarController {
     private const string ASSET_DIR = __DIR__ . '/../../public';
 
-    public function __construct(private Via $via) {}
+    /** @var array<string, array{mtime: int, body: string, etag: string, br: null|false|string}> by file name */
+    private array $assets = [];
+
+    public function __construct(private Via $via, private string $assetDir = self::ASSET_DIR) {}
 
     /**
      * Dispatch a `/_via/*` request. Caller has already verified tracing is on
@@ -43,12 +48,12 @@ final class DevBarController {
                 return;
 
             case '/_via/devbar.css':
-                $this->serveAsset('devbar.css', 'text/css; charset=utf-8', $response);
+                $this->serveAsset('devbar.css', 'text/css; charset=utf-8', $request, $response);
 
                 return;
 
             case '/_via/devbar.js':
-                $this->serveAsset('devbar.js', 'application/javascript', $response);
+                $this->serveAsset('devbar.js', 'application/javascript', $request, $response);
 
                 return;
 
@@ -147,6 +152,48 @@ final class DevBarController {
     }
 
     /**
+     * A Dev Bar asset, read once and served from memory with an ETag, and with Brotli when
+     * withBrotli() is on and the client accepts it. Dev mode re-reads a file after an edit.
+     *
+     * @param array<string, string> $requestHeaders lower-cased names, as OpenSwoole passes them
+     *
+     * @return array{status: int, headers: array<string, string>, body: string}
+     */
+    public function assetResponse(string $file, string $contentType, array $requestHeaders): array {
+        $asset = $this->loadAsset($file);
+        if ($asset === null) {
+            return ['status' => 404, 'headers' => [], 'body' => 'Not Found'];
+        }
+
+        $config = $this->via->getConfig();
+        $brotli = $config->getBrotli() && \function_exists('brotli_compress');
+        $headers = [
+            'Cache-Control' => 'no-cache',
+            'ETag' => $asset['etag'],
+            'Last-Modified' => ConditionalGet::lastModified($asset['mtime']),
+        ];
+        if ($brotli) {
+            $headers['Vary'] = 'Accept-Encoding';
+        }
+
+        if (ConditionalGet::isNotModified($requestHeaders['if-none-match'] ?? null, $requestHeaders['if-modified-since'] ?? null, $asset['etag'], $asset['mtime'])) {
+            return ['status' => 304, 'headers' => $headers, 'body' => ''];
+        }
+
+        $headers['Content-Type'] = $contentType;
+        if ($brotli && str_contains($requestHeaders['accept-encoding'] ?? '', 'br')) {
+            $compressed = $this->assets[$file]['br'] ??= brotli_compress($asset['body'], $config->getBrotliStaticLevel(), BROTLI_TEXT);
+            if ($compressed !== false) {
+                $headers['Content-Encoding'] = 'br';
+
+                return ['status' => 200, 'headers' => $headers, 'body' => $compressed];
+            }
+        }
+
+        return ['status' => 200, 'headers' => $headers, 'body' => $asset['body']];
+    }
+
+    /**
      * Clear the server-side trace buffer so the cleared view also survives a
      * reload / a fresh console connection (the front-end clears its own arrays).
      */
@@ -192,20 +239,42 @@ final class DevBarController {
         $response->end((string) json_encode($result['body']));
     }
 
-    private function serveAsset(string $file, string $contentType, Response $response): void {
-        $path = self::ASSET_DIR . '/' . $file;
-        $body = is_file($path) ? file_get_contents($path) : false;
+    private function serveAsset(string $file, string $contentType, Request $request, Response $response): void {
+        $result = $this->assetResponse($file, $contentType, $request->header ?? []);
 
-        if ($body === false) {
-            $response->status(404);
-            $response->end('Not Found');
+        $response->status($result['status']);
+        foreach ($result['headers'] as $name => $value) {
+            $response->header($name, $value);
+        }
+        $response->end($result['body']);
+    }
 
-            return;
+    /**
+     * @return null|array{mtime: int, body: string, etag: string, br: null|false|string}
+     */
+    private function loadAsset(string $file): ?array {
+        $cached = $this->assets[$file] ?? null;
+        if ($cached !== null && !$this->via->getConfig()->getDevMode()) {
+            return $cached;
         }
 
-        $response->header('Content-Type', $contentType);
-        $response->header('Cache-Control', 'no-cache');
-        $response->end($body);
+        $path = $this->assetDir . '/' . $file;
+        // PHP's stat cache would hide an edit made while the server runs.
+        clearstatcache(true, $path);
+        $mtime = is_file($path) ? filemtime($path) : false;
+        if ($mtime === false) {
+            return null;
+        }
+        if ($cached !== null && $cached['mtime'] === $mtime) {
+            return $cached;
+        }
+
+        $body = file_get_contents($path);
+        if ($body === false) {
+            return null;
+        }
+
+        return $this->assets[$file] = ['mtime' => $mtime, 'body' => $body, 'etag' => 'W/"' . hash('xxh3', $body) . '"', 'br' => null];
     }
 
     private function serveConsole(Response $response): void {
@@ -251,7 +320,7 @@ final class DevBarController {
      * The front-end consumes this with EventSource + addEventListener. The SSE
      * id carries both cursors as "{traceCursor}.{logCursor}" so a reconnect can
      * resume each independently via Last-Event-ID. Polls the buffers every
-     * Config::getSsePollIntervalMs() (usleep is coroutine-safe under SWOOLE_HOOK_ALL).
+     * Config::getSsePollIntervalMs().
      */
     private function serveStream(Request $request, Response $response): void {
         $traceStore = $this->via->getTraceStore();
@@ -280,7 +349,7 @@ final class DevBarController {
             $logs = $logBuffer?->since($logCursor) ?? [];
 
             if ($traces === [] && $logs === []) {
-                usleep($pollMs * 1000);
+                Coroutine::usleep($pollMs * 1000);
 
                 continue;
             }
