@@ -3015,7 +3015,8 @@ stock-chart {
   color: var(--text-3);
 }
 
-/* ── Pairing demo placeholder ── */
+/* ── Phone pairing ── */
+/* The hero panel: a QR code with the pairing link, and the widget the phone shares with this tab */
 .px-pair {
   background: var(--surface-2);
   border: 2px solid var(--border-strong);
@@ -3037,6 +3038,7 @@ stock-chart {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
+  white-space: nowrap;
 }
 /* A tiny pixel phone */
 .px-pair-bar-title::before {
@@ -3046,12 +3048,23 @@ stock-chart {
   border: 2px solid var(--brand-secondary);
   box-shadow: inset 0 -3px 0 0 var(--brand-secondary);
 }
+:where(.page-home main) .px-tag--scope {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.2em 0.5em;
+  font-size: 0.7rem;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  border: 1px solid currentColor;
+}
 .px-pair-body {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--size-5);
   align-items: center;
-  padding: var(--size-5);
+  padding: var(--size-5) var(--size-5) var(--size-4);
 }
 .px-pair-text h2 {
   font-size: 1.2rem;
@@ -3065,76 +3078,237 @@ stock-chart {
   margin: 0;
 }
 .px-pair-mobile { display: none; }
-.px-pair-note {
-  margin: 0;
-  padding: 0.6rem 0.9rem;
-  border-block-start: 1px dashed var(--border-strong);
+
+/* The QR code sits on its own light ground, framed like a little screen */
+.px-qr {
+  flex: none;
+  line-height: 0;
+  border: 2px solid var(--border-strong);
+  box-shadow: 4px 4px 0 0 var(--shadow-hard);
+}
+.px-qr-svg { display: block; max-width: 100%; height: auto; }
+
+.px-pair-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-inline: var(--size-5);
+  padding: 0.4rem 0.4rem 0.4rem 0.8rem;
+  border: 1px solid var(--code-border);
+  background: var(--code-bg);
   font-family: var(--font-ui);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
+}
+:where(.page-home main) .px-pair-link code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  font-size: inherit;
+  color: var(--code-text);
+  background: none;
+  border: none;
+  padding: 0;
+}
+.px-pair-alt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  margin: 0.65rem var(--size-5) 0;
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
   color: var(--text-3);
   max-inline-size: none;
 }
+.px-pair-alt a { font-weight: var(--font-weight-7); }
 
-/* QR stand-in: three finder squares on a checkerboard, with a dashed frame */
-.px-qr {
-  --m: 8px;
-  --qr-ink: var(--text-1);
+.px-pair-shared {
+  margin-block-start: var(--size-4);
+  padding: var(--size-4) var(--size-5) var(--size-5);
+  border-block-start: 1px dashed var(--border-strong);
+}
+
+/* The shared widget: a big block in the pair's colour and five swatches */
+.px-colour--blue   { --swatch: var(--px-blue); }
+.px-colour--orange { --swatch: var(--px-orange); }
+.px-colour--yellow { --swatch: var(--px-yellow); }
+.px-colour--green  { --swatch: var(--px-green); }
+.px-colour--violet { --swatch: var(--px-violet); }
+
+.px-pairw {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--size-4);
+  align-items: stretch;
+}
+.px-pairw-screen {
   position: relative;
-  box-sizing: content-box;
-  width: calc(var(--m) * 21);
-  height: calc(var(--m) * 21);
-  padding: var(--m);
-  border: 2px dashed var(--border-strong);
-  background-color: var(--surface-1);
-  background-image: conic-gradient(
-    color-mix(in srgb, var(--qr-ink) 22%, transparent) 25%, transparent 0 50%,
-    color-mix(in srgb, var(--qr-ink) 22%, transparent) 0 75%, transparent 0
-  );
-  background-size: calc(var(--m) * 2) calc(var(--m) * 2);
-  background-repeat: repeat;
-  background-origin: content-box;
-  background-clip: content-box;
+  min-height: 4.75rem;
+  background: var(--swatch);
+  border: 2px solid var(--border-strong);
+  /* 8-bit bevel: a light top-left edge and a dark bottom-right edge */
+  box-shadow:
+    inset 4px 4px 0 0 rgb(255 255 255 / 0.3),
+    inset -4px -4px 0 0 rgb(0 0 0 / 0.22);
+  transition: background-color 240ms steps(4, end);
 }
-.px-qr-finder {
+.px-pairw-name {
   position: absolute;
-  width: calc(var(--m) * 7);
-  height: calc(var(--m) * 7);
-  border: var(--m) solid var(--qr-ink);
-  background: var(--surface-1);
+  left: 10px;
+  bottom: 10px;
+  padding: 0.15rem 0.45rem;
+  background: #070818;
+  color: #eef0ff;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-7);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
-.px-qr-finder::after {
+/* Two pixel sparkles in the top-right corner */
+.px-pairw-stars {
+  position: absolute;
+  top: 14px;
+  right: 22px;
+  width: 3px;
+  height: 3px;
+  color: rgb(7 8 24 / 0.45);
+  background: currentColor;
+  box-shadow:
+    -3px 0 0 currentColor, 3px 0 0 currentColor, 0 -3px 0 currentColor, 0 3px 0 currentColor,
+    -24px 18px 0 currentColor, -27px 18px 0 currentColor, -21px 18px 0 currentColor,
+    -24px 15px 0 currentColor, -24px 21px 0 currentColor,
+    -9px 30px 0 currentColor;
+}
+.px-pairw-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 2.25rem);
+  gap: 0.55rem;
+  align-content: center;
+}
+.px-swatch {
+  position: relative;
+  width: 2.25rem;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid var(--border-strong);
+  border-radius: 0;
+  background: var(--swatch);
+  box-shadow:
+    inset 3px 3px 0 0 rgb(255 255 255 / 0.3),
+    inset -3px -3px 0 0 rgb(0 0 0 / 0.2),
+    3px 3px 0 0 var(--shadow-hard);
+  cursor: pointer;
+  transition: transform 80ms steps(2), box-shadow 80ms steps(2);
+}
+.px-swatch:hover {
+  transform: translate(-1px, -1px);
+  box-shadow:
+    inset 3px 3px 0 0 rgb(255 255 255 / 0.3),
+    inset -3px -3px 0 0 rgb(0 0 0 / 0.2),
+    4px 4px 0 0 var(--shadow-hard);
+}
+.px-swatch:active,
+.px-swatch[aria-pressed="true"] {
+  transform: translate(3px, 3px);
+  box-shadow:
+    inset 3px 3px 0 0 rgb(0 0 0 / 0.2),
+    inset -3px -3px 0 0 rgb(255 255 255 / 0.25),
+    0 0 0 0 var(--shadow-hard);
+}
+/* A pixel tick on the chosen swatch: a 7x6 grid of 3px cells, drawn with box-shadow */
+.px-swatch[aria-pressed="true"]::after {
   content: "";
   position: absolute;
-  inset: var(--m);
-  background: var(--qr-ink);
+  left: calc(50% - 10px);
+  top: calc(50% - 9px);
+  width: 3px;
+  height: 3px;
+  color: #070818;
+  box-shadow:
+    18px 0 0 currentColor,
+    15px 3px 0 currentColor, 18px 3px 0 currentColor,
+    0 6px 0 currentColor, 12px 6px 0 currentColor, 15px 6px 0 currentColor,
+    0 9px 0 currentColor, 3px 9px 0 currentColor, 9px 9px 0 currentColor, 12px 9px 0 currentColor,
+    3px 12px 0 currentColor, 6px 12px 0 currentColor, 9px 12px 0 currentColor,
+    6px 15px 0 currentColor;
 }
-.px-qr-finder--tl { top: var(--m); left: var(--m); }
-.px-qr-finder--tr { top: var(--m); right: var(--m); }
-.px-qr-finder--bl { bottom: var(--m); left: var(--m); }
-.px-qr-label {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  translate: -50% -50%;
-  padding: 0.35rem 0.5rem;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+.px-pairw-ended {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed var(--border-strong);
   font-family: var(--font-ui);
-  font-size: 0.68rem;
-  font-weight: var(--font-weight-7);
-  line-height: 1.3;
-  text-align: center;
-  white-space: nowrap;
+  font-size: 0.82rem;
   color: var(--text-2);
 }
+@media (prefers-reduced-motion: reduce) {
+  .px-pairw-screen, .px-swatch { transition: none; }
+}
 
-/* On a phone there is nothing to scan, so the QR stand-in goes and the copy explains the pairing */
+/* On a phone there is nothing to scan: the QR code goes, and the copy offers a second tab */
 @media (max-width: 640px) {
   .px-pair-desktop { display: none; }
   .px-pair-mobile { display: revert; }
-  .px-pair-body { grid-template-columns: minmax(0, 1fr); padding: var(--size-4); }
+  .px-pair-body { grid-template-columns: minmax(0, 1fr); padding: var(--size-4) var(--size-4) var(--size-3); }
   .px-qr { display: none; }
+  .px-pair-link { margin-inline: var(--size-4); }
+  .px-pair-alt { margin-inline: var(--size-4); }
+  .px-pair-shared { padding: var(--size-4); }
 }
+@media (max-width: 480px) {
+  .px-pairw { grid-template-columns: minmax(0, 1fr); }
+  .px-pairw-swatches { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .px-swatch { width: 100%; }
+}
+
+/* ── Phone page (/pair/{code}) ── */
+.px-phone {
+  padding-block: clamp(1.25rem, 5vw, 3rem) clamp(2.5rem, 6vw, 4rem);
+}
+.px-phone-wrap {
+  max-width: 30rem;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+.px-phone-body {
+  padding: var(--size-4) var(--size-4) var(--size-5);
+}
+.px-phone-body h1 {
+  font-size: clamp(1.35rem, 5.6vw, 1.7rem);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  margin-block-end: 0.6rem;
+}
+.px-phone-body p {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-2);
+  margin: 0 0 var(--size-4);
+}
+.px-phone-body p:last-child { margin-block-end: 0; }
+.px-pair--phone .px-pair-shared {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+.px-pair--phone .px-pairw { grid-template-columns: minmax(0, 1fr); gap: var(--size-4); }
+.px-pair--phone .px-pairw-screen { min-height: clamp(10rem, 34vh, 17rem); }
+.px-pair--phone .px-pairw-name { font-size: 0.85rem; left: 12px; bottom: 12px; }
+.px-pair--phone .px-pairw-swatches {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding-inline-end: 3px;
+}
+.px-pair--phone .px-swatch { width: 100%; }
+.px-phone-foot {
+  margin: var(--size-5) 0 0;
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.px-phone-foot a { margin-inline-start: 0.35rem; font-weight: var(--font-weight-7); }
 
 /* ── Sections ── */
 .px-section {

@@ -1,0 +1,35 @@
+<aside class="px-pair" aria-labelledby="px-pair-title">
+    <div class="px-pair-bar">
+        <span class="px-pair-bar-title">Phone pairing</span>
+        <code class="px-tag px-tag--scope">{{ scope }}</code>
+    </div>
+    <div class="px-pair-body">
+        <div class="px-qr" role="img" aria-label="QR code for {{ url }}">{{ qr | raw }}</div>
+        <div class="px-pair-text">
+            <h2 id="px-pair-title">
+                <span class="px-pair-desktop">Pair this tab with your phone</span>
+                <span class="px-pair-mobile">Pair two tabs on this phone</span>
+            </h2>
+            <p class="px-pair-desktop">
+                Scan the code with your phone camera. Your phone and this tab join the scope
+                <code>{{ scope }}</code>, so a colour picked on one screen shows on both.
+            </p>
+            <p class="px-pair-mobile">
+                On a computer, this panel shows a QR code. On this phone, open the link in a second
+                tab. Both tabs join the scope <code>{{ scope }}</code>, so a colour picked in one
+                shows in the other.
+            </p>
+        </div>
+    </div>
+    <div class="px-pair-link">
+        <code id="px-pair-url">{{ url }}</code>
+        <button type="button" class="px-install-copy" data-copy="px-pair-url">Copy</button>
+    </div>
+    <p class="px-pair-alt">
+        <span class="px-pair-desktop">No phone at hand?</span>
+        <a href="{{ url }}" target="_blank" rel="nofollow noopener">Open it in a second tab <span aria-hidden="true">→</span></a>
+    </p>
+    <div class="px-pair-shared">
+        {% include 'components/pair-widget.html.twig' with widget|merge({expired: 'This pairing has ended. Reload the page for a new code.'}) only %}
+    </div>
+</aside>

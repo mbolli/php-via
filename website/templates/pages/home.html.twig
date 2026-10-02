@@ -66,7 +66,7 @@
             </div>
         </div>
 
-        {% include 'components/pairing-placeholder.html.twig' %}
+        {{ pairing | raw }}
     </div>
 </section>
 
@@ -456,11 +456,16 @@ $app->start();
 
 <script>
 (function () {
-    var btn = document.querySelector('.px-install-copy');
-    if (!btn || !navigator.clipboard) { if (btn) btn.hidden = true; return; }
-    btn.addEventListener('click', function () {
-        var text = document.getElementById(btn.dataset.copy).textContent;
-        navigator.clipboard.writeText(text).then(function () {
+    if (!navigator.clipboard) {
+        document.querySelectorAll('[data-copy]').forEach(function (btn) { btn.hidden = true; });
+        return;
+    }
+    // Delegated, so the button in the pairing panel keeps working after Datastar morphs it
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-copy]');
+        var source = btn && document.getElementById(btn.dataset.copy);
+        if (!source) return;
+        navigator.clipboard.writeText(source.textContent.trim()).then(function () {
             btn.textContent = 'Copied';
             setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
         });

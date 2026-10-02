@@ -9,6 +9,9 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use PhpVia\Website\Pairing\PairingDemo;
+use PhpVia\Website\Pairing\PairingStore;
+use PhpVia\Website\Pairing\RequestOrigin;
 use PhpVia\Website\StaticPage;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
@@ -130,7 +133,8 @@ $cssPath = __DIR__ . '/public/css/site.css';
 $twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
 $workerPath = __DIR__ . '/public/upload-worker.js';
 $twig->addGlobal('workerVersion', (string) (file_exists($workerPath) ? filemtime($workerPath) : time()));
-$twig->addGlobal('siteUrl', 'https://via.zweiundeins.gmbh/');
+$siteOrigin = 'https://via.zweiundeins.gmbh';
+$twig->addGlobal('siteUrl', $siteOrigin . '/');
 
 // ─── 404 handler ─────────────────────────────────────────────────────────────
 
@@ -393,14 +397,18 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// Phone pairing in the hero: a code per homepage tab, and the phone page at /pair/{code}
+$pairingDemo = new PairingDemo($app, new PairingStore(), $siteOrigin);
+
 // Home page
-$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo): void {
+$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo, $pairingDemo): void {
     $c->scope(Scope::routeScope('/'));
 
     $presence = $c->component($presenceDemo, 'presence');
     $sharedCounter = $c->component($sharedCounterDemo, 'shared-counter');
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
     $poll = $c->component($livePollDemo, 'poll');
+    $pairing = $c->component($pairingDemo->component(...), 'pairing');
 
     // Components patch their own target divs, so updates leave the page itself alone.
     StaticPage::view($c, 'pages/home.html.twig', fn (): array => [
@@ -408,8 +416,9 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
         'sharedCounter' => $sharedCounter(),
         'sessionCounter' => $sessionCounter(),
         'poll' => $poll(),
+        'pairing' => $pairing(),
     ]);
-});
+})->middleware(new RequestOrigin($siteOrigin, $config->isHttps()));
 
 // ─── Docs routes ─────────────────────────────────────────────────────────────
 
@@ -546,6 +555,9 @@ $app->page('/examples', function (Context $c): void {
     $c->scope(Scope::routeScope('/examples'));
     StaticPage::view($c, 'pages/examples-intro.html.twig');
 });
+
+// Phone side of the homepage pairing demo
+$pairingDemo->register();
 
 // Professional support / body-leasing page
 $app->page('/support', function (Context $c): void {
