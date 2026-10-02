@@ -1,6 +1,6 @@
-# php-via — Full LLM Reference
+# php-via: Full LLM Reference
 
-**Version**: latest (MIT) | **Requires**: PHP 8.4+, OpenSwoole extension
+**Version**: 0.13.0 (MIT) | **Requires**: PHP 8.4+, ext-openswoole 26
 **Install**: `composer require mbolli/php-via`
 **Homepage**: https://via.zweiundeins.gmbh/
 **GitHub**: https://github.com/mbolli/php-via
@@ -12,13 +12,13 @@
 ## What is php-via?
 
 php-via is a real-time reactive web framework for PHP. It runs as a persistent
-OpenSwoole server that maintains long-lived SSE (Server-Sent Events) connections to
-every browser tab. When state changes on the server, it pushes DOM patches to
-connected clients via Datastar — a lightweight SSE library that uses the Declarative
-Shadow DOM morphing algorithm. No JavaScript, no build step, multiplayer by default.
+OpenSwoole server that keeps a long-lived SSE (Server-Sent Events) connection to every
+browser tab. When state changes on the server, it pushes HTML and signal patches to the
+connected tabs, and Datastar morphs them into the page. No JavaScript to write, no build
+step, multiplayer by default.
 
-The name "via" means "the way". From a single PHP process you get full-duplex
-real-time communication without WebSockets, polling, or any frontend framework.
+The name "via" means "the way". From one PHP process you get server-pushed real-time
+updates without WebSockets, polling or a frontend framework.
 
 ---
 
@@ -26,17 +26,18 @@ real-time communication without WebSockets, polling, or any frontend framework.
 
 ```
 Browser ──── GET /page ────────────────► RequestHandler  (creates Context, renders HTML)
-Browser ──── GET /_sse ────────────────► SseHandler      (SSE keep-alive, sends patches)
-Browser ──── POST /_action/:id ────────► ActionHandler   (injects signals, calls handler)
+Browser ──── GET /_sse ────────────────► SseHandler      (long-lived stream, sends patches)
+Browser ──── POST /_action/:id ────────► ActionHandler   (writes posted signals, runs the action)
                                               │
                                          Application
                                          ├── Router        (route matching, reflection DI)
-                                         ├── Context       (per-tab: signals, actions, views)
+                                         ├── Context       (per tab: signals, actions, views)
                                          │   ├── PatchManager   (Channel → SSE queue)
                                          │   ├── SignalFactory
                                          │   ├── ComponentManager (sub-contexts)
                                          │   └── ContextLifecycle (timers, cleanup)
-                                         └── Broker        (InMemory / Redis / NATS)
+                                         ├── Broadcast flush (per worker, once per tick)
+                                         └── Broker        (InMemory / Swoole / Redis / NATS)
 ```
 
 **Public API surface**: `Via`, `Context`, `Signal`, `Action`, `Scope`, `Config`
@@ -48,7 +49,7 @@ Browser ──── POST /_action/:id ────────► ActionHandler
 ### Requirements
 
 - PHP 8.4 or higher
-- OpenSwoole extension (`pecl install openswoole`)
+- OpenSwoole extension 26 (`pecl install openswoole-26.2.0`)
 - Composer
 - Optional: `ext-brotli` for Brotli compression
 
@@ -75,20 +76,20 @@ $app = new Via(new Config());
 $app->page('/', function (Context $c): void {
     $count = $c->signal(0, 'count');
 
-    $c->action(function (Context $c) use ($count): void {
+    $increment = $c->action(function (Context $c) use ($count): void {
         $count->setValue($count->int() + 1);
         $c->sync();
     }, 'increment');
 
     $c->view(fn () => <<<HTML
         <main>
-            <p data-text="\${$count->id()}">0</p>
-            <button data-on-click="@post('/increment')">+1</button>
+            <p data-text="\${$count->id()}">{$count->int()}</p>
+            <button data-on:click="@post('{$increment->url()}')">+1</button>
         </main>
     HTML);
 });
 
-$app->start(); // http://localhost:8080
+$app->start(); // http://localhost:3000
 ```
 
 ---
@@ -97,12 +98,11 @@ $app->start(); // http://localhost:8080
 
 ### 1. Signals
 
-Signals are reactive PHP values scoped to a connection, route, session, or the whole
-server. Signal values are automatically serialised to the browser's Datastar store and
-kept in sync.
+Signals are reactive PHP values scoped to a tab, a route, a session, the whole server or a
+custom group. Their values are sent to the browser's Datastar store and kept in sync.
 
 ```php
-// Create a signal with initial value and optional name
+// Create a signal with an initial value and an optional name
 $count  = $c->signal(0, 'count');        // integer
 $name   = $c->signal('', 'name');        // string
 $active = $c->signal(false, 'active');   // bool
@@ -115,225 +115,278 @@ $active->bool();
 $items->array();
 $count->getValue(); // mixed, raw
 
-// Write a value
+// Write a value; a scoped signal (not TAB) broadcasts its scope
 $count->setValue(42);
-$count->setValue($count->int() + 1);
+$count->setValue(42, broadcast: false);  // write without broadcasting
 
-// Write and broadcast immediately (non-TAB scopes only)
-$count->setValue(42, broadcast: true);  // default when scope != TAB
+// Shared counters and lists: update without losing writes from other workers
+$count->increment();                                   // atomic, returns the new value
+$items->mutate(fn (array $list) => [...$list, $item]); // read-modify-write under a lock
 
-// Get the signal's Datastar store ID for use in Twig/HTML
-$count->id(); // e.g. "count" or "ns.count" inside a component
+// The id the browser uses
+$count->id();
 ```
 
-Signal IDs are namespaced by the component hierarchy. Always use `$signal->id()` in
-templates — never hard-code IDs.
+**Ids**: a signal's id is unique per tab and includes the tab for TAB signals, so always
+write it from the signal object: `$signal->id()`, `bind()`, `text()` in PHP, or
+`{{ count.id }}` in Twig. A scoped signal outside a component whose name and scope are
+plain letters and digits keeps a readable id such as `global_count`; every other id ends in
+`____` plus codes, so names that differ only in punctuation never collide. To find a scoped
+signal from code outside a context (a timer), use
+`$app->getScopedSignalByName($scope, $name)`.
+
+**Who may write a signal from the browser**: Datastar posts every signal with each action.
+By default TAB signals take the posted value and scoped signals are server-owned.
+`clientWritable: true` or `false` on `signal()` (or `#[Signal]`) overrides this for any
+scope, and `Config::withStrictTabSignals()` makes TAB signals server-owned by default.
 
 ### 2. Actions
 
-Actions are server-side event handlers registered under a URL and invoked via Datastar
-expressions in HTML (`@post(...)`, `@get(...)`, `data-on-click`, etc.).
+Actions are server-side handlers registered on a context and called from the browser with a
+Datastar expression such as `@post(...)`.
 
 ```php
-// Register with an explicit name → URL /action/increment
 $inc = $c->action(function (Context $c) use ($count): void {
     $count->setValue($count->int() + 1);
-    $c->sync(); // push updates to this tab only
+    $c->sync(); // push this tab's changes now
 }, 'increment');
 
-// Get the URL for use in templates
-$inc->url(); // "/action/increment?..."
+$inc->url(); // "/_action/increment"
 
-// Signal injection: signal values from the browser are automatically injected
-// as typed PHP arguments when parameter names match signal names
-$greet = $c->action(function (Context $c, string $name): void {
-    // $name is automatically populated from the "$name" Datastar signal
+// In HTML: <button data-on:click="@post('/_action/increment')">+1</button>
+
+// Signal values the browser posts are written into the signals before the action runs
+$greet = $c->action(function (Context $c) use ($name): void {
+    $greeting = 'Hello ' . $name->string();
 }, 'greet');
 
-// Receive arbitrary input (non-signal)
+// Read input that is not a signal (POST body or query string)
 $c->action(function (Context $c): void {
-    $option = $c->input('option'); // reads from POST body or query string
+    $option = $c->input('option');
 }, 'vote');
 ```
 
+An action that throws answers 500 `Action failed`; the worker keeps running and the error
+is logged. Registering a second TAB action under the same name replaces the first with a
+warning.
+
 ### 3. Views
 
-Views are closures (or template strings) that render HTML for a Context. They run on
-initial page load and on every broadcast that affects this context.
+Views render a context's HTML. They run on page load, on `$c->sync()` and on every
+broadcast flush that reaches the context.
 
 ```php
 // Simple string view
 $c->view('<p>Hello</p>');
 
-// Twig template (string path, no closure overhead)
-$c->view('pages/home.html.twig', ['name' => 'world']);
+// Twig template; the context's signals and actions are passed in by name
+$c->view('pages/home.html.twig', ['title' => 'Home']);
 
-// Closure view — re-runs on every update
-$c->view(function () use ($count, $twig): string {
-    return $twig->render('counter.html.twig', ['count' => $count->int()]);
-});
+// Closure view
+$c->view(fn (): string => $c->render('counter.html.twig'));
 
-// Skip full-page re-render on SSE updates (when using components)
-$c->view(function (bool $isUpdate) use ($c, $data): string {
-    if ($isUpdate) {
-        return ''; // components own their own patches
-    }
-    return $c->render('page.html.twig', $data);
-});
+// Only send a named Twig block on SSE updates
+$c->view(fn () => $c->render('page.html.twig'), block: 'counter');
 
-// Only send a named Twig block on SSE updates (most efficient)
-$c->view(fn () => $c->render('page.html.twig', $data), block: 'counter');
-
-// Disable update caching for views that must always re-render fresh
+// Views that read per-client or fast-changing data must not use the update cache
 $c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
 ```
 
+Compute values inside the view closure, as above. A value computed in the page handler,
+such as `count($app->getClients())` passed to `$c->view('tpl', [...])`, is frozen at page
+load.
+
 ### 4. Scopes
 
-Scope controls which contexts share the same signals and receive broadcasts together.
+Scope controls which contexts share signals and receive broadcasts together.
 
 | Scope | Who shares state |
 |---|---|
 | `Scope::TAB` (default) | Fully isolated per browser tab |
-| `Scope::ROUTE` | All tabs on the same route (`/docs/signals`) |
+| `Scope::ROUTE` | All tabs on the same route |
 | `Scope::SESSION` | All tabs in the same browser session |
 | `Scope::GLOBAL` | Every connected client |
-| `"room:lobby"` | Custom string — any group you define |
-| `"room:*"` | Wildcard — matches all `room:…` scopes |
+| `"room:lobby"` | Custom string, any group you define |
+| `"room:*"` | Wildcard, matches all `room:…` scopes |
 
 ```php
 // Set the scope for a context
-$c->scope(Scope::GLOBAL);
 $c->scope(Scope::ROUTE);
 $c->scope(Scope::SESSION);
 $c->scope('room:' . $roomId);
 
-// Convenience helper for route-based scope
-$c->scope(Scope::routeScope('/dashboard'));
-
-// Add a second scope (context participates in multiple scopes)
-$c->addScope(Scope::routeScope($c->getRoute()));
+// Join a second scope
+$c->addScope('room:lobby');
 
 // Broadcast to a scope from anywhere
 $app->broadcast(Scope::GLOBAL);
+$app->broadcast(Scope::routeScope('/dashboard'));  // one route
 $app->broadcast('room:lobby');
 
-// Broadcast from within a context (uses the context's own scope)
+// Broadcast the context's own primary scope
 $c->broadcast();
 
-// Sync only this tab (does not broadcast)
+// Push this tab only (no broadcast)
 $c->sync();
 ```
 
+A bare `Scope::ROUTE` passed to `broadcast()` reaches every route, like `Scope::GLOBAL`.
+Use `Scope::routeScope('/path')` to target one route.
+
 ### 5. Components
 
-Components are isolated sub-contexts composed inside a parent context. Each component
-has its own signals, actions, views, and a dedicated `<div id="c-{name}">` patch target.
+Components are isolated sub-contexts inside a page. Each has its own signals, actions and
+view. Calling the component returns its HTML, already wrapped in a `<div id="c-…">` that
+php-via targets with the component's own patches.
 
 ```php
-// Define a component closure
-$counterComp = function (Context $c) use ($twig): void {
-    $count = $c->signal(0, 'count');
-    $inc = $c->action(fn (Context $c) => $count->setValue($count->int() + 1), 'inc');
-    $c->view(fn () => $twig->render('components/counter.html.twig', [
-        'count_id'  => $count->id(),
-        'count_val' => $count->int(),
-        'inc_url'   => $inc->url(),
-    ]));
+$counter = function (Context $k): void {
+    $count = $k->signal(0, 'count');
+    $inc = $k->action(fn (Context $k) => $count->setValue($count->int() + 1) & $k->sync(), 'inc');
+    $k->view(fn () => $k->render('components/counter.html.twig')); // count and inc passed in by name
 };
 
-// Compose into a parent page
-$app->page('/dashboard', function (Context $c) use ($counterComp, $twig): void {
-    $counter = $c->component($counterComp, 'my-counter');
-    $c->view(fn () => $twig->render('pages/dashboard.html.twig', [
-        'counter' => $counter(),   // renders the component's initial HTML
+$app->page('/dashboard', function (Context $c) use ($counter): void {
+    $first = $c->component($counter, 'first');
+    $second = $c->component($counter, 'second');
+
+    // Call the components inside the view, so every page render carries their current HTML
+    $c->view(fn (): string => $c->render('pages/dashboard.html.twig', [
+        'first' => $first(),
+        'second' => $second(),
     ]));
 });
 ```
 
-In the template, embed with:
-```twig
-<div id="c-my-counter">{{ counter | raw }}</div>
-```
-
-The `id="c-{name}"` div is the component's SSE update target. Via automatically
-targets it when the component re-renders on broadcast.
+In the template: `{{ first|raw }}`. Do not call a component in the page handler and pass
+the string to `$c->view('tpl', [...])`: that HTML is frozen at page load, and every later
+page render resets the component.
 
 ---
 
 ## Broadcasting
 
+Inside a coroutine (actions, timers, hooks), `broadcast()`, a scoped signal write and a
+message from the broker only mark the scope. Each worker flushes the marked scopes once:
+at the end of the event-loop turn when it is idle, otherwise at most once per tick
+(`Config::withBroadcastTickMs()`, default 25 ms). A flush renders each scope once and each
+context once, and publishes each scope to the broker once.
+
+What this means for app code:
+- Views render the state at flush time. Several writes in one action produce one frame.
+- A value set, broadcast and reset within one action never reaches clients.
+- Patches the action queues itself (`execScript()`, `$c->sync()`) reach the tab before the
+  broadcast frame.
+- The action's HTTP response does not wait for the fan-out.
+- Under sustained load clients get about one frame per tick and skip the states between.
+
 ```php
-// Broadcast from a context (scope set via $c->scope(...))
-$c->broadcast();
-
-// Broadcast to a specific scope from anywhere
-$app->broadcast(Scope::GLOBAL);
-$app->broadcast(Scope::routeScope('/leaderboard'));
-
-// Update one signal without broadcasting, then broadcast manually
-$count->setValue(42, broadcast: false);
-$c->broadcast();
-
-// Broadcast with a debounce to collapse bursts
-Timer::after(200, fn () => $app->broadcast(Scope::GLOBAL));
+$app->broadcast(Scope::GLOBAL);   // marks the scope; the flush renders it
+$app->flushBroadcasts();          // render the pending flush now, in this coroutine
 ```
+
+`Config::withBroadcastCoalescing(false)` renders on every call, synchronously. Outside a
+coroutine (CLI scripts, tests) `broadcast()` is always synchronous.
+`$app->getStats()->getBroadcastStats()` reports flushes, coalesced broadcasts and flush
+times per worker.
 
 ---
 
 ## Lifecycle
 
 ```php
-// Server lifecycle
-$app->onStart(function () use ($app): void {
-    // runs once when the Swoole server boots
-});
-
-$app->onShutdown(function () use ($app): void {
-    // graceful shutdown
-});
+// Server lifecycle: onStart and onShutdown run once in every worker process
+$app->onStart(function () use ($app): void { /* ... */ });
+$app->onShutdown(function () use ($app): void { /* runs on stop, reload and recycle */ });
 
 // Per-client lifecycle
 $app->onClientConnect(function (Context $c) use ($app): void {
     $app->broadcast(Scope::routeScope($c->getRoute()));
 });
+$app->onClientDisconnect(function (Context $c) use ($app): void { /* ... */ });
 
-$app->onClientDisconnect(function (Context $c) use ($app): void {
-    // cleanup or broadcast
-});
-
-// Process-wide recurring timer
+// Server timer: runs on one worker, once per interval for the whole server
 $app->setInterval(function () use ($app): void {
     if (empty($app->getClients())) {
         return;
     }
     $app->broadcast(Scope::GLOBAL);
-}, 1000); // every 1000 ms
+}, 1000);
+$app->setInterval($perProcessWork, 1000, everyWorker: true); // in every worker
 
-// Context-level timer (tied to a single connection's lifecycle)
-// Must be started inside the page handler or component
+// Tab timer: start it in the page handler; it stops with the context
+$c->setInterval(fn () => $c->sync(), 1000);
+
+// Context cleanup hooks
+$c->onDisconnect(function (Context $c): void { /* ... */ });
 ```
+
+- **A closed tab is noticed at once.** A stream ends about 1 ms after the browser closes
+  the connection: `onClientDisconnect` runs, the client leaves `getClients()`, and
+  `onDisconnect`/`onCleanup` run after the cleanup delay (`withContextCleanupDelay()`,
+  5 s by default).
+- **Idle streams stay open behind proxies.** A stream silent for 15 s writes an SSE
+  comment (`withSseKeepAliveMs()`, `0` turns it off).
+- **A context whose stream never connects is freed** after the connect timeout
+  (`withContextConnectTimeout()`, 30 s by default), running its cleanup hooks.
+- **Revival.** A tab that comes back after its context was cleaned up is rebuilt with the
+  same id and the signal values it still holds, within the revival window
+  (`withContextRevivalWindow()`, 10 minutes by default), instead of reloading.
 
 ---
 
-## Multi-node Scaling (Broker)
+## Scaling
 
-Out of the box php-via uses an in-memory broker (single process). For multi-node
-deployments, swap in Redis or NATS:
+### Several workers on one machine
+
+```php
+use Mbolli\PhpVia\Broker\SwooleBroker;
+
+$config = (new Config())
+    ->withWorkerNum(swoole_cpu_num())
+    ->withBroker(new SwooleBroker());
+```
+
+Scoped signal values, GlobalState, session data, the client list, the action rate limit and
+a context directory live in shared memory, so an action that lands on any worker reaches its
+tab. No sticky sessions are needed. What stays per worker: PHP statics in app code, and
+server-owned TAB signals. Read-modify-write on shared values loses updates between workers:
+use `increment()`/`mutate()` on signals, `incrementGlobalState()`/`mutateGlobalState()` on
+GlobalState, and `#[Signal(..., atomic: true)]` in the composition API. Session data values
+must be serializable. `withScopedSignalTableSize()`, `withContextDirectorySize()`,
+`withSessionTableSize()` and `withGlobalStateTableSize()` size the shared tables. Deploy a
+new version with a full restart, not a worker reload (`SIGUSR1`).
+
+### Several servers
 
 ```php
 use Mbolli\PhpVia\Broker\RedisBroker;
 use Mbolli\PhpVia\Broker\NatsBroker;
 
-// Redis
-$config->withBroker(new RedisBroker('redis://127.0.0.1:6379'));
-
-// NATS (JetStream)
-$config->withBroker(new NatsBroker('nats://127.0.0.1:4222'));
+$config->withBroker(new RedisBroker('127.0.0.1', 6379));
+$config->withBroker(new NatsBroker('127.0.0.1', 4222));
 ```
 
-All `broadcast()` calls are transparently forwarded through the broker. Signals and
-views stay per-node; only broadcast messages cross node boundaries.
+The broker carries broadcasts between servers. Shared memory is per machine, so contexts,
+scoped signal values and GlobalState are not shared between servers: route each browser
+session to one server with cookie-sticky load balancing.
+
+---
+
+## Shared and Persistent State
+
+```php
+$app->setGlobalState('motd', 'Hello');
+$app->globalState('motd', 'default');
+$app->incrementGlobalState('visits');                                   // atomic
+$app->mutateGlobalState('log', fn (?array $l) => [...$l ?? [], $entry]); // under a lock
+
+// Keep GlobalState in SQLite across restarts (written behind, every $flushMs)
+$config->withPersistentGlobalState(__DIR__ . '/state.db', flushMs: 1000);
+```
+
+With shared memory in use (`worker_num > 1` or persistence), GlobalState keys are at most
+63 characters.
 
 ---
 
@@ -342,27 +395,49 @@ views stay per-node; only broadcast messages cross node boundaries.
 ```php
 $config = (new Config())
     ->withHost('0.0.0.0')
-    ->withPort(8080)
+    ->withPort(3000)                          // default 3000
     ->withTemplateDir(__DIR__ . '/templates')
-    ->withStaticDir(__DIR__ . '/public')     // serves static files
+    ->withStaticDir(__DIR__ . '/public')      // serves static files
     ->withDevMode(true)                       // verbose logging, no cache headers
-    ->withBrotli()                            // requires ext-brotli
-    ->withH2c()                               // HTTP/2 cleartext (behind TLS proxy)
-    ->withCertificate($crt, $key)             // enable HTTPS directly
-    ->withLogLevel('debug')                   // debug | info | warning | error
-    ->withBroker(new RedisBroker(...))        // multi-node broker
-    ->withBasePath('/app/')                   // set at startup when mounted at a sub-path;
-                                              // throws InvalidArgumentException for invalid paths
-                                              // (absolute URLs, protocol-relative, etc.)
-                                              // exposes {{ basePath }} to all Twig templates
+    ->withLogLevel('info')                    // debug | info | warn | error
+    ->withBrotli()                            // requires ext-brotli and HTTPS or h2c
+    ->withH2c()                               // HTTP/2 cleartext (behind a TLS proxy)
+    ->withCertificate($crt, $key)             // HTTPS directly
+    ->withBasePath('/app/')                   // when mounted at a sub-path
+    ->withWorkerNum(4)                        // default 1
+    ->withBroker(new SwooleBroker())          // or RedisBroker / NatsBroker
+    ->withBroadcastTickMs(25)                 // broadcast flush tick; 0 = every turn
+    ->withBroadcastCoalescing(true)           // false = synchronous broadcasts
+    ->withSseKeepAliveMs(15_000)              // SSE comment on silent streams; 0 = off
+    ->withSseMaxQueuedBytes(1_048_576)        // drop element frames for a slow client
+    ->withContextCleanupDelay(5_000)          // after a stream closes
+    ->withContextConnectTimeout(30_000)       // free a context whose stream never connects
+    ->withContextRevivalWindow(600_000)       // rebuild a returning tab
+    ->withStrictTabSignals()                  // TAB signals server-owned by default
+    ->withPersistentGlobalState(__DIR__ . '/state.db')
+    ->withTrustedOrigins(['https://example.com'])
+    ->withAllowMissingOrigin()                // accept actions without an Origin header
+    ->withActionRateLimit(100, 60)            // per IP, counted across workers
+    ->withSecureCookie(true)
 ;
 ```
 
 ---
 
+## Security
+
+- `withTrustedOrigins([...])` rejects action POSTs whose `Origin` is not listed. Outside dev
+  mode a POST without an `Origin` header gets 403; non-browser clients need
+  `withAllowMissingOrigin()`. The Dev Bar endpoints and the tab-close beacon apply the same
+  check.
+- A context only accepts actions and streams from the session that created it.
+- `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
+
+---
+
 ## Middleware
 
-php-via supports PSR-15 middleware for authentication, rate-limiting, CORS, etc.
+php-via supports PSR-15 middleware for authentication, rate limiting, CORS, etc.
 
 ```php
 // Global middleware (runs on every request)
@@ -382,33 +457,28 @@ $app->group('/admin', function (Via $app) use ($handler): void {
 
 ## Twig Integration
 
-`Via::getTwig()` returns the Twig environment for registering custom extensions and
-runtime loaders. Variables automatically injected into every template via `Context::render()`:
+`Via::getTwig()` returns the Twig environment for registering extensions. `Context::render()`
+passes the context's signals and actions to the template by name, plus:
 
 | Variable | Value |
 |---|---|
-| `contextId` | The connection's unique ID (used in `data-signals`) |
-| `currentRoute` | The matched route pattern, e.g. `/docs/signals` |
+| `contextId` | The tab's context id |
+| `currentRoute` | The matched route, e.g. `/docs/signals` |
 | `basePath` | Base URL path, always ends with `/` (default: `/`) |
-| `siteUrl` | Your configured site URL (set via `$twig->addGlobal(...)`) |
-| `assetVersion` | Cache-busting version token (set via `addGlobal`) |
 
-Key `data-*` attributes for Datastar in templates:
-```html
-<!-- Display a signal value -->
-<span data-text="$count">0</span>
+Datastar attributes in templates, with ids written from the signal objects:
+```twig
+{# Display a signal value #}
+<span data-text="${{ count.id }}">{{ count.int }}</span>
 
-<!-- Two-way bind an input to a signal -->
-<input data-bind="name" type="text">
+{# Two-way bind an input to a signal #}
+<input data-bind="{{ name.id }}" type="text">
 
-<!-- Trigger an action on click -->
-<button data-on-click="@post('{{ inc_url }}')">+1</button>
+{# Trigger an action on click #}
+<button data-on:click="@post('{{ increment.url }}')">+1</button>
 
-<!-- Show/hide based on signal -->
-<div data-show="$loggedIn">Protected content</div>
-
-<!-- Class toggle -->
-<div data-class-active="$isActive">...</div>
+{# Show/hide based on a signal #}
+<div data-show="${{ loggedIn.id }}">Protected content</div>
 ```
 
 ---
@@ -423,7 +493,7 @@ Key `data-*` attributes for Datastar in templates:
 | Zero JavaScript | ✅ | ❌ Alpine | ❌ Alpine/JS | ❌ React/Vue | ✅ |
 | No build step | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Framework required | ❌ | Laravel | ❌ | Laravel/Symfony | Phoenix |
-| Multi-server scaling | ✅ Redis/NATS | ⚠️ | N/A | N/A | ✅ |
+| Multi-worker / multi-server | ✅ Swoole / Redis / NATS | ⚠️ | N/A | N/A | ✅ |
 | Persistent connection | ✅ SSE | ❌ HTTP | ❌ HTTP | ❌ HTTP | ✅ WS |
 
 **Choose php-via when**: you want real-time multiplayer UIs in plain PHP with no
@@ -436,33 +506,37 @@ server-pushed real-time without Reverb.
 **Choose htmx when**: you're progressively enhancing an existing app and don't need
 persistent connections or server-initiated updates.
 
-**Choose Phoenix LiveView when**: you work in Elixir and want the mature, battle-tested
-original inspiration for php-via.
+**Choose Phoenix LiveView when**: you work in Elixir and want the original inspiration for
+php-via.
 
 ---
 
 ## Common Pitfalls (Quick Reference)
 
-1. **Broadcast sends stale data**: read from `$app->globalState()` inside view closures
-   instead of per-client signal values.
-2. **Dual state (globalState + Signal)**: scoped signals are already shared — drop
-   `globalState` and just use `$c->scope(Scope::ROUTE); $s = $c->signal(...)`.
-3. **Wrong signal ID in HTML**: always use `$signal->id()` in PHP and pass to template;
-   never hard-code signal IDs.
-4. **Full-page patch overwrites component updates**: return `''` from page view when
-   `$isUpdate === true`; or use `block:` parameter on `$c->view()`.
-5. **Variable null in view closure**: add it to both outer and inner `use` lists.
-6. **Stale cached view after broadcast**: pass `cacheUpdates: false` to `$c->view()`.
-7. **PatchElementsNoTargetsFound**: the root element in your rendered block must have
-   a unique `id` attribute.
-8. **Partial update replaces whole page**: your block root element's `id` collides with
-   the shell's `<main id="content">`; give it a unique ID.
-9. **Timer fires with no clients**: guard `$app->broadcast()` with
-   `if (empty($app->getClients())) return;`.
-10. **Shell templates ignore Twig**: shell HTML files use `str_replace` placeholders,
-    not Twig; put layout logic in proper `{% extends %}` / `{% block %}` templates.
-11. **Action returns HTTP 400**: stale `via_ctx` after server restart; refresh the page,
-    or include `via_ctx` explicitly in custom `@post()` payloads.
+1. **Hand-written signal ids**: ids include the tab and may carry a `____` suffix; write
+   them from the signal object (`$signal->id()`, `{{ count.id }}`), never by hand.
+2. **Broadcast shows stale data for other clients**: views that show shared state must read
+   shared state (a scoped signal or `$app->globalState()`), not a per-client TAB signal.
+3. **Dual state (globalState + Signal)**: scoped signals are already shared; use
+   `$c->scope(Scope::ROUTE); $s = $c->signal(...)` instead of mirroring into GlobalState.
+4. **Lost updates with several workers**: `setValue($s->int() + 1)` or
+   `setGlobalState($k, globalState($k) + 1)` lose writes; use `increment()`/`mutate()`.
+5. **Transient state never shown**: a value set, broadcast and reset in one action never
+   reaches clients, because the flush renders later; call `$app->flushBroadcasts()` first.
+6. **Script runs before the morph**: `execScript()` after `broadcast()` reaches the tab
+   before the broadcast frame; call `$app->flushBroadcasts()` before `execScript()`.
+7. **Value frozen at page load**: compute it inside the view closure, not in the page
+   handler (applies to `count($app->getClients())` and to component HTML).
+8. **Variable null in view closure**: add it to both outer and inner `use` lists.
+9. **Stale cached view after broadcast**: pass `cacheUpdates: false` to `$c->view()`.
+10. **PatchElementsNoTargetsFound**: the root element of your rendered block must have a
+    unique `id` attribute.
+11. **Timer fires with no clients**: guard `$app->broadcast()` with
+    `if (empty($app->getClients())) return;`.
+12. **Shell templates ignore Twig**: shell HTML files use string placeholders, not Twig; put
+    layout logic in `{% extends %}` / `{% block %}` templates.
+13. **Action returns 403**: a POST without an `Origin` header when `withTrustedOrigins()` is
+    set; browsers always send one, scripts need `withAllowMissingOrigin()`.
 
 ---
 
