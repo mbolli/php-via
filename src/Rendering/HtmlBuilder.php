@@ -19,6 +19,9 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
+    /** @var array<string, true> Shell paths already checked for a mismatched import map */
+    private array $checkedShells = [];
+
     /**
      * @param null|\Closure(string, string, ?Context): void $logger Receives level, message and context
      */
@@ -60,10 +63,11 @@ class HtmlBuilder {
      * @param string      $contextId   Context ID for initial signals
      * @param string      $basePath    Base path for URLs
      * @param null|string $datastarUrl URL of the Datastar bundle, '<basePath>datastar.js' when null
+     * @param bool        $importMap   Fill {{ datastar_import_map }}, which stays empty otherwise (Rocket build only)
      *
      * @return string Complete HTML document
      */
-    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null): string {
+    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null, bool $importMap = false): string {
         if (stripos($content, '<html') !== false) {
             return $this->injectIntoDocument($content, $context, initial: true);
         }
@@ -92,7 +96,7 @@ class HtmlBuilder {
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
             '{{ datastar_url }}' => htmlspecialchars($datastarUrl, ENT_QUOTES, 'UTF-8'),
-            '{{ datastar_import_map }}' => self::datastarImportMap($datastarUrl),
+            '{{ datastar_import_map }}' => $importMap ? self::datastarImportMap($datastarUrl) : '',
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
             '{{ foot_content }}' => implode("\n", $footIncludes),
@@ -105,6 +109,13 @@ class HtmlBuilder {
 
         if ($shell === false) {
             throw new \RuntimeException("Failed to load shell template from: {$shellPath}");
+        }
+
+        if ($importMap && !isset($this->checkedShells[$shellPath])) {
+            $this->checkedShells[$shellPath] = true;
+            if (str_contains($shell, '{{ datastar_import_map }}') && !str_contains($shell, '{{ datastar_url }}')) {
+                $this->log('warning', "Shell {$shellPath} has {{ datastar_import_map }} but loads Datastar without {{ datastar_url }}: Rocket components will start a second Datastar engine", $context);
+            }
         }
 
         // strtr() replaces in one pass, so placeholder text inside the content or a value stays as is

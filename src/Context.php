@@ -748,7 +748,7 @@ class Context {
     public function render(string $template, array $data = [], ?string $block = null): string {
         $effectiveBlock = $block ?? ($this->isUpdating ? $this->updateBlock : null);
         $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
-        $data += ['contextId' => $this->id, 'currentRoute' => $this->route];
+        $data += ['contextId' => $this->id, 'currentRoute' => $this->route, 'datastarUrl' => $this->app->getConfig()->getDatastarUrl()];
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $effectiveBlock);
     }
@@ -761,7 +761,7 @@ class Context {
      */
     public function renderString(string $template, array $data = []): string {
         // Add context data automatically
-        $data += ['contextId' => $this->id];
+        $data += ['contextId' => $this->id, 'datastarUrl' => $this->app->getConfig()->getDatastarUrl()];
 
         return $this->app->getViewRenderer()->renderString($template, $data);
     }

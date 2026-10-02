@@ -529,11 +529,11 @@ plain bundle). Configure it before `new Via()`.
 **One engine per page.** Components `import { rocket } from 'datastar'`, so the page needs an
 import map that maps `datastar` to exactly the URL of the Datastar `<script type="module">`,
 query string included, before any module script. Another URL loads a second Datastar
-engine. The default shell writes both from `Config::getDatastarUrl()`
+engine. With the option on, the default shell writes both from `Config::getDatastarUrl()`
 (`/datastar.js?v=<10 hex digits of the bundle's sha256>`). A custom shell uses the
-placeholders `{{ datastar_import_map }}` (in `<head>`, before `{{ head_content }}`) and
-`<script type="module" src="{{ datastar_url }}">`. A Twig layout that renders the whole
-document writes both itself:
+placeholders `{{ datastar_import_map }}` (in `<head>`, before `{{ head_content }}`; empty
+without the option) and `<script type="module" src="{{ datastar_url }}">`. A Twig layout that
+renders the whole document writes both itself:
 
 ```twig
 <head>
@@ -546,15 +546,18 @@ document writes both itself:
 </body>
 ```
 
+The map is an inline script: under a CSP without `'unsafe-inline'`, allow it by its sha256 or
+write it yourself with a nonce.
+
 **Loading components.** Take the script tag from a Starbase component page's Installation
 section (pinned version with `integrity`) and add it with `$app->appendToHead(...)`, leaving
 out that snippet's `imports` entry. Or copy the component's files into `withStaticDir()`;
 `.js` and `.mjs` are served as JavaScript.
 
 **Binding.** Use `$signal->bind('value')` / `{{ bind(signal, 'value') }}`
-(`data-bind__prop.value`) on components. Plain `data-bind` on an element not yet defined
-falls back to the `value` attribute, which the component does not update and the next morph
-removes.
+(`data-bind__prop.value`) on components, and the property form for any other property
+(`bind('checked')`). Plain `data-bind` binds a custom element's `value` property only if its
+tag is already defined, and the `value` attribute otherwise.
 
 **Server state.** Render the server's value into the component's attribute in the view and
 post the component's `change` event to an action, which decides the value and syncs:

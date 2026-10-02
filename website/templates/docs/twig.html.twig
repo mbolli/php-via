@@ -21,7 +21,8 @@
                 with its id, where <code>name</code> is the name passed to <code>signal()</code>.
                 {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the versioned Datastar URL and
                 {% verbatim %}<code>{{ datastar_import_map }}</code>{% endverbatim %} the import map that
-                <a href="/docs/web-components#one-engine">web components</a> need.
+                <a href="/docs/web-components#one-engine">web components</a> need, empty without
+                <code>withDatastarRocket()</code>.
                 The shell is sent once per page load and never re-sent over SSE.
                 Use it for the outer chrome: doctype, nav, scripts, footer.
             </p>
@@ -85,9 +86,9 @@ $c->view(function () use ($count): string {
     <p>
         Your layout still has to carry the SSE bootstrap: the <code>@get('_sse')</code> meta, the
         <code>sendBeacon</code> meta for closing the session and Datastar, loaded from the
-        <code>datastarUrl</code> global with an import map for the same URL. php-via never
-        injects them into a full document, because a second copy would break the page. Copy them from
-        the default <code>shell.html</code>; <a href="/docs/web-components#twig-layout">Web components</a>
+        <code>datastarUrl</code> variable, with <code>withDatastarRocket()</code> also an import map for
+        the same URL. php-via never injects them into a full document, because a second copy would
+        break the page. Copy them from the default <code>shell.html</code>; <a href="/docs/web-components#twig-layout">Web components</a>
         explains the import map.
     </p>
     {% code 'twig' %}{% verbatim %}
@@ -96,6 +97,7 @@ $c->view(function () use ($count): string {
 <html>
 <head>
     <meta charset="UTF-8">
+    {# with withDatastarRocket() #}
     <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
     <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
     <meta data-indicator="_connecting"

@@ -643,9 +643,10 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         the URL pages load Datastar from: the base path, <code>datastar.js</code> and the first 10 hex
         digits of the served bundle's SHA-256 as <code>v</code>, such as
         <code>/datastar.js?v=727844adfc</code>. Twig templates get it
-        as <code>{% verbatim %}{{ datastarUrl }}{% endverbatim %}</code>, set when <code>Via</code> is
-        constructed, and custom shells as <code>{% verbatim %}{{ datastar_url }}{% endverbatim %}</code>
-        next to the import map placeholder <code>{% verbatim %}{{ datastar_import_map }}{% endverbatim %}</code>.
+        as <code>{% verbatim %}{{ datastarUrl }}{% endverbatim %}</code> and custom shells as
+        <code>{% verbatim %}{{ datastar_url }}{% endverbatim %}</code>. With the option on, the import map
+        placeholder <code>{% verbatim %}{{ datastar_import_map }}{% endverbatim %}</code> maps
+        <code>datastar</code> to that URL; without it, the placeholder is empty.
         See <a href="/docs/web-components">Web components</a>.
     </p>
     ---

@@ -24,8 +24,7 @@ $app = new Via(
         <code>/datastar.js</code> then serves Datastar 1.0.4 with Rocket instead of the plain Datastar
         1.0.4 bundle. The build comes from Starbase: Datastar 1.0.4 and Rocket built with Starbase's
         fixes, which php-via ships because of the <a href="#keyed-lists">keyed-list crash</a> in the
-        official Rocket bundle. Configure it before <code>new Via()</code>, which sets the <code>datastarUrl</code>
-        Twig global.
+        official Rocket bundle.
     </p>
     <p>
         The Rocket build is 21,958 bytes with Brotli, against 12,183 bytes for the plain bundle, and every
@@ -50,8 +49,9 @@ $app = new Via(
         is in place when the first import resolves.
     </p>
     <p>
-        The default shell does both. It writes the map right after the viewport meta, ahead of everything
-        <code>appendToHead()</code> adds, and loads Datastar from the same URL at the end of the body:
+        With <code>withDatastarRocket()</code>, the default shell does both. It writes the map right after
+        the viewport meta, ahead of everything <code>appendToHead()</code> adds, and loads Datastar from the
+        same URL at the end of the body:
     </p>
     {% code 'html' %}{% verbatim %}
 <script type="importmap">{"imports":{"datastar":"/datastar.js?v=f602fbe19d"}}</script>
@@ -62,16 +62,24 @@ $app = new Via(
         <code>v</code> is the first 10 hex digits of the served bundle's SHA-256, so a new bundle gets a
         new URL and browsers fetch it instead of using a cached copy. <code>Config::getDatastarUrl()</code>
         returns the URL, including the base path; in a page handler that is
-        <code>$c-&gt;getConfig()-&gt;getDatastarUrl()</code>. The default shell writes the map in both
-        modes; with the plain bundle, nothing imports through it.
+        <code>$c-&gt;getConfig()-&gt;getDatastarUrl()</code>. With the plain bundle, the default shell
+        loads Datastar from that URL and writes no import map.
+    </p>
+    <p id="csp">
+        The import map is an inline script. Under a <code>Content-Security-Policy</code> whose
+        <code>script-src</code> lacks <code>'unsafe-inline'</code>, the browser blocks it, and every
+        component then fails to import <code>datastar</code>. Allow the map by its SHA-256, which changes
+        with every bundle, or write it yourself with your nonce in a
+        <a href="#own-shell">custom shell or Twig layout</a>.
     </p>
 
     <h2 id="own-shell">The import map in a custom shell or Twig layout</h2>
     <h3 id="custom-shell">Custom shell</h3>
     <p>
         A shell set with <code>withShellTemplate()</code> gets two placeholders:
-        {% verbatim %}<code>{{ datastar_import_map }}</code>{% endverbatim %} is the whole import map tag,
-        and {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the URL. Put the map in the
+        {% verbatim %}<code>{{ datastar_import_map }}</code>{% endverbatim %} is the whole import map tag
+        (empty without <code>withDatastarRocket()</code>), and
+        {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the URL. Put the map in the
         head, before {% verbatim %}<code>{{ head_content }}</code>{% endverbatim %} and any module script
         of your own:
     </p>
@@ -93,16 +101,20 @@ $app = new Via(
 </html>
     {% endverbatim %}{% endcode %}
     <p>
-        A shell that loads {% verbatim %}<code>{{ base_path }}datastar.js</code>{% endverbatim %} and has
-        no import map still works with the plain bundle, but Rocket components fail on it, and browsers
-        keep a cached bundle until its <code>Cache-Control</code> lifetime ends.
+        Load Datastar from {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %}. A shell that
+        keeps {% verbatim %}<code>{{ base_path }}datastar.js</code>{% endverbatim %} loads Datastar from
+        another URL than the map's, so the components start a second engine; php-via logs a warning
+        when a shell has the map placeholder without the URL one. A shell without any import map works
+        with the plain bundle but not with Rocket components, and an unversioned
+        <code>datastar.js</code> stays cached for up to an hour after an upgrade.
     </p>
 
     <h3 id="twig-layout">Twig layout</h3>
     <p>
         php-via never adds the Datastar script or the import map to a view that renders its own
         <code>&lt;html&gt;</code> document (see <a href="/docs/twig#twig-shell">Twig as the shell</a>), so
-        the layout writes both tags from the <code>datastarUrl</code> global:
+        the layout loads Datastar from the <code>datastarUrl</code> variable and, with
+        <code>withDatastarRocket()</code>, writes the import map for the same URL:
     </p>
     {% code 'twig' %}{% verbatim %}
 {# templates/base.html.twig #}
@@ -110,6 +122,7 @@ $app = new Via(
 <html>
 <head>
     <meta charset="UTF-8">
+    {# with withDatastarRocket() #}
     <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
     <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
     <meta data-indicator="_connecting"
@@ -203,12 +216,13 @@ $app->appendToHead('<script type="module" src="/js/slider/slider.min.js"></scrip
 {# renders data-bind__prop.value="<thrust's id>" #}
     {% endverbatim %}{% endcode %}
     <p>
-        Use the property form for web components. Datastar can bind an element before its module has
-        defined the tag, and plain <code>bind()</code> then falls back to the element's <code>value</code>
-        attribute: the component does not update that attribute, so the signal stops following what the
-        user sets, and the next morph removes the attribute. With the property form, Datastar always reads
-        and writes the property, and updates the signal on the element's <code>input</code> and
-        <code>change</code> events. Starbase's docs bind every component this way.
+        Use the property form for web components. Datastar then reads and writes the property, whether
+        or not the module has defined the tag when Datastar reaches the element, and updates the signal
+        on the element's <code>input</code> and <code>change</code> events. Plain <code>bind()</code>
+        binds a custom element's <code>value</code> property only if its tag is already defined, and its
+        <code>value</code> attribute otherwise, which a component does not have to keep up to date. Any
+        other property, such as <code>checked</code> on <code>sb-toggle</code>, needs the property form.
+        Starbase's docs bind every component this way.
     </p>
     <p>
         A camelCase name is written in kebab case, which Datastar turns back:
