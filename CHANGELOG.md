@@ -15,12 +15,12 @@ All notable changes to php-via will be documented in this file.
 - **A versioned Datastar URL.** The default shell loads `/datastar.js?v=<hash>`, so browsers fetch
   the new bundle after an upgrade instead of reusing the cached one.
 - **Worker freezes and crashes.** A burst of page views that never opened a stream froze a worker
-  for up to 45 s once their contexts expired, and on libcurl 8.20 or newer a curl request to any host
-  name crashed the worker. Both are fixed. [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks)
+  for about a minute once their contexts expired, and on libcurl 8.20 or newer a curl request to any
+  host name crashed the worker. Both are fixed. [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks)
   documents what each OpenSwoole hook covers and the OpenSwoole 26.2 bugs that affect apps.
-- **Cheaper page views and static files.** A page rendered into a shell template costs half the CPU
-  (0.043 instead of 0.086 ms), a cached stylesheet a sixth (0.029 instead of 0.173 ms), because
-  php-via no longer reads either from disk on every request.
+- **Cheaper page views and static files.** A small page view costs half the CPU (0.048 instead of
+  0.091 ms) and a cached stylesheet about a quarter (0.054 instead of 0.193 ms), because php-via no
+  longer reads the shell template or the file from disk on every request.
 
 ### Breaking Changes
 
@@ -55,9 +55,9 @@ All notable changes to php-via will be documented in this file.
   on web components. The Twig `bind()` function takes the property as a second argument.
 - **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
   as `application/json`.
-- **`Via::HOOK_FLAGS_NO_FILE_IO`** is the hook set without file and stdio hooks, for apps that run
-  no shell commands and hold no `flock()` across a suspension. `Via::defaultHookFlags()` returns the
-  default. See [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks-narrow).
+- **`Via::HOOK_FLAGS_NO_FILE_IO`** is the hook set without file, stdio and native curl hooks, for
+  apps that run no shell commands and hold no `flock()` across a suspension.
+  `Via::defaultHookFlags()` returns the default. See [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks-narrow).
 - **`start()` checks `hook_flags`.** It throws for `SWOOLE_HOOK_STDIO` without `SWOOLE_HOOK_FILE`,
   under which includes suspend halfway through a file and concurrent requests fail with "Class not
   found", and for a `RedisBroker` without the socket hook its connection needs.
@@ -67,27 +67,29 @@ All notable changes to php-via will be documented in this file.
 ### Performance
 
 - **Shell templates are read once per worker,** and in dev mode again after an edit. Under the
-  default hooks each read took seven trips through the file thread pool: a page rendered into a
-  shell now costs 0.043 ms of CPU instead of 0.086 ms. Outside dev mode, a changed shell needs a
-  reload.
-- **Static files are served from worker memory** and read again only when they change: 0.029 ms of
-  CPU per request for a 91 KB stylesheet instead of 0.173 ms. Each worker keeps files up to 2 MiB,
-  16 MiB per encoding. Bigger files go out with `sendfile()` and are no longer Brotli-compressed.
+  default hooks each read took seven trips through the file thread pool: a small page view now
+  costs 0.048 ms of CPU instead of 0.091 ms, and one worker serves 26,500 views a second instead of
+  17,700. Outside dev mode, a changed shell needs a reload.
+- **Static files are served from worker memory** and read again only when they change: a 91 KB
+  stylesheet costs 0.054 ms of CPU per request instead of 0.193 ms with Brotli, and 0.040 ms instead
+  of 0.161 ms without. Each worker keeps files up to 2 MiB, 16 MiB per encoding. Bigger files go out
+  with `sendfile()` and are no longer Brotli-compressed.
   See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
 - **Only paths with a file extension are looked up in `withStaticDir()` before routing,** and the
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
-  `/_sse` and actions included: 44 to 66 µs of CPU on a FUSE mount.
-- **Dev Bar assets** are served from memory with an ETag, and with Brotli when it is on, so a page
-  view revalidates `devbar.js` (25 KB) with a 304 instead of downloading it again.
+  `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.
+- **Dev Bar assets** are served from memory with an ETag, and with Brotli when it is on. A page view
+  revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
+  download is 6.8 KB with Brotli.
 
 ### Fixed
 
 - `.json` files from `withStaticDir()` were served as `application/octet-stream`, which breaks JSON
   module imports. They are now `application/json`.
 - A burst of page views that never opened a stream froze a worker once their contexts expired: each
-  destroyed context walked every revival record and, above 10,000, sorted them all. After 277,000
-  page views in 10 s a worker stopped answering for 45 s, and any client could cause it with GET
-  requests. Pruning now stops at the first record still valid.
+  destroyed context walked every revival record and, above 10,000, sorted them all. After 250,000
+  page views in 15 s a worker stopped answering for 60 to 74 s, and any client could cause it with
+  GET requests. Pruning now stops at the first record still valid, and the longest pause is 0.7 s.
 - On libcurl 8.20 or newer, a curl request to any host name crashed the worker under the default
   `hook_flags` (OpenSwoole's native curl hook, curl#21558). The default now leaves
   `SWOOLE_HOOK_NATIVE_CURL` out there, so curl blocks the worker for the request, and `start()`
