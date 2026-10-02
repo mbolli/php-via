@@ -27,8 +27,17 @@ final class FakeStaticResponse extends Response {
     /** The file passed to sendfile(), whose contents become the body. */
     public ?string $sentFile = null;
 
+    /** @var array<string, null|string> */
+    public array $cookies = [];
+
     public function header(string $key, mixed $value, bool $ucwords = true): bool {
         $this->headers[$key] = (string) $value;
+
+        return true;
+    }
+
+    public function cookie(string $key, ?string $value = null, int $expire = 0, string $path = '', string $domain = '', bool $secure = false, bool $httpOnly = false, string $sameSite = '', string $priority = ''): bool {
+        $this->cookies[$key] = $value;
 
         return true;
     }

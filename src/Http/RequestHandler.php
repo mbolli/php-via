@@ -56,6 +56,9 @@ class RequestHandler {
     /** @var array<string, int> Bytes the static cache holds per encoding */
     private array $staticCacheBytes = ['br' => 0, 'identity' => 0];
 
+    /** @var null|array{0: string, 1: string} The configured static dir and its realpath, resolved once */
+    private ?array $staticBase = null;
+
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
@@ -160,23 +163,15 @@ class RequestHandler {
             return;
         }
 
-        // Serve static files from configured staticDir (if set)
+        // Serve static files from configured staticDir (if set). Only a path that looks like a file
+        // is looked up before routing; any other only once no route matched.
         $staticDir = $this->via->getConfig()->getStaticDir();
-        if ($staticDir !== null) {
-            // Prevent directory traversal
-            $relPath = ltrim(parse_url($path, PHP_URL_PATH) ?? '', '/');
-            $filePath = $staticDir . '/' . $relPath;
-            $realBase = realpath($staticDir);
-            $realFile = realpath($filePath);
+        $staticFirst = $staticDir !== null && self::looksLikeStaticFile($path);
+        if ($staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
+            $this->serveStaticFile($realFile, $request, $response);
+            $this->logRequest($method, $path, 200, $requestStart);
 
-            if ($realBase !== false && $realFile !== false
-                && str_starts_with($realFile, $realBase . '/')
-                && is_file($realFile)) {
-                $this->serveStaticFile($realFile, $request, $response);
-                $this->logRequest($method, $path, 200, $requestStart);
-
-                return;
-            }
+            return;
         }
 
         // Handle SSE connection (logged separately by SseHandler)
@@ -277,6 +272,14 @@ class RequestHandler {
                     return;
                 }
             }
+        }
+
+        // An extension-less static file, such as an ACME challenge token
+        if ($staticDir !== null && !$staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
+            $this->serveStaticFile($realFile, $request, $response);
+            $this->logRequest($method, $path, 200, $requestStart);
+
+            return;
         }
 
         // 404 Not Found
@@ -745,6 +748,45 @@ class RequestHandler {
         };
 
         $this->sendStaticFile($filePath, $contentType, $compressible, $request, $response);
+    }
+
+    /**
+     * Whether a request path is looked up in the static dir before routing: its last segment has
+     * an extension, and it is not under a framework endpoint (action names may contain dots).
+     */
+    private static function looksLikeStaticFile(string $path): bool {
+        if (str_starts_with($path, '/_action/') || str_starts_with($path, '/_via/') || str_starts_with($path, '/_session/')) {
+            return false;
+        }
+
+        return str_contains(substr($path, (int) strrpos($path, '/') + 1), '.');
+    }
+
+    /**
+     * The real path of the file a request path names in the static dir, or null when there is
+     * none or the path leads outside the dir.
+     */
+    private function resolveStaticFile(string $staticDir, string $path): ?string {
+        if ($this->staticBase === null || $this->staticBase[0] !== $staticDir) {
+            $realBase = realpath($staticDir);
+            if ($realBase === false) {
+                return null;
+            }
+            $this->staticBase = [$staticDir, $realBase];
+        }
+
+        $urlPath = parse_url($path, PHP_URL_PATH);
+        if (!\is_string($urlPath)) {
+            return null;
+        }
+
+        // Prevent directory traversal
+        $realFile = realpath($staticDir . '/' . ltrim($urlPath, '/'));
+        if ($realFile === false || !str_starts_with($realFile, $this->staticBase[1] . '/') || !is_file($realFile)) {
+            return null;
+        }
+
+        return $realFile;
     }
 
     /**

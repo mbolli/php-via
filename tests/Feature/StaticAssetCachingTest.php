@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\SseHandler;
@@ -419,5 +420,98 @@ describe('the static file cache', function (): void {
         expect($sent)->toBe([false, false, false, false, false, false, false, false, true])
             ->and($bytesOf($handler)['identity'])->toBe(16 << 20)
         ;
+    });
+});
+
+describe('the static dir lookup', function (): void {
+    $dir = null;
+    $outside = null;
+
+    beforeEach(function () use (&$dir, &$outside): void {
+        $dir = sys_get_temp_dir() . '/via-static-lookup-' . bin2hex(random_bytes(6));
+        $outside = $dir . '-outside';
+        mkdir($dir . '/_action', 0o777, true);
+        mkdir($dir . '/_via');
+        mkdir($dir . '/.well-known/acme-challenge', 0o777, true);
+        mkdir($outside);
+        foreach (['_sse', 'about', '_action/save.draft', '_via/devbar.js', 'feed.xml', '.well-known/acme-challenge/tok3n'] as $file) {
+            file_put_contents($dir . '/' . $file, 'FILE ' . $file);
+        }
+        file_put_contents($outside . '/secret.css', 'SECRET');
+        file_put_contents($outside . '/secret', 'SECRET');
+        symlink($outside . '/secret.css', $dir . '/link.css');
+    });
+
+    afterEach(function () use (&$dir, &$outside): void {
+        exec('rm -rf ' . escapeshellarg($dir) . ' ' . escapeshellarg($outside));
+    });
+
+    /** A handler with the routes registered, as Via::start() wires it. */
+    $handlerWithRoutes = function (string $dir): RequestHandler {
+        $via = createVia((new Config())->withStaticDir($dir));
+        $via->page('/about', fn (Context $c) => $c->view(fn (): string => '<p>ROUTE about</p>'));
+        $via->page('/feed.xml', fn (Context $c) => $c->view(fn (): string => '<p>ROUTE feed</p>'));
+        $handler = requestHandlerFor($via);
+        $handler->setRoutes($via->getRouter()->getRoutes());
+
+        return $handler;
+    };
+
+    $get = function (RequestHandler $handler, string $path): FakeStaticResponse {
+        $request = new class extends Request {
+            public function getContent(): false|string {
+                return '';
+            }
+        };
+        $request->server = ['request_uri' => $path, 'request_method' => 'GET'];
+        $request->header = [];
+        $request->cookie = [];
+        $request->get = [];
+        $response = new FakeStaticResponse();
+        $handler->handleRequest($request, $response);
+
+        return $response;
+    };
+
+    test('/_sse, /_action, /_via and extension-less page routes never reach a same-named file', function () use (&$dir, $handlerWithRoutes, $get): void {
+        $handler = $handlerWithRoutes($dir);
+
+        $sse = $get($handler, '/_sse');
+        $action = $get($handler, '/_action/save.draft');
+        $devBar = $get($handler, '/_via/devbar.js');
+        $page = $get($handler, '/about');
+
+        expect([$sse->statusCode, $sse->body])->toBe([400, 'Invalid context'])
+            ->and($action->statusCode)->toBe(405)
+            ->and([$devBar->statusCode, $devBar->body])->toBe([404, 'Not Found'])
+            ->and($page->statusCode)->toBe(200)
+            ->and($page->body)->toContain('ROUTE about')
+        ;
+    });
+
+    test('a path with an extension is still served from the static dir before routing', function () use (&$dir, $handlerWithRoutes, $get): void {
+        $response = $get($handlerWithRoutes($dir), '/feed.xml');
+
+        expect($response->statusCode)->toBe(200)
+            ->and($response->body)->toBe('FILE feed.xml')
+        ;
+    });
+
+    test('an extension-less file is served when no route matches', function () use (&$dir, $handlerWithRoutes, $get): void {
+        $response = $get($handlerWithRoutes($dir), '/.well-known/acme-challenge/tok3n');
+
+        expect($response->statusCode)->toBe(200)
+            ->and($response->body)->toBe('FILE .well-known/acme-challenge/tok3n')
+        ;
+    });
+
+    test('paths leading outside the static dir are refused', function () use (&$dir, &$outside, $handlerWithRoutes, $get): void {
+        $handler = $handlerWithRoutes($dir);
+        $name = basename((string) $outside);
+
+        foreach (["/../{$name}/secret.css", "/../{$name}/secret", '/link.css', '/'] as $path) {
+            $response = $get($handler, $path);
+            expect([$path, $response->statusCode, $response->body])->toBe([$path, 404, 'Not Found']);
+        }
     });
 });
