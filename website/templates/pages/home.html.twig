@@ -1,6 +1,7 @@
 {% extends 'shells/base.html.twig' %}
-{% block title %}php-via: Real-time PHP. No JavaScript. No build step.{% endblock %}
-{% block description %}php-via is a real-time engine for building reactive PHP web applications with OpenSwoole and Datastar. No JavaScript, no build step, multiplayer by default.{% endblock %}
+{% block title %}php-via: server-side reactive UIs in PHP{% endblock %}
+{% block description %}php-via is a PHP framework for server-side reactive web UIs. It runs on OpenSwoole, and Datastar applies its updates over one SSE stream per browser tab. Scopes decide who shares state.{% endblock %}
+{% block body_class %}page-home{% endblock %}
 {% block head %}
 <script type="application/ld+json">
 {
@@ -10,7 +11,7 @@
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Linux, macOS",
     "programmingLanguage": "PHP",
-    "description": "Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole, Datastar, and Twig.",
+    "description": "PHP framework for server-side reactive web UIs, built on OpenSwoole, Datastar and Twig.",
     "url": "https://via.zweiundeins.gmbh/",
     "downloadUrl": "https://packagist.org/packages/mbolli/php-via",
     "installUrl": "https://packagist.org/packages/mbolli/php-via",
@@ -30,45 +31,58 @@
 </script>
 {% endblock %}
 {% block content %}
-<!-- Hero -->
-<section class="hero">
-    <div class="hero-inner">
-        <div class="hero-eyebrow">
-            <span>⚡</span> Real-time PHP
+
+<section class="px-hero">
+    <div class="px-wrap px-hero-grid">
+        <div class="px-hero-copy">
+            <h1 class="px-hero-title">
+                <span class="px-wordmark">php-via</span>
+                <span class="px-hero-sub">Server-side reactive UIs in PHP</span>
+            </h1>
+            <p class="px-hero-lead">
+                php-via keeps the state of each page on the server. You write signals, actions and
+                views in PHP. Datastar applies the server's patches in the browser over one SSE
+                stream per tab, and scopes decide who shares which state.
+            </p>
+
+            <div class="px-actions">
+                <a href="/docs/getting-started" class="px-btn px-btn--primary">Get started <span aria-hidden="true">→</span></a>
+                <a href="/examples" class="px-btn">Examples</a>
+                <a href="https://github.com/mbolli/php-via" class="px-btn px-btn--ghost" target="_blank" rel="noopener">
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                    GitHub
+                </a>
+            </div>
+
+            <div class="px-install">
+                <span class="px-install-prompt" aria-hidden="true">$</span>
+                <code id="px-install-cmd">composer require mbolli/php-via</code>
+                <button type="button" class="px-install-copy" data-copy="px-install-cmd">Copy</button>
+            </div>
+
+            <div class="px-hero-status">
+                {{ presence | raw }}
+                <span class="px-hero-reqs">PHP 8.4 · OpenSwoole 26 · MIT</span>
+            </div>
         </div>
 
-        <h1>
-            PHP finally has<br>
-            <em>real-time superpowers.</em>
-        </h1>
-
-        <p class="hero-tagline">
-            php-via turns your PHP into a reactive, multiplayer-ready server.
-            No JavaScript. No build step. No API layer. Just PHP and OpenSwoole.
-        </p>
-
-        {{ presence | raw }}
-
-        <div class="hero-ctas">
-            <a href="/docs/getting-started" class="btn btn-primary">Get started →</a>
-            <a href="https://github.com/mbolli/php-via" class="btn btn-secondary" target="_blank" rel="noopener">
-                <svg width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-                GitHub
-            </a>
-        </div>
+        {% include 'components/pairing-placeholder.html.twig' %}
     </div>
 </section>
 
-<!-- Code + result demo -->
-<section class="page-section">
-    <div class="section-label">Minimal API</div>
-    <h2 class="section-title">This is all the code.</h2>
-    <p class="section-lead">
-        A counter in ~15 lines of PHP. Switch the scope tab to see the only change needed to make it
-        multiplayer: one line. Flip the API toggle to compare the closure handler with the
-        class-based <a href="/docs/composition">composition API</a>. No JavaScript. No WebSockets. No API glue.
-    </p>
-    <div class="code-examples-split">
+<section class="px-section" id="counter">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>A complete counter app</h2>
+            <p>
+                The listing is a full <code>app.php</code>. The <strong>TAB</strong> version is the default:
+                every browser tab keeps its own count. The <strong>GLOBAL</strong> version adds
+                <code>$c-&gt;scope(Scope::GLOBAL)</code>, and all visitors share the count. <strong>Composition</strong> shows the same counter as a
+                class with <code>#[Signal]</code> and <code>#[Action]</code> attributes, as described in the
+                <a href="/docs/composition">composition docs</a>.
+            </p>
+        </header>
+        <div class="code-examples-split">
         <div class="code-panel">
             <input type="radio" name="home-code-tab" id="home-tab-private" class="tab-radio" checked>
             <input type="radio" name="home-code-tab" id="home-tab-global" class="tab-radio">
@@ -244,9 +258,11 @@ $app->start();
             </div>
             </div>{# /tab-panes-wrapper #}
         </div>
-        <div class="demos-stack">
-            {{ sessionCounter | raw }}
-            {{ sharedCounter | raw }}
+            <div class="demos-stack">
+                {{ sessionCounter | raw }}
+                {{ sharedCounter | raw }}
+                <p class="px-demos-note">Both counters run on this server. Open the page in a second window to compare them.</p>
+            </div>
         </div>
     </div>
 </section>
@@ -280,170 +296,176 @@ $app->start();
 }());
 </script>
 
-<!-- Why php-via -->
-<section class="page-section page-section--tinted">
-    <div style="max-width: 56rem; margin-inline: auto;">
-        <div class="section-label">The case for server-centric reactivity</div>
-        <h2 class="section-title">PHP deserves real-time.</h2>
-        <div class="prose">
+<section class="px-section" id="how-it-works">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>How a php-via page works</h2>
             <p>
-                The PHP ecosystem bent itself into a pretzel trying to add real-time to the stack.
-                WebSockets bolted onto traditional PHP-FPM. Livewire polling on a timer.
-                Inertia.js adding a React, Vue or Svelte layer on top of Laravel. All of these add complexity,
-                JavaScript, and build tooling to solve a problem that should be solved at the server.
+                php-via runs your app as one long-lived OpenSwoole process. Page state stays in memory
+                between requests, so the server can push a change the moment it happens. A click posts to
+                an action, the action changes signals, and php-via sends the new HTML and signal values to
+                every tab that should see them.
             </p>
-            <p>
-                <strong>php-via takes a different approach.</strong> Built on OpenSwoole's persistent event loop,
-                every page maintains a live SSE connection. When your PHP changes state, the browser
-                updates instantly: no polling, no WebSocket handshake ceremony, no client-side
-                state management. The server is the source of truth, and the browser is a live view into it.
-            </p>
-            <p>
-                The <strong>scope system</strong> is the killer feature. Set a signal to
-                <code>Scope::ROUTE</code> and it automatically synchronizes across every browser
-                on that route. Change it to <code>Scope::SESSION</code> and it follows the user
-                across their tabs. Change it to <code>Scope::GLOBAL</code> and every user in
-                the entire application sees the update. One line of code changes who sees what.
-            </p>
-            <p>
-                We built this because PHP developers deserve the same multiplayer-by-default
-                experience that Elixir's LiveView gives to Elixir developers.
-                Without needing to learn Elixir.
-            </p>
+        </header>
+
+        <ol class="px-flow">
+            <li class="px-flow-step">
+                <code class="px-flow-code">$c-&gt;signal(0)</code>
+                <h3>Signal</h3>
+                <p>State held on the server. The browser keeps a copy, and Datastar updates the page when it changes.</p>
+            </li>
+            <li class="px-flow-step">
+                <code class="px-flow-code">$c-&gt;action(fn)</code>
+                <h3>Action</h3>
+                <p>A PHP function the browser calls with a POST, for a click or a keystroke. It changes signals.</p>
+            </li>
+            <li class="px-flow-step">
+                <code class="px-flow-code">$c-&gt;view(…)</code>
+                <h3>View</h3>
+                <p>HTML from Twig or a PHP heredoc. After an action, php-via renders it again and sends the new HTML.</p>
+            </li>
+            <li class="px-flow-step">
+                <code class="px-flow-code">GET /_sse</code>
+                <h3>Browser</h3>
+                <p>Datastar reads the patch from the tab's SSE stream and morphs it into the page without a reload.</p>
+            </li>
+        </ol>
+
+        <div class="px-scopes">
+            <div class="px-scopes-text">
+                <h3>Scopes</h3>
+                <p>
+                    A scope decides who shares a signal and who receives a broadcast. The default is
+                    <code>Scope::TAB</code>, so state is private until you choose otherwise.
+                    <a href="/docs/scopes">Read the scopes guide</a>.
+                </p>
+            </div>
+            <table class="px-scope-table">
+                <thead>
+                    <tr><th scope="col">Scope</th><th scope="col">Shared by</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>Scope::TAB</code></td><td>one browser tab (the default)</td></tr>
+                    <tr><td><code>Scope::ROUTE</code></td><td>everyone on the same route</td></tr>
+                    <tr><td><code>Scope::SESSION</code></td><td>all tabs of one browser session</td></tr>
+                    <tr><td><code>Scope::GLOBAL</code></td><td>every visitor on every route</td></tr>
+                    <tr><td><code>'room:42'</code></td><td>a scope you name; broadcast to <code>room:*</code> to reach them all</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 </section>
 
-<!-- Features grid -->
-<section class="page-section">
-    <div class="section-label">What you get</div>
-    <h2 class="section-title">Everything you need. Nothing you don't.</h2>
-    <div class="features-grid">
-        <div class="feature-card">
-            <span class="feature-icon">🚫</span>
-            <h3>No JavaScript</h3>
-            <p>Write server-side PHP. Datastar drives the browser through HTML attributes like <code>data-on:click="@post(...)"</code>. No JS files, no components, no client state.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">⚡</span>
-            <h3>No build step</h3>
-            <p><code>php app.php</code> and you're running. php-via serves its own <code>datastar.js</code>, so there is no bundler, no transpiler and no <code>npm install</code> before you can see a page.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🏗️</span>
-            <h3>Closures or classes</h3>
-            <p>Write pages as closures for quick scripts, or as classes with <code>#[Signal]</code> and <code>#[Action]</code> attributes for larger apps. Same engine: flip the toggle above to compare.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🎯</span>
-            <h3>Scoped state</h3>
-            <p>TAB, ROUTE, SESSION, GLOBAL, or your own scopes like <code>room:42</code>. One line decides whether state is private to a visitor or shared with everyone.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🤝</span>
-            <h3>Multiplayer in one line</h3>
-            <p>Route-scoped signals reach every user on the page, on every worker. One machine needs no pub/sub service, and <code>increment()</code> keeps simultaneous clicks from overwriting each other.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🔄</span>
-            <h3>Single SSE stream</h3>
-            <p>One persistent connection per tab carries every update. With <code>withBrotli()</code>, php-via compresses the stream itself and the reverse proxy just passes it through.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🧩</span>
-            <h3>Components</h3>
-            <p>Compose complex pages from isolated sub-contexts, written as closures or classes. Each component gets its own signals, actions, and view.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🖥️</span>
-            <h3>Every core, one server</h3>
-            <p><code>withWorkerNum()</code> spreads tabs over every core. Scoped signals and session data live in shared memory, and any worker can answer any tab.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🔍</span>
-            <h3>Built-in Dev Bar</h3>
-            <p>A debug overlay that turns on with dev mode: a request-trace waterfall, the raw SSE patches, and live signal, scope and log panels. It's running on this page: open the <strong>via</strong> pill in the bottom-right corner.</p>
+<section class="px-section" id="features">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>Features</h2>
+        </header>
+        <div class="px-specs">
+            <div class="px-spec">
+                <h3>PHP and HTML only</h3>
+                <p>Datastar reads attributes such as <code>data-on:click="@post(...)"</code> and talks to the server for you. You maintain no JS files and no client-side state.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Runs without a build step</h3>
+                <p><code>php app.php</code> starts the server. php-via serves its own <code>datastar.js</code>, so you need neither a bundler nor npm before the first page loads.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Closures or classes</h3>
+                <p>Write a page as a closure for a quick script, or as a class with <code>#[Signal]</code> and <code>#[Action]</code> attributes for a larger app. Both run on the same engine.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Scoped state</h3>
+                <p>TAB, ROUTE, SESSION, GLOBAL, or your own scopes like <code>room:42</code>. One line decides whether state is private to a tab or shared with everyone.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Atomic shared signals</h3>
+                <p>Give a signal ROUTE scope and every visitor on the route sees its changes, on every worker. One machine needs no pub/sub service, and <code>increment()</code> keeps simultaneous clicks from overwriting each other.</p>
+            </div>
+            <div class="px-spec">
+                <h3>One SSE stream per tab</h3>
+                <p>A single persistent connection carries every update for the tab. With <code>withBrotli()</code>, php-via compresses the stream itself and the reverse proxy passes it through.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Components</h3>
+                <p>Build a page from isolated sub-contexts, written as closures or classes. Each component has its own signals, actions and view.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Multi-core workers</h3>
+                <p><code>withWorkerNum()</code> spreads tabs over every core. Scoped signals and session data live in shared memory, and any worker can answer any tab.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Dev Bar</h3>
+                <p>A debug overlay with a request trace, the raw SSE patches, and live signal, scope and log panels. It runs on this page: open the <strong>via</strong> pill in the bottom-right corner.</p>
+            </div>
         </div>
     </div>
 </section>
 
-<!-- Live poll -->
-<section class="page-section page-section--tinted">
-    <div class="poll-section-inner">
-        <div class="poll-section-text">
-            <div class="section-label">Broadcasting in action</div>
-            <h2 class="section-title">Vote. Watch it update everywhere.</h2>
-            <p class="section-lead" style="margin-block-end: 0;">
-                Cast a vote. Every browser on this page sees the bars shift in real-time.
-                That's <code>Scope::ROUTE</code> broadcasting in action.
+<section class="px-section" id="poll">
+    <div class="px-wrap px-poll">
+        <header class="px-section-head">
+            <h2>A live poll with ROUTE scope</h2>
+            <p>
+                The tally lives on the server, and the poll component has <code>Scope::ROUTE</code>, so every
+                browser on this page renders the same bars. Vote here, or open a second window and vote there.
             </p>
-        </div>
-        <div class="poll-section-demo">
+        </header>
+        <div class="px-poll-demo">
             {{ poll | raw }}
         </div>
     </div>
 </section>
 
-<!-- How it works -->
-<section class="page-section">
-    <div class="section-label">Mental model</div>
-    <h2 class="section-title">Three primitives. That's the whole API.</h2>
-    <p class="section-lead">
-        Every php-via application is built from signals (reactive state), actions (event handlers),
-        and views (rendering). The framework wires them together over SSE automatically.
-    </p>
+<section class="px-section" id="comparison">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>Comparison with Livewire, htmx, Inertia.js and LiveView</h2>
+            <p>
+                Livewire and Inertia.js send a new HTTP request when something changes, and htmx does the
+                same unless you add its SSE extension. php-via keeps one connection open per tab and pushes
+                changes down it, like Phoenix LiveView, which inspired its architecture. Hover or focus a
+                mark for the details, or read the <a href="/docs/comparisons">comparisons page</a>.
+            </p>
+        </header>
+        {% include 'components/comparison-table.html.twig' %}
+    </div>
+</section>
 
-    <div class="how-it-works">
-        <div class="how-step">
-            <div class="how-step-number">1</div>
-            <h3>Signal</h3>
-            <p>Declare reactive state. The browser watches it and updates when it changes.</p>
-            <code style="font-size: var(--font-size-0);">$c->signal(0, 'count')</code>
-        </div>
-        <div class="how-arrow">→</div>
-        <div class="how-step">
-            <div class="how-step-number">2</div>
-            <h3>Action</h3>
-            <p>Handle browser events server-side. Modify signals in the handler.</p>
-            <code style="font-size: var(--font-size-0);">$c->action(fn() => ...)</code>
-        </div>
-        <div class="how-arrow">→</div>
-        <div class="how-step">
-            <div class="how-step-number">3</div>
-            <h3>View</h3>
-            <p>Render HTML with Twig or inline PHP. The framework pushes updates via SSE.</p>
-            <code style="font-size: var(--font-size-0);">$c->view('page.twig')</code>
-        </div>
-        <div class="how-arrow">→</div>
-        <div class="how-step">
-            <div class="how-step-number">🌐</div>
-            <h3>Browser</h3>
-            <p>Datastar applies the HTML patch. No page reload. No flash. Instant.</p>
+<section class="px-section px-section--install" id="install">
+    <div class="px-wrap px-install-grid">
+        <header class="px-section-head">
+            <h2>Install php-via</h2>
+            <p>
+                php-via needs PHP 8.4 or newer and the OpenSwoole 26 extension. Composer installs the rest.
+                Put the counter from above in <code>app.php</code> and start it.
+            </p>
+            <div class="px-actions">
+                <a href="/docs/getting-started" class="px-btn px-btn--primary">Getting started guide <span aria-hidden="true">→</span></a>
+                <a href="/examples" class="px-btn">Live examples</a>
+            </div>
+        </header>
+        <div class="px-terminal" role="group" aria-label="Install commands">
+            <div class="px-terminal-bar">~/my-app</div>
+            <pre class="px-terminal-body"><span class="px-terminal-prompt" aria-hidden="true">$ </span>composer require mbolli/php-via
+<span class="px-terminal-prompt" aria-hidden="true">$ </span>php app.php
+<span class="px-terminal-out">[INFO] Via server started on http://0.0.0.0:3000</span></pre>
         </div>
     </div>
 </section>
 
-<!-- Comparison table -->
-<section class="page-section page-section--tinted">
-    <h2 class="section-title">Honest comparison.</h2>
-    <p class="section-lead">Every tool has trade-offs. Here's where php-via stands.</p>
-
-    {% include 'components/comparison-table.html.twig' %}
-</section>
-
-<!-- Getting started CTA -->
-<section class="page-section" style="text-align: center;">
-    <div class="section-label">Ready?</div>
-    <h2 class="section-title">Try it in under 5 minutes.</h2>
-
-    <div class="install-block">
-        <code>composer require mbolli/php-via</code>
-    </div>
-
-    <div class="hero-ctas">
-        <a href="/docs/getting-started" class="btn btn-primary">Getting started guide →</a>
-        <a href="/examples" class="btn btn-secondary">Browse live examples</a>
-    </div>
-</section>
+<script>
+(function () {
+    var btn = document.querySelector('.px-install-copy');
+    if (!btn || !navigator.clipboard) { if (btn) btn.hidden = true; return; }
+    btn.addEventListener('click', function () {
+        var text = document.getElementById(btn.dataset.copy).textContent;
+        navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+        });
+    });
+}());
+</script>
 
 {% endblock %}
