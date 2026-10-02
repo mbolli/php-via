@@ -76,20 +76,44 @@ $c->view(fn (): string => $c->render('page.html.twig', [
 
     <h2 id="scoped-components">Scoped components</h2>
     <p>
-        Components can set their own scope, independent of the parent. This is how the website's
-        shared counter and presence indicator work. They're ROUTE-scoped components inside a page:
+        Components can set their own scope, independent of the parent. The website's presence indicator
+        is a component in a scope of its own, so a visitor arriving or leaving re-renders the indicators
+        and nothing else:
     </p>
     {% code 'php' %}{% verbatim %}
 $presenceComponent = function (Context $c) use ($app, $twig): void {
-    $c->scope(Scope::ROUTE); // shared with everyone on this route
+    $c->scope('site:presence'); // only presence indicators join this scope
 
     $c->view(function () use ($app, $twig): string {
         $count = count($app->getClients());
+
         return $twig->render('components/presence.html.twig', [
             'count'  => $count,
             'person' => $count === 1 ? 'person' : 'people',
         ]);
-    }, cacheUpdates: false);
+    });
+};
+
+$app->onClientConnect(fn () => $app->broadcast('site:presence'));
+$app->onClientDisconnect(fn () => $app->broadcast('site:presence'));
+{% endverbatim %}{% endcode %}
+    <p>
+        A broadcast to the page's scope re-renders every component on the page, so give a busy widget its
+        own scope and broadcast to that. The page looks up a component's actions only among the component's
+        TAB actions, so register them with <code>Scope::TAB</code> and broadcast with
+        <code>$app->broadcast()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$counterComponent = function (Context $c) use ($app): void {
+    $c->scope('home:counter');
+    $count = $c->signal(0, 'count');
+
+    $c->action(function () use ($app, $count): void {
+        $count->increment(broadcast: false);
+        $app->broadcast('home:counter');
+    }, 'increment', Scope::TAB);
+
+    $c->view('counter.html.twig');
 };
 {% endverbatim %}{% endcode %}
 

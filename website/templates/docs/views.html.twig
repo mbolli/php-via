@@ -133,18 +133,20 @@ $c->action(function (Context $c) use ($status): void {
 
     <h2 id="caching">View caching</h2>
     <p>
-        By default, php-via caches the last render per scope and skips re-rendering if no signals in the context changed.
-        This is safe for most views. Disable it when the view reads <em>external</em> state that isn't tracked by signals:
+        Update renders are cached per scope: when a broadcast reaches a scope, the first context renders its
+        view and every other context in the scope receives the same HTML. Each broadcast renders afresh, so a
+        view that reads state outside signals, such as <code>$app->getClients()</code>, is still current.
+    </p>
+    <p>
+        Turn caching off with <code>cacheUpdates: false</code> when the view differs per client (it reads TAB
+        signals, the session or a cookie), or when contexts with different views share the scope. The cache is
+        keyed by the scope alone, so they would receive each other's HTML:
     </p>
     {% code 'php' %}{% verbatim %}
-// This view reads $app->getClients(), not a signal, so caching must be disabled
-$c->view(function () use ($app, $twig): string {
-    $count = count($app->getClients());
-    return $twig->render('presence.html.twig', [
-        'count'  => $count,
-        'person' => $count === 1 ? 'person' : 'people',
-    ]);
-}, cacheUpdates: false);
+// Every tab in this scope shows its own cart, so each one renders for itself
+$c->view(fn (): string => $twig->render('cart.html.twig', [
+    'items' => $cart->forSession($c->getSessionId()),
+]), cacheUpdates: false);
 {% endverbatim %}{% endcode %}
 
     <h2 id="components">Views in components</h2>

@@ -212,17 +212,21 @@ $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
     $lastClick = $c->signal('', 'lastClick');
     $lastClickHue = $c->signal(0, 'lastClickHue');
 
+    // A TAB action on the component: the page looks actions up, and it would not find one
+    // registered in COUNTER_SCOPE.
     $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
         // Atomic: $counter inherits the shared COUNTER_SCOPE, so with more than one worker
         // setValue($counter->int() + 1) would let two workers read the same value and each
         // write back the same result, dropping a click.
         $counter->increment(broadcast: false);
 
-        $visitorNum = substr($c->getId(), -4);
+        // $c is this component; the visitor is the page it sits on.
+        $page = $c->getComponentManager()->getParentPageContext() ?? $c;
+        $visitorNum = substr($page->getId(), -4);
         $lastClick->setValue('Visitor #' . strtoupper($visitorNum), broadcast: false);
         $lastClickHue->setValue(hexdec($visitorNum) % 360, broadcast: false);
         $app->broadcast(COUNTER_SCOPE);
-    }, 'increment');
+    }, 'increment', Scope::TAB);
 
     $c->view(fn () => $twig->render('components/shared-counter.html.twig', [
         'counter_id' => $counter->id(),
