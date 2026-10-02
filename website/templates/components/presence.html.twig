@@ -1,4 +1,4 @@
 <div class="presence-indicator" id="presence">
     <span class="presence-dot" aria-hidden="true"></span>
-    <span data-text="'{{ count }} ' + ({{ count }} === 1 ? 'person' : 'people') + ' on this website right now'">{{ count }} {{ person }} on this website right now</span>
+    <span><sb-odometer value="{{ count }}">{{ count }}</sb-odometer> {{ count == 1 ? 'person' : 'people' }} on this website right now</span>
 </div>

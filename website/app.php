@@ -8,10 +8,10 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use OpenSwoole\Timer;
 use PhpVia\Website\Pairing\PairingDemo;
 use PhpVia\Website\Pairing\PairingStore;
 use PhpVia\Website\Pairing\RequestOrigin;
+use PhpVia\Website\PresenceDemo;
 use PhpVia\Website\StarbaseComponents;
 use PhpVia\Website\StaticPage;
 use PhpVia\Website\SyntaxHighlightExtension;
@@ -159,55 +159,16 @@ $app->notFound(function ($request, $response) use ($twig, $cssPath): void {
 
 // (Scoped signals handle shared counter state, no globalState needed)
 
-// ─── Presence: broadcast globally on connect/disconnect ──────────────────────
-//
-// Debounced: rapid connect/disconnect bursts (e.g. load tests) collapse into a
-// single broadcast. Without this, N connections joining simultaneously triggers
-// N broadcasts × N contexts = O(N²) renders that saturate the server.
-// Timer fires 200ms after the last event.
-/** @var null|int $presenceTimer */
-$presenceTimer = null;
+// ─── Presence ────────────────────────────────────────────────────────────────
 
-$broadcastPresence = function () use ($app, &$presenceTimer): void {
-    if ($presenceTimer !== null) {
-        Timer::clear($presenceTimer);
-    }
-    $presenceTimer = Timer::after(200, function () use ($app, &$presenceTimer): void {
-        $presenceTimer = null;
-        $app->broadcast(PRESENCE_SCOPE);
-    });
-};
-
-$app->onClientConnect(function (Context $c) use ($broadcastPresence): void {
-    $broadcastPresence();
-});
-
-$app->onClientDisconnect(function (Context $c) use ($broadcastPresence): void {
-    $broadcastPresence();
-});
+$presenceDemo = new PresenceDemo($app);
+$presenceDemo->register();
 
 // ─── Demo components ─────────────────────────────────────────────────────────
 
-// Custom scopes for the busiest widgets. A broadcast to the page's own scope re-renders every
-// component on the page, so a click on one of these reaches only that widget.
-const PRESENCE_SCOPE = 'site:presence';
+// A custom scope for the busiest widget, like PresenceDemo::SCOPE. A broadcast to the page's own
+// scope re-renders every component on the page, so a click here reaches only this widget.
 const COUNTER_SCOPE = 'home:counter';
-
-/**
- * Presence indicator: "N people on this website right now". Its own scope, so a visitor
- * arriving or leaving re-renders the indicators and not every open page.
- */
-$presenceDemo = function (Context $c) use ($app, $twig): void {
-    $c->scope(PRESENCE_SCOPE);
-    $c->view(function () use ($app, $twig): string {
-        $count = count($app->getClients());
-
-        return $twig->render('components/presence.html.twig', [
-            'count' => $count,
-            'person' => $count === 1 ? 'person' : 'people',
-        ]);
-    });
-};
 
 /**
  * Shared multiplayer counter: all visitors share one counter.
@@ -408,7 +369,7 @@ $pairingDemo = new PairingDemo($app, new PairingStore(), $siteOrigin);
 $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo, $pairingDemo): void {
     $c->scope(Scope::routeScope('/'));
 
-    $presence = $c->component($presenceDemo, 'presence');
+    $presence = $c->component(fn (Context $presence) => $presenceDemo->component($presence, $c->getId()), 'presence');
     $sharedCounter = $c->component($sharedCounterDemo, 'shared-counter');
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
     $poll = $c->component($livePollDemo, 'poll');
