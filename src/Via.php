@@ -850,6 +850,8 @@ class Via {
     public function start(): void {
         // Lazy initialization: create server only when starting
         if ($this->server === null) {
+            self::assertWorkerSettings($this->config);
+
             // Multi-worker guard: InMemoryBroker is a no-op. Cross-worker broadcasts
             // will be silently lost. Fail loudly so operators don't run with broken config.
             if ($this->config->getWorkerNum() > 1 && $this->broker instanceof InMemoryBroker) {
@@ -1948,6 +1950,31 @@ class Via {
         $curl = \function_exists('curl_version') ? curl_version() : false;
 
         return \is_array($curl) && $curl['version_number'] >= 0x08_14_00;
+    }
+
+    /**
+     * Refuse a worker_num passed through withSwooleSettings() that differs from withWorkerNum(): php-via sets up its
+     * shared tables, cross-worker state and the broker check from withWorkerNum() alone.
+     *
+     * @throws \RuntimeException
+     *
+     * @internal
+     */
+    public static function assertWorkerSettings(Config $config): void {
+        $settings = $config->getSwooleSettings();
+        if (!\array_key_exists('worker_num', $settings) || (int) $settings['worker_num'] === $config->getWorkerNum()) {
+            return;
+        }
+
+        $n = (int) $settings['worker_num'];
+
+        throw new \RuntimeException(
+            "withSwooleSettings(['worker_num' => {$n}]) would start {$n} workers that php-via sets up as "
+            . "{$config->getWorkerNum()}: sessions, scoped signals and contexts would not be shared between them. "
+            . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(); with more than one "
+            . 'worker also pass a multi-worker broker, such as ->withBroker(new SwooleBroker()). '
+            . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
+        );
     }
 
     /**

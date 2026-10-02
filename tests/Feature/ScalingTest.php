@@ -7,6 +7,7 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\SharedTable;
+use Mbolli\PhpVia\Via;
 use Tests\Support\TestBroker;
 
 /*
@@ -160,6 +161,31 @@ describe('Multi-worker startup guard', function (): void {
         expect($config->getWorkerNum())->toBe(1);
         // The guard is: workerNum > 1 && InMemoryBroker — with workerNum=1 it never fires.
         expect(true)->toBeTrue();
+    });
+
+    test('start() refuses a worker_num passed through withSwooleSettings(), naming withWorkerNum()', function (): void {
+        // As nfsen-ng did with SWOOLE_WORKER_NUM: 4 workers would start, each set up as the only one.
+        $via = createVia((new Config())->withSwooleSettings(['worker_num' => '4']));
+
+        expect(fn () => $via->start())->toThrow(
+            RuntimeException::class,
+            "withSwooleSettings(['worker_num' => 4]) would start 4 workers that php-via sets up as 1"
+        );
+
+        try {
+            $via->start();
+        } catch (RuntimeException $e) {
+            expect($e->getMessage())->toContain('Call ->withWorkerNum(4) instead and drop worker_num from withSwooleSettings()');
+        }
+    });
+
+    test('a worker_num in withSwooleSettings() that matches withWorkerNum() passes', function (): void {
+        Via::assertWorkerSettings((new Config())->withSwooleSettings(['worker_num' => 1]));
+        Via::assertWorkerSettings((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 3]));
+
+        expect(fn () => Via::assertWorkerSettings((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 2])))
+            ->toThrow(RuntimeException::class, 'Call ->withWorkerNum(2)')
+        ;
     });
 
     test('withWorkerNum accepts 1 as minimum', function (): void {
