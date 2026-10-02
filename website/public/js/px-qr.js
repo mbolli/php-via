@@ -3,14 +3,17 @@
 
 // The same breakpoint as site.css, which hides the code on phones: nothing to scan there.
 const narrow = matchMedia('(max-width: 640px)')
-// Version 4 at least, which the live origin needs anyway: every code is 41 modules, 5 px each in site.css.
+// Version 4 at least, which the live origin needs anyway: 41 modules, 5 px each in site.css. An origin longer than
+// about 30 characters needs version 5, which the same box draws at 4.6 px per module.
 const OPTIONS = { ecc: 'M', border: 4, minVersion: 4 }
 const MODULE_PX = 5
 const STYLE = '<style>:host{display:block;line-height:0}:host([hidden]){display:none}'
   + 'svg{display:block;width:100%;height:100%}.paper{fill:#f3f4fa}.data{fill:#10122e}.ring{fill:#5a3fd6}</style>'
 
 let uqr
-const load = () => (uqr ??= import('./vendor/uqr.js'))
+let failures = 0
+// The browser caches a failed module fetch, so a retry needs another URL
+const load = () => (uqr ??= import(`./vendor/uqr.js${failures ? `?retry=${failures}` : ''}`))
 
 // 1 for the dark ring of a finder square (uqr type 2, "Position", 3 modules from its centre); its centre dot goes with the data
 const ring = ({ types, size }, x, y) => {
@@ -58,7 +61,14 @@ customElements.define('px-qr', class extends HTMLElement {
   async render() {
     const value = this.getAttribute('value')
     if (value === this.#drawn || (value && narrow.matches)) return
-    const { encode } = await load()
+    let encode
+    try {
+      ({ encode } = await load())
+    } catch {
+      uqr = undefined
+      if (++failures < 4) setTimeout(this.#render, 2000 * failures)
+      return
+    }
     // Another call may have drawn it, or a morph brought another URL, while uqr loaded
     if (this.getAttribute('value') !== value || value === this.#drawn) return
     this.#drawn = value
@@ -66,7 +76,13 @@ customElements.define('px-qr', class extends HTMLElement {
       this.shadowRoot.innerHTML = STYLE
       return
     }
-    const qr = encode(value, OPTIONS)
+    let qr
+    try {
+      qr = encode(value, OPTIONS)
+    } catch {
+      this.shadowRoot.innerHTML = STYLE
+      return
+    }
     const n = qr.size
     const [data, rings] = paths(qr)
     this.shadowRoot.innerHTML = `${STYLE}<svg viewBox="0 0 ${n} ${n}" width="${n * MODULE_PX}" height="${n * MODULE_PX}" shape-rendering="crispEdges" aria-hidden="true">`
