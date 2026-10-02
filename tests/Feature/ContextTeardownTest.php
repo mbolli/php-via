@@ -107,3 +107,129 @@ describe('Context teardown', function (): void {
         expect(teardownIdsIn($app, 'widgets'))->toBe([$secondWidget]);
     });
 });
+
+describe('Context teardown with a revival under the same ID', function (): void {
+    test('a revival that registers while cleanup runs keeps its registrations', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->scope('room:1');
+            $c->view(fn (): string => 'room');
+        };
+        $old = teardownMintPage($app, '/room', $handler);
+        $id = $old->getId();
+        $app->contexts[$id] = $old;
+        $app->scheduleContextCleanup($id, 60_000);
+        $revived = null;
+        // A cleanup callback that yields lets a returning tab revive the ID mid-teardown.
+        $old->onCleanup(function () use ($app, $id, $handler, &$revived): void {
+            $revived = new Context($id, '/room', $app, null, 'session-1');
+            $app->invokeHandlerWithParams($handler, $revived, []);
+            $app->contexts[$id] = $revived;
+            $app->getApp()->registerContext($revived);
+            $app->registerContextInScope($revived, Scope::TAB);
+        });
+
+        $app->getApp()->destroyContext($id);
+
+        expect($app->getApp()->getContext($id))->toBe($revived)
+            ->and($app->contexts[$id] ?? null)->toBe($revived)
+            ->and($app->getContextsByScope('room:1'))->toBe([$revived])
+            ->and($app->getContextsByScope(Scope::TAB))->toBe([$revived])
+        ;
+    });
+
+    test('teardown drops the context\'s session binding in both maps', function (): void {
+        $app = createVia();
+        $ctx = teardownMintPage($app, '/docs', function (Context $c): void {
+            $c->scope(Scope::routeScope('/docs'));
+            $c->view(fn (): string => 'docs');
+        });
+        $id = $ctx->getId();
+        $app->contexts[$id] = $ctx;
+        $app->contextSessions[$id] = 'session-1';
+        $app->scheduleContextCleanup($id, 60_000);
+
+        $app->getApp()->destroyContext($id);
+
+        expect($app->getContextSessionId($id))->toBeNull()
+            ->and($app->getApp()->getContextSessionId($id))->toBeNull()
+            ->and($app->contexts)->not->toHaveKey($id)
+        ;
+    });
+
+    test('a revival whose handler throws leaves no scope entry or session binding', function (): void {
+        $app = createVia();
+        $app->page('/flaky', function (Context $c): void {
+            $c->scope('room:flaky');
+            $c->view(fn (): string => 'flaky');
+        });
+        $ctx = teardownMintPage($app, '/flaky', function (Context $c): void {
+            $c->scope('room:flaky');
+            $c->view(fn (): string => 'flaky');
+        });
+        $id = $ctx->getId();
+        $app->getApp()->destroyContext($id);
+        // The route now throws after joining its scope, as a handler does when its database is down.
+        $app->page('/flaky', function (Context $c): void {
+            $c->scope('room:flaky');
+
+            throw new RuntimeException('database down');
+        });
+
+        ob_start(); // the failed revival logs an error
+        $revived = $app->reviveContextFromClient($id, 'session-1', []);
+        $log = (string) ob_get_clean();
+
+        expect($revived)->toBeNull()
+            ->and($log)->toContain('database down')
+            ->and($app->getContextsByScope('room:flaky'))->toBe([])
+            ->and($app->getContextSessionId($id))->toBeNull()
+        ;
+    });
+});
+
+describe('Component IDs', function (): void {
+    test('a named component gets the same ID each time its page is built', function (): void {
+        $app = createVia();
+        $build = function (string $pageId) use ($app): string {
+            $page = new Context($pageId, '/p', $app);
+            $page->component(fn (Context $w) => $w->view(fn (): string => 'w'), 'widget');
+
+            return array_keys($page->getComponentRegistry())[0];
+        };
+
+        expect($build('/p_/abc'))->toBe($build('/p_/abc'))
+            ->and($build('/p_/abc'))->not->toBe($build('/p_/xyz'))
+        ;
+    });
+
+    test('two components with one name on a page get distinct IDs', function (): void {
+        $app = createVia();
+        $page = new Context('/p_/abc', '/p', $app);
+        $page->component(fn (Context $w) => $w->view(fn (): string => 'a'), 'widget');
+        $page->component(fn (Context $w) => $w->view(fn (): string => 'b'), 'widget');
+
+        expect(array_unique(array_keys($page->getComponentRegistry())))->toHaveCount(2);
+    });
+});
+
+describe('Scope state after a component is released', function (): void {
+    test('a released component leaves its scope\'s signals for the next page', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->component(function (Context $w): void {
+                $w->scope('widgets');
+                $w->signal(0, 'clicks');
+                $w->view(fn (): string => 'widget');
+            }, 'widget');
+            $c->view(fn (): string => 'page');
+        };
+        $first = teardownMintPage($app, '/a', $handler);
+        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7, broadcast: false);
+
+        $app->getApp()->destroyContext($first->getId());
+        teardownMintPage($app, '/a', $handler);
+
+        expect($app->getScopedSignalByName('widgets', 'clicks', 'widget')?->int())->toBe(7);
+    });
+});

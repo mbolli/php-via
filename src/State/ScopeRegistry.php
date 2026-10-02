@@ -18,12 +18,17 @@ class ScopeRegistry {
     private array $registry = [];
 
     /**
-     * Where each context is registered, so teardown finds every entry. A context's own scope list
-     * can miss some: scope() replaces the list, and the TAB entry is added outside it.
+     * Where each context object is registered, so teardown finds every entry. A context's own
+     * scope list can miss some: scope() replaces the list, and the TAB entry is added outside it.
+     * Keyed by object, because a revived context reuses the ID of the one being torn down.
      *
-     * @var array<string, array<string, true>> contextId => [scope => true]
+     * @var \WeakMap<Context, array<string, true>>
      */
-    private array $scopesByContext = [];
+    private \WeakMap $scopesByContext;
+
+    public function __construct() {
+        $this->scopesByContext = new \WeakMap();
+    }
 
     /**
      * Register a context under a specific scope.
@@ -36,7 +41,9 @@ class ScopeRegistry {
             $this->registry[$scope] = [];
         }
         $this->registry[$scope][$context->getId()] = $context;
-        $this->scopesByContext[$context->getId()][$scope] = true;
+        $scopes = $this->scopesByContext[$context] ?? [];
+        $scopes[$scope] = true;
+        $this->scopesByContext[$context] = $scopes;
     }
 
     /**
@@ -48,21 +55,24 @@ class ScopeRegistry {
      * @return bool True if scope became empty after unregistration
      */
     public function unregisterContext(Context $context, string $scope): bool {
-        $contextId = $context->getId();
-        unset($this->scopesByContext[$contextId][$scope]);
-        if (($this->scopesByContext[$contextId] ?? null) === []) {
-            unset($this->scopesByContext[$contextId]);
+        $scopes = $this->scopesByContext[$context] ?? [];
+        unset($scopes[$scope]);
+        if ($scopes === []) {
+            unset($this->scopesByContext[$context]);
+        } else {
+            $this->scopesByContext[$context] = $scopes;
         }
 
-        if (isset($this->registry[$scope])) {
-            unset($this->registry[$scope][$context->getId()]);
+        // The entry may belong to a newer context with the same ID (a revival); leave it.
+        if (($this->registry[$scope][$context->getId()] ?? null) !== $context) {
+            return false;
+        }
 
-            // Return true if scope is now empty
-            if (empty($this->registry[$scope])) {
-                unset($this->registry[$scope]);
+        unset($this->registry[$scope][$context->getId()]);
+        if ($this->registry[$scope] === []) {
+            unset($this->registry[$scope]);
 
-                return true;
-            }
+            return true;
         }
 
         return false;
@@ -77,7 +87,7 @@ class ScopeRegistry {
      */
     public function unregisterContextFromAllScopes(Context $context): array {
         $emptyScopes = [];
-        $scopes = array_keys($this->scopesByContext[$context->getId()] ?? []);
+        $scopes = array_keys($this->scopesByContext[$context] ?? []);
 
         foreach (array_unique([...$context->getScopes(), ...$scopes]) as $scope) {
             if ($this->unregisterContext($context, $scope)) {

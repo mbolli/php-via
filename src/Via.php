@@ -102,8 +102,13 @@ class Via {
     /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
     public array $contextSessions = [];
 
-    /** @var array<string, true> Contexts that already have a Via::$contexts unset callback registered */
-    private array $viaUnsetCallbackRegistered = [];
+    /**
+     * Contexts that already have a Via::$contexts unset callback registered, keyed by object
+     * because a revived context reuses the ID of the one being torn down.
+     *
+     * @var \WeakMap<Context, true>
+     */
+    private \WeakMap $viaUnsetCallbackRegistered;
 
     private ?Server $server = null;
 
@@ -219,6 +224,8 @@ class Via {
     private string $groupPrefix = '';
 
     public function __construct(private Config $config) {
+        $this->viaUnsetCallbackRegistered = new \WeakMap();
+
         // Initialize support classes
         $this->logger = new Logger($this->config->getLogLevel());
         $this->requestLogger = new RequestLogger($this->config->getDevMode());
@@ -1563,10 +1570,14 @@ class Via {
         // be cleared here, otherwise zombie contexts (no viewFn) survive and break SSE reconnection.
         // Guard: register at most once per context. This method is called on every SSE disconnect, so
         // repeated reconnections would otherwise accumulate unbounded closures in cleanupCallbacks.
-        if (isset($this->contexts[$contextId]) && !isset($this->viaUnsetCallbackRegistered[$contextId])) {
-            $this->viaUnsetCallbackRegistered[$contextId] = true;
-            $this->contexts[$contextId]->onCleanup(function () use ($contextId): void {
-                unset($this->contexts[$contextId], $this->viaUnsetCallbackRegistered[$contextId]);
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context !== null && !isset($this->viaUnsetCallbackRegistered[$context])) {
+            $this->viaUnsetCallbackRegistered[$context] = true;
+            $context->onCleanup(function (Context $dying) use ($contextId): void {
+                // A revival may already have registered a new context under this ID.
+                if (($this->contexts[$contextId] ?? null) === $dying) {
+                    unset($this->contexts[$contextId], $this->contextSessions[$contextId]);
+                }
             });
         }
 
@@ -1669,6 +1680,12 @@ class Via {
             $this->invokeHandlerWithParams($handler, $context, $record['params']);
         } catch (\Throwable $e) {
             $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
+            // The half-built context may already have joined scopes and started timers.
+            $context->cleanup();
+            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            if (!isset($this->contexts[$contextId])) {
+                unset($this->contextSessions[$contextId]);
+            }
 
             return null;
         }

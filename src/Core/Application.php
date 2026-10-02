@@ -154,7 +154,7 @@ class Application {
         if (isset($this->contexts[$contextId])) {
             $this->releaseScopes($this->contexts[$contextId]);
 
-            unset($this->contexts[$contextId], $this->clients[$contextId], $this->cleanupTimers[$contextId]);
+            unset($this->contexts[$contextId], $this->clients[$contextId], $this->cleanupTimers[$contextId], $this->contextSessions[$contextId]);
         }
     }
 
@@ -557,15 +557,21 @@ class Application {
      * @internal invoked by the cleanup timer (and directly by tests, since timers don't fire under VIA_TEST_MODE)
      */
     public function destroyContext(string $contextId): void {
-        if (!isset($this->contexts[$contextId])) {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null) {
             return;
         }
 
         $this->logger->log('debug', "Cleaning up inactive context: {$contextId}");
-        $context = $this->contexts[$contextId];
         $this->recordRevivable($context);
         $context->cleanup();
-        $this->unregisterContext($contextId);
+
+        // Cleanup callbacks can yield, and a returning tab may have revived this ID meanwhile,
+        // so only entries that still belong to this context object are dropped.
+        $this->releaseScopes($context);
+        if (($this->contexts[$contextId] ?? null) === $context) {
+            unset($this->contexts[$contextId], $this->clients[$contextId], $this->cleanupTimers[$contextId], $this->contextSessions[$contextId]);
+        }
     }
 
     /**
@@ -643,11 +649,14 @@ class Application {
     /**
      * Tear down a component context with its page: run its cleanup and leave its scopes.
      *
+     * The scopes' signals and actions stay: a component is often the only registered member
+     * of a shared scope (GLOBAL, a room) that pages outside the registry still read and act on.
+     *
      * @internal called by Context::cleanup() for each of its components
      */
     public function releaseComponent(Context $component): void {
         $component->cleanup();
-        $this->releaseScopes($component);
+        $this->scopeRegistry->unregisterContextFromAllScopes($component);
     }
 
     /**

@@ -80,7 +80,17 @@ class ComponentManager {
      * @return callable Returns a function that renders the component
      */
     public function createComponent(callable $fn, ?string $namespace = null): callable {
-        $componentId = $this->context->getId() . '/_component/' . IdGenerator::generate();
+        // A named component gets the same ID every time its page is built, so a revived page's
+        // patches find the wrappers the browser still has.
+        if ($namespace !== null) {
+            $base = $this->context->getId() . '/_component/' . mb_substr(md5($namespace), 0, 16);
+            $componentId = $base;
+            for ($n = 2; isset($this->componentRegistry[$componentId]); ++$n) {
+                $componentId = $base . '-' . $n;
+            }
+        } else {
+            $componentId = $this->context->getId() . '/_component/' . IdGenerator::generate();
+        }
         $componentNamespace = $namespace ?? 'c' . mb_substr(md5($componentId), 0, 8);
         $componentContext = new Context($componentId, $this->context->getRoute(), $this->app, $componentNamespace);
 
