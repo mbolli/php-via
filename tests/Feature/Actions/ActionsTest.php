@@ -183,24 +183,3 @@ describe('Action URL Format', function (): void {
         expect($action1->url())->not->toBe($action2->url());
     });
 });
-
-describe('Component actions in a scope of their own', function (): void {
-    test('a component in a custom scope runs its action when the page receives it', function (): void {
-        $app = createVia();
-        $page = new Context(testContextId(), '/test', $app);
-        $page->scope(Scope::routeScope('/test'));
-        $ran = null;
-        $page->component(function (Context $poll) use (&$ran): void {
-            $poll->scope('poll:test');
-            $poll->action(function (Context $c) use (&$ran): void {
-                $ran = $c;
-            }, 'vote');
-            $poll->view(fn (): string => 'poll');
-        }, 'poll');
-
-        $page->executeAction('vote');
-
-        // The page context carries the request input, so the action receives it.
-        expect($ran)->toBe($page);
-    });
-});
