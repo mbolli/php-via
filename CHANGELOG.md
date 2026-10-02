@@ -2,624 +2,122 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [Unreleased]
+## [0.13.0] - 2026-10-02
+
+### Highlights
+
+- **Multi-worker mode works.** With `worker_num > 1`, scoped signals, session data, the client
+  list and the context directory are shared between workers, and an action reaches its tab on any
+  worker. In 0.12.0 an action that landed on another worker answered 400.
+- **Broadcasts coalesce.** A worker renders each broadcast scope at most once per tick (25 ms by
+  default), so the cost no longer grows with the number of actions. In the benchmark, a storm of
+  500 actions on 5,000 clients reached every client in 120 ms instead of 18 s, with 124 times less
+  worker CPU than broadcasting on every call.
+- **Race-free shared state.** `Signal::increment()` and `mutate()`, `Via::incrementGlobalState()`
+  and `mutateGlobalState()`, and `#[Signal(atomic: true)]` update shared values without losing
+  writes between workers. `Config::withPersistentGlobalState()` keeps GlobalState in SQLite across
+  restarts.
+- **Closed tabs are noticed.** A stream ends about 1 ms after the browser closes it, so
+  `onClientDisconnect` and the cleanup hooks run for idle tabs too, and a 15 s keep-alive comment
+  keeps idle streams open behind proxies.
+- **Fewer ways to lose a worker or leak memory.** A throw in an action, view or timer no longer
+  kills the worker, `onShutdown` callbacks run on stop, and a context whose SSE stream never
+  connects is freed after 30 s.
+- **Before you upgrade:** php-via needs ext-openswoole 26, `broadcast()` inside a coroutine now
+  returns before the fan-out, most TAB and component signal ids change, and action POSTs without
+  an `Origin` header get 403 when `withTrustedOrigins()` is set. With `worker_num > 1`, deploy with
+  a full restart. Breaking Changes below has the details.
 
 ### Breaking Changes
 
-- **Inside a coroutine, `broadcast()` marks the scope and returns; the worker's next flush renders
-  it.** This covers `Via::broadcast()`, `Context::broadcast()`, the auto-broadcast of scoped
-  `setValue()`, `increment()` and `mutate()`, and broadcasts received from other workers or nodes.
-  A flush re-renders each marked scope once, renders a context in several marked scopes once, and
-  publishes each scope to the broker once. It runs at the end of the event-loop turn when the
-  worker's last flush started at least one broadcast tick ago and ended at least half a tick ago,
-  otherwise as soon as both have passed (`Config::withBroadcastTickMs()`, default 25 ms). Flushes
-  of different scopes run side by side, so a view that waits on I/O delays only its own scope, and
-  a scope broadcast while its fan-out runs is rendered by the first flush after that fan-out ends.
-  What changes for apps:
-  - Views render the state at flush time. Several writes in one action send one frame instead of
-    one per write, as long as the action does not wait on I/O between them: a database call in
-    between lets the flush send a half-updated frame, so write first and broadcast last. A value an
-    action sets, broadcasts and resets before it returns never reaches clients.
-  - Patches the action queues itself (`execScript()`, `$c->sync()`, `syncSignals()`) reach the tab
-    before the broadcast's frame.
-  - The action's HTTP response no longer waits for the fan-out, so a Datastar indicator can clear
-    before the frame arrives. An error in the fan-out or in the broker publish is logged instead of
-    failing the action.
-  - Under sustained load a client gets about one frame per tick and skips the states in between.
-    Flushes that take F ms, with F over half the tick, start F plus half a tick apart instead. A
-    broadcast reaches clients at most that gap plus one flush after the call, and one more tick on
-    another worker. A request that reaches a worker while a flush renders without waiting on I/O
-    waits for that flush to end.
-  - Dev Bar: fan-out renders appear as their own `broadcast {scope}` traces, and the action trace
-    shows a `broadcast.schedule` span per call.
-  - Two new warnings. "Broadcast chain limit reached" means views broadcast each other's scopes in
-    a loop, which stops after 8 flushes. "The fan-out of scope ... has been running for" means a
-    broadcast found that scope's fan-out still rendering after more than a second, usually a view
-    blocked on I/O.
-
-  `Via::flushBroadcasts()` runs the pending flush in the calling coroutine, for code that needs the
-  frame before what it queues next. When another flush is rendering a scope the caller broadcast, it
-  waits for that fan-out up to 1 s; past that it logs a warning and returns, and the frame follows
-  on a later flush. `Config::withBroadcastCoalescing(false)` renders and publishes on every call, as
-  before, except that a fan-out that other actions re-run 8 times in a row leaves the rest to a
-  flush paced by the tick, which `getBroadcastStats()` counts under `flushes` (see Fixed).
-  `withBroadcastTickMs(0)` keeps the coalescing but flushes every event-loop turn with no gap.
-  Outside a coroutine (CLI scripts, tests) and during worker shutdown `broadcast()` stays
-  synchronous. At shutdown the frames still waiting for the tick are rendered in a coroutine of
-  their own, so they reach clients before the streams close unless a view waits on I/O, which then
-  cannot hold up the stop. The owed publishes go out before the broker disconnects.
-
-- **A closed tab is noticed when its connection closes.** OpenSwoole reports an HTTP/1.1 response
-  as writable after the client has gone, so a stream with nothing to send stayed in `getClients()`,
-  skipped `onClientDisconnect` and kept its context until a write to it failed, which for an idle
-  tab could be never. The server's close event now ends the stream about 1 ms after the browser
-  closes the connection. A browser that cancels one HTTP/2 stream keeps the connection, so no
-  close event fires; each worker of a server that speaks HTTP/2 looks for such streams every
-  250 ms and ends them, as 0.13.0 did within 100 ms. What changes for apps:
-  - `onClientDisconnect` and the removal from `getClients()` run when an idle tab closes, on every
-    worker, and `onDisconnect` / `onCleanup` follow after the cleanup delay
-    (`withContextCleanupDelay()`, 5 s by default). Hooks that never ran for idle tabs now do, and
-    their contexts are freed. A tab restored from the browser's back/forward cache after that delay
-    is revived or reloads, like any tab that comes back after cleanup.
-  - A stream that has sent nothing for 15 s writes the SSE comment `: keep-alive`, which browsers
-    and Datastar ignore. Proxies that cut idle connections, such as nginx with its 60 s default
-    `proxy_read_timeout`, therefore keep idle streams open. `Config::withSseKeepAliveMs()` sets the
-    interval. `0` turns the comment off, and idle streams then wake once a minute. Code that reads
-    the raw stream sees the comment.
-  - `Config::withSsePollIntervalMs()` now sets only how often the Dev Bar stream polls. Page
-    streams do not poll (see Performance).
-  - With `dispatch_mode` 1, 3 or 7 in `withSwooleSettings()`, OpenSwoole has no close event, and
-    the stream ends at its next keep-alive interval instead.
-  - A stream whose context was destroyed without closing its channel sends its reload script at
-    its next wake, up to the keep-alive interval later, instead of within 100 ms. Context cleanup
-    closes the channel, so this is a safety net only.
-
-- **Signals whose names differ only by punctuation no longer share an id.** A signal id replaced
-  every byte outside `[A-Za-z0-9]` with `_`, so `user-name` and `user_name` in one tab were one
-  signal, a page in `room:a-b` and `room:a.b` sent one browser value for both scopes' `topic`, a
-  component `cats` with a GLOBAL `votes` got the GLOBAL signal `cats_votes`, a component TAB
-  signal `q` in `search` took the id of a `q` in scope `search`, and a signal `ctx` in scope `via`
-  overwrote the browser's `via_ctx`. An id that could be read two ways now ends in `____` and one
-  code per `_` saying what that `_` stands for, so each signal has its own id. What changes for
-  apps:
-  - A scoped signal outside a component keeps its id when its name is letters and digits and its
-    scope is letters and digits joined by `:`, or a route path of letters and digits:
-    `global_count`, `room_lobby_messages`, `route__examples_counter_count`. A signal `ctx` in
-    scope `via` is the one exception.
-  - Every other id gains the suffix and still starts with the old id. That covers all TAB and
-    component signals and scopes or names with `_` or other punctuation: `search_q` becomes
-    `search_q____n`, `global_cats_votes` becomes `global_cats_votes____kn`. Templates that use
-    `$signal->id()`, `bind()` or `text()` need no change. A hardcoded id stops matching, and
-    `getScopedSignal()` returns null for it. Code outside a context, such as a timer, should look
-    the signal up by name with the new `Via::getScopedSignalByName($scope, $name)`, adding the
-    component namespace as a third argument for a component signal.
-  - A tab left open across the deploy reconnects with the old ids, so revival does not restore
-    its TAB and component values.
-  - With `worker_num > 1`, deploy this version with a full restart, not a reload (`SIGUSR1`). A
-    reload keeps the shared table: scoped signals whose ids changed start again from their
-    declared defaults, an old worker that is still draining keeps writing the old ids, so updates
-    made there are lost, and the old rows count against `withScopedSignalTableSize()` until the
-    next full restart.
-
-- **With `worker_num > 1`, session data values must be serializable and come back as copies.**
-  `setSessionData()` with a closure, a PDO handle or another value that cannot be serialized now
-  throws `\InvalidArgumentException`, and changing a stored object in place no longer changes
-  what the session holds. See the session data entry under Fixed.
-
-### Fixed
-
-- **With `worker_num > 1`, session data set in one request could be missing in the next.**
-  `sessionData()`, `setSessionData()` and `clearSessionData()` kept a copy in each worker, and a
-  tab's requests land on any worker, so a value an action stored was missing whenever the next
-  action or page load reached another worker. Session data now lives in shared memory, one row per
-  session, and each write holds a lock on that session, so writes from several workers to different
-  keys of one session all land (4 workers × 500 writes: 2,000 of 2,000 kept, about 680 without the
-  lock). A key written twice keeps the last write, as before. What changes for apps:
-  - Values must be serializable and come back as copies (see Breaking Changes).
-  - Reading a key and writing it back is not atomic across workers: two tabs adding to one cart
-    at the same moment on different workers can lose one of the adds.
-  - One session's data is capped at 16 KB serialized, and a write past it throws
-    `\OverflowException`. `Config::withSessionTableSize($maxSessions, $maxBytesPerSession)` raises
-    the cap.
-  - A write that cannot take the session's lock within about 7 s, because a worker died holding
-    it or its event loop is blocked, throws `\RuntimeException`.
-  - Past 1,024 sessions holding data the first worker drops the least recently used ones every
-    second and logs a warning, and a write that finds the table full drops them on its own worker
-    first; a single worker still drops them past 10,000. `withSessionTableSize()` sets the count.
-    Rows have no age limit: a session holds its row from its first write until its last key is
-    cleared or it is dropped, so the count includes visitors who left long ago.
-  - The table reserves about twice the session count, rounded up to a power of two, times the
-    bytes per session: 33 MB of shared memory at the defaults. About 9 MB of it is resident from
-    start-up, and the rest becomes resident as sessions store data and is not returned.
-  - Session data survives a worker reload (`SIGUSR1`), since the master process holds it.
-  - With one worker nothing changes: session data stays in a PHP array with no byte cap.
-
-- **With `worker_num > 1`, a tab whose stream stayed busy could lose the ability to act on other
-  workers.** The context directory entry that lets any worker rebuild a context expires after
-  `withContextDirectorySize()`'s TTL (3,600 s by default) unless it is refreshed, and only an idle
-  wake of the SSE loop refreshed it. A worker that destroys its copy of a context also cuts the
-  entry to the revival window (600 s by default), even when the tab has moved its stream to
-  another worker. A tab that got a frame at least every 100 ms for that long lost its entry, and
-  its actions landing on another worker answered 400 `Invalid context` until it reconnected. Each
-  worker now rewrites the entries of all its streams, busy or idle, from one timer every quarter
-  of the TTL or of the revival window, whichever is shorter (150 s by default), and restores an
-  entry that has gone.
-
-- **With `worker_num > 1`, a client whose stream stayed busy for 120 s dropped out of
-  `getClients()` for good.** A row expired 120 s after its last heartbeat, and the next
-  `getClients()` deleted it, but the heartbeat ran only when the stream had nothing to send. A tab
-  that got a frame at least every 100 ms for two minutes left the list until it reconnected. Rows
-  no longer expire. The worker that registered a client removes it when the stream ends, and the
-  clients of a worker that crashes or is killed leave the list when OpenSwoole restarts it: 65 ms
-  after a SIGKILL in the test, against up to 120 s before. Every 60 s the first worker also drops
-  the clients of any worker process that no longer exists, in case the restart missed some.
-
-- **A tab that reconnected to the same worker before its old stream ended dropped out of its
-  scopes and `getClients()`.** The new stream registered the tab, then ended the old stream, which
-  still counted as the tab's last one and unregistered it again, firing `onClientDisconnect`. The
-  tab then missed broadcasts to custom and session scopes until its next reconnect. In 0.13.0 this
-  was every such reconnect of an idle HTTP/1.1 tab, such as a tab the browser hid and showed
-  again, because the old stream never noticed its connection close. A tab whose new stream
-  replaces a running one now stays connected: `onClientConnect` fires once and
-  `onClientDisconnect` fires when its last stream ends.
-
-- **A tab that reconnected to another worker could drop out of `getClients()`.** When its old
-  stream ended after the new one had registered, the old worker deleted the new row. Each worker
-  process now writes its own row for a client and removes only that one, and the list shows the
-  tab once.
-
-- **A full client registry broke SSE connections.** Past its capacity (the context directory size
-  from `Config::withContextDirectorySize()`, 4,096 rows by default), registering a client threw,
-  which ended that tab's SSE request, and so did every reconnect that registered it again. The
-  client is now left out of `getClients()` and a warning is logged.
-
-- **A `mutateGlobalState()` or `Signal::mutate()` call that timed out, or a worker that died while
-  waiting in one, wedged the key.** Both left a ticket that the lock later served with no lease on
-  it, and waiters only broke in on an expired lease, so every later mutate on that key threw
-  `RuntimeException` after 5 s for as long as the server ran. One overload burst that timed out a
-  few callers was enough. A caller that times out in a coroutine now leaves its ticket to a
-  watcher coroutine, which passes the turn on as soon as it comes. A ticket nobody watches, from a
-  process that died or from a caller outside a coroutine, is skipped once the queue has stood
-  still for 2 s with no lease, so each one costs about 2 s. The same rule also skips a live worker
-  that is next in line but cannot run for 2 s, for example because its event loop is blocked,
-  just as an overdue holder is skipped, and its write can then overlap the next holder's.
-
-- **Releasing the mutate lock could erase the next holder's lease.** The releasing worker cleared
-  the lease after advancing the queue, and a holder that lost its lease that way could not be
-  recovered if it then died. The lease is now cleared first, and only by the holder still being
-  served.
-
-- **A tab could keep an older frame than one it had already received.** When a view waited on I/O
-  during a broadcast, a broadcast that came after it could render the same tab and finish first.
-  The older frame then arrived last and stayed until the next broadcast to one of the tab's scopes,
-  with one worker or several. A fan-out now renders the tab again when a fan-out that started
-  after it finished that tab first, so the tab shows the older frame briefly and then the current
-  one. After 8 such renders in a row it logs a warning and leaves the tab to the next flush of the
-  scope, which renders it again.
-
-- **With coalescing off, the last write under sustained load could be lost.** A broadcast that
-  finds its scope's fan-out running makes that fan-out run one more pass, and a fan-out stopped
-  after 8 passes in a row and dropped the broadcast still owed. When other actions kept
-  broadcasting that long, which happens under load once the views wait on I/O, clients could end
-  on an older state until the scope's next broadcast, and the log blamed a view that broadcasts its
-  own scope. 0.13.0 renders this way on every broadcast and has the same fault. After 8 passes the
-  fan-out now hands the owed broadcast to the next flush, paced by the tick, and returns; during
-  shutdown it drops it, since no flush runs any more. "Broadcast re-entrancy limit reached" is
-  logged only when the fan-out's own views broadcast its scope again in all 8 passes, directly,
-  through another scope or from a coroutine they start during the fan-out, and that broadcast is
-  still dropped, so such a view cannot hold the worker. This holds with coalescing on too. A
-  coroutine the action started before it broadcast counts as another action. Coalesced broadcasts
-  from other actions already went to the next flush and were not affected.
-
-- **A page that embedded component HTML rendered in its handler reset the components on every
-  page re-render.** The docs passed `$counter()` to `$c->view('page.html.twig', [...])`, which
-  renders the component once, when the handler runs, so each broadcast that reached the page, each
-  reconnect and each revival sent the page-load HTML again. The docs now call the component
-  callables inside the view closure. A component the page frame already carries then sends only its
-  signals in that sync, instead of rendering again for a `#c-` frame of its own. The docs also no
-  longer suggest returning `''` from a page view on updates: a revived tab mounts its components
-  under new ids, and only the page frame can bring those into the page.
-
-- **A context revived by an action without signals reset the tab on its next connect.** An action
-  whose body carries only `via_ctx` (Datastar's `filterSignals`) revives the context with every TAB
-  signal at its declared default, and the SSE connect that followed sent those defaults to the
-  browser, so the tab lost every client value it held. Such a context now queues no sync until its
-  next SSE connect, which seeds the TAB signals from the values it carries. A signal an action
-  wrote in between keeps the action's value, and element patches still go out.
-
-### Performance
-
-- **Broadcast storms cost a bounded number of renders.** Every `broadcast()` call and every scoped
-  signal write re-rendered every client in the scope inside the calling action and published once
-  per call, so N clients and M actions cost N x M renders, and each action waited for its own
-  fan-out. Each worker now renders a scope at most once per flush and starts a flush at least one
-  tick after the previous one started and half a tick after it ended, so flushes whose views render
-  for F ms without waiting on I/O use at most F / max(tick, F + tick / 2) of the worker whatever
-  the action rate, that is F / tick while F is at most half the tick and two thirds when F equals
-  the tick. Between two flushes the worker always has half a tick for requests, timers and I/O.
-  `MessageBroker::publish()` is called once per scope per flush, and never from two
-  coroutines of one worker at the same time, so RedisBroker and NatsBroker no longer share their
-  publish connection between coroutines. `$app->getStats()->getBroadcastStats()`, and
-  `broadcast_stats` in the dev-mode `/_stats`, report per worker the broadcasts scheduled and
-  coalesced, the flushes, the last, longest and total flush time, and the flushes that overran the
-  tick. In a small `bench/contention/broadcast_storm.php` run (200 SSE clients, 50 actions from 10
-  connections, 1 worker, 3 runs) renders fell from 10,000 to 400, frames per client from 50 to 2,
-  and the action p50 from about 11 ms to between 0.5 and 1.2 ms. The last frame reached every
-  client 17 to 28 ms after the last action, against 11 ms before.
-
-- **Contended `mutateGlobalState()` and `Signal::mutate()` scale with coroutines per worker.**
-  Every waiting coroutine held its own ticket and read the whole row at reactor speed, because
-  OpenSwoole treats a coroutine sleep under 1 ms, such as the old 200 µs pause, as a plain yield.
-  Coroutines of one worker now queue locally, so a worker holds one ticket and runs one poller per
-  key. Polls read a single column, and waiters park on a 1 ms timer once the queue has not moved
-  for 2 ms. Measured with `bench/contention/lock_contention.php` on one hot key, median of 3 runs
-  on a 20-core host shared with other load, so the absolute rates move with that load: 4 workers
-  x 32 coroutines went from 38k to 221k mutations/s and from 106 to 17 µs of CPU per mutation;
-  8 workers x 32 coroutines from 12k to 50k and from 636 to 158 µs. A coroutine waiting behind a
-  holder that stalls for 300 ms uses 6 ms of CPU instead of 300 ms. While the queue moves, each
-  waiting worker still keeps one core busy polling.
-
-  Concurrent mutations of one key now run FIFO within a worker and round-robin across workers,
-  and callers of one worker return in the order they ran. A coroutine waits at most 2 s behind
-  earlier callers of its own worker, or not at all once the local holder has overrun its 2 s
-  lease, and its 5 s timeout starts when it takes a ticket, so a call can now take up to 7 s
-  before it throws.
-
-- **A broadcast reads each scoped signal from shared memory once per flush.** With `worker_num > 1`
-  every read of a scoped signal went to the shared table (a sha1 of the key, a row lock, and an
-  `unserialize()` for non-integers), and a fan-out read every signal again for every context, once
-  in its view and once for its signals patch. A flush now reads each signal once and reuses the
-  value for every context of every scope it renders. With `withBroadcastCoalescing(false)` or
-  outside a coroutine, each fan-out reads each signal once. Actions, timers, hooks, page loads and
-  SSE initial syncs still read shared memory on every call, and a write on this worker during a
-  flush, a view's own included, is read back at once. A write on another worker arrives with a
-  broadcast: a scope it marks before a running flush reaches that scope is read again there,
-  including the tabs the flush rendered before the mark, and any other scope goes to the next
-  flush. A tab that an older flush renders after a newer one did is rendered again (see Fixed). A
-  view that computes a new value from a scoped signal during a broadcast now computes it from the
-  flush's value, so use `increment()` or `mutate()` there. In `bench/contention/shared_read.php`
-  (2,000 contexts, 5 scoped signals written by another worker, two runs per tree), store reads per
-  broadcast fell from 20,000 to 5 with a view per context and from 10,005 to 5 with a cached route
-  view. The store's cost over a single-worker run fell from 30 ms (+146%) to 1.6 ms (+8%) and from
-  17 ms (+430%) to 0.6 ms (+14%) per broadcast.
-
-- **`getClients()` no longer rebuilds the list on every call.** With one worker it copied every
-  client into a new array; it now returns the stored one. With `worker_num > 1` every call scanned
-  the shared table and regenerated each client's 1.5 KB identicon, about 5 µs per client, so a
-  broadcast whose per-tab view counts the clients cost tabs x clients. Each worker now keeps the
-  list it built last and rebuilds it only after a client connects or leaves on any worker, reusing
-  the identicons it already made. A broadcast reads the list once for all the views it renders,
-  like scoped signals, and again only when a client joins or leaves this worker meanwhile, or when
-  other code on this worker reads the list while a view in the broadcast waits on I/O. A client
-  joining another worker otherwise shows up on the next broadcast. Each worker that calls
-  `getClients()` holds about 2.3 KB per client. In `bench/contention/get_clients.php` with 500
-  clients, a call went from 2.4 ms to 0.1 µs, or 0.2 ms right after a connect, and a broadcast to
-  100 tabs whose view counts the clients from 239 ms to 0.4 ms. With one worker a call went from
-  36 µs to 0.1 µs.
-
-- **Idle SSE streams cost nothing between events.** Every page stream woke every 100 ms to check
-  its connection, and with `worker_num > 1` each wake also wrote the context directory and the
-  client registry in shared memory, so idle CPU grew with the number of open tabs. A stream now
-  sleeps until a patch is queued, its connection closes, the worker stops or the keep-alive
-  interval passes, which is one wake per 15 s instead of 150. The directory refresh moved to one
-  timer per worker (see Fixed).
-  Patch latency does not change, because a queued patch always woke the stream at once.
-  In `bench/contention/idle_sse.php` with 1,000 idle streams, worker CPU went from 4% of a core
-  to below the 0.25% the run can resolve with one worker, and from 8.75% to below it with four.
-  The workers' voluntary context switches, a proxy for wakes, fell from about 440 to 1 per second
-  with one worker and from about 1,200 to 4 with four. A broadcast still reached all 1,000 streams,
-  and SIGTERM still stopped the server within 100 ms. A server that speaks HTTP/2 also checks its
-  streams for client resets every 250 ms, which took 75 µs per worker for 2,000 streams.
-
-## [0.13.0] - 2026-09-29
+- **ext-openswoole 26 is required.** The `ext-openswoole` constraint is now `^26.0` instead of `*`.
+  Upgrade the extension (`pecl install openswoole-26.2.0`) before running `composer update`. No code
+  changes are needed.
+- **`broadcast()` inside a coroutine returns before the fan-out.** Broadcasts, scoped signal writes
+  and broker messages mark the scope, and the worker renders each marked scope once per flush, at
+  most once per tick (`Config::withBroadcastTickMs()`, default 25 ms). Views render the state at
+  flush time, patches the action queues itself (`execScript()`, `sync()`) reach the tab before the
+  broadcast frame, and fan-out errors are logged instead of failing the action.
+  `Via::flushBroadcasts()` forces the flush, and `Config::withBroadcastCoalescing(false)` restores
+  synchronous broadcasts. See [Broadcasting](https://via.zweiundeins.gmbh/docs/broadcasting#timing).
+- **Closed idle tabs are detected.** `onClientDisconnect`, the removal from `getClients()` and the
+  cleanup hooks now run for idle tabs, and their contexts are freed. Idle streams write a
+  `: keep-alive` comment after 15 s (`Config::withSseKeepAliveMs()`), and `withSsePollIntervalMs()`
+  only paces the Dev Bar stream. See [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#disconnect-detection).
+- **Signal ids are unique.** Names that differ only in punctuation no longer share an id. Readable
+  scoped ids such as `global_count` stay; TAB and component ids gain a `____` suffix. Templates that
+  use `$signal->id()`, `bind()` or `text()` need no change, hardcoded ids break, and
+  `Via::getScopedSignalByName()` finds a scoped signal outside a context. Tabs left open across the
+  deploy lose their values on revival, and with `worker_num > 1` the deploy needs a full restart,
+  not `SIGUSR1`. See [signal()](https://via.zweiundeins.gmbh/docs/api#context-signal).
+- **`Via::setInterval()` runs on one worker.** Pass `everyWorker: true` for a timer in every process.
+- **Requests without an `Origin` header are denied outside dev mode** for actions when
+  `withTrustedOrigins()` is set, and always for the Dev Bar endpoints and `POST /_session/close`.
+  Non-browser clients need `Config::withAllowMissingOrigin()`.
+- **`clientWritable: false` is enforced on TAB signals,** and component TAB signals take client
+  values like page TAB signals. The parameter type widens from `bool` to `?bool`.
+- **With `worker_num > 1`, session data values must be serializable** and come back as copies.
+  GlobalState keys longer than 63 characters throw `\InvalidArgumentException` whenever the shared
+  table is used (`worker_num > 1` or `withPersistentGlobalState()`).
+- **Shell placeholders use the name passed to `signal()`** (`{{ graph_display }}`, not `{{ graph }}`)
+  and are HTML-escaped JSON. Full-document views now get `appendToHead()`/`appendToFoot()` content
+  and the signal seed.
 
 ### New Features
 
-- **Multi-worker mode works.** With `worker_num > 1`, scoped signal values, the SSE client list
-  and the context directory now live in shared memory, so an action served by any worker reaches
-  the context it names. Before, an action on a worker that had not rendered the page got 400
-  `Invalid context`: measured over 1,000 actions, success fell to 51% at 2 workers and 6.9% at 16.
-  It is now 100% at every worker count. A worker that does not hold a context rebuilds it by
-  re-running the route handler, as SSE reconnects already did, and adopts the live shared values
-  instead of the declared defaults. The server logs a warning at start-up listing what stays
-  per-worker: PHP statics in app code, server-owned TAB signals and session data.
+- **Shared state across workers:** scoped signals, session data, the client list and a context
+  directory live in shared memory. `withScopedSignalTableSize()`, `withSessionTableSize()` and
+  `withContextDirectorySize()` size them. See [Deployment](https://via.zweiundeins.gmbh/docs/deployment#same-machine).
+- **Atomic updates:** `Signal::increment()`, `Signal::mutate()`, `Via::incrementGlobalState()`,
+  `Via::mutateGlobalState()` and `#[Signal(atomic: true)]`. See [Signal](https://via.zweiundeins.gmbh/docs/api#signal).
+- **`Config::withPersistentGlobalState()`** keeps GlobalState in SQLite across restarts.
+- **`Config::withContextConnectTimeout()`** (default 30 s) frees a context whose SSE stream never
+  connects.
+- **`Config::withSseMaxQueuedBytes()`** (default 1 MB) drops element frames for a slow client
+  instead of blocking its stream.
+- **`Config::withStrictTabSignals()`**, and `clientWritable` for every scope.
+- **`Stats::getBroadcastStats()`** reports flushes, coalesced broadcasts and flush times.
 
-- **`Signal::increment()` and `Signal::mutate()`** for race-free updates to shared signals.
-  `increment()` is atomic across workers; `mutate()` runs a callback under a per-signal lock.
-  Over 4 workers doing 500 mutations each, `increment()` kept 2000 of 2000 against 802 for
-  `setValue($signal->int() + 1)`. Do not mix the two on one signal: `increment()` skips the lock.
+### Performance
 
-- **`Config::withPersistentGlobalState($path, $flushMs = 1000)`** keeps GlobalState in a SQLite
-  file across restarts. Reads never touch SQLite. Writes mark the key dirty and the leader worker
-  writes the dirty keys in one transaction every `$flushMs`, about 1 µs per key. Anything written
-  since the last flush is lost if the process dies.
-
-- **`Config::withSseMaxQueuedBytes()`** (default 1 MB, `0` disables) drops element patches for a
-  client whose unsent backlog exceeds the threshold, instead of parking its SSE coroutine in
-  `write()` until the client drains or disconnects (measured at 20 s). Element patches are
-  idempotent, so the client catches up on the next broadcast. Signal and script patches are never
-  dropped.
-
-- **`Config::withScopedSignalTableSize()` and `Config::withContextDirectorySize()`** size the new
-  shared tables.
-
-- **`#[Signal(Scope::GLOBAL, atomic: true)]`:** atomic counters for the composition API.
-  PageMount hydrates each `#[Signal]` property before an `#[Action]` and assigns it back after, so
-  `++$this->votes` on a shared signal was a read-modify-write with the whole action body in the
-  gap — and the attribute API had no way to reach `Signal::increment()`. With `atomic: true`,
-  syncBack applies the action's net *change* through `increment()` instead. Measured over 6 worker
-  processes doing 500 actions each on one signal, the plain property retained 2410–2514 of 3000
-  and `atomic: true` retains all 3000. Rejected at mount on a non-integer property.
-  The trade-off: assignment to an atomic property becomes an adjustment, so `$this->votes = 0` is a
-  decrement-by-current rather than a reset. Use `$ctx->getSignal('votes')->setValue(0)` to mean SET.
-
-- **`Via::incrementGlobalState()` and `Via::mutateGlobalState()`:** atomic read-modify-write for
-  GlobalState, closing the last cross-worker store that had no race-free mutation path.
-  `Signal` gained `increment()`/`mutate()` when scoped signal values started crossing workers, but
-  GlobalState kept only get/set — leaving `setGlobalState($k, globalState($k) + 1)` as the only way
-  to express a shared counter. Measured over 4 worker processes doing 500 mutations each on one
-  key, that read-modify-write retained 772–1238 of 2000 increments; `incrementGlobalState()`
-  retains all 2000. For non-integers, appending to a list through `setGlobalState()` kept 536–735
-  of 2000 entries against 2000 through `mutateGlobalState()`.
-  `SharedTable` gained the storage split this needs — an atomic `TYPE_INT` column for integers
-  plus the same ticket lock `SharedSignalStore` uses — and the distinction survives the durable
-  snapshot, so a persisted counter comes back on the atomic path after a restart rather than as an
-  opaque blob that reads correctly and then throws on its next increment.
-  Single-worker behaviour is unchanged, and existing `setGlobalState()` calls keep working.
-
-- **`clientWritable` for every scope, and `Config::withStrictTabSignals()`.** `clientWritable` is
-  now `?bool` on `Context::signal()`, `Signal` and `#[Signal]`: `null` keeps the old rule (TAB
-  writable, scoped server-owned), `true` and `false` apply to any scope. The new
-  `Config::withStrictTabSignals()` (off by default) makes TAB signals server-owned unless declared
-  `clientWritable: true`.
-
-- **`Config::withAllowMissingOrigin()`** (off by default) accepts action POSTs without an `Origin`
-  header in production, for non-browser clients. Dev mode always accepts them.
+- **A broadcast storm renders each scope once per flush,** so its cost no longer grows with the
+  action rate, and the broker gets one publish per scope per flush. Measurements are in
+  `bench/contention/RESULTS.md`.
+- **`getClients()` returns the stored list** instead of copying it on every call.
 
 ### Fixed
 
-- **Scoped signals of two different scopes could share one value across workers.** Signal ids
-  are sanitised, so `user:a-b@x.com` and `user:a.b@x.com` produce the same id for a signal of
-  the same name. With `worker_num > 1` the shared store was keyed by that id alone, so one
-  user's value showed up in the other's scope. Rows are now keyed by the raw scope plus the id.
-  Single-worker servers were not affected.
-
-- **`mutateGlobalState()` and `Signal::mutate()` could lose writes on a fresh key.** The lock
-  row was created with `exists()` then `set()`, so two workers touching a new key together could
-  both create it: the second reset the value and the ticket counter while the first was inside its
-  callback, and both held the lock. With 8 workers creating 200 keys in step, 44 to 76 of 1600
-  appends were lost per run. Rows are now created atomically.
-
-- **Multi-worker was non-functional.** Four independent faults, each enough on its own:
-  `dispatch_mode => 7` is not a valid OpenSwoole constant, so session affinity never ran; the
-  `dispatch_func` installed beside it fatals on PHP 8.4; every broker generated its node id before
-  the fork, so sibling workers shared one id and dropped each other's messages as their own; and
-  `$server->worker_num` does not exist on ext-openswoole 26, so the broker fan-out looped zero
-  times. The custom dispatch is removed, the node id is generated per process, and the worker
-  count is read from `$server->setting`.
-
-- **A signal patch dropped from a full queue was never resent.** Signals were marked synced when
-  the patch was queued rather than delivered, so an evicted delta left the browser out of step for
-  good. Delivery is now confirmed by the SSE writer and an evicted signal stays dirty for the next
-  sync. Eviction under pressure now drops element patches first, then signal patches, and script
-  patches only as a last resort.
-
-- **The SSE loop stopped noticing shutdown, destroyed contexts and dead clients.**
-  `Channel::pop(0)` blocks with no timeout, so the loop parked indefinitely and its liveness
-  checks never ran. It now pops with a real timeout and exits on a closed channel.
-
-- **Two broadcasts could interleave mid-fan-out,** so a client received half of one frame and half
-  of the next. Fan-outs are now serialised per scope.
-
-- **A signal declared with `Scope::ROUTE` emitted no patches.** It was compared against the
-  unexpanded constant instead of the route-qualified scope, so the browser never saw it change.
-
-- **A component that declares no signals froze on its first render.** With `cacheUpdates: true`,
-  the default, an empty signal set counted as "nothing changed" on every broadcast. It now syncs.
-
-- **`withActionRateLimit()` was enforced per worker,** so the effective limit was
-  `limit × worker_num`. The counter is now shared and the limit holds at any worker count. If the
-  table fills up, requests are allowed and the overflow is logged once.
-
-- **`Via::setInterval()` fired once per worker.** It now runs on one worker; see Breaking Changes.
-
-- **`log('warning')` was filtered as info,** and `withLogLevel('warning')` meant info and above.
-  Both spellings now map to the warn level, so `withLogLevel('warn')` shows the warnings it
-  previously hid.
-
-- **GlobalState table limits.** A full table raises `\OverflowException` instead of a bare
-  OpenSwoole error. The value cap per key is raised from 4 KB to 32 KB: a growing list overflowed at
-  about 240 short entries. `maxRows` is documented as a floor, since OpenSwoole admits more keys
-  than requested but rejects by hash once past it.
-
-- **A shared scope that silently disabled the update cache is now reported.** A context that joins
-  a shared scope with `addScope()` stays TAB-primary and re-renders per client on every broadcast.
-  A warning is logged once per route when such a view still claims to be cacheable and declares no
-  TAB signals.
-
-- **`onShutdown` callbacks now run when the server is stopped.** OpenSwoole owns SIGTERM in
-  server processes, so the `Process::signal(SIGTERM, ...)` calls in the master and in every worker
-  failed with a "processor has been registered by the system" warning and the only code that ran
-  the callbacks never did. Measured with 2 workers and one open SSE stream: `kill -TERM` and
-  `kill -INT` to the master ran no callback and ended in a scheduler deadlock; SIGINT to the process
-  group ran them and then died with `Uncaught OpenSwoole\ExitException` from the worker's `exit(0)`.
-  Cleanup now runs from `workerExit`, in a coroutine: server intervals are cleared, patch channels
-  are closed and the worker waits for the SSE loops to leave through their normal exit path
-  (`onClientDisconnect` included), then each callback runs in its own try/catch, then the broker
-  disconnects. Each worker arms an idle keepalive timer so `workerExit` fires even when nothing else
-  is scheduled. OpenSwoole's manager now ignores SIGINT, so the master alone drives a Ctrl-C stop.
-  Behaviour changes: callbacks run once per worker, inside a coroutine. They also run on every
-  worker reload (SIGUSR1) and `max_request` recycle, which end that worker's SSE streams too, so
-  `onClientDisconnect` fires and the clients reconnect. A callback cannot tell a reload from a
-  stop. The default `max_wait_time` is now 3 seconds (was 1): OpenSwoole counts it in whole
-  seconds, so a stopping worker gets roughly `max_wait_time` minus up to one second, and with 1 a
-  callback yielding a few hundred milliseconds was regularly killed. A stop can take up to
-  `max_wait_time` while coroutines finish: a coroutine, socket or `Event::add` fd the app keeps
-  alive past `onShutdown` holds the worker until OpenSwoole kills it, and the worker then logs how
-  many coroutines were left. `isShuttingDown()` is now public so background loops can end on
-  their own. The signal warnings are gone from the logs.
-
-- **Persistent GlobalState no longer shares one SQLite connection across `fork()`.** The snapshot
-  was opened in the master before the workers were forked, and the final drain was an `onShutdown`
-  callback, so with several workers each one drained and checkpointed over that inherited
-  connection. The boot connection is now closed after loading, the leader worker opens its own for
-  the periodic flush and flushes once more when it stops, and the final drain runs once in the
-  master's `shutdown` event after every worker has stopped. The leader's stop flush is there because
-  a second SIGTERM to the master can end it before that event (seen in about 1 of 8 runs).
-  `SqliteSnapshot` reopens after `close()` and throws instead of using a connection opened in
-  another process.
-
-- **A `#[Signal]` written directly inside an `#[Action]` is no longer discarded.** `syncBack()`
-  assigned every reactive property back to its signal unconditionally, so an action whose body was
-  `$ctx->getSignal('votes')->increment()` ended each round exactly where it started — the untouched
-  property still held the pre-increment value and was written straight back over the increment
-  (measured: 0 after five increments). Properties the action did not change are now left alone.
-  This also stops a shared signal being clobbered with a stale hydrated value when another worker
-  wrote it while the action was running. Where an action both writes the signal directly and
-  changes the property, the direct write wins, which makes
-  `$this->votes = $ctx->getSignal('votes')->increment()` correct rather than double-counting.
-
-- **A throw from an action, a view or a timer no longer kills the worker.** `ActionHandler` caught
-  `\Exception` only, so a `TypeError` or `ValueError` in an action closure escaped the request
-  coroutine: the connection dropped, the worker exited with code 255 and every context on it was
-  gone, so the tab's next action got 400 from the respawned worker. The initial page render, the
-  per-tab `$c->setInterval()` callback and the broadcast fan-out had no guard at all, and a plain
-  `RuntimeException` from a view was enough. Every request, SSE, per-tab and server interval,
-  cleanup, fan-out and broker entry point now catches `\Throwable`. These guards, and the existing
-  ones around `Via::setInterval()`, the client connect and disconnect callbacks and revival, log
-  the class, message and `file:line`. `RequestHandler::handleRequest()` has a last guard that
-  answers 500 when nothing has been written yet; an SSE stream that already wrote is only ended,
-  and its exit bookkeeping still runs, so the context is cleaned up as usual. A page whose handler
-  or render throws has its context torn down before the 500, timers and scopes included. A context
-  whose view throws during a broadcast is skipped, so the other contexts still get the frame, and
-  each broadcast logs one line per distinct failure with the number of contexts it hit. A broker
-  message whose fan-out throws is logged and the Redis and NATS receive loops keep reading.
-  Behaviour changes: an action that throws an `\Error` answers 500 `Action failed`, as an
-  `\Exception` already did, and the worker keeps running with whatever the action changed before
-  it threw, where the crash used to wipe every context on that worker. A page whose render throws
-  answers 500 instead of dropping the connection. A per-tab interval keeps ticking after a throw,
-  as `Via::setInterval()` already did. An SSE stream whose initial sync throws answers 500 and
-  fires neither `onClientConnect` nor `onClientDisconnect`. The default shell retries the stream
-  within 15 s; a custom full-document view without such an interval does not reconnect.
-
-- **`clientWritable` is honoured for TAB signals, and component signals receive client values.**
-  `SignalFactory` built TAB signals without the flag and `injectSignals()` accepted every TAB value,
-  so `$c->signal(..., clientWritable: false)` was silently ignored and a TAB signal could not be
-  kept server-owned: Datastar posts every signal with each `@post`, and the browser copy overwrote
-  the server value before the action ran. A rejected TAB value that differs from the server's
-  marks the signal changed, so the next sync puts the server value back in the browser (scoped
-  signals are sent on every sync anyway). `injectSignals()` also only looked at the page context's
-  own signals, so a `data-bind` inside a component never reached the component's action; ids the
-  page does not own now go to its components, nested ones included. The same applies on revival
-  for components declared with an explicit namespace; an auto-named component gets new signal ids
-  when the page is rebuilt, so its signals start from their initial values. Re-declaring a TAB
-  signal still sets it to the new initial value, and now logs a warning, once per name, when that
-  changes the live value or explicitly asks for a different `clientWritable` (the first one is
-  kept). The warning gives the type and size of both values, never their content. A signal holding
-  a JSON object also never received the posted value: the object was split into `id.key` entries
-  that matched no signal. An object posted under a known signal id is now that signal's value.
-
-- **A view that renders a full `<html>` document gets `via_ctx`, a signal seed and the head/foot
-  includes.** `HtmlBuilder` returned such a view unchanged, so `appendToHead()`/`appendToFoot()`
-  content never reached it and signal values arrived only with the first SSE frame, which left
-  expressions like `$x.y` throwing until then. The initial render now adds, right after the opening
-  `<head>` tag and so ahead of the layout's SSE bootstrap, a `via_ctx` meta (only when the document
-  has none) and a `data-signals__ifmissing` meta with what the first sync sends: changed TAB
-  signals, scoped signals and the page's component signals. Datastar compiles that attribute as
-  code, so `@`, `;`, `\\` and non-ASCII characters in the values are `\u`-escaped. Includes go
-  before the first `</head>` and the last `</body>` unless their exact markup is already there, also
-  on every SSE update, since the morph replaces `<head>` too. The layout still carries the SSE
-  bootstrap and `datastar.js`. Shell pages get the same seed in `{{ head_content }}`.
-
-- **Shell signal placeholders use the name passed to `signal()`.** `graph_display` and
-  `graph_ports` both filled `{{ graph }}`. The shell is now filled in one pass, so placeholder text
-  inside the view or a signal value is left alone.
-
-- **An Origin allowlist no longer lets requests without an Origin through.** With
-  `withTrustedOrigins()` set, `ActionHandler` accepted any action POST that carried no `Origin`
-  header, even in production, while without an allowlist the same request was denied: the
-  stricter setting was the laxer one for that case. The Dev Bar's `/_via/signal` and
-  `/_via/reset` had their own copy of the check that let a missing `Origin` or `Host` through in
-  every mode. Both now use one `OriginPolicy`: a missing `Origin` is accepted in dev mode or with
-  the new `Config::withAllowMissingOrigin()`, and denied otherwise. The first such denial per
-  worker logs a warning that names the opt-in, and the 403 body says `missing Origin`.
-  `POST /_session/close` had no Origin check at all, so a cross-site page that knew a context id
-  could schedule that tab's cleanup, which ended the context if its SSE connection was down when
-  the timer fired; it now uses the same policy.
-
-- **Registering a TAB action name twice in one context logs a warning.** The later callback
-  replaced the earlier one with only a debug line. It still does, and now logs a warning once per
-  action id. Scoped actions keep the first registration, as before.
-
-### Breaking Changes
-
-- **`Via::setInterval()` runs on the leader worker only.** With `worker_num > 1` each worker used to
-  arm its own timer, so a 100 ms interval fired about 4 times as often on 4 workers. Pass
-  `everyWorker: true` for work that must run in every process.
-
-- **GlobalState keys longer than 63 characters throw `\InvalidArgumentException`** wherever the
-  shared table backs GlobalState: with `worker_num > 1` or `withPersistentGlobalState()`. A
-  64-character key used to be accepted with a "key is too long" warning on every write.
-
-- **Action POSTs without an `Origin` header get 403 in production when `withTrustedOrigins()` is
-  set.** Browsers send `Origin` on every POST, so browser traffic is unaffected. Non-browser
-  clients that post to `/_action/*` (curl scripts, server-to-server calls, uptime checks) need
-  `Config::withAllowMissingOrigin()`. Without an allowlist nothing changes for actions. The Dev
-  Bar's `/_via/signal` and `/_via/reset` no longer accept a missing `Origin`, or an `Origin`
-  without a `Host` header, outside dev mode. The same applies to `POST /_session/close`, with or
-  without an allowlist. A page served with `Referrer-Policy: no-referrer` sends its tab-close
-  beacon with `Origin: null`, which is denied; the SSE disconnect then schedules the cleanup.
-
-- **Shell placeholders and full-document includes changed.** A custom shell that used
-  `{{ graph }}` for a signal named `graph_display` must use `{{ graph_display }}`. Placeholder
-  values are HTML-escaped, so a string placeholder inside a `<script>` arrives escaped: read the
-  signal from Datastar instead. They are also JSON with `@`, `;`, `\\` and non-ASCII characters
-  `\u`-escaped, like the seed, so they are safe inside a Datastar attribute. Content from
-  `appendToHead()`/`appendToFoot()` that full-document pages silently dropped now appears there,
-  so a `<title>` appended for shell pages lands next to the layout's own: append it only for shell
-  pages. Every page also gains the seed meta. The Dev Bar is no longer re-added to component
-  updates.
-
-- **`clientWritable: false` on a TAB signal is enforced.** It was ignored before. Such a signal no
-  longer takes the browser's value on actions or on revival, where it starts from the handler's
-  initial value. The parameter type widens from `bool` to `?bool`, which breaks a subclass of
-  `Context`, `Signal` or `SignalFactory` that overrides one of these signatures with `bool`.
-  With `worker_num > 1`, an action on a worker that does not hold the context rebuilds it the same
-  way, so a server-owned TAB signal is per-worker state: use `worker_num = 1` or a scoped signal.
-
-- **Component TAB signals are client-writable by default, like page TAB signals.** They take the
-  browser's value on every action, which overwrites a value the server set (from an interval, a
-  broadcast or another action) and has not synced yet. `clientWritable: false` or
-  `Config::withStrictTabSignals()` opts out.
-
-- **`ext-openswoole` now requires v26:** the extension constraint was unbound (`*`) and is now
-  `^26.0`, matching the upgrade of `openswoole/core` and `openswoole/ide-helper` from v22 to v26.
-  Apps running ext-openswoole 22 must upgrade the extension before updating php-via. Previously the
-  unbound constraint allowed a v22 extension to be paired with the v26 core library — or the
-  reverse — with no install-time error.
-  Migration: rebuild the extension (`pecl install openswoole-26.2.0`), then `composer update`.
-  php-via's own API is unchanged, so no application code changes are required.
+- Multi-worker mode did not work: an invalid `dispatch_mode`, a dispatch function that crashed on
+  PHP 8.4, broker node ids shared between workers, and `$server->worker_num`, which OpenSwoole 26
+  does not have.
+- With `worker_num > 1`, session data set in one request could be missing in the next.
+- A context whose SSE stream never connected stayed in memory until the worker stopped.
+- A context revived by an action without signals reset the tab's values on its next connect.
+- A throw in an action, a view or a timer killed the worker. Actions now answer 500.
+- `onShutdown` callbacks never ran when the server stopped. The default `max_wait_time` is now 3 s.
+- A signal patch dropped from a full queue was never resent.
+- Two broadcasts could interleave mid-fan-out, and a tab could keep an older frame than the newest.
+- Signals declared with `Scope::ROUTE` emitted no patches, and a component without signals froze
+  on its first render.
+- Components rendered in a page handler reset on every page re-render; the docs now render them
+  inside the view.
+- `withActionRateLimit()` counted per worker.
+- `log('warning')` was filtered as info.
+- A full GlobalState table threw a bare OpenSwoole error, and values were capped at 4 KB (now 32 KB).
+- A `#[Signal]` an action wrote directly was overwritten when the action ended.
+- `clientWritable: false` was ignored on TAB signals, component signals never received client
+  values, and JSON object values were not injected.
+- A view that renders a full HTML document lacked `via_ctx`, the signal seed and the head/foot
+  includes.
+- An `Origin` allowlist let requests without `Origin` through, and `POST /_session/close` had no
+  Origin check.
+- A shared scope that silently disabled the update cache, and a TAB action name registered twice,
+  now log a warning.
 
 ### Dependencies
 
-- Upgraded `openswoole/core` `^22.2` → `^26.2` and `openswoole/ide-helper` `^22.1` → `^26.2`.
-  php-via imports nothing from `OpenSwoole\Core\*` and uses none of the APIs dropped in v26
-  (`Coroutine::fgets`/`fread`/`fwrite`, `Coroutine\System::fgets`/`fread`/`fwrite`,
-  `Coroutine::getuid`, `Coroutine::suspend`, and the `Coroutine\PostgreSQL` fetch methods that moved
-  to the new `Coroutine\PostgreSQLStatement`), so no source changes were needed.
-- Upgraded `pestphp/pest` `^4.0` → `^5.0`, which pulls PHPUnit 12 → 13. `phpunit.xml` needs no
-  schema changes.
-- Removed `rector/type-perfect`: the package is abandoned and `tomasvotruba/type-coverage` 2.3.0
-  absorbed it, so both registered the same PHPStan services and the analyser crashed with
-  "Multiple services of type `Rector\TypePerfect\Reflection\MethodNodeAnalyser` found".
-- Pinned `tomasvotruba/type-coverage` to `^2.3`: the `type_perfect:` block in `.phpstan.neon` now
-  depends on the copy bundled from 2.3.0, which the previous `^2.0` could have resolved away.
-- Refreshed lockfiles: `friendsofphp/php-cs-fixer` 3.95.18, `twig/twig` 3.28, `symfony/*` 1.41, and
-  `tempest/highlight` 2.27 (website).
-- Website: `postcss` `^8.5.14` → `^8.5.26`. `public/css/site.css` was rebuilt with no content
-  change — newer postcss emits fewer line breaks. `open-props` was already current at 1.7.23.
-- The `src/Via.php` PHPStan exclusion is still required: the v26 stubs still omit
-  `OpenSwoole\Event::EVENT_READ`, so lifting it still crashes the analyser.
+- `openswoole/core` and `openswoole/ide-helper` from `^22` to `^26`, with no source changes.
+  Development: Pest 5, and `rector/type-perfect` removed.
 
 ## [0.12.0] - 2026-07-08
 
