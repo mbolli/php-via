@@ -1690,8 +1690,10 @@ class Via {
             return null;
         }
 
-        // Register the rebuilt context exactly as an initial page load would.
+        // Register the rebuilt context exactly as an initial page load would. The session binding
+        // is set again: a concurrent revival of this ID that failed meanwhile has removed it.
         $this->contexts[$contextId] = $context;
+        $this->contextSessions[$contextId] = $sessionId;
         $this->app->registerContext($context);
         $this->app->setContextSession($contextId, $sessionId);
         $this->registerContextInScope($context, Scope::TAB);
