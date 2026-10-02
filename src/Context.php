@@ -1032,6 +1032,17 @@ class Context {
 
                 return;
             }
+            // A component in a scope of its own registered its actions there. Like the scoped
+            // actions above, it runs with the page context, which holds the request input.
+            foreach ($component->getScopes() as $scope) {
+                $scopedAction = $this->app->getScopedAction($scope, $actionId);
+                if ($scopedAction !== null) {
+                    $this->app->log('debug', "Found scoped action {$actionId} in component scope {$scope}", $this);
+                    $scopedAction($this);
+
+                    return;
+                }
+            }
         }
 
         throw new \RuntimeException("Action not found: {$actionId}");
