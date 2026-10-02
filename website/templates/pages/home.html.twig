@@ -470,7 +470,8 @@ $app->start();
 <script type="module">
 // site.css hides the QR code on phones, where there is nothing to scan
 const narrow = matchMedia('(max-width: 640px)')
-const load = () => import('sb-qr-code')
+// The browser keeps a failed module fetch for the page's lifetime, so a retry would fail too: the link stays
+const load = () => import('sb-qr-code').catch((e) => console.warn('QR code unavailable, use the pairing link:', e.message))
 narrow.matches ? narrow.addEventListener('change', load, { once: true }) : load()
 </script>
 {% endblock %}
