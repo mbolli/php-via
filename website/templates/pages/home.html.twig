@@ -1,5 +1,5 @@
 {% extends 'shells/base.html.twig' %}
-{% block title %}php-via — Real-time PHP. No JavaScript. No build step.{% endblock %}
+{% block title %}php-via: Real-time PHP. No JavaScript. No build step.{% endblock %}
 {% block description %}php-via is a real-time engine for building reactive PHP web applications with OpenSwoole and Datastar. No JavaScript, no build step, multiplayer by default.{% endblock %}
 {% block head %}
 <script type="application/ld+json">
@@ -65,7 +65,7 @@
     <h2 class="section-title">This is all the code.</h2>
     <p class="section-lead">
         A counter in ~15 lines of PHP. Switch the scope tab to see the only change needed to make it
-        multiplayer — one line. Flip the API toggle to compare the closure handler with the
+        multiplayer: one line. Flip the API toggle to compare the closure handler with the
         class-based <a href="/docs/composition">composition API</a>. No JavaScript. No WebSockets. No API glue.
     </p>
     <div class="code-examples-split">
@@ -101,7 +101,7 @@ use Mbolli\PhpVia\Via;
 $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
-    // TAB scope (default) — each visitor has their own counter
+    // TAB scope (default): each visitor has their own counter
     $count = $c->signal(0);
 
     $increment = $c->action(
@@ -134,13 +134,14 @@ use Mbolli\PhpVia\Via;
 $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
-{-    // TAB scope (default) — each visitor has their own counter-}
-{+    // GLOBAL scope — one shared counter for every visitor
+{-    // TAB scope (default): each visitor has their own counter-}
+{+    // GLOBAL scope: one shared counter for every visitor
     $c->scope(Scope::GLOBAL);+}
     $count = $c->signal(0);
 
     $increment = $c->action(
-        fn() => $count->setValue($count->int() + 1)
+{-        fn() => $count->setValue($count->int() + 1)-}
+{+        fn() => $count->increment()+}
     );
 
     $c->view(fn() => <<<HTML
@@ -168,7 +169,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
 final class Counter {
-    // TAB scope (default) — each visitor has their own counter
+    // TAB scope (default): each visitor has their own counter
     #[Signal]
     public int $count = 0;
 
@@ -210,10 +211,10 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 
 final class Counter {
-{-    // TAB scope (default) — each visitor has their own counter
+{-    // TAB scope (default): each visitor has their own counter
     #[Signal]-}
-{+    // GLOBAL scope — one shared counter for every visitor
-    #[Signal(Scope::GLOBAL)]+}
+{+    // GLOBAL scope: one shared counter, atomic so no click is lost
+    #[Signal(Scope::GLOBAL, atomic: true)]+}
     public int $count = 0;
 
     #[Action]
@@ -287,14 +288,14 @@ $app->start();
         <div class="prose">
             <p>
                 The PHP ecosystem bent itself into a pretzel trying to add real-time to the stack.
-                WebSockets bolted onto traditional PHP-FPM. Livewire polling every second.
-                Inertia.js adding a React layer on top of Laravel. All of these add complexity,
+                WebSockets bolted onto traditional PHP-FPM. Livewire polling on a timer.
+                Inertia.js adding a React, Vue or Svelte layer on top of Laravel. All of these add complexity,
                 JavaScript, and build tooling to solve a problem that should be solved at the server.
             </p>
             <p>
                 <strong>php-via takes a different approach.</strong> Built on OpenSwoole's persistent event loop,
                 every page maintains a live SSE connection. When your PHP changes state, the browser
-                updates instantly — no polling, no WebSocket handshake ceremony, no client-side
+                updates instantly: no polling, no WebSocket handshake ceremony, no client-side
                 state management. The server is the source of truth, and the browser is a live view into it.
             </p>
             <p>
@@ -321,42 +322,47 @@ $app->start();
         <div class="feature-card">
             <span class="feature-icon">🚫</span>
             <h3>No JavaScript</h3>
-            <p>Write server-side PHP. Datastar handles client-side reactivity through HTML attributes. Zero JavaScript to author.</p>
+            <p>Write server-side PHP. Datastar drives the browser through HTML attributes like <code>data-on:click="@post(...)"</code>. No JS files, no components, no client state.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">⚡</span>
             <h3>No build step</h3>
-            <p><code>php app.php</code> and you're running. No bundler, no transpiler, no <code>npm install</code> before you can see a page.</p>
+            <p><code>php app.php</code> and you're running. php-via serves its own <code>datastar.js</code>, so there is no bundler, no transpiler and no <code>npm install</code> before you can see a page.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">🏗️</span>
             <h3>Closures or classes</h3>
-            <p>Write pages as closures for quick scripts, or as classes with <code>#[Signal]</code> and <code>#[Action]</code> attributes for larger apps. Same engine — flip the toggle above to compare.</p>
+            <p>Write pages as closures for quick scripts, or as classes with <code>#[Signal]</code> and <code>#[Action]</code> attributes for larger apps. Same engine: flip the toggle above to compare.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">🎯</span>
             <h3>Scoped state</h3>
-            <p>TAB, ROUTE, SESSION, and GLOBAL scopes. One line changes whether state is private to a visitor or shared across everyone.</p>
+            <p>TAB, ROUTE, SESSION, GLOBAL, or your own scopes like <code>room:42</code>. One line decides whether state is private to a visitor or shared with everyone.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">🤝</span>
-            <h3>Multiplayer by default</h3>
-            <p>Route-scoped signals broadcast to every user on the page. Build collaborative apps without pub/sub infrastructure.</p>
+            <h3>Multiplayer in one line</h3>
+            <p>Route-scoped signals reach every user on the page, on every worker. One machine needs no pub/sub service, and <code>increment()</code> keeps simultaneous clicks from overwriting each other.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">🔄</span>
             <h3>Single SSE stream</h3>
-            <p>One persistent connection per client carries all updates. Compresses exceptionally well with Brotli over a reverse proxy.</p>
+            <p>One persistent connection per tab carries every update. With <code>withBrotli()</code>, php-via compresses the stream itself and the reverse proxy just passes it through.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">🧩</span>
             <h3>Components</h3>
-            <p>Compose complex pages from isolated sub-contexts. Each component gets its own signals, actions, and rendering scope.</p>
+            <p>Compose complex pages from isolated sub-contexts, written as closures or classes. Each component gets its own signals, actions, and view.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-icon">🖥️</span>
+            <h3>Every core, one server</h3>
+            <p><code>withWorkerNum()</code> spreads tabs over every core. Scoped signals and session data live in shared memory, and any worker can answer any tab.</p>
         </div>
         <div class="feature-card">
             <span class="feature-icon">🔍</span>
             <h3>Built-in Dev Bar</h3>
-            <p>A zero-config debug overlay: a request-trace waterfall plus live signal, log, and connection inspectors. It's running on this page — open the <strong>via</strong> pill in the bottom-right corner.</p>
+            <p>A debug overlay that turns on with dev mode: a request-trace waterfall, the raw SSE patches, and live signal, scope and log panels. It's running on this page: open the <strong>via</strong> pill in the bottom-right corner.</p>
         </div>
     </div>
 </section>
@@ -422,134 +428,7 @@ $app->start();
     <h2 class="section-title">Honest comparison.</h2>
     <p class="section-lead">Every tool has trade-offs. Here's where php-via stands.</p>
 
-    <div class="comparison-table-wrap">
-        <table class="comparison-table">
-            <thead>
-                <tr>
-                    <th style="text-align:left;">Feature</th>
-                    <th>php-via</th>
-                    <th>Livewire</th>
-                    <th>htmx + Alpine</th>
-                    <th>Inertia.js</th>
-                    <th>LiveView</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>Native real-time push</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-1"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-1">Requires Laravel Reverb + Echo for server push; native Livewire uses HTTP round-trips.</span></span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-2"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-2">SSE extension available but requires manual wiring.</span></span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="check">✓</span></td>
-                </tr>
-                <tr>
-                    <td>Multiplayer / shared state</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="check">✓</span></td>
-                </tr>
-                <tr>
-                    <td>Scoped state system</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-3"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-3">PubSub topics achieve similar results without a declarative scope system.</span></span></td>
-                </tr>
-                <tr>
-                    <td>No JS to author</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-4"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-4">Alpine.js is bundled; complex interactions may need JS hooks.</span></span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-5"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-5">JS hooks needed for some client-side interactions.</span></span></td>
-                </tr>
-                <tr>
-                    <td>No build step</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="cross">✗</span></td>
-                    <td><span class="cross">✗</span></td>
-                </tr>
-                <tr>
-                    <td>File uploads</td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-uploads"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-uploads">Via multipart/form-data form submission using Datastar's contentType: 'form' modifier. Files arrive in $c->file().</span></span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                </tr>
-                <tr>
-                    <td>Form validation</td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-validation"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-validation">HTML5 client-side (Datastar calls reportValidity() before sending) plus full server-side validation with per-field error signals pushed back via SSE.</span></span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-6"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-6">HTML5 constraint API only; no built-in server-side validation.</span></span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                </tr>
-                <tr>
-                    <td>Auth / middleware</td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                </tr>
-                <tr>
-                    <td>Built-in debugging / observability</td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-via"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-via">Zero-config Dev Bar ships with the framework: an in-page request-trace waterfall plus live signal, log, and connection inspectors. Toggled with Config::withTracing().</span></span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-lw"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-lw">No built-in overlay; relies on Laravel Telescope and Debugbar (separate packages) plus community browser DevTools extensions.</span></span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-htmx"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-htmx">htmx.logAll() console logging plus third-party htmx and Alpine.js browser DevTools extensions; no built-in in-page inspector.</span></span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-inertia"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-inertia">Leans on Laravel Telescope server-side, Vue/React DevTools client-side, and a community Inertia.js DevTools extension.</span></span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-dbg-lv"><span class="check">✓</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-dbg-lv">First-party Phoenix LiveDashboard (real-time metrics, requests, processes) plus HEEx debug annotations.</span></span></td>
-                </tr>
-                <tr>
-                    <td>Ecosystem &amp; community</td>
-                    <td>Early</td>
-                    <td>Large</td>
-                    <td>Medium</td>
-                    <td>Large</td>
-                    <td>Large</td>
-                </tr>
-                <tr>
-                    <td>Multi-worker / multi-server scaling</td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-multiserver"><span class="partial">~</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-multiserver">Same machine: withWorkerNum() + SwooleBroker (no external deps, no sticky sessions). Multi-server: RedisBroker or NatsBroker, with sticky sessions. One line in Config.</span></span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                    <td><span class="check">✓</span></td>
-                </tr>
-                <tr>
-                    <td>Framework required</td>
-                    <td><span class="check">No</span></td>
-                    <td><span class="cross">Laravel</span></td>
-                    <td><span class="check">No</span></td>
-                    <td><span class="has-tooltip" style="anchor-name:--tip-7"><span class="partial">Any</span><span role="tooltip" class="tooltip" style="position-anchor:--tip-7">Primarily targets Laravel but also supports Rails, Django, and Phoenix.</span></span></td>
-                    <td><span class="cross">Phoenix</span></td>
-                </tr>
-                <tr>
-                    <td>Language</td>
-                    <td>PHP</td>
-                    <td>PHP</td>
-                    <td>PHP + JS</td>
-                    <td>PHP + JS</td>
-                    <td>Elixir</td>
-                </tr>
-                <tr>
-                    <td>Runtime</td>
-                    <td>OpenSwoole</td>
-                    <td>PHP-FPM</td>
-                    <td>PHP-FPM</td>
-                    <td>PHP-FPM</td>
-                    <td>BEAM VM</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
+    {% include 'components/comparison-table.html.twig' %}
 </section>
 
 <!-- Getting started CTA -->

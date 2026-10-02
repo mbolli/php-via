@@ -1,0 +1,161 @@
+{#
+  Feature comparison, shared by the homepage and /docs/comparisons so the two cannot drift.
+  Cells: [mark, class, tooltip]; class is check, partial or cross, an empty tooltip adds none.
+#}
+{% set columns = ['php-via', 'Livewire', 'htmx + Alpine', 'Inertia.js', 'LiveView'] %}
+{% set rows = [
+    {label: 'Native real-time push', cells: [
+        ['✓', 'check', 'One SSE stream per tab carries every update, and any action, timer or broadcast can push to it.'],
+        ['~', 'partial', 'Server push needs Laravel Echo plus a broadcaster such as Reverb, Pusher, Ably or Mercure. Livewire alone offers polling and in-request streaming with wire:stream.'],
+        ['~', 'partial', 'The SSE extension streams HTML into the page, but the server side is yours to build.'],
+        ['✗', 'cross', 'No push channel of its own: use polling, or a separate broadcaster with Laravel Echo.'],
+        ['✓', 'check', 'A persistent WebSocket carries diffs from the server.'],
+    ]},
+    {label: 'Multiplayer / shared state', cells: [
+        ['✓', 'check', 'Scoped signals: one line shares state with everyone on a route, in a session, in a room or on the whole site.'],
+        ['~', 'partial', 'No shared server-side state. Multiplayer UIs broadcast Laravel events through Echo and re-render from the database.'],
+        ['✗', 'cross', ''],
+        ['✗', 'cross', ''],
+        ['✓', 'check', 'Phoenix PubSub broadcasts between LiveView processes.'],
+    ]},
+    {label: 'Scoped state system', cells: [
+        ['✓', 'check', 'TAB, ROUTE, SESSION, GLOBAL, or your own scopes like room:42, with wildcard broadcasts.'],
+        ['✗', 'cross', ''],
+        ['✗', 'cross', ''],
+        ['✗', 'cross', ''],
+        ['~', 'partial', 'PubSub topics achieve similar results without a declarative scope system.'],
+    ]},
+    {label: 'Presence (who is online)', cells: [
+        ['✓', 'check', 'getClients(), onClientConnect() and onClientDisconnect() work across workers, and a closed tab disconnects at once.'],
+        ['~', 'partial', 'Laravel presence channels, through Echo and a broadcaster.'],
+        ['✗', 'cross', ''],
+        ['✗', 'cross', ''],
+        ['✓', 'check', 'Phoenix.Presence tracks users across nodes.'],
+    ]},
+    {label: 'No JS to author', cells: [
+        ['✓', 'check', 'No JS files, components or client state. Datastar attributes take one-line expressions such as @post(url).'],
+        ['✓', 'check', 'Typical components use only wire: directives and Blade. Alpine ships bundled for optional client-side behaviour.'],
+        ['~', 'partial', 'htmx requests are plain HTML attributes, but Alpine state and behaviour are inline JavaScript expressions.'],
+        ['✗', 'cross', 'Pages are React, Vue or Svelte components.'],
+        ['~', 'partial', 'JS hooks are needed for some client-side interactions.'],
+    ]},
+    {label: 'No build step', cells: [
+        ['✓', 'check', 'php-via serves its own datastar.js. No bundler, no npm.'],
+        ['✓', 'check', 'Livewire injects its script and Alpine automatically. The documented Echo setup for push uses npm and Vite.'],
+        ['✓', 'check', ''],
+        ['✗', 'cross', 'npm and Vite build the client.'],
+        ['~', 'partial', 'No Node.js: Mix runs standalone esbuild and Tailwind binaries, but the app still bundles its assets.'],
+    ]},
+    {label: 'File uploads', cells: [
+        ['✓', 'check', "Multipart form submission with Datastar's contentType: 'form' modifier. Files arrive in $c->file()."],
+        ['✓', 'check', 'Temporary uploads with previews, progress events, validation and direct-to-S3 uploads.'],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+        ['✓', 'check', 'Built-in progress, drag and drop, previews and direct-to-cloud uploads.'],
+    ]},
+    {label: 'Form validation', cells: [
+        ['~', 'partial', "No validation API: validate in the action with plain PHP or any validator library, and push per-field errors back as signals. With contentType: 'form', the browser's HTML5 checks run first."],
+        ['✓', 'check', "Laravel's validator through #[Validate] attributes or form objects."],
+        ['~', 'partial', 'HTML5 checks in the browser. Server-side errors come back as HTML from your backend.'],
+        ['✓', 'check', 'Server validation errors arrive as props from the backend adapter.'],
+        ['✓', 'check', 'Ecto changesets validate on change and on submit.'],
+    ]},
+    {label: 'Auth / middleware', cells: [
+        ['✓', 'check', 'PSR-15 middleware per route or group. Actions are bound to the session and check the Origin header.'],
+        ['✓', 'check', ''],
+        ['✓', 'check', 'Provided by the backend you pair it with.'],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+    ]},
+    {label: 'Built-in debugging / observability', cells: [
+        ['✓', 'check', 'The Dev Bar ships with the framework and turns on with dev mode: a request-trace waterfall, the raw SSE patches, and live signal, scope and log panels.'],
+        ['~', 'partial', 'No built-in inspector. Laravel Debugbar detects Livewire components, plus Telescope and community browser extensions.'],
+        ['~', 'partial', 'Console event logging plus third-party htmx and Alpine DevTools extensions, with no in-page inspector.'],
+        ['✓', 'check', 'The first-party Inertia DevTools browser panel records every visit with its props and headers (Laravel adapter).'],
+        ['✓', 'check', 'Phoenix LiveDashboard (real-time metrics, requests, processes) plus HEEx debug annotations.'],
+    ]},
+    {label: 'Multi-core on one server', cells: [
+        ['✓', 'check', 'withWorkerNum() and SwooleBroker: scoped signals, GlobalState, session data and the client list live in shared memory, and an action reaches its tab on any worker.'],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+    ]},
+    {label: 'Multi-server', cells: [
+        ['~', 'partial', 'RedisBroker or NatsBroker carries broadcasts between servers. Use sticky sessions and keep shared state in a database.'],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+        ['✓', 'check', 'Distributed PubSub and Presence across nodes.'],
+    ]},
+    {label: 'Runs without a long-running process', cells: [
+        ['✗', 'cross', 'Needs a long-running OpenSwoole 26 process behind a reverse proxy. No PHP-FPM or shared hosting.'],
+        ['✓', 'check', 'Plain PHP-FPM. Real-time push adds a Reverb process.'],
+        ['✓', 'check', 'Any backend. Under PHP-FPM every open SSE stream ties up a worker.'],
+        ['✓', 'check', 'Plain PHP-FPM. Server-side rendering adds a Node.js process.'],
+        ['✗', 'cross', 'Runs as a long-lived BEAM release.'],
+    ]},
+    {label: 'No server memory per open tab', cells: [
+        ['✗', 'cross', 'Every open tab holds its context and its SSE stream in server memory.'],
+        ['✓', 'check', 'Component state travels with each request in a checksummed snapshot.'],
+        ['✓', 'check', ''],
+        ['✓', 'check', ''],
+        ['✗', 'cross', 'Each LiveView is a BEAM process that holds its state.'],
+    ]},
+    {label: 'Ecosystem & community', cells: [
+        ['Early', '', ''],
+        ['Large', '', ''],
+        ['Large', '', ''],
+        ['Large', '', ''],
+        ['Large', '', ''],
+    ]},
+    {label: 'Framework required', cells: [
+        ['No', 'check', 'php-via is its own server. Next to a Laravel or Symfony app it runs as a separate process.'],
+        ['Laravel', 'cross', ''],
+        ['No', 'check', ''],
+        ['React, Vue or Svelte', 'partial', 'Plus a server adapter: Laravel is first-party, and community adapters cover Rails, Phoenix, Django, Symfony and more.'],
+        ['Phoenix', 'cross', ''],
+    ]},
+    {label: 'Language', cells: [
+        ['PHP', '', ''],
+        ['PHP', '', ''],
+        ['PHP + JS', '', ''],
+        ['PHP + JS', '', ''],
+        ['Elixir', '', ''],
+    ]},
+    {label: 'Runtime', cells: [
+        ['OpenSwoole 26', '', ''],
+        ['PHP-FPM or Octane', '', ''],
+        ['Any backend', '', ''],
+        ['PHP-FPM, Node for SSR', '', ''],
+        ['BEAM VM', '', ''],
+    ]},
+] %}
+<div class="comparison-table-wrap">
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th style="text-align:left;">Feature</th>
+                {% for column in columns %}<th>{{ column }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+                {% set r = loop.index %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    {% for cell in row.cells %}
+                        {% set mark = cell[1] ? '<span class="' ~ cell[1] ~ '">' ~ (cell[0]|e) ~ '</span>' : cell[0]|e %}
+                        <td>
+                            {%- if cell[2] -%}
+                                <span class="has-tooltip" style="anchor-name:--cmp-{{ r }}-{{ loop.index }}">{{ mark|raw }}<span role="tooltip" class="tooltip" style="position-anchor:--cmp-{{ r }}-{{ loop.index }}">{{ cell[2] }}</span></span>
+                            {%- else -%}
+                                {{ mark|raw }}
+                            {%- endif -%}
+                        </td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
