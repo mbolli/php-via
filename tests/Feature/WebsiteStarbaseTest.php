@@ -78,6 +78,19 @@ describe('The vendored Starbase components', function (): void {
         }
     });
 
+    test('every file is cached for a year, since its folder name changes with each version', function (): void {
+        $dir = (string) realpath(starbaseDir());
+        $config = (new Config())->withStaticCacheControl(StarbaseComponents::cacheControl(...));
+
+        foreach (array_keys(StarbaseComponents::INTEGRITY) as $file) {
+            expect($config->getStaticCacheControl($dir . '/' . $file, 'application/javascript'))->toBe('public, max-age=31536000, immutable');
+        }
+        expect($config->getStaticCacheControl($dir . '/README.md', 'text/markdown'))->toBe('public, max-age=3600, must-revalidate')
+            ->and($config->getStaticCacheControl(dirname($dir, 2) . '/js/docs-toc.js', 'application/javascript'))->toBe('public, max-age=3600, must-revalidate')
+            ->and($config->getStaticCacheControl('/srv/public/datastar.js', 'application/javascript', versioned: true))->toBe('public, max-age=31536000, immutable')
+        ;
+    });
+
     test('register() maps each tag to its module and gives every file its hash', function (): void {
         $map = StarbaseComponents::register(new Config())->getImportMap();
 

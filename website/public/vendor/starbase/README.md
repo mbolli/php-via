@@ -8,7 +8,8 @@ cached old file against a new hash.
 
 `src/StarbaseComponents.php` puts them into php-via's import map: each tag maps to its module,
 and every file has the hash from the snapshot's `/c/@4cfa9b656272/importmap.json`.
-`tests/Feature/WebsiteStarbaseTest.php` checks the hashes against the files.
+`tests/Feature/WebsiteStarbaseTest.php` checks the hashes against the files. The site serves these
+folders as `immutable` for a year, so never change a file inside an existing folder.
 
 | Tag | File | Bytes | Integrity |
 |---|---|---|---|

@@ -311,7 +311,11 @@ $config->withDatastarRocket()->withImportMap(
     <p>
         Keep the version in the folder name, as Starbase's URLs do. A browser that still has the old file
         in its cache checks it against the new hash and refuses it, so a copy updated under the same URL
-        breaks the component for returning visitors until their cached copy expires.
+        breaks the component for returning visitors until their cached copy expires. Versioned folders
+        can then be cached for a year, as this website does with a
+        <a href="/docs/deployment#static-assets"><code>withStaticCacheControl()</code></a> closure that
+        returns <code>'public, max-age=31536000, immutable'</code> for them and <code>null</code> for
+        every other file.
     </p>
 
     <h2 id="binding">Binding signals to component properties</h2>

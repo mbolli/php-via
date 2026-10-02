@@ -42,4 +42,16 @@ final class StarbaseComponents {
 
         return $config->withImportMap($imports, $integrity);
     }
+
+    /**
+     * For Config::withStaticCacheControl(): a year for the files in a versioned Starbase folder, whose
+     * URL changes with every new version, and php-via's default (null) for every other file.
+     */
+    public static function cacheControl(string $filePath): ?string {
+        $dir = realpath(\dirname(__DIR__) . '/public' . self::BASE_URL);
+
+        return $dir !== false && preg_match('#^' . preg_quote($dir, '#') . '/[a-z0-9-]+@[0-9a-f]{12}/#', $filePath) === 1
+            ? 'public, max-age=31536000, immutable'
+            : null;
+    }
 }

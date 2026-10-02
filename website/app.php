@@ -57,6 +57,7 @@ $config = (new Config())
 
 // The Datastar + Rocket build, and the Starbase components the site copies into public/vendor/starbase
 StarbaseComponents::register($config->withDatastarRocket());
+$config->withStaticCacheControl(StarbaseComponents::cacheControl(...));
 
 if (!$isDev) {
     // Production hardening: Secure cookie flag (HTTPS) + explicit trusted origins.
