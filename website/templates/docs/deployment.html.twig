@@ -392,6 +392,16 @@ $config = (new Config())
         <code>\OverflowException</code>. GlobalState keys are at most 63 characters.
     </p>
     <p>
+        The context directory keeps a row for every page view until its revival window ends. A page whose
+        stream never opened, which is every crawler hit, holds its row for the connect timeout plus the
+        revival window: 30&nbsp;s + 600&nbsp;s by default. Size it for peak open tabs plus peak page views
+        per second &times; 630; the default 4&nbsp;096 rows (about 8&nbsp;000 in practice) covers about
+        12 page views per second. When it is full, new contexts get no row and a warning is logged at most
+        every 10&nbsp;s per worker; those tabs work, but their actions on other workers answer 400. With
+        <code>withContextRevivalWindow(0)</code> no worker rebuilds another worker's context, so no rows
+        are written.
+    </p>
+    <p>
         Session data takes one row per session that holds data, with all of its keys, and
         <code>withSessionTableSize()</code> sizes it (default 1&nbsp;024 sessions &times; 16&nbsp;KB per
         session). A write that takes a session past its byte cap throws <code>\OverflowException</code>.

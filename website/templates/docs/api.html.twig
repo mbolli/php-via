@@ -576,7 +576,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withWorkerNum(swoole_cpu_num())   // default: 1; requires SwooleBroker/RedisBroker/NatsBroker when > 1
     ->withGlobalStateTableSize(2048, 65536)   // GlobalState rows × value bytes (default 1024 × 32768; rows is a floor)
     ->withScopedSignalTableSize(1024, 32768)  // shared values of scoped signals (defaults shown)
-    ->withContextDirectorySize(4096)          // contexts reachable from every worker; size for peak tabs
+    ->withContextDirectorySize(4096)          // contexts reachable from every worker; see Deployment for sizing
     ->withSessionTableSize(1024, 16384)       // sessions × bytes per session of shared session data (defaults shown)
     // GlobalState persistence
     ->withPersistentGlobalState(__DIR__ . '/state.sqlite', flushMs: 1000) // write-behind to SQLite

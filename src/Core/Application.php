@@ -97,6 +97,9 @@ class Application {
 
     private int $directoryWarnedAt = 0;
 
+    /** When this worker last swept expired context directory records (hrtime ns). */
+    private int $directoryPrunedAtNs = 0;
+
     private Environment $twig;
 
     public function __construct(
@@ -681,7 +684,8 @@ class Application {
      * Write a context's rebuild record, expiring $ttlSeconds from now.
      */
     private function publishContextRecord(Context $context, int $ttlSeconds): void {
-        if ($this->contextDirectory === null) {
+        // With revival off no worker rebuilds a context, so nothing would ever read the record.
+        if ($this->contextDirectory === null || $this->config->getContextRevivalWindowMs() <= 0) {
             return;
         }
 
@@ -719,7 +723,12 @@ class Application {
             // Shorten the live entry to the revival window: the context is gone, and only a
             // returning tab has any use for it now.
             $this->publishContextRecord($context, (int) ceil($windowMs / 1000));
-            $this->contextDirectory->prune();
+            // The sweep reads every row, so a worker runs it at most once a second.
+            $now = hrtime(true);
+            if ($now - $this->directoryPrunedAtNs >= 1_000_000_000) {
+                $this->directoryPrunedAtNs = $now;
+                $this->contextDirectory->prune();
+            }
 
             return;
         }

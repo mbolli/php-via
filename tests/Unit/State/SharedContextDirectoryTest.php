@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\State\SharedContextDirectory;
 
@@ -53,5 +54,15 @@ describe('SharedContextDirectory', function (): void {
         $app->getApp()->registerContext($ctx);
 
         expect($app->getApp()->getContext('/docs_/late'))->toBe($ctx);
+    });
+
+    test('with revival off, registering a context writes no directory row', function (): void {
+        $app = createVia((new Config())->withContextRevivalWindow(0));
+        $directory = new SharedContextDirectory(maxRows: 16);
+        $app->getApp()->setContextDirectory($directory);
+
+        $app->getApp()->registerContext(new Context('/docs_/a', '/docs', $app, null, 's'));
+
+        expect($directory->count())->toBe(0);
     });
 });
