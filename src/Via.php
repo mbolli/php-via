@@ -1690,6 +1690,16 @@ class Via {
             return null;
         }
 
+        // The handler can yield, and a request for the same tab may have revived it meanwhile.
+        // That one is registered and may already stream, so this copy is the one to drop.
+        $winner = $this->contexts[$contextId] ?? null;
+        if ($winner !== null) {
+            $context->cleanup();
+            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+
+            return $winner;
+        }
+
         // Register the rebuilt context exactly as an initial page load would. The session binding
         // is set again: a concurrent revival of this ID that failed meanwhile has removed it.
         $this->contexts[$contextId] = $context;
