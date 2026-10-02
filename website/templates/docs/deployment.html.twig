@@ -486,7 +486,10 @@ $config->withStaticDir(__DIR__ . '/public');
         Leave <code>/datastar.js</code> to php-via: it serves the plain Datastar bundle, or the Rocket build
         with <code>withDatastarRocket()</code>. A proxy that serves it from disk has to pick the matching
         file, <code>datastar.js</code> or <code>datastar-rocket.js</code> from
-        <code>vendor/mbolli/php-via/public/</code>.
+        <code>vendor/mbolli/php-via/public/</code>. An app that
+        <a href="/docs/web-components#pin-datastar">pins Datastar</a> with
+        <code>getDatastarIntegrity()</code> needs a proxy that passes the file on unchanged; compressing
+        it is fine.
     </p>
     <p>
         If you do serve <code>withStaticDir()</code> files through php-via itself (no reverse proxy, or a

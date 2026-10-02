@@ -435,6 +435,7 @@ $config = (new Config())
     ->withCertificate($crt, $key)             // HTTPS directly
     ->withBasePath('/app/')                   // when mounted at a sub-path
     ->withDatastarRocket()                    // Datastar + Rocket for web components
+    ->withImportMap(['charts' => '/js/charts.js'], ['/js/charts.js' => 'sha384-...'])
     ->withWorkerNum(4)                        // default 1
     ->withBroker(new SwooleBroker())          // or RedisBroker / NatsBroker
     ->withBroadcastTickMs(25)                 // broadcast flush tick; 0 = every turn
@@ -498,6 +499,7 @@ passes the context's signals and actions to the template by name, plus:
 | `currentRoute` | The matched route, e.g. `/docs/signals` |
 | `basePath` | Base URL path, always ends with `/` (default: `/`) |
 | `datastarUrl` | URL of the Datastar bundle, versioned by content, e.g. `/datastar.js?v=727844adfc` |
+| `importMap` | The page's `<script type="importmap">` tag, empty without Rocket or `withImportMap()` entries |
 
 Datastar attributes in templates, with ids written from the signal objects:
 ```twig
@@ -529,15 +531,16 @@ plain bundle). Configure it before `new Via()`.
 **One engine per page.** Components `import { rocket } from 'datastar'`, so the page needs an
 import map that maps `datastar` to exactly the URL of the Datastar `<script type="module">`,
 query string included, before any module script. Another URL loads a second Datastar
-engine. With the option on, the default shell writes both from `Config::getDatastarUrl()`
-(`/datastar.js?v=<10 hex digits of the bundle's sha256>`). A custom shell uses the
-placeholders `{{ datastar_import_map }}` (in `<head>`, before `{{ head_content }}`; empty
-without the option) and `<script type="module" src="{{ datastar_url }}">`. A Twig layout that
-renders the whole document writes both itself:
+engine. With the option on, or once `withImportMap()` added entries, the default shell writes
+both from `Config::getDatastarUrl()` (`/datastar.js?v=<10 hex digits of the bundle's
+sha256>`). A custom shell uses the placeholders `{{ import_map }}` (in `<head>`, before
+`{{ head_content }}`; empty without the option or entries) and
+`<script type="module" src="{{ datastar_url }}">`. A Twig layout that renders the whole
+document writes both itself:
 
 ```twig
 <head>
-    <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
+    {{ importMap }}
     ...
 </head>
 <body>
@@ -547,12 +550,26 @@ renders the whole document writes both itself:
 ```
 
 The map is an inline script: under a CSP without `'unsafe-inline'`, allow it by its sha256 or
-write it yourself with a nonce.
+write it yourself with a nonce from `json_encode($config->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG)`.
+
+**Own modules and integrity.** `Config::withImportMap(array $imports, array $integrity = [])`
+merges entries into php-via's map: specifier => URL (absolute or starting with `/`, `./`,
+`../`), and module URL => Subresource Integrity (`sha256-`/`sha384-`/`sha512-` + base64). Later
+calls replace entries with the same key. Invalid entries and the reserved `datastar` specifier
+throw `InvalidArgumentException`. `getImportMap()` returns the map, `getImportMapTag()` the
+tag. `getDatastarIntegrity()` is the served bundle's sha384; pin Datastar with
+`$config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()])`
+after `withDatastarRocket()` and `withBasePath()`. php-via never pins it by itself: a proxy
+that rewrites `/datastar.js` would break every page, since the pin covers the script tag too.
 
 **Loading components.** Take the script tag from a Starbase component page's Installation
-section (pinned version with `integrity`) and add it with `$app->appendToHead(...)`, leaving
-out that snippet's `imports` entry. Or copy the component's files into `withStaticDir()`;
-`.js` and `.mjs` are served as JavaScript.
+section (pinned version with `integrity`) and add it with `$app->appendToHead(...)`. Put the
+snippet's other `integrity` entries into `withImportMap()` and leave out its `datastar`
+entries. To pin a whole catalog snapshot, save `https://starbase.zweiundeins.gmbh/c/@<catalog>/importmap.json`
+with the app, pass its `integrity` to `withImportMap([], ...)` and load
+`/c/@<catalog>/autoloader.js` with its hash from that file (93 hashes, 6 KB per page with
+Brotli). Or copy the component's files into `withStaticDir()`; `.js` and `.mjs` are served as
+JavaScript.
 
 **Binding.** Use `$signal->bind('value')` / `{{ bind(signal, 'value') }}`
 (`data-bind__prop.value`) on components, and the property form for any other property
@@ -628,8 +645,9 @@ php-via.
 13. **Action returns 403**: a POST without an `Origin` header when `withTrustedOrigins()` is
     set; browsers always send one, scripts need `withAllowMissingOrigin()`.
 14. **Rocket component fails or the page runs two Datastar engines**: enable
-    `withDatastarRocket()`, and map `datastar` in the import map to exactly the Datastar
-    script's URL (`{{ datastarUrl }}` in both places).
+    `withDatastarRocket()`, write the map with `{{ importMap }}` (Twig) or `{{ import_map }}`
+    (shell), and load Datastar from `{{ datastarUrl }}` / `{{ datastar_url }}`. Add other
+    modules with `withImportMap()` instead of a second map.
 15. **Two elements post the same action and one request is lost**: Datastar cancels
     in-flight requests per method and URL; add a query string (`?from=button`) or pass
     `{requestCancellation: 'disabled'}`.

@@ -22,6 +22,7 @@ Real-time reactive web framework for PHP. Server-side reactive UIs with zero Jav
 - **Real-time by default**: every page gets a live SSE connection
 - **Scoped state**: TAB, ROUTE, SESSION, GLOBAL, and custom scopes control who shares what
 - **Single SSE stream**: extremely efficient with Brotli compression
+- **[Web components](https://via.zweiundeins.gmbh/docs/web-components)**: Rocket and [Starbase](https://starbase.zweiundeins.gmbh) components bound to your signals, with an opt-in Datastar build
 
 ## Requirements
 

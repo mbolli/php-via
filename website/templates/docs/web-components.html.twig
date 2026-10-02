@@ -12,6 +12,19 @@
         runs. php-via serves that build when you ask for it, and its default shell adds the import map
         that points the components at it.
     </p>
+    <p>With the Rocket build on:</p>
+    <ul>
+        <li>Rocket components run on php-via pages, also inside php-via components and keyed lists that
+            the server re-renders.</li>
+        <li>Starbase components load from its catalog, pinned with integrity hashes through
+            <a href="#own-modules"><code>withImportMap()</code></a>, or from copies in your app.</li>
+        <li><code>bind('value')</code> <a href="#binding">binds a signal to a component property</a>, so
+            the component's value reaches the server with the next action.</li>
+    </ul>
+    <p>
+        The Rocket build is 22&nbsp;KB with Brotli instead of 12&nbsp;KB, and only apps that turn it on
+        load it.
+    </p>
 
     <h2 id="enabling">Enabling the Rocket build</h2>
     {% code 'php' %}{% verbatim %}
@@ -49,9 +62,10 @@ $app = new Via(
         is in place when the first import resolves.
     </p>
     <p>
-        With <code>withDatastarRocket()</code>, the default shell does both. It writes the map right after
-        the viewport meta, ahead of everything <code>appendToHead()</code> adds, and loads Datastar from the
-        same URL at the end of the body:
+        With <code>withDatastarRocket()</code>, or once <a href="#own-modules"><code>withImportMap()</code></a>
+        added entries, the default shell does both. It writes the map right after the viewport meta, ahead
+        of everything <code>appendToHead()</code> adds, and loads Datastar from the same URL at the end of
+        the body:
     </p>
     {% code 'html' %}{% verbatim %}
 <script type="importmap">{"imports":{"datastar":"/datastar.js?v=f602fbe19d"}}</script>
@@ -62,23 +76,25 @@ $app = new Via(
         <code>v</code> is the first 10 hex digits of the served bundle's SHA-256, so a new bundle gets a
         new URL and browsers fetch it instead of using a cached copy. <code>Config::getDatastarUrl()</code>
         returns the URL, including the base path; in a page handler that is
-        <code>$c-&gt;getConfig()-&gt;getDatastarUrl()</code>. With the plain bundle, the default shell
-        loads Datastar from that URL and writes no import map.
+        <code>$c-&gt;getConfig()-&gt;getDatastarUrl()</code>. With the plain bundle and no entries of your
+        own, the default shell loads Datastar from that URL and writes no import map.
     </p>
     <p id="csp">
         The import map is an inline script. Under a <code>Content-Security-Policy</code> whose
         <code>script-src</code> lacks <code>'unsafe-inline'</code>, the browser blocks it, and every
         component then fails to import <code>datastar</code>. Allow the map by its SHA-256, which changes
-        with every bundle, or write it yourself with your nonce in a
+        with the bundle and with every entry, or write the tag yourself with your nonce in a
         <a href="#own-shell">custom shell or Twig layout</a>.
+        <code>json_encode($config-&gt;getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG)</code> gives
+        its content.
     </p>
 
     <h2 id="own-shell">The import map in a custom shell or Twig layout</h2>
     <h3 id="custom-shell">Custom shell</h3>
     <p>
         A shell set with <code>withShellTemplate()</code> gets two placeholders:
-        {% verbatim %}<code>{{ datastar_import_map }}</code>{% endverbatim %} is the whole import map tag
-        (empty without <code>withDatastarRocket()</code>), and
+        {% verbatim %}<code>{{ import_map }}</code>{% endverbatim %} is the whole import map tag (empty
+        unless <code>withDatastarRocket()</code> is on or <code>withImportMap()</code> added entries), and
         {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the URL. Put the map in the
         head, before {% verbatim %}<code>{{ head_content }}</code>{% endverbatim %} and any module script
         of your own:
@@ -88,7 +104,7 @@ $app = new Via(
 <html>
 <head>
     <meta charset="UTF-8">
-    {{ datastar_import_map }}
+    {{ import_map }}
     <meta data-signals='{{ signals_json }}'>
     <!-- the SSE bootstrap metas from the default shell.html -->
     {{ head_content }}
@@ -103,8 +119,9 @@ $app = new Via(
     <p>
         Load Datastar from {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %}. A shell that
         keeps {% verbatim %}<code>{{ base_path }}datastar.js</code>{% endverbatim %} loads Datastar from
-        another URL than the map's, so the components start a second engine; php-via logs a warning
-        when a shell has the map placeholder without the URL one. A shell without any import map works
+        another URL than the map's, so the components start a second engine. php-via logs a warning
+        when a shell has the map placeholder without the URL one, and when a map is due but the shell
+        has neither the placeholder nor an import map of its own. A shell without any import map works
         with the plain bundle but not with Rocket components, and an unversioned
         <code>datastar.js</code> stays cached for up to an hour after an upgrade.
     </p>
@@ -113,8 +130,8 @@ $app = new Via(
     <p>
         php-via never adds the Datastar script or the import map to a view that renders its own
         <code>&lt;html&gt;</code> document (see <a href="/docs/twig#twig-shell">Twig as the shell</a>), so
-        the layout loads Datastar from the <code>datastarUrl</code> variable and, with
-        <code>withDatastarRocket()</code>, writes the import map for the same URL:
+        the layout writes the import map from the <code>importMap</code> variable and loads Datastar from
+        the <code>datastarUrl</code> variable:
     </p>
     {% code 'twig' %}{% verbatim %}
 {# templates/base.html.twig #}
@@ -122,8 +139,7 @@ $app = new Via(
 <html>
 <head>
     <meta charset="UTF-8">
-    {# with withDatastarRocket() #}
-    <script type="importmap">{"imports": {"datastar": "{{ datastarUrl }}"}}</script>
+    {{ importMap }}
     <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
     <meta data-indicator="_connecting"
         data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
@@ -137,9 +153,61 @@ $app = new Via(
 </html>
     {% endverbatim %}{% endcode %}
     <p>
-        The URL contains only letters, digits and <code>/ . _ - ? =</code>, so
-        {% verbatim %}<code>{{ datastarUrl }}</code>{% endverbatim %} prints the same bytes inside the JSON
-        and inside the attribute.
+        {% verbatim %}<code>{{ importMap }}</code>{% endverbatim %} is the tag the default shell writes,
+        and empty when php-via writes no map.
+    </p>
+
+    <h2 id="own-modules">Adding modules to the import map</h2>
+    <p>
+        <code>Config::withImportMap()</code> adds entries to the map php-via writes, so your own modules
+        and the integrity hashes of Starbase files end up in the same map as <code>datastar</code>. A page
+        needs them in one map: a browser that supports one import map per page ignores a second one.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withDatastarRocket()
+    ->withImportMap(
+        ['charts' => '/js/charts.min.js', 'icons/' => '/js/icons/'],
+        ['https://cdn.example.com/lib@2.1.0/lib.min.js' => 'sha384-<hash>'],
+    );
+    {% endverbatim %}{% endcode %}
+    <p>
+        The first array maps module specifiers to URLs: <code>import { chart } from 'charts'</code> loads
+        <code>/js/charts.min.js</code>, and <code>import 'icons/rocket.js'</code> loads
+        <code>/js/icons/rocket.js</code>. The second gives the browser a Subresource Integrity hash per
+        module URL, and the browser refuses a module whose bytes do not match. Browsers that do not
+        support integrity in import maps ignore it and load the modules unchecked.
+    </p>
+    <p>
+        Calls merge: a later URL for the same specifier, or a later hash for the same URL, replaces the
+        earlier one. The map is written as soon as there are entries, with the plain bundle too, and
+        <code>getImportMap()</code> returns it as an array. Configure it before <code>new Via()</code>,
+        like <code>withDatastarRocket()</code>.
+    </p>
+    <p>
+        Each entry is checked when you add it. One the browser would ignore throws an
+        <code>\InvalidArgumentException</code>: a URL that is neither absolute nor starts with
+        <code>/</code>, <code>./</code> or <code>../</code>, a specifier ending in <code>/</code> whose URL
+        does not, or a hash that is not <code>sha256-</code>, <code>sha384-</code> or <code>sha512-</code>
+        with a base64 digest of that algorithm's length. php-via maps <code>datastar</code> itself, so an
+        entry for it throws too.
+    </p>
+
+    <h3 id="pin-datastar">Pinning Datastar</h3>
+    <p>
+        php-via does not put Datastar's hash into the map by itself. A proxy or CDN that rewrites
+        <code>/datastar.js</code>, by minifying it or injecting a script, would then break every page.
+        Compression is fine, since the hash covers the decoded bytes.
+        <code>Config::getDatastarIntegrity()</code> returns the served bundle's sha384 for apps that want
+        the pin:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
+    {% endverbatim %}{% endcode %}
+    <p>
+        Call it after <code>withDatastarRocket()</code> and <code>withBasePath()</code>, which both change
+        the URL. The hash also applies to the Datastar script tag, so with a hash that does not match,
+        the browser refuses Datastar and nothing on the page reacts.
     </p>
 
     <h2 id="loading">Loading a Starbase component</h2>
@@ -163,20 +231,15 @@ $app->appendToHead(
     {% endverbatim %}{% endcode %}
     <p>
         The <code>integrity</code> attribute covers that one file. A component that imports files of its
-        own, such as <code>sb-code-editor</code> with its vendored Prism, lists their hashes under
-        <code>integrity</code> in the tab's import map. They have to go into the same map as the
-        <code>datastar</code> entry, because a browser that supports one import map per page ignores a
-        second one. Write that map yourself in a custom shell or layout, with php-via's URL:
+        own, such as <code>sb-qr-code</code> with its vendored uqr, lists their hashes under
+        <code>integrity</code> in the tab's import map. Add them with <code>withImportMap()</code>, and
+        leave out the line for Starbase's copy of Datastar:
     </p>
-    {% code 'html' %}{% verbatim %}
-<script type="importmap">
-  {
-    "imports": { "datastar": "{{ datastar_url }}" },
-    "integrity": {
-      "https://starbase.zweiundeins.gmbh/c/code-editor@<hash>/vendor/prism.min.js": "sha384-<hash>"
-    }
-  }
-</script>
+    {% code 'php' %}{% verbatim %}
+$config->withImportMap([], [
+    'https://starbase.zweiundeins.gmbh/c/qr-code@<hash>/qr-code.min.js' => 'sha384-<hash>',
+    'https://starbase.zweiundeins.gmbh/c/qr-code@<hash>/vendor/uqr.min.mjs' => 'sha384-<hash>',
+]);
     {% endverbatim %}{% endcode %}
     <p>
         The <em>Autoloader</em> and <em>Pinned</em> tabs load Starbase's autoloader instead, which imports
@@ -184,7 +247,26 @@ $app->appendToHead(
         tags a morph adds later. <code>/c/autoloader.js</code> always loads the latest version of each
         component. The <em>Pinned</em> tab's autoloader belongs to one snapshot of the catalog, and
         <code>/c/@&lt;catalog&gt;/importmap.json</code> holds the integrity hashes of every file that
-        snapshot can load, for the import map above.
+        snapshot can load. Save that file with your code, merge it into php-via's map and load the
+        autoloader with its hash:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// curl -o starbase-importmap.json https://starbase.zweiundeins.gmbh/c/@<catalog>/importmap.json
+$snapshot = json_decode(file_get_contents(__DIR__ . '/starbase-importmap.json'), true, flags: JSON_THROW_ON_ERROR);
+$autoloader = 'https://starbase.zweiundeins.gmbh/c/@<catalog>/autoloader.js';
+
+$config->withDatastarRocket()->withImportMap([], $snapshot['integrity']);
+
+$app = new Via($config);
+$app->appendToHead('<script type="module" src="' . $autoloader . '" integrity="' . $snapshot['integrity'][$autoloader] . '"></script>');
+    {% endverbatim %}{% endcode %}
+    <p>
+        The snapshot's URLs never change, so the saved file stays valid, and the app starts without
+        reaching Starbase. The file also lists Starbase's copy of Datastar, which a php-via page never
+        loads; the browser ignores hashes for URLs it does not fetch. The file covers the whole catalog,
+        93 files in October 2026, which adds 14&nbsp;KB to every page, 6&nbsp;KB with Brotli. For a few
+        components, the hashes from each component's <em>Pinned</em> tab are enough: that tab's map lists
+        the files of the component and of the components it renders.
     </p>
 
     <h3 id="vendoring">Copied into your app</h3>
@@ -300,7 +382,7 @@ $app->page('/thrust', function (Context $c): void {
     <ul>
         <li><a href="/docs/twig">Templates</a>: shells, Twig layouts and binding</li>
         <li><a href="/docs/actions#cancellation">Actions</a>: requests that cancel each other</li>
-        <li><a href="/docs/api#config">API reference</a>: <code>withDatastarRocket()</code> and <code>getDatastarUrl()</code></li>
+        <li><a href="/docs/api#config">API reference</a>: <code>withDatastarRocket()</code>, <code>withImportMap()</code> and <code>getDatastarIntegrity()</code></li>
         <li><a href="https://starbase.zweiundeins.gmbh" target="_blank" rel="noopener">Starbase</a>: the component catalog</li>
     </ul>
 </article>

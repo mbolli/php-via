@@ -571,6 +571,7 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     // ...or a closure(string $filePath, string $mimeType): string to fine-tune per file (see Deployment → Static assets)
     ->withBasePath('/')             // base path when mounted at a sub-path (see below)
     ->withDatastarRocket()          // serve Datastar with Rocket for web components (see below)
+    ->withImportMap(['charts' => '/js/charts.js'], ['/js/charts.js' => 'sha384-...'])  // import map entries, merged across calls
     ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
     ->withContextConnectTimeout(30_000) // free a context whose SSE stream never connects; 0 = keep (default 30000)
     ->withContextReconnectTimeout(60_000) // keep a tab whose stream is down this long after an action; 0 = connect timeout (default 60000)
@@ -644,10 +645,27 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         digits of the served bundle's SHA-256 as <code>v</code>, such as
         <code>/datastar.js?v=727844adfc</code>. Twig templates get it
         as <code>{% verbatim %}{{ datastarUrl }}{% endverbatim %}</code> and custom shells as
-        <code>{% verbatim %}{{ datastar_url }}{% endverbatim %}</code>. With the option on, the import map
-        placeholder <code>{% verbatim %}{{ datastar_import_map }}{% endverbatim %}</code> maps
-        <code>datastar</code> to that URL; without it, the placeholder is empty.
-        See <a href="/docs/web-components">Web components</a>.
+        <code>{% verbatim %}{{ datastar_url }}{% endverbatim %}</code>.
+        <code>getDatastarIntegrity(): string</code> returns the bundle's Subresource Integrity value
+        (sha384), for pinning Datastar in the import map; it throws <code>\RuntimeException</code> if the
+        bundle cannot be read.
+    </p>
+    <p>
+        <code>withImportMap(array $imports, array $integrity = [])</code> adds entries to the page's import
+        map: <code>$imports</code> maps module specifiers to URLs, <code>$integrity</code> module URLs to
+        Subresource Integrity values. Calls merge, and a later entry for the same key wins. A URL has to be
+        absolute or start with <code>/</code>, <code>./</code> or <code>../</code>, a specifier ending in
+        <code>/</code> needs a URL ending in <code>/</code>, and an integrity value is
+        <code>sha256-</code>, <code>sha384-</code> or <code>sha512-</code> with the base64 digest; anything
+        else throws <code>\InvalidArgumentException</code>, and so does an entry for
+        <code>datastar</code>, which php-via maps to <code>getDatastarUrl()</code> itself.
+        <code>getImportMap()</code> returns the whole map as an array, <code>datastar</code> first, and
+        <code>getImportMapTag()</code> the <code>&lt;script type="importmap"&gt;</code> tag. php-via writes
+        the map when <code>withDatastarRocket()</code> is on or <code>withImportMap()</code> added entries,
+        and the tag is empty otherwise. The default shell writes it, custom shells get it as
+        <code>{% verbatim %}{{ import_map }}{% endverbatim %}</code> and Twig templates as
+        <code>{% verbatim %}{{ importMap }}{% endverbatim %}</code>.
+        See <a href="/docs/web-components#own-modules">Web components</a>.
     </p>
     ---
 

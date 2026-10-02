@@ -368,7 +368,7 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         <p><strong>Why:</strong> Shell templates are processed by <code>HtmlBuilder</code> using a plain
         string replacement, not the Twig engine. They only understand literal
         placeholders: <code>{{ signals_json }}</code>, <code>{{ context_id }}</code>,
-        <code>{{ base_path }}</code>, <code>{{ datastar_url }}</code>, <code>{{ datastar_import_map }}</code>,
+        <code>{{ base_path }}</code>, <code>{{ datastar_url }}</code>, <code>{{ import_map }}</code>,
         <code>{{ head_content }}</code>, <code>{{ content }}</code>,
         <code>{{ foot_content }}</code>, <code>{{ styles }}</code>, and <code>{{ name }}</code> and
         <code>{{ name.id }}</code> for each signal by the name passed to <code>signal()</code>.

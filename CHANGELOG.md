@@ -10,8 +10,8 @@ All notable changes to php-via will be documented in this file.
   but Datastar now cancels an in-flight request when any element sends another one to the same URL,
   so check pages where two elements post the same action. Breaking Changes lists the rest.
 - **Web components.** `Config::withDatastarRocket()` serves Datastar with Rocket, so Rocket
-  components such as Starbase's run on php-via pages. See
-  [Web components](https://via.zweiundeins.gmbh/docs/web-components).
+  components such as Starbase's run on php-via pages, and `Config::withImportMap()` pins them with
+  integrity hashes. See [Web components](https://via.zweiundeins.gmbh/docs/web-components).
 - **A versioned Datastar URL.** The default shell loads `/datastar.js?v=<hash>`, so browsers fetch
   the new bundle after an upgrade instead of reusing the cached one.
 
@@ -37,6 +37,11 @@ All notable changes to php-via will be documented in this file.
   `/datastar.js` (22 KB with Brotli, against 12 KB), and the default shell adds the import map Rocket
   components need. Unlike the official Rocket bundle, the build survives morphs that reorder keyed
   components. Sources, patches and hashes are in `public/DATASTAR.md`.
+- **`Config::withImportMap()`** adds modules and integrity hashes to the import map php-via writes,
+  so Starbase components load pinned from its catalog. `Config::getDatastarIntegrity()` returns the
+  served bundle's hash for apps that pin Datastar too. Custom shells get the map as
+  `{{ import_map }}`, Twig layouts as `importMap`. See
+  [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-modules).
 - **Versioned Datastar URL.** `Config::getDatastarUrl()` returns `/datastar.js?v=<content hash>`,
   cached for a year by default. Load Datastar from it in custom shells (`{{ datastar_url }}`) and Twig
   layouts (`datastarUrl`): an unversioned `datastar.js` stays cached for up to an hour after an
