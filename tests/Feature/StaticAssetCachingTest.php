@@ -421,6 +421,28 @@ describe('the static file cache', function (): void {
             ->and($bytesOf($handler)['identity'])->toBe(16 << 20)
         ;
     });
+
+    test('in dev mode, deleted files make room once the cache is full, and live ones stay', function () use (&$dir, $cacheOf, $bytesOf): void {
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withDevMode()));
+        $handler->handleRequest(fakeStaticRequest('/app.css'), new FakeStaticResponse());
+        $sent = [];
+        // A watch build writes app.<n>.js and deletes the previous one; 11 of them overflow 16 MiB.
+        for ($i = 0; $i < 15; ++$i) {
+            file_put_contents($dir . "/app.{$i}.js", str_repeat((string) ($i % 10), 3 << 19));
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest("/app.{$i}.js"), $response);
+            expect($response->body)->toBe(str_repeat((string) ($i % 10), 3 << 19));
+            $sent[] = $response->sentFile !== null;
+            unlink($dir . "/app.{$i}.js");
+        }
+
+        $identity = $cacheOf($handler)['identity'];
+        expect($sent)->not->toContain(true)
+            ->and($identity)->toHaveKey(realpath($dir . '/app.css'))
+            ->and($identity)->toHaveCount(6)
+            ->and($bytesOf($handler)['identity'])->toBe(strlen('body { color: red; }') + 5 * (3 << 19))
+        ;
+    });
 });
 
 describe('the static dir lookup', function (): void {
@@ -513,5 +535,24 @@ describe('the static dir lookup', function (): void {
             $response = $get($handler, $path);
             expect([$path, $response->statusCode, $response->body])->toBe([$path, 404, 'Not Found']);
         }
+    });
+
+    test('a static dir symlink switched by a deploy keeps serving its old target until a reload', function () use (&$dir, $handlerWithRoutes, $get): void {
+        foreach (['rel1' => 'one', 'rel2' => 'two'] as $release => $body) {
+            mkdir("{$dir}/{$release}");
+            file_put_contents("{$dir}/{$release}/app.css", $body);
+        }
+        symlink("{$dir}/rel1", "{$dir}/current");
+        $handler = $handlerWithRoutes("{$dir}/current");
+        $before = $get($handler, '/app.css');
+
+        unlink("{$dir}/current");
+        symlink("{$dir}/rel2", "{$dir}/current");
+        clearstatcache(true);
+        $after = $get($handler, '/app.css');
+
+        expect([$before->statusCode, $before->body])->toBe([200, 'one'])
+            ->and([$after->statusCode, $after->body])->toBe([200, 'one'])
+        ;
     });
 });

@@ -58,6 +58,9 @@ class RequestHandler {
     /** @var array<string, int> Bytes the static cache holds per encoding */
     private array $staticCacheBytes = ['br' => 0, 'identity' => 0];
 
+    /** @var array<string, int> When dev mode last dropped deleted and changed files from each encoding's cache */
+    private array $staticCacheSweptAt = ['br' => 0, 'identity' => 0];
+
     /** @var null|array{0: string, 1: string} The configured static dir and its realpath, resolved once */
     private ?array $staticBase = null;
 
@@ -791,8 +794,9 @@ class RequestHandler {
             return null;
         }
 
-        // Prevent directory traversal
-        $realFile = realpath($staticDir . '/' . ltrim($urlPath, '/'));
+        // Prevent directory traversal. Joined to the resolved base, so a symlink switched by a deploy keeps
+        // serving the old target until a reload instead of failing the prefix check.
+        $realFile = realpath($this->staticBase[1] . '/' . ltrim($urlPath, '/'));
         if ($realFile === false || !str_starts_with($realFile, $this->staticBase[1] . '/') || !is_file($realFile)) {
             return null;
         }
@@ -873,7 +877,11 @@ class RequestHandler {
         }
 
         // The compressed size is unknown until compressing, so the raw size is checked against the budget.
-        if ($size > self::STATIC_CACHE_FILE_BYTES || $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES) {
+        $tooBig = $size > self::STATIC_CACHE_FILE_BYTES;
+        if (!$tooBig && $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES && $this->via->getConfig()->getDevMode()) {
+            $this->dropStaleStaticEntries($encoding);
+        }
+        if ($tooBig || $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES) {
             $response->sendfile($filePath);
 
             return;
@@ -902,6 +910,26 @@ class RequestHandler {
         $this->staticCache[$encoding][$filePath] = ['mtime' => $mtime, 'size' => $size, 'body' => $body];
         $this->staticCacheBytes[$encoding] += \strlen($body);
         $response->end($body);
+    }
+
+    /**
+     * Drop cached files that were deleted or changed since, such as the previous builds of a bundle with a
+     * content hash in its name. Runs at most once a second per encoding, since each entry costs a stat().
+     */
+    private function dropStaleStaticEntries(string $encoding): void {
+        $now = time();
+        if ($this->staticCacheSweptAt[$encoding] === $now) {
+            return;
+        }
+        $this->staticCacheSweptAt[$encoding] = $now;
+
+        foreach ($this->staticCache[$encoding] as $path => $entry) {
+            clearstatcache(true, $path);
+            if (!is_file($path) || filemtime($path) !== $entry['mtime'] || filesize($path) !== $entry['size']) {
+                unset($this->staticCache[$encoding][$path]);
+                $this->staticCacheBytes[$encoding] -= \strlen($entry['body']);
+            }
+        }
     }
 
     /**

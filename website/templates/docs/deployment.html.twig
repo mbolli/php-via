@@ -679,8 +679,9 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): s
         the others, and reads it again only when its modification time or size changes. It keeps files up to
         2&nbsp;MiB, and up to 16&nbsp;MiB for each of the two forms; a bigger file, or one that no longer
         fits, goes out with <code>sendfile()</code> and uncompressed. Dev mode checks the file on every
-        request, so an edit shows up on the next reload; in production, reload the workers after changing
-        files (see <a href="#graceful-restart">Graceful restart</a>).
+        request, so an edit shows up on the next reload, and when the memory is used up it first drops files
+        that were deleted or changed, such as earlier builds of a bundle with a hash in its name. In
+        production, reload the workers after changing files (see <a href="#graceful-restart">Graceful restart</a>).
     </p>
     <p>
         A request path whose last segment has a file extension, such as <code>/css/site.css</code>, is
@@ -689,7 +690,7 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): s
         path serve the route. Paths under <code>/_action/</code>, <code>/_via/</code> and
         <code>/_session/</code> are never looked up before routing, even with a dot in them. php-via
         resolves the directory's real path once per worker, so a static directory behind a symlink that a
-        deployment switches needs a reload too.
+        deployment switches keeps serving the old target until the workers reload.
     </p>
 
     <h2 id="next-steps">Next steps</h2>
