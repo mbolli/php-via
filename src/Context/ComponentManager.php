@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Support\DomId;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
@@ -121,8 +122,7 @@ class ComponentManager {
 
         return function () use ($componentContext, $componentId): string {
             $html = $componentContext->renderView();
-            // Create valid CSS ID by replacing slashes and prefixing with 'c-'
-            $cssId = 'c-' . str_replace(['/', '_'], '-', $componentContext->getId());
+            $cssId = DomId::component($componentContext->getId());
             $wrapped = '<div id="' . $cssId . '">' . $html . '</div>';
             $cid = Coroutine::getCid();
             if (isset($this->rendered[$cid])) {

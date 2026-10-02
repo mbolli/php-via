@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\PatchMode;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
+use Mbolli\PhpVia\Support\DomId;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
@@ -284,8 +285,7 @@ class PatchManager {
 
         if (!empty(trim($viewHtml))) {
             if (!$isPage) {
-                // Create valid CSS ID by replacing slashes and prefixing with 'c-'
-                $cssId = 'c-' . str_replace(['/', '_'], '-', $this->contextId);
+                $cssId = DomId::component($this->contextId);
                 $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
                 $this->queuePatch([
                     'type' => 'elements',
