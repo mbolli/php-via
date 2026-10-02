@@ -25,7 +25,7 @@ $server->set([
     'log_level' => 5,
     'send_yield' => true,
     'socket_buffer_size' => 1024 * 1024,
-    'hook_flags' => Via::HOOK_FLAGS_DEFAULT,
+    'hook_flags' => Via::defaultHookFlags(),
 ]);
 
 $threshold = 1024 * 1024;

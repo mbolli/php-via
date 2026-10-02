@@ -14,10 +14,12 @@ use Mbolli\PhpVia\Via;
  * without the hook for its transport blocks the whole worker on every call.
  */
 
-describe('hook flag constants', function (): void {
-    test('the default is SWOOLE_HOOK_ALL and reaches the server settings', function (): void {
-        expect(Via::HOOK_FLAGS_DEFAULT)->toBe(SWOOLE_HOOK_ALL);
-        expect(Via::serverSettings(new Config())['hook_flags'])->toBe(Via::HOOK_FLAGS_DEFAULT);
+describe('hook flag sets', function (): void {
+    test('the default is SWOOLE_HOOK_ALL, without the native curl hook where it crashes, and reaches the server settings', function (): void {
+        $expected = Via::nativeCurlHookCrashes() ? SWOOLE_HOOK_ALL & ~SWOOLE_HOOK_NATIVE_CURL : SWOOLE_HOOK_ALL;
+
+        expect(Via::defaultHookFlags())->toBe($expected);
+        expect(Via::serverSettings(new Config())['hook_flags'])->toBe(Via::defaultHookFlags());
     });
 
     test('the narrow set hooks sockets, sleep, proc_open and native curl, and no file or stdio I/O', function (): void {
@@ -27,8 +29,8 @@ describe('hook flag constants', function (): void {
         expect(Via::HOOK_FLAGS_NO_FILE_IO)->toBe($expected);
         expect(Via::HOOK_FLAGS_NO_FILE_IO & SWOOLE_HOOK_FILE)->toBe(0);
         expect(Via::HOOK_FLAGS_NO_FILE_IO & SWOOLE_HOOK_STDIO)->toBe(0);
-        // Everything else it hooks is part of the default.
-        expect(Via::HOOK_FLAGS_NO_FILE_IO & ~Via::HOOK_FLAGS_DEFAULT)->toBe(0);
+        // Everything else it hooks is part of SWOOLE_HOOK_ALL.
+        expect(Via::HOOK_FLAGS_NO_FILE_IO & ~SWOOLE_HOOK_ALL)->toBe(0);
     });
 
     test('the narrow set is 5886 on OpenSwoole 26.2', function (): void {
@@ -37,7 +39,7 @@ describe('hook flag constants', function (): void {
         }
 
         expect(Via::HOOK_FLAGS_NO_FILE_IO)->toBe(5886);
-        expect(Via::HOOK_FLAGS_DEFAULT)->toBe(2147457023);
+        expect(SWOOLE_HOOK_ALL)->toBe(2147457023);
     });
 
     test('withSwooleSettings() overrides the default', function (): void {
@@ -54,7 +56,7 @@ describe('Via::assertHookFlags()', function (): void {
 
         expect(true)->toBeTrue();
     })->with([
-        'default' => [Via::HOOK_FLAGS_DEFAULT],
+        'default' => [Via::defaultHookFlags()],
         'narrow' => [Via::HOOK_FLAGS_NO_FILE_IO],
         'FILE and STDIO' => [SWOOLE_HOOK_FILE | SWOOLE_HOOK_STDIO],
         'none' => [0],
@@ -66,12 +68,12 @@ describe('Via::assertHookFlags()', function (): void {
         ;
     })->with([
         'STDIO alone' => [SWOOLE_HOOK_STDIO],
-        'the default minus FILE' => [Via::HOOK_FLAGS_DEFAULT & ~SWOOLE_HOOK_FILE],
+        'the default minus FILE' => [Via::defaultHookFlags() & ~SWOOLE_HOOK_FILE],
         'the narrow set plus STDIO' => [Via::HOOK_FLAGS_NO_FILE_IO | SWOOLE_HOOK_STDIO],
     ]);
 
     test('accepts a RedisBroker under the default and the narrow set', function (RedisBroker $broker): void {
-        Via::assertHookFlags(['hook_flags' => Via::HOOK_FLAGS_DEFAULT], $broker);
+        Via::assertHookFlags(['hook_flags' => Via::defaultHookFlags()], $broker);
         Via::assertHookFlags(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO], $broker);
 
         expect(true)->toBeTrue();
@@ -84,7 +86,7 @@ describe('Via::assertHookFlags()', function (): void {
     test('refuses a RedisBroker without the hook its transport needs', function (RedisBroker $broker, int $hook, string $name): void {
         expect($broker->requiredHookFlag())->toBe($hook);
 
-        expect(fn () => Via::assertHookFlags(['hook_flags' => Via::HOOK_FLAGS_DEFAULT & ~$hook], $broker))
+        expect(fn () => Via::assertHookFlags(['hook_flags' => Via::defaultHookFlags() & ~$hook], $broker))
             ->toThrow(RuntimeException::class, "RedisBroker needs {$name} in hook_flags")
         ;
     })->with([

@@ -39,7 +39,7 @@ describe('RedisBroker', function (): void {
 
         // Enable coroutine TCP hook so ext-redis socket I/O yields coroutines
         // instead of blocking the process, as Via::start() does with its default hook_flags.
-        Runtime::enableCoroutine(true, Via::HOOK_FLAGS_DEFAULT);
+        Runtime::enableCoroutine(true, Via::defaultHookFlags());
     });
 
     test('foreign message reaches subscriber on other broker instance', function (): void {
