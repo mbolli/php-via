@@ -2958,7 +2958,8 @@ stock-chart {
 
 /* sb-copy-button in the code boxes, which stay dark in both schemes */
 .px-install,
-.px-pair-link {
+.px-pair-link,
+.code-block {
   --sb-surface-raised: var(--code-head);
   --sb-border:         var(--code-border);
   --sb-border-strong:  var(--px-blue);
@@ -2980,6 +2981,28 @@ sb-copy-button::part(tip) {
 sb-copy-button::part(manual) {
   font-family: var(--font-ui);
   box-shadow: 4px 4px 0 0 var(--shadow-hard);
+}
+
+/* Code blocks ({% code %} in Twig): the button sits in the top corner, and its tip to its left,
+   inside the block, since a code panel clips what sticks out */
+.code-block { position: relative; }
+.code-block > sb-copy-button {
+  position: absolute;
+  inset-block-start: 0.5rem;
+  inset-inline-end: 0.5rem;
+}
+.code-block > sb-copy-button::part(tip) {
+  inset-block: 50% auto;
+  left: auto;
+  right: calc(100% + 6px);
+  translate: 0 -50%;
+}
+@media (hover: hover) {
+  .code-block > sb-copy-button { opacity: 0; transition: opacity 120ms; }
+  .code-block:hover > sb-copy-button,
+  .code-block:focus-within > sb-copy-button { opacity: 1; }
+  /* Its own rule: a browser without :state() drops the whole rule */
+  .code-block > sb-copy-button:state(copied) { opacity: 1; }
 }
 @media (max-width: 400px) {
   .px-install { font-size: 0.8rem; gap: 0.5rem; }

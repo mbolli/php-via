@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
 use PhpVia\Website\StarbaseComponents;
+use PhpVia\Website\Twig\CodeRuntime;
 
 /*
  * The Starbase components the website copies into public/vendor/starbase and registers in php-via's
- * import map.
+ * import map, and the copy button of its {% code %} blocks.
  */
 
 $starbaseAutoload = dirname(__DIR__, 2) . '/website/vendor/autoload.php';
@@ -88,4 +89,23 @@ describe('The vendored Starbase components', function (): void {
             ->and($map['integrity'] ?? [])->toHaveKey('/vendor/starbase/qr-code@ecc5a99c314a/vendor/uqr.min.mjs')
         ;
     });
+});
+
+describe('Code blocks', function (): void {
+    test('a block gets a copy button with the code as written', function (): void {
+        $html = (new CodeRuntime())->highlight("echo '<b>';\n{-old();-}\n{+new();+}", 'php');
+
+        expect($html)->toStartWith('<div class="code-block"><pre data-lang="php"><code>')
+            ->and($html)->toEndWith('</code></pre><sb-copy-button value="echo &#039;&lt;b&gt;&#039;;' . "\n" . 'new();" label="Copy the code"></sb-copy-button></div>')
+        ;
+    });
+
+    test('a deletion goes with the line it fills, an addition keeps its text, other braces stay', function (string $code, string $plain): void {
+        expect(CodeRuntime::plain($code))->toBe($plain);
+    })->with([
+        'whole lines' => ["a\n{-    b\n    c-}\n{+    d+}\ne", "a\n    d\ne"],
+        'inside a line' => ['f({-1-}{+2+})', 'f(2)'],
+        'two deletions on a line' => ["{-a-} keep {-b-}\nnext", " keep \nnext"],
+        'no marks' => ['$a = [1, -2]; fn() => {$x}', '$a = [1, -2]; fn() => {$x}'],
+    ]);
 });
