@@ -43,24 +43,19 @@ final class PresenceDemo {
 
     /**
      * Set up the homepage component.
-     *
-     * @param string $tabId the ID of the page the component is on
      */
-    public function component(Context $c, string $tabId): void {
+    public function component(Context $c): void {
         $c->scope(self::SCOPE);
-        $c->view(fn (bool $isUpdate): string => $c->render('components/presence.html.twig', [
-            'count' => $this->count($tabId, $isUpdate),
+        $c->view(fn (): string => $c->render('components/presence.html.twig', [
+            'count' => $this->count(),
         ]));
     }
 
     /**
-     * The first render comes before the viewer's own stream connects, so it counts that tab too.
-     * Update renders are cached for the whole scope, so they count only connected tabs.
+     * The connected tabs, and at least the viewer. The viewer's own tab is not counted before its
+     * stream connects: its first sync shows the scope's cached render, so the count would drop back.
      */
-    private function count(string $tabId, bool $isUpdate): int {
-        $clients = $this->app->getClients();
-        $ownTab = !$isUpdate && !isset($clients[$tabId]) ? 1 : 0;
-
-        return \count($clients) + $ownTab;
+    private function count(): int {
+        return max(1, \count($this->app->getClients()));
     }
 }

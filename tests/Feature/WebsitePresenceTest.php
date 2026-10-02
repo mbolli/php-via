@@ -9,8 +9,8 @@ use Mbolli\PhpVia\Via;
 use PhpVia\Website\PresenceDemo;
 
 /*
- * The presence line in the website's homepage hero counts the tabs whose stream is connected. A
- * tab's first render comes before its own stream connects, so that render counts the tab too.
+ * The presence line in the website's homepage hero counts the tabs whose stream is connected, and
+ * never fewer than the one viewer. As a tab loads, the line must not jump down and back up.
  */
 
 $presenceAutoload = dirname(__DIR__, 2) . '/website/vendor/autoload.php';
@@ -36,7 +36,7 @@ function presenceApp(): Via {
     $app = createVia((new Config())->withTemplateDir(dirname(__DIR__, 2) . '/website/templates'));
     $demo = new PresenceDemo($app);
     $app->page('/', function (Context $c) use ($demo): void {
-        $presence = $c->component(fn (Context $presence) => $demo->component($presence, $c->getId()), 'presence');
+        $presence = $c->component($demo->component(...), 'presence');
         // Like StaticPage::view(): updates render nothing, and the component patches itself.
         $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : '<main id="home">' . $presence() . '</main>', cacheUpdates: false);
     });
@@ -59,9 +59,24 @@ function presenceOpen(Via $app, string $id): array {
     return [$ctx, $app->buildHtmlDocument($ctx)];
 }
 
-/** What SseHandler does when the tab's stream connects. */
+/** What SseHandler does when the tab's stream connects, before its first sync. */
 function presenceConnect(Via $app, string $id): void {
     $app->getApp()->registerClient($id, ['id' => 'client-' . md5($id), 'identicon' => '', 'connected_at' => time(), 'ip' => '127.0.0.1']);
+}
+
+/**
+ * A homepage tab's stream connecting, as SseHandler runs it: the client is registered, the initial
+ * sync renders the line, and the onClientConnect broadcast renders it again.
+ *
+ * @return array{0: ?string, 1: ?string} the line the sync showed and the one the broadcast showed
+ */
+function presenceStream(Via $app, Context $page): array {
+    presenceConnect($app, $page->getId());
+    $page->sync();
+    $synced = presenceFramed($page);
+    $app->broadcast(PresenceDemo::SCOPE);
+
+    return [$synced, presenceFramed($page)];
 }
 
 /** The count and the noun the line shows, e.g. "2 people". */
@@ -81,25 +96,48 @@ function presenceFramed(Context $page): ?string {
     return presenceLine($html);
 }
 
-describe('The presence line', function (): void {
-    test('the first tab counts itself before its stream connects', function (): void {
+describe('The presence line as a tab loads', function (): void {
+    test('the first visitor sees 1 person throughout, also after an earlier visitor left', function (): void {
         $app = presenceApp();
-        [, $html] = presenceOpen($app, '/_/tab1');
+        [$first, $html] = presenceOpen($app, '/_/tab1');
+        expect(presenceLine($html))->toBe('1 person')
+            ->and(presenceStream($app, $first))->toBe(['1 person', '1 person'])
+        ;
 
-        expect($app->getClients())->toBe([])
-            ->and(presenceLine($html))->toBe('1 person')
+        $app->getApp()->unregisterClient('/_/tab1');
+        $app->broadcast(PresenceDemo::SCOPE);
+        [$second, $html] = presenceOpen($app, '/_/tab2');
+
+        expect(presenceLine($html))->toBe('1 person')
+            ->and(presenceStream($app, $second))->toBe(['1 person', '1 person'])
         ;
     });
 
-    test('a later tab counts the connected tabs and itself', function (): void {
+    test('a later visitor sees the count only go up', function (): void {
         $app = presenceApp();
-        presenceOpen($app, '/_/tab1');
-        presenceConnect($app, '/_/tab1');
-        [, $html] = presenceOpen($app, '/_/tab2');
+        [$first] = presenceOpen($app, '/_/tab1');
+        presenceStream($app, $first);
+        [$second, $html] = presenceOpen($app, '/_/tab2');
 
-        expect(presenceLine($html))->toBe('2 people');
+        expect(presenceLine($html))->toBe('1 person')
+            ->and(presenceStream($app, $second))->toBe(['1 person', '2 people'])
+        ;
     });
 
+    test('going to the homepage from another page of the site does not count the page left', function (): void {
+        $app = presenceApp();
+        presenceConnect($app, '/docs_/left');
+        $app->broadcast(PresenceDemo::SCOPE);
+        [$home, $html] = presenceOpen($app, '/_/home');
+        $app->getApp()->unregisterClient('/docs_/left');
+
+        expect(presenceLine($html))->toBe('1 person')
+            ->and(presenceStream($app, $home))->toBe(['1 person', '1 person'])
+        ;
+    });
+});
+
+describe('The presence line', function (): void {
     test('a broadcast counts the connected tabs, as streams connect and leave', function (): void {
         $app = presenceApp();
         [$first] = presenceOpen($app, '/_/tab1');
@@ -109,7 +147,7 @@ describe('The presence line', function (): void {
 
         presenceConnect($app, '/_/tab2');
         $app->broadcast(PresenceDemo::SCOPE);
-        // One render for the whole scope: the first tab's, which must not count itself, since it has not connected.
+        // One render for the whole scope, also sent to the first tab, which has not connected.
         expect(presenceFramed($first))->toBe('1 person')
             ->and(presenceFramed($second))->toBe('1 person')
         ;

@@ -369,7 +369,7 @@ $pairingDemo = new PairingDemo($app, new PairingStore(), $siteOrigin);
 $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo, $pairingDemo): void {
     $c->scope(Scope::routeScope('/'));
 
-    $presence = $c->component(fn (Context $presence) => $presenceDemo->component($presence, $c->getId()), 'presence');
+    $presence = $c->component($presenceDemo->component(...), 'presence');
     $sharedCounter = $c->component($sharedCounterDemo, 'shared-counter');
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
     $poll = $c->component($livePollDemo, 'poll');
