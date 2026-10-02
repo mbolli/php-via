@@ -56,7 +56,7 @@ use Twig\Environment;
  * Main application class that manages routing, contexts, and SSE connections.
  */
 class Via {
-    public const string VERSION = '0.13.0';
+    public const string VERSION = '0.13.1';
 
     /**
      * The worker that runs server-wide singleton work (see setInterval()).

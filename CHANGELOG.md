@@ -2,6 +2,72 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.13.1] - 2026-10-02
+
+### Highlights
+
+- **Page views no longer leak memory.** A page whose handler called `$c->scope()`, which most do,
+  stayed registered for the life of the worker together with its components and its response's
+  Brotli encoder: about 0.6 MB per page view with Brotli on. A page view that never opens its stream
+  now holds 13 to 35 KB until the connect timeout. In a 5 s burst on the website, 0.13.0 grew by
+  2.4 GB and kept it; 0.13.1 grows by 147 MB and reuses it.
+- **An open tab costs less.** A tab no longer keeps its page response's Brotli encoder: a docs tab
+  went from 2.8 MB to 574 KB, a home page tab from 1.3 MB to 642 KB. Most of what remains is the
+  live stream's encoder; [Performance](https://via.zweiundeins.gmbh/docs/performance#tab-memory)
+  shows the trade against the Brotli level.
+- **Multi-worker pages keep working when the context directory is full.** Every page view answered
+  500 once about 8,000 contexts had been created within the revival window.
+
+### Fixed
+
+- Page contexts that called `$c->scope()` were never freed. The registry now remembers every scope a
+  context joined, and teardown removes it from all of them.
+- Components that joined a scope stayed registered after their page was destroyed and kept receiving
+  broadcasts. Their `onDisconnect` and `onCleanup` callbacks now run and their timers stop when the
+  page is destroyed; they never ran before. The scope's signals and actions stay for other pages.
+- A response's Brotli encoder lived as long as its tab. It is now created on the first write and
+  released when the response ends.
+- Both maps of context sessions grew by one entry per page view.
+- A revival that arrived while a destroyed context's cleanup callbacks ran could be torn down with
+  it. Teardown now removes only entries that still belong to the destroyed context.
+- A revival whose page handler threw left the half-built context in its scopes, with its timers
+  running.
+- After a revival, components lost their DOM wrappers because component IDs were random. A
+  component created with a name (`$c->component($fn, 'name')`) now gets the same ID every time its
+  page is built.
+- A stream with nothing to send on connect never cleared the reconnect banner after a dropped
+  connection, and sent no headers until its first keep-alive. Every connect now sends
+  `_disconnected: false`.
+- With `worker_num > 1`, a full context directory turned every page view into a 500. New contexts
+  now get no row, a warning is logged at most every 10 s per worker, and those tabs' actions on other
+  workers answer 400. With the revival window at 0, no rows are written, and the sweep of expired
+  rows runs at most once a second. See
+  [Deployment](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
+- A broadcast that reached a context through another scope, a wildcard or `Scope::GLOBAL`, or a
+  component re-rendered with its page, served the update cached at an earlier broadcast, and a render
+  that started before a broadcast could store its older result over the newer one. Each scope still
+  renders once per flush.
+- Two revivals of one tab at the same moment (an action and the stream reconnect) both registered,
+  leaving one copy running with its timers. The later one now returns the registered context.
+- A component's actions could not read the request or set cookies. `input()`, `file()`,
+  `cookie()` and `setCookie()` on a component now use its page's request.
+
+### Known limitations
+
+- An action a component registers in a scope of its own is not found. Register it with
+  `Scope::TAB` and broadcast with `$app->broadcast($scope)`, as
+  [Components](https://via.zweiundeins.gmbh/docs/components#scoped-components) shows.
+- The update cache is keyed by scope alone, so two different views with caching on in one scope
+  receive each other's HTML. See [Views](https://via.zweiundeins.gmbh/docs/views#caching).
+- Signals and actions of a scope stay after its last context leaves, as they did in 0.13.0, so
+  per-entity scopes such as `room:<id>` accumulate for the life of the worker. A scoped action
+  should use the `Context` it receives rather than a captured `$c`, which it would keep alive.
+
+### Docs
+
+- New [Performance](https://via.zweiundeins.gmbh/docs/performance) page, with the harness in
+  `bench/capacity`.
+
 ## [0.13.0] - 2026-10-02
 
 ### Highlights
