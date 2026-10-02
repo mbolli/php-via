@@ -101,11 +101,8 @@ composer install
 # Run tests
 vendor/bin/pest
 
-# Static analysis (PHPStan level 6)
-# ⚠️  Do NOT run `composer phpstan` (full project) — it crashes with an internal
-#    error: "Undefined constant OpenSwoole\Event::EVENT_READ" when analysing
-#    src/Via.php. This is a pre-existing PHPStan stub gap in src/Via.php, not a real bug.
-#    src/Via.php cannot be analysed with PHPStan at all; skip it and run on individual files:
+# Static analysis (PHPStan level 6), all of src/ or single files
+composer phpstan
 vendor/bin/phpstan analyse src/Context.php src/Context/PatchManager.php
 vendor/bin/phpstan analyse website/src/Examples/SomeExample.php
 

@@ -6,18 +6,17 @@ parameters:
     - SWOOLE_EVENT_READ
     - SWOOLE_IPC_NONE
   level: 6
+  scanFiles:
+    # The extension's Event methods default to Event::EVENT_READ, a constant the class lacks,
+    # which crashes PHPStan when it reflects the loaded extension. The stub takes precedence.
+    - vendor/openswoole/ide-helper/src/OpenSwoole/Event.php
   paths:
     - src/
   ignoreErrors:
-    # OpenSwoole IDE-helper stub for Timer::clear() declares 0 required params,
-    # but the real OpenSwoole extension requires the timer ID argument.
-    - message: '#Timer::clear\(\)#'
+    # The extension declares Timer::clear() and Timer::exists() without parameters,
+    # but both take the timer ID at runtime.
+    - message: '#Timer::(clear|exists)\(\)#'
       identifier: arguments.count
-  excludePaths:
-    # src/Via.php references OpenSwoole\Event::EVENT_READ which is missing from
-    # the OpenSwoole PHPStan stubs, causing an internal analyser crash (not a real
-    # bug). The file cannot be analysed until upstream stubs are fixed.
-    - src/Via.php
   editorUrl: 'phpstorm://open?file=%%file%%&line=%%line%%'
   editorUrlTitle: '%%file%%:%%line%%'
   type_perfect:
