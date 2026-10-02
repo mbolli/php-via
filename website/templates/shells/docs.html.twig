@@ -133,5 +133,5 @@
 
 {% block foot_scripts %}
 <script type="module" src="{{ basePath }}js/docs-toc.js?v={{ assetVersion }}"></script>
-<script type="module">import 'sb-copy-button'</script>
+<script type="module">if (document.querySelector('sb-copy-button')) import('sb-copy-button')</script>
 {% endblock %}
