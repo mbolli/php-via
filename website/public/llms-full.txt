@@ -569,7 +569,9 @@ entries. To pin a whole catalog snapshot, save `https://starbase.zweiundeins.gmb
 with the app, pass its `integrity` to `withImportMap([], ...)` and load
 `/c/@<catalog>/autoloader.js` with its hash from that file (93 hashes, 6 KB per page with
 Brotli). Or copy the component's files into `withStaticDir()`; `.js` and `.mjs` are served as
-JavaScript.
+JavaScript. A copy can get a name and its hashes with `withImportMap(['sb-qr-code' => '/vendor/starbase/qr-code@<hash>/qr-code.min.js'], [...])`,
+and a page imports it with `<script type="module">import 'sb-qr-code'</script>`. Keep the version
+in the folder name: a cached old file under the same URL fails the new hash.
 
 **Binding.** Use `$signal->bind('value')` / `{{ bind(signal, 'value') }}`
 (`data-bind__prop.value`) on components, and the property form for any other property

@@ -3502,6 +3502,10 @@ sb-copy-button::part(manual) {
 @media (max-width: 600px) {
   .px-specs { grid-template-columns: minmax(0, 1fr); }
 }
+/* A last item alone in its row of three spans the row */
+@media (min-width: 961px) {
+  .px-spec:last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
+}
 .px-spec {
   background: var(--surface-1);
   padding: 1.35rem 1.4rem 1.55rem;
