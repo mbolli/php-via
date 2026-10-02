@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use PhpVia\Website\StaticPage;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
 use Psr\Log\AbstractLogger;
@@ -165,7 +166,7 @@ $broadcastPresence = function () use ($app, &$presenceTimer): void {
     }
     $presenceTimer = Timer::after(200, function () use ($app, &$presenceTimer): void {
         $presenceTimer = null;
-        $app->broadcast(Scope::GLOBAL);
+        $app->broadcast(PRESENCE_SCOPE);
     });
 };
 
@@ -179,12 +180,17 @@ $app->onClientDisconnect(function (Context $c) use ($broadcastPresence): void {
 
 // ─── Demo components ─────────────────────────────────────────────────────────
 
+// Custom scopes for the busiest widgets. A broadcast to the page's own scope re-renders every
+// component on the page, so a click on one of these reaches only that widget.
+const PRESENCE_SCOPE = 'site:presence';
+const COUNTER_SCOPE = 'home:counter';
+
 /**
- * Presence indicator: "🟢 N people on this page right now"
- * Route-scoped so it shows the client count for the current page.
+ * Presence indicator: "N people on this website right now". Its own scope, so a visitor
+ * arriving or leaving re-renders the indicators and not every open page.
  */
 $presenceDemo = function (Context $c) use ($app, $twig): void {
-    $c->scope(Scope::GLOBAL);
+    $c->scope(PRESENCE_SCOPE);
     $c->view(function () use ($app, $twig): string {
         $count = count($app->getClients());
 
@@ -192,22 +198,22 @@ $presenceDemo = function (Context $c) use ($app, $twig): void {
             'count' => $count,
             'person' => $count === 1 ? 'person' : 'people',
         ]);
-    }, cacheUpdates: false);
+    });
 };
 
 /**
- * Shared multiplayer counter. ROUTE-scoped: all visitors share one counter.
+ * Shared multiplayer counter: all visitors share one counter.
  * The "aha" moment: click and everyone sees it.
  */
-$sharedCounterDemo = function (Context $c) use ($twig): void {
-    $c->scope(Scope::ROUTE);
+$sharedCounterDemo = function (Context $c) use ($app, $twig): void {
+    $c->scope(COUNTER_SCOPE);
 
     $counter = $c->signal(0, 'counter');
     $lastClick = $c->signal('', 'lastClick');
     $lastClickHue = $c->signal(0, 'lastClickHue');
 
-    $increment = $c->action(function (Context $c) use ($counter, $lastClick, $lastClickHue): void {
-        // Atomic: $counter inherits the context's ROUTE scope, so with more than one worker
+    $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
+        // Atomic: $counter inherits the shared COUNTER_SCOPE, so with more than one worker
         // setValue($counter->int() + 1) would let two workers read the same value and each
         // write back the same result, dropping a click.
         $counter->increment(broadcast: false);
@@ -215,7 +221,7 @@ $sharedCounterDemo = function (Context $c) use ($twig): void {
         $visitorNum = substr($c->getId(), -4);
         $lastClick->setValue('Visitor #' . strtoupper($visitorNum), broadcast: false);
         $lastClickHue->setValue(hexdec($visitorNum) % 360, broadcast: false);
-        $c->broadcast();
+        $app->broadcast(COUNTER_SCOPE);
     }, 'increment');
 
     $c->view(fn () => $twig->render('components/shared-counter.html.twig', [
@@ -378,7 +384,7 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
         return $twig->render('components/live-poll.html.twig', [
             'options' => $options,
         ]);
-    }, cacheUpdates: false);
+    });
 };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -392,21 +398,13 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
     $poll = $c->component($livePollDemo, 'poll');
 
-    // On broadcast updates, skip re-rendering the full page: component sub-contexts
-    // handle their own patches via their own target divs. Re-rendering here with stale
-    // embedded component HTML would overwrite those fresh patches.
-    $c->view(function (bool $isUpdate) use ($c, $presence, $sharedCounter, $sessionCounter, $poll): string {
-        if ($isUpdate) {
-            return '';
-        }
-
-        return $c->render('pages/home.html.twig', [
-            'presence' => $presence(),
-            'sharedCounter' => $sharedCounter(),
-            'sessionCounter' => $sessionCounter(),
-            'poll' => $poll(),
-        ]);
-    });
+    // Components patch their own target divs, so updates leave the page itself alone.
+    StaticPage::view($c, 'pages/home.html.twig', fn (): array => [
+        'presence' => $presence(),
+        'sharedCounter' => $sharedCounter(),
+        'sessionCounter' => $sessionCounter(),
+        'poll' => $poll(),
+    ]);
 });
 
 // ─── Docs routes ─────────────────────────────────────────────────────────────
@@ -415,7 +413,7 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
     // Landing
     $app->page('/', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs'));
-        $c->view('docs/index.html.twig');
+        StaticPage::view($c, 'docs/index.html.twig');
     });
 
     // Getting started (tutorial with embedded demo)
@@ -424,9 +422,7 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
 
         $demo = $c->component($codeResultDemo, 'gs-demo');
 
-        $c->view('docs/getting-started.html.twig', [
-            'demo' => $demo(),
-        ]);
+        StaticPage::view($c, 'docs/getting-started.html.twig', fn (): array => ['demo' => $demo()]);
     });
 
     // Signals concept page
@@ -436,16 +432,10 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         $tabDemo = $c->component($tabScopeDemo, 'scope-tab');
         $routeDemo = $c->component($routeScopeDemo, 'scope-route');
 
-        $c->view(function (bool $isUpdate) use ($c, $tabDemo, $routeDemo): string {
-            if ($isUpdate) {
-                return '';
-            }
-
-            return $c->render('docs/signals.html.twig', [
-                'tabDemo' => $tabDemo(),
-                'routeDemo' => $routeDemo(),
-            ]);
-        });
+        StaticPage::view($c, 'docs/signals.html.twig', fn (): array => [
+            'tabDemo' => $tabDemo(),
+            'routeDemo' => $routeDemo(),
+        ]);
     });
 
     // Scopes concept page
@@ -455,109 +445,103 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         $tabDemo = $c->component($tabScopeDemo, 'scope-tab');
         $routeDemo = $c->component($routeScopeDemo, 'scope-route');
 
-        $c->view(function (bool $isUpdate) use ($c, $tabDemo, $routeDemo): string {
-            if ($isUpdate) {
-                return '';
-            }
-
-            return $c->render('docs/scopes.html.twig', [
-                'tabDemo' => $tabDemo(),
-                'routeDemo' => $routeDemo(),
-            ]);
-        });
+        StaticPage::view($c, 'docs/scopes.html.twig', fn (): array => [
+            'tabDemo' => $tabDemo(),
+            'routeDemo' => $routeDemo(),
+        ]);
     });
 
     $app->page('/actions', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/actions'));
-        $c->view('docs/actions.html.twig');
+        StaticPage::view($c, 'docs/actions.html.twig');
     });
 
     $app->page('/views', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/views'));
-        $c->view('docs/views.html.twig');
+        StaticPage::view($c, 'docs/views.html.twig');
     });
 
     $app->page('/components', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/components'));
-        $c->view('docs/components.html.twig');
+        StaticPage::view($c, 'docs/components.html.twig');
     });
 
     $app->page('/dev-bar', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/dev-bar'));
-        $c->view('docs/dev-bar.html.twig');
+        StaticPage::view($c, 'docs/dev-bar.html.twig');
     });
 
     $app->page('/composition', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/composition'));
-        $c->view('docs/composition.html.twig');
+        StaticPage::view($c, 'docs/composition.html.twig');
     });
 
     $app->page('/broadcasting', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/broadcasting'));
-        $c->view('docs/broadcasting.html.twig');
+        StaticPage::view($c, 'docs/broadcasting.html.twig');
     });
 
     $app->page('/broker', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/broker'));
-        $c->view('docs/broker.html.twig');
+        StaticPage::view($c, 'docs/broker.html.twig');
     });
 
     $app->page('/lifecycle', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/lifecycle'));
-        $c->view('docs/lifecycle.html.twig');
+        StaticPage::view($c, 'docs/lifecycle.html.twig');
     });
 
     $app->page('/middleware', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/middleware'));
-        $c->view('docs/middleware.html.twig');
+        StaticPage::view($c, 'docs/middleware.html.twig');
     });
 
     $app->page('/twig', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/twig'));
-        $c->view('docs/twig.html.twig');
+        StaticPage::view($c, 'docs/twig.html.twig');
     });
 
     $app->page('/development', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/development'));
-        $c->view('docs/development.html.twig');
+        StaticPage::view($c, 'docs/development.html.twig');
     });
 
     $app->page('/deployment', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/deployment'));
-        $c->view('docs/deployment.html.twig');
+        StaticPage::view($c, 'docs/deployment.html.twig');
     });
 
     $app->page('/api', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/api'));
-        $c->view('docs/api.html.twig');
+        StaticPage::view($c, 'docs/api.html.twig');
     });
 
     $app->page('/design', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/design'));
-        $c->view('docs/design.html.twig');
+        StaticPage::view($c, 'docs/design.html.twig');
     });
 
     $app->page('/comparisons', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/comparisons'));
-        $c->view('docs/comparisons.html.twig');
+        StaticPage::view($c, 'docs/comparisons.html.twig');
     });
 
     $app->page('/faq', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/faq'));
-        $c->view('docs/faq.html.twig');
+        StaticPage::view($c, 'docs/faq.html.twig');
     });
 });
 
 // Examples intro
 $app->page('/examples', function (Context $c): void {
     $c->scope(Scope::routeScope('/examples'));
-    $c->view('pages/examples-intro.html.twig');
+    StaticPage::view($c, 'pages/examples-intro.html.twig');
 });
 
 // Professional support / body-leasing page
 $app->page('/support', function (Context $c): void {
     $c->scope(Scope::routeScope('/support'));
-    $c->view('pages/support.html.twig');
+    StaticPage::view($c, 'pages/support.html.twig');
 });
 
 // ─── Hot reload: load routes inside each worker ──────────────────────────────
