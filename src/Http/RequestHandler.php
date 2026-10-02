@@ -18,8 +18,10 @@ use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
 use Nyholm\Psr7\Response as Psr7Response;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
+use OpenSwoole\Runtime;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
@@ -637,6 +639,15 @@ class RequestHandler {
             'broadcast_stats' => [
                 'tick_ms' => $this->via->getConfig()->getBroadcastTickMs(),
                 ...$this->via->getStats()->getBroadcastStats(),
+            ],
+            // Per worker: a call that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
+            'runtime' => [
+                'hook_flags' => Runtime::getHookFlags(),
+                ...array_intersect_key(Coroutine::stats(), array_flip(['aio_worker_num', 'aio_task_num'])),
+                ...array_intersect_key(
+                    $this->via->getServer()?->stats() ?: [],
+                    array_flip(['event_loop_lag_ms', 'event_loop_lag_max_ms', 'event_loop_lag_avg_ms']),
+                ),
             ],
             'memory' => [
                 'current' => memory_get_usage(true),
