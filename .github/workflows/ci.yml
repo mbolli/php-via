@@ -19,6 +19,8 @@ jobs:
     
     - name: Setup PHP
       uses: shivammathur/setup-php@v2
+      env:
+        OPENSWOOLE_CONFIGURE_OPTS: --enable-http2
       with:
         php-version: ${{ matrix.php-version }}
         extensions: openswoole-26.2.0, brotli
