@@ -17,6 +17,12 @@ class ViewCache {
     /** @var array<string, bool> Tracks if scope is currently rendering (prevents race condition) */
     private array $rendering = [];
 
+    /** @var array<string, int> Bumped by invalidate(), so a render that started before it is not stored */
+    private array $generations = [];
+
+    /** Bumped by clear(), for the same reason */
+    private int $epoch = 0;
+
     /**
      * Get cached view for a scope.
      *
@@ -53,6 +59,7 @@ class ViewCache {
      */
     public function invalidate(string $scope): void {
         unset($this->cache[$this->getCacheKey($scope, false)], $this->cache[$this->getCacheKey($scope, true)]);
+        $this->generations[$scope] = ($this->generations[$scope] ?? 0) + 1;
     }
 
     /**
@@ -60,6 +67,25 @@ class ViewCache {
      */
     public function clear(): void {
         $this->cache = [];
+        $this->generations = [];
+        ++$this->epoch;
+    }
+
+    /**
+     * A token for the scope's current generation. Take it before rendering and store the render
+     * with setIfCurrent(): a render can suspend, and an invalidation meanwhile makes it stale.
+     */
+    public function generation(string $scope): string {
+        return $this->epoch . ':' . ($this->generations[$scope] ?? 0);
+    }
+
+    /**
+     * Cache rendered view HTML unless the scope was invalidated since $generation was taken.
+     */
+    public function setIfCurrent(string $scope, string $html, bool $isUpdate, string $generation): void {
+        if ($this->generation($scope) === $generation) {
+            $this->set($scope, $html, $isUpdate);
+        }
     }
 
     /**

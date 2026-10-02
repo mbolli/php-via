@@ -66,11 +66,13 @@ class ViewRenderer {
             // Render fresh (either no cache, or cacheUpdates=false)
             $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
 
+            $generation = $this->cache->generation($scope);
             $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
 
-            // Cache the result if updates are cacheable
+            // Cache the result if updates are cacheable, unless a broadcast invalidated the scope while
+            // the view rendered: the render saw the older state.
             if ($context->shouldCacheUpdates()) {
-                $this->cache->set($scope, $result, true);
+                $this->cache->setIfCurrent($scope, $result, true, $generation);
             }
 
             return $result;

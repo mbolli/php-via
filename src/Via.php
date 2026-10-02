@@ -2164,11 +2164,14 @@ class Via {
      */
     private function doSyncLocally(string $scope, ?array &$rendered = null, int $skipRenderedAfter = PHP_INT_MAX): void {
         $this->invalidateForBroadcast($scope);
+        // A coalesced flush invalidates what its scopes reach once, up front; doing it per scope
+        // would drop the entry the previous scope of the same flush just rendered.
+        if ($rendered === null || $skipRenderedAfter === PHP_INT_MAX) {
+            $this->invalidateReached($scope);
+        }
 
         // Handle GLOBAL scope - sync all contexts
         if ($scope === Scope::GLOBAL) {
-            // Every context renders, each under its own primary scope's cache entry.
-            $this->viewCache->clear();
             $this->syncContexts($this->contexts, null, $scope, $rendered, $skipRenderedAfter);
             $this->requestLogger->logBroadcast($scope, \count($this->contexts));
 
@@ -2182,11 +2185,9 @@ class Via {
 
             // If no specific route provided, broadcast to all routes
             if ($route === null) {
-                $this->invalidatePrimaryScopes($this->contexts);
                 $this->syncContexts($this->contexts, null, $scope, $rendered, $skipRenderedAfter);
                 $this->requestLogger->logBroadcast($scope, \count($this->contexts));
             } else {
-                $this->invalidatePrimaryScopes(array_filter($this->contexts, static fn (Context $c): bool => $c->getRoute() === $route));
                 $count = $this->syncContexts($this->contexts, $route, $scope, $rendered, $skipRenderedAfter);
                 $this->requestLogger->logBroadcast($scope, $count);
             }
@@ -2196,7 +2197,6 @@ class Via {
 
         // Handle custom scopes (with wildcard support)
         $matchedContexts = $this->scopeRegistry->getContextsByScopePattern($scope);
-        $this->invalidatePrimaryScopes($matchedContexts);
         $this->syncContexts($matchedContexts, null, $scope, $rendered, $skipRenderedAfter);
 
         $this->requestLogger->logBroadcast($scope, \count($matchedContexts));
@@ -2271,6 +2271,10 @@ class Via {
             if ($pass === null) {
                 // Eagerly, so a sync() or an SSE initial render before the flush is not served stale HTML.
                 $this->invalidateForBroadcast($scope);
+                // The contexts it reaches only on the first mark of a tick: a storm marks the same scope often.
+                if (!isset($this->dirtyScopes[$scope])) {
+                    $this->invalidateReached($scope);
+                }
             } else {
                 // Not mid-pass, which would split its frame: runFlush() invalidates once the pass ends.
                 $this->warnIfSlowPass($scope, $pass);
@@ -2481,6 +2485,7 @@ class Via {
         foreach ($batch as $scope => $_) {
             if (!isset($this->syncInFlight[$scope])) {
                 $this->invalidateForBroadcast($scope);
+                $this->invalidateReached($scope);
             }
         }
 
@@ -2813,19 +2818,41 @@ class Via {
     }
 
     /**
-     * Drop the cached update of each primary scope among $contexts. A context that a broadcast reaches
-     * through a secondary scope, a wildcard or its route renders under its primary scope's entry,
-     * which the broadcast's own scope name does not cover.
-     *
-     * @param array<Context> $contexts
+     * Drop the cached updates of the contexts a broadcast of $scope reaches. A context reached through a
+     * secondary scope, a wildcard or its route renders under its primary scope's entry, and its page
+     * re-renders its components under theirs; the broadcast's own scope name covers neither.
      */
-    private function invalidatePrimaryScopes(array $contexts): void {
-        $seen = [];
+    private function invalidateReached(string $scope): void {
+        if ($scope === Scope::GLOBAL) {
+            $this->viewCache->clear();
+
+            return;
+        }
+        if (Scope::isRouteBased($scope)) {
+            $route = Scope::parse($scope)[1] ?? null;
+            $this->invalidatePrimaryScopes($route === null ? $this->contexts : array_filter($this->contexts, static fn (Context $c): bool => $c->getRoute() === $route));
+
+            return;
+        }
+        $this->invalidatePrimaryScopes($this->scopeRegistry->getContextsByScopePattern($scope));
+    }
+
+    /**
+     * Drop the cached update of each primary scope among $contexts and their components.
+     *
+     * @param array<Context>      $contexts
+     * @param array<string, true> $seen     scopes already dropped
+     */
+    private function invalidatePrimaryScopes(array $contexts, array &$seen = []): void {
         foreach ($contexts as $context) {
             $primary = $context->getPrimaryScope();
             if ($primary !== Scope::TAB && !isset($seen[$primary])) {
                 $seen[$primary] = true;
                 $this->invalidateViewCache($primary);
+            }
+            $components = $context->getComponentRegistry();
+            if ($components !== []) {
+                $this->invalidatePrimaryScopes($components, $seen);
             }
         }
     }

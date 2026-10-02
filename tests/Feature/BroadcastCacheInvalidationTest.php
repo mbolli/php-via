@@ -80,3 +80,60 @@ describe('Update cache across broadcast paths', function (): void {
         expect(implode('', cacheProbeElements($a)))->toContain('v=4');
     });
 });
+
+/** @return array<string, string> key => value from the fixture's key=value lines */
+function viewCacheFixture(string $case): array {
+    $out = (string) shell_exec('timeout 60 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/view_cache_cases.php') . ' ' . escapeshellarg($case) . ' 2>&1');
+    preg_match_all('/^([a-z_]+)=(\S*)$/m', $out, $m, PREG_SET_ORDER);
+    $values = ['out' => $out];
+    foreach ($m as [, $key, $value]) {
+        $values[$key] = $value;
+    }
+
+    return $values;
+}
+
+describe('Update cache in coalesced and concurrent broadcasts', function (): void {
+    test('one flush of several scopes that reach one primary scope renders it once, with fresh state', function (): void {
+        $r = viewCacheFixture('flush');
+
+        expect($r['renders'] ?? null)->toBe('1', $r['out'])
+            ->and($r['fresh'] ?? null)->toBe('4', $r['out'])
+        ;
+    });
+
+    test('a render that started before a newer broadcast does not overwrite the newer cached update', function (): void {
+        $r = viewCacheFixture('concurrent');
+
+        expect($r['sync_fresh'] ?? null)->toBe('1', $r['out']);
+    });
+
+    test('two revivals of one context return the same context and leave no timers behind', function (): void {
+        $r = viewCacheFixture('revival');
+
+        expect($r['same_context'] ?? null)->toBe('1', $r['out'])
+            ->and($r['ticks_after_destroy'] ?? null)->toBe('0', $r['out'])
+        ;
+    });
+
+    test('a component re-rendered with its page renders the current state', function (): void {
+        $GLOBALS['cache_probe'] = 1;
+        $app = createVia();
+        $page = new Context('/a_/1', '/a', $app);
+        $widget = $page->component(static function (Context $w): void {
+            $w->scope('widgets');
+            $w->view(static fn (): string => '<span>w=' . $GLOBALS['cache_probe'] . '</span>');
+        }, 'w');
+        // The page's update frame leaves the component out, so the component syncs on its own.
+        $page->view(static fn (bool $isUpdate): string => $isUpdate ? '<div id="page">header</div>' : '<div id="page">header' . $widget() . '</div>');
+        $app->contexts['/a_/1'] = $page;
+        $app->getApp()->registerContext($page);
+        $app->broadcast('widgets');
+        cacheProbeElements($page);
+
+        $GLOBALS['cache_probe'] = 2;
+        $app->broadcast(Scope::routeScope('/a'));
+
+        expect(implode('', cacheProbeElements($page)))->toContain('w=2');
+    });
+});
