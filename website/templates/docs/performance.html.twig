@@ -1,0 +1,135 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Performance · php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Performance</h1>
+    <p>
+        A php-via server keeps a context in memory for every open tab and holds one SSE stream per tab.
+        Its capacity depends on what each page view, open tab, action and broadcast costs, and those
+        costs are listed below, measured on the code of this website. The full tables, before and after
+        the 0.13.1 fixes, are in
+        <a href="https://github.com/mbolli/php-via/blob/master/bench/capacity/RESULTS.md" target="_blank" rel="noopener">bench/capacity/RESULTS.md</a>.
+    </p>
+    <p class="note">
+        Measured on two physical cores of an Intel i5-13500 with one worker, PHP 8.5, OpenSwoole 26.2,
+        opcache on and Brotli level 4. A virtual server's core is usually slower: scale the CPU figures
+        as described in <a href="#measure">measuring your own app</a>. Memory figures carry over.
+    </p>
+
+    <h2 id="costs">What each part costs</h2>
+    <table>
+        <thead><tr><th>Unit</th><th>CPU</th><th>Memory</th></tr></thead>
+        <tbody>
+            <tr><td>Page view (21 to 83&nbsp;KB of HTML)</td><td>1.3 to 4.1&nbsp;ms</td><td>13 to 35&nbsp;KB until the stream connects or 30&nbsp;s pass</td></tr>
+            <tr><td>Opening a tab (page view plus stream)</td><td>2.3 to 5.1&nbsp;ms</td><td>see the next row</td></tr>
+            <tr><td>Open tab, Brotli level 4</td><td>none while idle</td><td>570 to 650&nbsp;KB</td></tr>
+            <tr><td>Open tab, Brotli level 1</td><td>none while idle</td><td>70 to 125&nbsp;KB</td></tr>
+            <tr><td>Open tab, no Brotli</td><td>none while idle</td><td>45 to 75&nbsp;KB</td></tr>
+            <tr><td>Private action with a <code>sync()</code></td><td>0.6 to 1.1&nbsp;ms</td><td></td></tr>
+            <tr><td>Broadcast, per receiving tab</td><td>about 0.05&nbsp;ms</td><td></td></tr>
+            <tr><td>Keep-alive comment every 15&nbsp;s</td><td>under 1% of a core for 1,000 tabs</td><td></td></tr>
+        </tbody>
+    </table>
+    <p>
+        A broadcast renders a cached view once per scope and then writes and compresses one frame per tab,
+        so the per-tab cost is what grows with the audience. Broadcasts coalesce: a worker renders a busy
+        scope at most once per tick (25&nbsp;ms by default), however many actions marked it.
+        <a href="/docs/broadcasting#timing">Broadcasting</a> explains the timing.
+    </p>
+
+    <h2 id="tab-memory">Memory per open tab and the Brotli level</h2>
+    <p>
+        A tab's context and stream take around 50 to 75&nbsp;KB. With Brotli on, the stream's encoder
+        adds a window of what it has compressed, which lets a patch that repeats earlier markup shrink to
+        a few bytes. That window is what an open tab mostly costs:
+    </p>
+    <table>
+        <thead><tr><th>Home page, 500 tabs, 20 broadcasts per second</th><th>Memory per tab</th><th>Bytes per tab per second</th></tr></thead>
+        <tbody>
+            <tr><td>Brotli level 4 (default)</td><td>642&nbsp;KB</td><td>0.70&nbsp;KB</td></tr>
+            <tr><td>Brotli level 1</td><td>124&nbsp;KB</td><td>10.04&nbsp;KB</td></tr>
+            <tr><td>No Brotli</td><td>74&nbsp;KB</td><td>23.81&nbsp;KB</td></tr>
+        </tbody>
+    </table>
+    <p>
+        The encoder grows with traffic: a busy stream, such as a live game board, levels off near 9&nbsp;MB
+        at level 4 and 575&nbsp;KB at level 1. On a server short of memory and not of bandwidth, set
+        <code>withBrotli(true, 1)</code>; the second argument is the level for responses and streams.
+    </p>
+
+    <h2 id="page-views">Page views that never open a stream</h2>
+    <p>
+        A crawler, a link preview or a prefetch loads the page but never connects its stream. php-via keeps
+        that context until the connect timeout (<code>withContextConnectTimeout()</code>, 30&nbsp;s by
+        default), so a crawler fetching 50 pages per second holds about 50&nbsp;MB. Before 0.13.1 such
+        contexts, and every page that called <code>$c->scope()</code>, were never freed.
+    </p>
+
+    <h2 id="broadcasts">Keeping broadcasts narrow</h2>
+    <p>
+        A broadcast to a page's scope re-renders the page and every component on it. Three patterns from this
+        website keep a busy page cheap:
+    </p>
+    <ul>
+        <li>
+            Give a busy widget a scope of its own and broadcast to that scope. The home page counter lives in
+            <code>home:counter</code>, so a click re-renders the counters and not the poll next to them.
+            <a href="/docs/components#scoped-components">Components</a> shows the code.
+        </li>
+        <li>
+            Put presence indicators in their own scope too. A broadcast to <code>Scope::GLOBAL</code> on
+            every connect and disconnect re-renders every open page: with 1,000 readers open, each visitor
+            arriving and leaving cost 545&nbsp;ms of CPU. With the indicator in its own scope and static pages
+            rendered once, it costs 16&nbsp;ms.
+        </li>
+        <li>
+            Render a static page once. A view that returns an empty string on updates sends nothing on the
+            SSE connect or on a broadcast, and its components still patch themselves:
+        </li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$app->page('/docs/install', function (Context $c): void {
+    $c->view(
+        fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('docs/install.html.twig'),
+        cacheUpdates: false, // the update cache is keyed by scope; keep the empty render out of it
+    );
+});
+{% endverbatim %}{% endcode %}
+
+    <h2 id="workers">More workers</h2>
+    <p>
+        With <code>withWorkerNum(2)</code> on two cores, page views per second rose from 797 to 1,327 for
+        <code>/docs/signals</code> and from 245 to 463 for <code>/docs/api</code>. Scoped signals, session data and the client list are shared between
+        workers, and the shared context directory has to be sized for your traffic:
+        <a href="/docs/deployment#same-machine">Deployment</a> gives the rule.
+    </p>
+
+    <h2 id="small-server">A small server, worked through</h2>
+    <p>
+        This website runs on a two-core virtual server with 2&nbsp;GB of memory. With about 1.2&nbsp;GB left
+        for php-via after the system and the reverse proxy:
+    </p>
+    <table>
+        <thead><tr><th>Load</th><th>Estimate</th></tr></thead>
+        <tbody>
+            <tr><td>Open docs tabs, Brotli level 4</td><td>about 2,200</td></tr>
+            <tr><td>Open docs tabs, Brotli level 1</td><td>about 17,000</td></tr>
+            <tr><td>Crawler traffic</td><td>50 pages per second hold about 50&nbsp;MB</td></tr>
+            <tr><td>Visitors arriving and leaving with 1,000 readers open</td><td>about 60 per second per core</td></tr>
+            <tr><td>Clicks on a shared widget with 2,000 viewers</td><td>about 10 per second per core</td></tr>
+        </tbody>
+    </table>
+    <p>The CPU rows assume a core as fast as the reference machine's; scale them as described below.</p>
+
+    <h2 id="measure">Measuring your own app</h2>
+    <p>
+        The harness in
+        <a href="https://github.com/mbolli/php-via/tree/master/bench/capacity" target="_blank" rel="noopener">bench/capacity</a>
+        opens tabs, fires actions and shared clicks at fixed rates, sends visitors through, and reads the
+        server's CPU and memory from <code>/proc</code>. Its README shows how to pin the server and the
+        harness to separate cores. To compare a server with the reference machine, run
+        <code>php -d opcache.enable_cli=1 bench/capacity/calibrate.php</code> on it: the reference prints
+        <code>brotli 7 ms, php 62 ms</code>, and the ratio of your figures to these scales the CPU costs above.
+    </p>
+</article>
+{% endblock %}

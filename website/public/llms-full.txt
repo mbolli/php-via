@@ -371,6 +371,18 @@ The broker carries broadcasts between servers. Shared memory is per machine, so 
 scoped signal values and GlobalState are not shared between servers: route each browser
 session to one server with cookie-sticky load balancing.
 
+### Capacity and memory
+
+Measured on the website (one worker, two cores, Brotli level 4): a page view costs 1.3 to 4.1 ms
+of CPU and 13 to 35 KB until its stream connects or the connect timeout (30 s) passes; an open tab
+costs 570 to 650 KB with Brotli level 4, 70 to 125 KB at level 1 and 45 to 75 KB without Brotli,
+mostly the stream encoder's window; a private action about 1 ms; a broadcast about 0.05 ms per
+receiving tab. A broadcast to a page's scope re-renders every component on the page, so give busy
+widgets a custom scope and broadcast to it, and keep presence indicators out of Scope::GLOBAL. A
+view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`, with
+`cacheUpdates: false`) renders a static page once. Size the shared context directory for peak open
+tabs plus peak page views per second times 630. The harness is bench/capacity in the repository.
+
 ---
 
 ## Shared and Persistent State

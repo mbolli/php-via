@@ -3,6 +3,7 @@
 *.cache
 /bench/*
 !/bench/contention/
+!/bench/capacity/
 /website/node_modules/
 /website/vendor/
 website/*.db

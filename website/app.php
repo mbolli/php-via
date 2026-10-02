@@ -515,6 +515,11 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         StaticPage::view($c, 'docs/deployment.html.twig');
     });
 
+    $app->page('/performance', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/performance'));
+        StaticPage::view($c, 'docs/performance.html.twig');
+    });
+
     $app->page('/api', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/api'));
         StaticPage::view($c, 'docs/api.html.twig');
