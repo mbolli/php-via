@@ -154,7 +154,8 @@ $app = new Via(
     {% endverbatim %}{% endcode %}
     <p>
         {% verbatim %}<code>{{ importMap }}</code>{% endverbatim %} is the tag the default shell writes,
-        and empty when php-via writes no map.
+        and empty when php-via writes no map. When a map is due and a route's document has none, php-via
+        logs a warning the first time it renders that route.
     </p>
 
     <h2 id="own-modules">Adding modules to the import map</h2>

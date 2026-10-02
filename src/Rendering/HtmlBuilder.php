@@ -22,6 +22,9 @@ class HtmlBuilder {
     /** @var array<string, true> Shell paths already checked for a missing or mismatched import map */
     private array $checkedShells = [];
 
+    /** @var array<string, true> Routes whose full-document view was already checked for a missing import map */
+    private array $checkedDocuments = [];
+
     /**
      * @param null|\Closure(string, string, ?Context): void $logger Receives level, message and context
      */
@@ -69,6 +72,14 @@ class HtmlBuilder {
      */
     public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null, string $importMap = ''): string {
         if (stripos($content, '<html') !== false) {
+            $route = $context->getRoute();
+            if ($importMap !== '' && !isset($this->checkedDocuments[$route])) {
+                $this->checkedDocuments[$route] = true;
+                if (stripos($content, 'importmap') === false) {
+                    $this->log('warning', "The document rendered for {$route} has no import map: write the importMap Twig variable into its <head>, or the map from withDatastarRocket() or withImportMap() is left out", $context);
+                }
+            }
+
             return $this->injectIntoDocument($content, $context, initial: true);
         }
 

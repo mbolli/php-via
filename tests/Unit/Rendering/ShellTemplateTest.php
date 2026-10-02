@@ -194,6 +194,43 @@ describe('a custom shell with the import map', function (): void {
     });
 });
 
+describe('a view that renders its own document', function (): void {
+    beforeEach(function (): void {
+        $this->logs = [];
+        $this->builder = new HtmlBuilder(null, function (string $level, string $message): void { $this->logs[] = [$level, $message]; });
+        $this->tag = '<script type="importmap">{"imports":{"datastar":"/datastar.js?v=1"}}</script>';
+        $this->document = fn (string $head): string => "<!DOCTYPE html><html><head>{$head}</head><body><script type=\"module\" src=\"/datastar.js?v=1\"></script></body></html>";
+    });
+
+    test('warns once per route when it leaves out a map that is due', function (): void {
+        $via = createVia();
+        $home = new Context(testContextId(), '/', $via);
+        $docs = new Context(testContextId(), '/docs', $via);
+
+        $this->builder->buildDocument(($this->document)(''), $home, $home->getId(), '/', '/datastar.js?v=1', $this->tag);
+        $html = $this->builder->buildDocument(($this->document)(''), $home, $home->getId(), '/', '/datastar.js?v=1', $this->tag);
+        $this->builder->buildDocument(($this->document)(''), $docs, $docs->getId(), '/', '/datastar.js?v=1', $this->tag);
+
+        expect($this->logs)->toHaveCount(2)
+            ->and($this->logs[0][0])->toBe('warning')
+            ->and($this->logs[0][1])->toContain('for / has no import map')
+            ->and($this->logs[1][1])->toContain('for /docs has no import map')
+            ->and($html)->not->toContain('importmap')
+        ;
+    });
+
+    test('does not warn when it writes the map, or no map is due', function (): void {
+        $via = createVia();
+        $home = new Context(testContextId(), '/', $via);
+        $docs = new Context(testContextId(), '/docs', $via);
+
+        $this->builder->buildDocument(($this->document)($this->tag), $home, $home->getId(), '/', '/datastar.js?v=1', $this->tag);
+        $this->builder->buildDocument(($this->document)(''), $docs, $docs->getId(), '/', '/datastar.js?v=1');
+
+        expect($this->logs)->toBe([]);
+    });
+});
+
 describe('datastarUrl and importMap in Twig templates', function (): void {
     test('follow the config when it changes after new Via()', function (): void {
         $via = createVia();
