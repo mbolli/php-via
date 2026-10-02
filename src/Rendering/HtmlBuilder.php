@@ -13,6 +13,9 @@ use Mbolli\PhpVia\Context;
  * and signal injection for initial page loads.
  */
 class HtmlBuilder {
+    /** @var array<string, array{0: string, 1: string}> Shell contents by path, with the mtime and size read in dev mode */
+    private array $shells = [];
+
     /** @var array<int, string> */
     private array $headIncludes = [];
 
@@ -28,6 +31,7 @@ class HtmlBuilder {
     public function __construct(
         private ?string $shellTemplate = null,
         private ?\Closure $logger = null,
+        private bool $devMode = false,
     ) {}
 
     /**
@@ -105,7 +109,7 @@ class HtmlBuilder {
 
         // Per-context shell overrides the configured one
         $shellPath = $context->getShellTemplate() ?? $this->shellTemplate ?? __DIR__ . '/shell.html';
-        $shell = file_get_contents($shellPath);
+        $shell = $this->loadShell($shellPath);
 
         if ($shell === false) {
             throw new \RuntimeException("Failed to load shell template from: {$shellPath}");
@@ -181,6 +185,31 @@ class HtmlBuilder {
         }
 
         return $html;
+    }
+
+    /**
+     * Read a shell template once per path; in dev mode, again whenever its mtime or size changes.
+     */
+    private function loadShell(string $path): false|string {
+        $version = '';
+        if ($this->devMode) {
+            // Under the file hooks PHP keeps stat() results across writes, which would hide an edit.
+            clearstatcache(true, $path);
+            $stat = @stat($path);
+            $version = $stat === false ? '' : $stat['mtime'] . ':' . $stat['size'];
+        }
+
+        $cached = $this->shells[$path] ?? null;
+        if ($cached !== null && $cached[0] === $version) {
+            return $cached[1];
+        }
+
+        $shell = file_get_contents($path);
+        if ($shell !== false) {
+            $this->shells[$path] = [$version, $shell];
+        }
+
+        return $shell;
     }
 
     /**

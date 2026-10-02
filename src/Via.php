@@ -245,7 +245,7 @@ class Via {
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...));
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->getDevMode());
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
