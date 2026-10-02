@@ -102,12 +102,12 @@
 <style>
 .auction-layout {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 1.25rem;
     align-items: start;
 }
 @media (max-width: 640px) {
-    .auction-layout { grid-template-columns: 1fr; }
+    .auction-layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Item card */
