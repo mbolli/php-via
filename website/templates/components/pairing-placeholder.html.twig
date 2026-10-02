@@ -1,0 +1,27 @@
+{# Mock of the planned phone pairing demo. Static markup only: nothing here is wired to the server yet. #}
+<aside class="px-pair" aria-labelledby="px-pair-title">
+    <div class="px-pair-bar">
+        <span class="px-pair-bar-title">Phone pairing</span>
+        <span class="px-tag px-tag--warn">Placeholder</span>
+    </div>
+    <div class="px-pair-body">
+        <div class="px-qr" role="img" aria-label="Placeholder where the pairing QR code will appear">
+            <span class="px-qr-finder px-qr-finder--tl"></span>
+            <span class="px-qr-finder px-qr-finder--tr"></span>
+            <span class="px-qr-finder px-qr-finder--bl"></span>
+            <span class="px-qr-label">QR code<br>goes here</span>
+        </div>
+        <div class="px-pair-text">
+            <h2 id="px-pair-title">Pair this tab with your phone</h2>
+            <p class="px-pair-desktop">
+                Scan the code with your phone camera. The phone opens a small widget that it shares
+                with this desktop tab and nobody else. Change it on one screen and the other follows.
+            </p>
+            <p class="px-pair-mobile">
+                On a computer, this box shows a QR code. Scan it with this phone and the two screens
+                share a widget that nobody else sees.
+            </p>
+        </div>
+    </div>
+    <p class="px-pair-note">This demo is not wired up yet, so the QR code is a stand-in.</p>
+</aside>
