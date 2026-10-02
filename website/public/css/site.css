@@ -5,7 +5,7 @@
     0 12px 10px -2px hsl(var(--shadow-color) / var(--shadow-strength-5)),
     0 22px 18px -2px hsl(var(--shadow-color) / var(--shadow-strength-6)),
     0 41px 33px -2px hsl(var(--shadow-color) / var(--shadow-strength-7)),
-    0 100px 80px -2px hsl(var(--shadow-color) / var(--shadow-strength-8));--font-sans:var(--font-system-ui);--font-mono:var(--font-monospace-code);--red-1:#ffe3e3;--red-8:#e03131;--font-weight-6:600;--font-weight-5:500;--ease-out-2:cubic-bezier(0, 0, .50, 1);--size-12:10rem;--font-weight-8:800;--size-7:2rem;--font-lineheight-4:1.75;--size-6:1.75rem;--blue-4:#4dabf7;--orange-5:#ff922b;--orange-4:#ffa94d;--green-6:#40c057;--red-5:#ff6b6b;--font-weight-4:400;--blue-6:#228be6;--violet-6:#7950f2;--blue-2:#a5d8ff;--blue-9:#1864ab;--ease-out-3:cubic-bezier(0, 0, .3, 1);--radius-round:1e5px;--ease-spring-2:linear(
+    0 100px 80px -2px hsl(var(--shadow-color) / var(--shadow-strength-8));--font-sans:var(--font-system-ui);--font-mono:var(--font-monospace-code);--red-1:#ffe3e3;--red-8:#e03131;--font-weight-6:600;--font-weight-5:500;--ease-out-2:cubic-bezier(0, 0, .50, 1);--size-12:10rem;--font-weight-8:800;--size-7:2rem;--font-lineheight-4:1.75;--size-6:1.75rem;--blue-4:#4dabf7;--orange-5:#ff922b;--orange-4:#ffa94d;--font-weight-4:400;--blue-6:#228be6;--violet-6:#7950f2;--green-6:#40c057;--blue-2:#a5d8ff;--blue-9:#1864ab;--ease-out-3:cubic-bezier(0, 0, .3, 1);--radius-round:1e5px;--ease-spring-2:linear(
     0, 0.007, 0.029 2.2%, 0.118 4.7%, 0.625 14.4%, 0.826 19%, 0.902, 0.962,
     1.008 26.1%, 1.041 28.7%, 1.064 32.1%, 1.07 36%, 1.061 40.5%, 1.015 53.4%,
     0.999 61.6%, 0.995 71.2%, 1
@@ -22,7 +22,7 @@
     0.997 69.8%, 1.003 76.9%, 1
   );--shadow-2:
     0 3px 5px -2px hsl(var(--shadow-color) / var(--shadow-strength-4)),
-    0 7px 14px -5px hsl(var(--shadow-color) / var(--shadow-strength-6));--green-5:#51cf66;--red-4:#ff8787;--green-8:#2f9e44;--yellow-1:#fff3bf;--yellow-8:#f08c00;--red-7:#f03e3e;--green-2:#b2f2bb;--yellow-9:#e67700;--yellow-2:#ffec99;--font-lineheight-5:2;--font-size-7:3rem;--font-size-00:.5rem;--gray-10:#16191d;--green-7:#37b24d;--yellow-5:#fcc419;--yellow-3:#ffe066;--shadow-3:
+    0 7px 14px -5px hsl(var(--shadow-color) / var(--shadow-strength-6));--green-5:#51cf66;--red-4:#ff8787;--green-8:#2f9e44;--yellow-1:#fff3bf;--yellow-8:#f08c00;--red-7:#f03e3e;--green-2:#b2f2bb;--yellow-9:#e67700;--yellow-2:#ffec99;--font-lineheight-5:2;--font-size-7:3rem;--font-size-00:.5rem;--gray-10:#16191d;--green-7:#37b24d;--red-5:#ff6b6b;--yellow-5:#fcc419;--yellow-3:#ffe066;--shadow-3:
     0 -1px 3px 0 hsl(var(--shadow-color) / var(--shadow-strength-3)),
     0 1px 2px -5px hsl(var(--shadow-color) / var(--shadow-strength-3)),
     0 2px 5px -5px hsl(var(--shadow-color) / var(--shadow-strength-5)),
@@ -115,8 +115,8 @@
     --brand:           #2160d6;
     --brand-light:     #3b7cf0;
     --brand-dark:      #174aa8;
-    --brand-secondary: #d4511c;
-    --brand-accent:    #a87900;
+    --brand-secondary: #c4470f;
+    --brand-accent:    #775200;
     --live:            #1d9a52;
     --on-brand:        #ffffff;
     --px-violet:       #5a3fd6;
@@ -367,9 +367,9 @@ main { position: relative; }
   text-align: center;
   color: var(--text-3);
   font-family: var(--font-ui);
-  font-size: var(--font-size-0);
+  font-size: 0.8rem;
 }
-.footer-inner p { max-inline-size: unset; }
+.footer-inner p { max-inline-size: unset; font-size: inherit; margin: 0; }
 .footer-inner a { color: var(--text-2); }
 
 /* ─── Marketing page layout ────────────────────────────── */
@@ -909,9 +909,9 @@ main { position: relative; }
 .comparison-table tr:last-child td { border-block-end: none; }
 .comparison-table tbody tr:hover td { background: var(--surface-2); }
 .check, .cross, .partial { font-weight: var(--font-weight-7); }
-.check { color: var(--green-6); }
-.cross { color: var(--red-5); }
-.partial { color: var(--orange-5); }
+.check { color: #15803d; }
+.cross { color: #c4321f; }
+.partial { color: #b45309; }
 @media (prefers-color-scheme: dark) {
   .check { color: var(--live); }
   .cross { color: var(--px-red); }
@@ -2905,29 +2905,38 @@ stock-chart {
   padding-block: clamp(2.5rem, 6vw, 5rem) clamp(3rem, 6vw, 5rem);
   border-block-end: 1px solid var(--border);
 }
-/* Pixel starfield, like the sky behind the mascot */
-.px-hero::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 4px;
-  height: 4px;
-  pointer-events: none;
-  opacity: 0.8;
-  box-shadow:
-    6vw 48px 0 var(--px-yellow),
-    14vw 300px 0 var(--text-3),
-    31vw 26px 0 var(--text-1),
-    44vw 380px 0 var(--px-yellow),
-    52vw 70px 0 var(--px-blue),
-    63vw 22px 0 var(--px-yellow),
-    78vw 54px 0 var(--text-1),
-    91vw 140px 0 var(--px-yellow),
-    96vw 420px 0 var(--text-3),
-    3vw 520px 0 var(--px-blue),
-    71vw 560px 0 var(--px-yellow),
-    86vw 610px 0 var(--text-1);
+/* Pixel stars, like the sky behind the mascot. They stay in the side gutters, so they never
+   land on text, and only show where the gutters are wide enough. */
+@media (min-width: 1360px) {
+  .px-hero {
+    --gutter: calc((100vw - 76rem) / 2);
+  }
+  .px-hero::before,
+  .px-hero::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: 4px;
+    height: 4px;
+    pointer-events: none;
+    opacity: 0.8;
+  }
+  .px-hero::before {
+    left: 0;
+    box-shadow:
+      calc(var(--gutter) * 0.55) 48px 0 var(--px-yellow),
+      calc(var(--gutter) * 0.25) 210px 0 var(--text-3),
+      calc(var(--gutter) * 0.7) 330px 0 var(--px-blue),
+      calc(var(--gutter) * 0.35) 520px 0 var(--px-yellow);
+  }
+  .px-hero::after {
+    right: 0;
+    box-shadow:
+      calc(var(--gutter) * -0.4) 90px 0 var(--text-1),
+      calc(var(--gutter) * -0.75) 250px 0 var(--px-yellow),
+      calc(var(--gutter) * -0.3) 430px 0 var(--px-blue),
+      calc(var(--gutter) * -0.6) 600px 0 var(--px-yellow);
+  }
 }
 
 .px-hero-grid {
@@ -3150,11 +3159,12 @@ stock-chart {
   color: var(--text-2);
 }
 
+/* On a phone there is nothing to scan, so the QR stand-in goes and the copy explains the pairing */
 @media (max-width: 640px) {
   .px-pair-desktop { display: none; }
-  .px-pair-mobile { display: block; }
-  .px-pair-body { grid-template-columns: minmax(0, 1fr); gap: var(--size-4); padding: var(--size-4); }
-  .px-qr { --m: 5px; }
+  .px-pair-mobile { display: revert; }
+  .px-pair-body { grid-template-columns: minmax(0, 1fr); padding: var(--size-4); }
+  .px-qr { display: none; }
 }
 
 /* ── Sections ── */
@@ -3243,7 +3253,7 @@ stock-chart {
   padding: 0.15rem 0.45rem;
   font-size: 0.78rem;
   color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  background: color-mix(in srgb, var(--brand) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
 }
 .px-flow-step h3 {
@@ -3285,6 +3295,7 @@ stock-chart {
   margin-block-end: 0.6rem;
 }
 .px-scopes-text p {
+  font-size: 1.05rem;
   color: var(--text-2);
   line-height: 1.65;
   margin: 0;
@@ -3333,7 +3344,9 @@ stock-chart {
 .px-scope-table tr:nth-child(5) { --swatch: var(--brand-accent); }
 .px-scope-table code { background: none; border: none; padding: 0; }
 @media (max-width: 480px) {
-  .px-scope-table td:first-child { white-space: normal; }
+  .px-scope-table { font-size: 0.85rem; }
+  .px-scope-table :is(th, td) { padding-inline: 0.7rem; }
+  .px-scope-table td:first-child::before { margin-inline-end: 0.45rem; }
 }
 
 /* ── Features: a ruled grid of specs ── */
@@ -3381,9 +3394,9 @@ stock-chart {
 /* ── Poll ── */
 .px-poll {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   gap: clamp(1.5rem, 5vw, 4rem);
-  align-items: center;
+  align-items: start;
 }
 .px-poll .px-section-head { margin-block-end: 0; }
 @media (max-width: 860px) {
@@ -3399,9 +3412,9 @@ stock-chart {
 /* ── Install ── */
 .px-install-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   gap: clamp(1.5rem, 5vw, 4rem);
-  align-items: center;
+  align-items: start;
 }
 .px-install-grid .px-section-head { margin-block-end: 0; }
 .px-install-grid .px-actions { margin-block-end: 0; }
@@ -3429,6 +3442,9 @@ stock-chart {
   line-height: 1.9;
   color: var(--code-text);
   max-inline-size: none;
+}
+@media (max-width: 480px) {
+  .px-terminal-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
 .px-terminal-prompt { color: #5ad48a; }
 .px-terminal-out { color: #8a8fc0; }

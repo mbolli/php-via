@@ -76,8 +76,8 @@
             <h2>A complete counter app</h2>
             <p>
                 The listing is a full <code>app.php</code>. The <strong>TAB</strong> version is the default:
-                every browser tab keeps its own count. The <strong>GLOBAL</strong> version adds one line,
-                and all visitors share the count. <strong>Composition</strong> shows the same counter as a
+                every browser tab keeps its own count. The <strong>GLOBAL</strong> version adds
+                <code>$c-&gt;scope(Scope::GLOBAL)</code>, and all visitors share the count. <strong>Composition</strong> shows the same counter as a
                 class with <code>#[Signal]</code> and <code>#[Action]</code> attributes, as described in the
                 <a href="/docs/composition">composition docs</a>.
             </p>
@@ -322,7 +322,7 @@ $app->start();
             <li class="px-flow-step">
                 <code class="px-flow-code">$c-&gt;view(…)</code>
                 <h3>View</h3>
-                <p>HTML from Twig or a PHP heredoc. After an action, php-via renders it again and sends the difference.</p>
+                <p>HTML from Twig or a PHP heredoc. After an action, php-via renders it again and sends the new HTML.</p>
             </li>
             <li class="px-flow-step">
                 <code class="px-flow-code">GET /_sse</code>
@@ -379,7 +379,7 @@ $app->start();
                 <p>TAB, ROUTE, SESSION, GLOBAL, or your own scopes like <code>room:42</code>. One line decides whether state is private to a tab or shared with everyone.</p>
             </div>
             <div class="px-spec">
-                <h3>Shared state in one line</h3>
+                <h3>Atomic shared signals</h3>
                 <p>Give a signal ROUTE scope and every visitor on the route sees its changes, on every worker. One machine needs no pub/sub service, and <code>increment()</code> keeps simultaneous clicks from overwriting each other.</p>
             </div>
             <div class="px-spec">
@@ -391,7 +391,7 @@ $app->start();
                 <p>Build a page from isolated sub-contexts, written as closures or classes. Each component has its own signals, actions and view.</p>
             </div>
             <div class="px-spec">
-                <h3>Every core, one server</h3>
+                <h3>Multi-core workers</h3>
                 <p><code>withWorkerNum()</code> spreads tabs over every core. Scoped signals and session data live in shared memory, and any worker can answer any tab.</p>
             </div>
             <div class="px-spec">
@@ -422,9 +422,10 @@ $app->start();
         <header class="px-section-head">
             <h2>Comparison with Livewire, htmx, Inertia.js and LiveView</h2>
             <p>
-                Other ways to get live pages in PHP add a WebSocket server next to PHP-FPM, poll on a timer,
-                or put a React or Vue front end on top of Laravel. The table shows where php-via differs.
-                Hover or focus a mark for the details, or read the <a href="/docs/comparisons">comparisons page</a>.
+                Livewire and Inertia.js send a new HTTP request when something changes, and htmx does the
+                same unless you add its SSE extension. php-via keeps one connection open per tab and pushes
+                changes down it, like Phoenix LiveView, which inspired its architecture. Hover or focus a
+                mark for the details, or read the <a href="/docs/comparisons">comparisons page</a>.
             </p>
         </header>
         {% include 'components/comparison-table.html.twig' %}
