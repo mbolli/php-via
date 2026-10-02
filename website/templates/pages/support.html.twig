@@ -1,157 +1,157 @@
 {% extends 'shells/base.html.twig' %}
 {% block title %}Professional Support · php-via{% endblock %}
-{% block description %}Expert php-via implementation, OpenSwoole consulting, real-time system design, and dedicated engineering from zwei und eins gmbh, the team behind php-via.{% endblock %}
+{% block description %}php-via project builds, OpenSwoole consulting, real-time architecture, training and embedded engineering from zwei und eins gmbh, the company that builds php-via.{% endblock %}
+{% block body_class %}page-px{% endblock %}
 {% block content %}
 
-<!-- Hero -->
-<section class="hero support-hero">
-    <div class="hero-inner">
-        <div class="hero-eyebrow">
-            <span>🏢</span> Professional Support
+<section class="px-hero px-hero--page">
+    <div class="px-wrap px-hero-grid">
+        <div class="px-hero-copy">
+            <p class="px-kicker">Professional support</p>
+            <h1 class="px-page-title">Work with the team that builds php-via</h1>
+            <p class="px-hero-lead">
+                zwei und eins gmbh created php-via and maintains it. We build applications on it, run
+                OpenSwoole in production and design real-time features. You can hire us for your project,
+                for a review, or for a few months of engineering.
+            </p>
+            <div class="px-actions">
+                <a href="mailto:info@zweiundeins.gmbh" class="px-btn px-btn--primary">Email us <span aria-hidden="true">→</span></a>
+                <a href="https://zweiundeins.gmbh" class="px-btn" target="_blank" rel="noopener">zweiundeins.gmbh <span class="px-ext" aria-hidden="true"></span></a>
+            </div>
         </div>
 
-        <h1>
-            Real-time PHP,<br>
-            <em>backed by the people<br>who built it.</em>
-        </h1>
+        <aside class="px-panel" aria-labelledby="support-contact-title">
+            <div class="px-panel-bar">
+                <h2 class="px-panel-title" id="support-contact-title">Contact details</h2>
+            </div>
+            <dl class="px-facts">
+                <div>
+                    <dt>Email</dt>
+                    <dd><a href="mailto:info@zweiundeins.gmbh">info@zweiundeins.gmbh</a></dd>
+                </div>
+                <div>
+                    <dt>First reply</dt>
+                    <dd>Within one business day</dd>
+                </div>
+                <div>
+                    <dt>Proposal</dt>
+                    <dd>In writing, two business days after the scoping call</dd>
+                </div>
+                <div>
+                    <dt>Company</dt>
+                    <dd>zwei und eins gmbh, a Swiss software consultancy</dd>
+                </div>
+            </dl>
+        </aside>
+    </div>
+</section>
 
-        <p class="hero-tagline">
-            Ship faster with the team that created php-via.
-            Deep expertise in OpenSwoole, real-time architecture, and async PHP,
-            available directly for your project.
-        </p>
-
-        <div class="hero-ctas">
-            <a href="mailto:info@zweiundeins.gmbh" class="btn btn-primary">Get in touch →</a>
-            <a href="https://zweiundeins.gmbh" class="btn btn-secondary" target="_blank" rel="noopener">
-                zweiundeins.gmbh ↗
-            </a>
+<section class="px-section" id="services">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>Services for php-via projects</h2>
+            <p>
+                We take on a single feature, an architecture review or a long engagement. Each one starts
+                with a written scope and the deliverables we agree on.
+            </p>
+        </header>
+        <div class="px-specs">
+            <div class="px-spec">
+                <h3>php-via project builds</h3>
+                <p>We design and build your application on php-via, from the first page to production: OpenSwoole, Datastar, and a scope design that decides who shares which state.</p>
+            </div>
+            <div class="px-spec">
+                <h3>OpenSwoole and async PHP</h3>
+                <p>Coroutine scheduling, the event loop and long-running workers. We find memory leaks, connection storms and timer drift in production systems.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Real-time and SSE architecture</h3>
+                <p>Server-sent event systems, broadcast strategies, Redis and NATS brokers, and scaling across servers. We benchmark these patterns for php-via itself, as the <a href="/docs/performance">performance page</a> shows.</p>
+            </div>
+            <div class="px-spec">
+                <h3>PHP architecture consulting</h3>
+                <p>For new projects and legacy code, we help you choose patterns that fit your scale, your team and how often you ship. Code reviews, architecture decision records and hands-on refactoring are part of it.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Embedded engineering</h3>
+                <p>A senior PHP engineer joins your team for a defined scope, with clear deliverables and regular check-ins.</p>
+            </div>
+            <div class="px-spec">
+                <h3>Training and workshops</h3>
+                <p>Sessions built around your team and your codebase, from async PHP basics to php-via scope design and running it in production. We teach remotely or on site.</p>
+            </div>
         </div>
     </div>
 </section>
 
-<!-- Services grid -->
-<section class="page-section">
-    <div class="section-label">What we offer</div>
-    <h2 class="section-title">Everything from integration to embedded expertise.</h2>
-    <p class="section-lead">
-        Whether you need a shipped feature, an architecture review, or a long-term engineering partner,
-        every engagement is scoped around outcomes, not hours.
-    </p>
-    <div class="features-grid">
-        <div class="feature-card">
-            <span class="feature-icon">🔌</span>
-            <h3>php-via Project Build</h3>
-            <p>php-via is a paradigm shift, not a plugin. We design and build your application from the ground up on the right foundations: OpenSwoole, Datastar, and the scope model that makes real-time PHP actually work.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">⚡</span>
-            <h3>OpenSwoole & Async PHP</h3>
-            <p>Deep knowledge of OpenSwoole internals, coroutine scheduling, and the async event loop. We debug the hard problems: memory leaks, connection storms, and timer drift. The ones that trip up everyone else.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">📡</span>
-            <h3>Real-time & SSE Architecture</h3>
-            <p>Design and implementation of server-sent event systems, broadcast strategies, message brokers (Redis, NATS), and horizontal scaling under load. We've stress-tested the patterns this framework is built on.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🏗️</span>
-            <h3>PHP Architecture Consulting</h3>
-            <p>Greenfield or legacy: we help you pick the right patterns for your scale, team size, and delivery pace. Code reviews, ADRs, and hands-on refactoring included.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🤝</span>
-            <h3>Dedicated Engineering</h3>
-            <p>A senior PHP engineer embedded in your team, focused on your outcomes. Defined scope, clear deliverables, full accountability. You get results, not a timesheet.</p>
-        </div>
-        <div class="feature-card">
-            <span class="feature-icon">🎓</span>
-            <h3>Training &amp; Workshops</h3>
-            <p>Hands-on training sessions tailored to your team and your codebase. From async PHP fundamentals to advanced php-via patterns, scope design, and production operations. Remote or on-site.</p>
-        </div>
-    </div>
-</section>
-
-<!-- About -->
-<section class="page-section page-section--tinted">
-    <div style="max-width: 56rem; margin-inline: auto;">
-        <div class="section-label">Behind the framework</div>
-        <h2 class="section-title">Built by zwei und eins gmbh.</h2>
-        <div class="founder-card">
-            <div class="founder-avatar" aria-hidden="true">MB</div>
-            <div class="founder-bio">
+<section class="px-section" id="about">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>About zwei und eins gmbh</h2>
+        </header>
+        <div class="px-founder">
+            <div class="px-founder-avatar" aria-hidden="true">MB</div>
+            <div class="px-founder-bio">
                 <p>
-                    <strong>Michael Bolli</strong> is the creator of php-via and owner of
+                    <strong>Michael Bolli</strong> created php-via and owns
                     <a href="https://zweiundeins.gmbh" target="_blank" rel="noopener">zwei und eins gmbh</a>,
-                    a Swiss software consultancy specialising in real-time PHP, backend architecture, and
+                    a Swiss software consultancy for real-time PHP, backend architecture and
                     high-performance web systems.
                 </p>
                 <p>
-                    php-via was born out of real production frustration: watching PHP projects bolt on
-                    WebSocket servers, polling loops, and JavaScript frameworks to solve problems that should
-                    be solved at the server. The goal: give PHP developers the same
-                    <em>multiplayer-by-default</em> experience that Elixir LiveView gives to Elixir teams.
-                    Without needing to learn Elixir.
+                    php-via grew out of production work. PHP projects kept adding WebSocket servers, polling
+                    loops and JavaScript frameworks to solve problems that belong on the server. php-via gives
+                    PHP developers the server-driven model that Phoenix LiveView gives Elixir teams, without
+                    a move to Elixir.
                 </p>
                 <p>
-                    When you engage with us, you're working directly with the engineer who made the
-                    design decisions in every line of this framework.
+                    When you hire us, you work directly with the engineer who designed the framework.
                 </p>
-                <div class="founder-links">
-                    <a href="https://zweiundeins.gmbh" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Company website ↗</a>
-                    <a href="https://linkedin.com/in/mbolli" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">LinkedIn ↗</a>
-                    <a href="https://github.com/mbolli" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">GitHub ↗</a>
+                <div class="px-founder-links">
+                    <a href="https://zweiundeins.gmbh" target="_blank" rel="noopener" class="px-btn px-btn--sm">Company website <span class="px-ext" aria-hidden="true"></span></a>
+                    <a href="https://linkedin.com/in/mbolli" target="_blank" rel="noopener" class="px-btn px-btn--sm">LinkedIn <span class="px-ext" aria-hidden="true"></span></a>
+                    <a href="https://github.com/mbolli" target="_blank" rel="noopener" class="px-btn px-btn--sm">GitHub <span class="px-ext" aria-hidden="true"></span></a>
                 </div>
             </div>
         </div>
     </div>
 </section>
 
-<!-- How it works -->
-<section class="page-section">
-    <div style="max-width: 56rem; margin-inline: auto; text-align: center;">
-        <div class="section-label">How it works</div>
-        <h2 class="section-title">Simple engagement, no sales theatre.</h2>
-        <p class="section-lead">
-            Three steps from first message to shipping code together.
-        </p>
-    </div>
-    <div class="how-it-works how-it-works--3steps">
-        <div class="how-step">
-            <div class="how-step-number">1</div>
-            <h3>Reach out</h3>
-            <p>Send a brief description of your project and what you need. No forms, no NDA before hello. Just an email.</p>
-        </div>
-        <div class="how-arrow" aria-hidden="true">→</div>
-        <div class="how-step">
-            <div class="how-step-number">2</div>
-            <h3>Scoping call</h3>
-            <p>A 30-minute call to define scope, deliverables, and what success looks like. You'll receive a written proposal by email within two business days.</p>
-        </div>
-        <div class="how-arrow" aria-hidden="true">→</div>
-        <div class="how-step">
-            <div class="how-step-number">3</div>
-            <h3>Kick off</h3>
-            <p>We start, either embedded in your team or as a dedicated external partner. Regular check-ins, tangible deliverables, no black boxes.</p>
-        </div>
+<section class="px-section" id="process">
+    <div class="px-wrap">
+        <header class="px-section-head">
+            <h2>How an engagement starts</h2>
+            <p>Three steps lead from the first email to work on your code.</p>
+        </header>
+        <ol class="px-flow px-flow--3">
+            <li class="px-flow-step">
+                <span class="px-flow-code">Step 1</span>
+                <h3>Email</h3>
+                <p>Describe your project and what you need in a short email. An NDA can wait until we talk about details.</p>
+            </li>
+            <li class="px-flow-step">
+                <span class="px-flow-code">Step 2</span>
+                <h3>Scoping call</h3>
+                <p>In a 30-minute call we agree on scope, deliverables and what success looks like. A written proposal follows by email within two business days.</p>
+            </li>
+            <li class="px-flow-step">
+                <span class="px-flow-code">Step 3</span>
+                <h3>Kick-off</h3>
+                <p>We start, either embedded in your team or as an external partner, with regular check-ins and deliverables you can review.</p>
+            </li>
+        </ol>
     </div>
 </section>
 
-<!-- CTA -->
-<section class="page-section page-section--tinted support-cta-section">
-    <div class="support-cta-inner">
-        <div class="section-label">Ready to start?</div>
-        <h2 class="section-title">Let's build something fast together.</h2>
-        <p class="section-lead">
-            Drop us a line. We respond within one business day.
-        </p>
-        <div class="support-cta-buttons">
-            <a href="mailto:info@zweiundeins.gmbh" class="btn btn-primary btn-lg">
-                ✉ info@zweiundeins.gmbh
-            </a>
-            <a href="https://zweiundeins.gmbh" class="btn btn-secondary btn-lg" target="_blank" rel="noopener">
-                Visit zweiundeins.gmbh ↗
-            </a>
+<section class="px-section px-section--last" id="contact">
+    <div class="px-wrap px-cta">
+        <header class="px-section-head">
+            <h2>Contact zwei und eins gmbh</h2>
+            <p>Write to us about your project. We reply within one business day.</p>
+        </header>
+        <div class="px-actions">
+            <a href="mailto:info@zweiundeins.gmbh" class="px-btn px-btn--primary">info@zweiundeins.gmbh</a>
+            <a href="https://zweiundeins.gmbh" class="px-btn" target="_blank" rel="noopener">Visit zweiundeins.gmbh <span class="px-ext" aria-hidden="true"></span></a>
         </div>
     </div>
 </section>
