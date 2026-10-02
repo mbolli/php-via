@@ -173,7 +173,7 @@ $app->setGlobalState('messages', []);
 
 // In an action:
 $send = $c->action(function (Context $c) use ($app): void {
-    $msg = ['user' => substr($c->getId(), -4), 'text' => $_POST['text'] ?? ''];
+    $msg = ['user' => substr($c->getId(), -4), 'text' => (string) $c->input('text', '')];
     $app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?? [], $msg], -50)); // keep last 50
 
     $app->broadcast(Scope::routeScope('/chat'));

@@ -45,10 +45,10 @@ $increment->url();  // '/_action/increment'
     </div>
 
     <h2 id="post-data">Reading POST data</h2>
-    <p>POST body and query params are accessible via <code>$_POST</code> and <code>$_GET</code> inside the callback:</p>
+    <p>Read POST body and query parameters with <code>$c->input()</code> inside the callback. OpenSwoole does not fill <code>$_POST</code> or <code>$_GET</code>:</p>
     {% code 'php' %}{% verbatim %}
 $vote = $c->action(function (Context $c) use ($app, $votes): void {
-    $option = $_POST['option'] ?? ($_GET['option'] ?? null);
+    $option = $c->input('option');
     if (!in_array($option, ['a', 'b', 'c'], true)) {
         return; // ignore unknown values
     }
