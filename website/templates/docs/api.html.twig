@@ -654,7 +654,8 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
         <code>withImportMap(array $imports, array $integrity = [])</code> adds entries to the page's import
         map: <code>$imports</code> maps module specifiers to URLs, <code>$integrity</code> module URLs to
         Subresource Integrity values. Calls merge, and a later entry for the same key wins. A URL has to be
-        absolute or start with <code>/</code>, <code>./</code> or <code>../</code>, a specifier ending in
+        absolute or start with <code>/</code> (every page gets the same map, so <code>./</code> would
+        resolve differently per route), a specifier ending in
         <code>/</code> needs a URL ending in <code>/</code>, and an integrity value is
         <code>sha256-</code>, <code>sha384-</code> or <code>sha512-</code> with the base64 digest; anything
         else throws <code>\InvalidArgumentException</code>, and so does an entry for

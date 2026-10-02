@@ -36,7 +36,7 @@ describe('Config::withImportMap()', function (): void {
     test('merges imports and integrity across calls, a later entry replacing an earlier one', function (): void {
         $config = (new Config())
             ->withImportMap(['chart' => '/js/chart.js', 'lib/' => 'https://cdn.example.com/lib/'], ['/js/chart.js' => sri('a')])
-            ->withImportMap(['chart' => '/js/chart-2.js', 'icons' => './icons.js'], ['/js/chart-2.js' => sri('b', 'sha512')])
+            ->withImportMap(['chart' => '/js/chart-2.js', 'icons' => '//cdn.example.com/icons.js'], ['/js/chart-2.js' => sri('b', 'sha512')])
             ->withImportMap([], ['/js/chart.js' => sri('c', 'sha256')])
         ;
 
@@ -45,7 +45,7 @@ describe('Config::withImportMap()', function (): void {
                 'datastar' => $config->getDatastarUrl(),
                 'chart' => '/js/chart-2.js',
                 'lib/' => 'https://cdn.example.com/lib/',
-                'icons' => './icons.js',
+                'icons' => '//cdn.example.com/icons.js',
             ],
             'integrity' => [
                 '/js/chart.js' => sri('c', 'sha256'),
@@ -81,6 +81,10 @@ describe('Config::withImportMap()', function (): void {
         'a URL that is not a string' => [['chart' => 42], []],
         'an empty URL' => [['chart' => ''], []],
         'a bare URL' => [['chart' => 'chart.js'], []],
+        // The same map goes into every page, and these resolve against each page's URL
+        'a URL relative to the page' => [['chart' => './chart.js'], []],
+        'a URL relative to the page\'s parent' => [['chart' => '../js/chart.js'], []],
+        'integrity for a URL relative to the page' => [[], ['./chart.js' => sri('a')]],
         'a URL that is not UTF-8' => [['chart' => "/js/\xff.js"], []],
         'a prefix specifier without a prefix URL' => [['lib/' => '/js/lib.js'], []],
         'integrity for a bare URL' => [[], ['chart.js' => sri('a')]],
@@ -143,6 +147,14 @@ describe('Config::getImportMapTag()', function (): void {
             ->and(importMapFromTag($more))->toBe($config->getImportMap())
             ->and(array_keys(importMapFromTag($more)['imports']))->toBe(['datastar', 'chart', 'icons'])
         ;
+    });
+
+    test('holds the JSON the CSP docs tell apps to hash', function (): void {
+        $config = (new Config())->withDatastarRocket()->withImportMap(['chart' => 'https://cdn.example.com/chart.js?v=2&min=1']);
+
+        expect($config->getImportMapTag())->toBe(
+            '<script type="importmap">' . json_encode($config->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) . '</script>'
+        );
     });
 
     test('keeps the JSON from closing the script or opening a comment', function (): void {

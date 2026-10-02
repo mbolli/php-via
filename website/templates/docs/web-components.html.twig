@@ -85,8 +85,8 @@ $app = new Via(
         component then fails to import <code>datastar</code>. Allow the map by its SHA-256, which changes
         with the bundle and with every entry, or write the tag yourself with your nonce in a
         <a href="#own-shell">custom shell or Twig layout</a>.
-        <code>json_encode($config-&gt;getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG)</code> gives
-        its content.
+        <code>json_encode($config-&gt;getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)</code>
+        gives its content, byte for byte.
     </p>
 
     <h2 id="own-shell">The import map in a custom shell or Twig layout</h2>
@@ -187,10 +187,13 @@ $config = (new Config())
     <p>
         Each entry is checked when you add it. One the browser would ignore throws an
         <code>\InvalidArgumentException</code>: a URL that is neither absolute nor starts with
-        <code>/</code>, <code>./</code> or <code>../</code>, a specifier ending in <code>/</code> whose URL
-        does not, or a hash that is not <code>sha256-</code>, <code>sha384-</code> or <code>sha512-</code>
-        with a base64 digest of that algorithm's length. php-via maps <code>datastar</code> itself, so an
-        entry for it throws too.
+        <code>/</code>, a specifier ending in <code>/</code> whose URL does not, or a hash that is not
+        <code>sha256-</code>, <code>sha384-</code> or <code>sha512-</code> with a base64 digest of that
+        algorithm's length. A URL starting with <code>./</code> or <code>../</code> throws too: every page
+        gets the same map, and the browser resolves such a URL against each page's own URL, so it would
+        point at another file on <code>/docs/intro</code> than on <code>/</code>. Under
+        <code>withBasePath()</code>, start your URLs with <code>getBasePath()</code>. php-via maps
+        <code>datastar</code> itself, so an entry for it throws as well.
     </p>
 
     <h3 id="pin-datastar">Pinning Datastar</h3>

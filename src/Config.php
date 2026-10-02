@@ -405,12 +405,13 @@ class Config {
      * );
      * ```
      *
-     * @param array<string, string> $imports   module specifier => URL, absolute or starting with '/', './' or '../';
-     *                                         a specifier ending in '/' maps a prefix and needs a URL ending in '/'
-     * @param array<string, string> $integrity module URL => Subresource Integrity value ('sha256-', 'sha384-' or
-     *                                         'sha512-' and the base64 digest), checked when the browser loads the module
+     * @param array<string, string> $imports   module specifier => URL, absolute or starting with '/' (with the base path
+     *                                         from getBasePath()); a specifier ending in '/' maps a prefix and needs a URL ending in '/'
+     * @param array<string, string> $integrity module URL, written as in $imports => Subresource Integrity value ('sha256-',
+     *                                         'sha384-' or 'sha512-' and the base64 digest), checked when the browser loads the module
      *
-     * @throws \InvalidArgumentException for an entry the browser would ignore, or one for 'datastar'
+     * @throws \InvalidArgumentException for an entry the browser would ignore, a URL starting with './' or '../',
+     *                                   which would resolve differently on every route, or an entry for 'datastar'
      */
     public function withImportMap(array $imports, array $integrity = []): self {
         $newImports = [];
@@ -1392,8 +1393,9 @@ class Config {
      */
     private static function importMapUrl(mixed $value, string $what): string {
         $url = self::importMapString($value, $what);
-        if (preg_match('#^(?:\.{0,2}/|[a-zA-Z][a-zA-Z0-9+.-]*:)#', $url) !== 1) {
-            throw new \InvalidArgumentException("Invalid import map {$what}: expected an absolute URL or one starting with '/', './' or '../', got '{$url}'");
+        // Every page gets the same map, and the browser resolves './' and '../' against each page's URL
+        if (preg_match('#^(?:/|[a-zA-Z][a-zA-Z0-9+.-]*:)#', $url) !== 1) {
+            throw new \InvalidArgumentException("Invalid import map {$what}: expected an absolute URL or one starting with '/', got '{$url}'");
         }
 
         return $url;
