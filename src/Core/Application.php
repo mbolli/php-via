@@ -813,6 +813,7 @@ class Application {
         // Add global variables
         $this->twig->addGlobal('basePath', $this->config->getBasePath());
         $this->twig->addGlobal('datastarUrl', $this->config->getDatastarUrl());
+        $this->twig->addGlobal('importMap', new Markup($this->config->getImportMapTag(), 'UTF-8'));
 
         $this->addTwigFunctions();
     }

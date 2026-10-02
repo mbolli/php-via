@@ -36,24 +36,27 @@ describe('bundled Datastar files', function (): void {
     });
 });
 
-describe('DatastarBundle versions', function (): void {
-    test('the version is the first 10 hex digits of the sha256 and follows the content', function (): void {
+describe('DatastarBundle fingerprints', function (): void {
+    test('the version is the first 10 hex digits of the sha256, the integrity the sha384, and both follow the content', function (): void {
         $file = sys_get_temp_dir() . '/via-ds-' . bin2hex(random_bytes(6)) . '.js';
         file_put_contents($file, 'export const a = 1');
-        $first = DatastarBundle::version($file);
+        $first = DatastarBundle::fingerprint($file);
         file_put_contents($file, 'export const a = 2');
-        $second = DatastarBundle::version($file);
+        $second = DatastarBundle::fingerprint($file);
         @unlink($file);
 
-        expect($first)->toBe(substr(hash('sha256', 'export const a = 1'), 0, 10))
-            ->and($second)->toBe(substr(hash('sha256', 'export const a = 2'), 0, 10))
-            ->and($second)->not->toBe($first)
-            ->and(DatastarBundle::url('/app/', $second))->toBe('/app/datastar.js?v=' . $second)
+        expect($first)->toBe([
+            'version' => substr(hash('sha256', 'export const a = 1'), 0, 10),
+            'integrity' => 'sha384-' . base64_encode(hash('sha384', 'export const a = 1', true)),
+        ])
+            ->and($second['version'])->toBe(substr(hash('sha256', 'export const a = 2'), 0, 10))
+            ->and($second['integrity'])->not->toBe($first['integrity'])
+            ->and(DatastarBundle::url('/app/', $second['version']))->toBe('/app/datastar.js?v=' . $second['version'])
         ;
     });
 
     test('a missing file has no version and an unversioned URL', function (): void {
-        expect(DatastarBundle::version(sys_get_temp_dir() . '/via-ds-missing.js'))->toBeNull()
+        expect(DatastarBundle::fingerprint(sys_get_temp_dir() . '/via-ds-missing.js')['version'])->toBeNull()
             ->and(DatastarBundle::url('/', null))->toBe('/datastar.js')
         ;
     });

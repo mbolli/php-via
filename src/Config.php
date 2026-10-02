@@ -27,8 +27,17 @@ class Config {
 
     private bool $datastarRocket = false;
 
-    /** @var array<string, ?string> Bundle path => content version, hashed once per path */
-    private array $datastarVersions = [];
+    /** @var array<string, array{version: ?string, integrity: ?string}> Bundle path => its hashes, computed once per path */
+    private array $datastarFingerprints = [];
+
+    /** @var array<string, string> Specifier => URL, from withImportMap() */
+    private array $importMapImports = [];
+
+    /** @var array<string, string> Module URL => integrity, from withImportMap() */
+    private array $importMapIntegrity = [];
+
+    /** @var null|array{string, string} Datastar URL the cached import map tag was built with, and the tag */
+    private ?array $importMapTag = null;
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -342,8 +351,8 @@ class Config {
      * A page must run exactly one Datastar module. Rocket components import it by the bare specifier
      * 'datastar', so an import map has to map 'datastar' to the URL Datastar is loaded from, byte for
      * byte, query string included, before any module script; another URL loads a second engine. The
-     * default shell emits both from getDatastarUrl(); a custom shell uses the {{ datastar_import_map }}
-     * and {{ datastar_url }} placeholders, a Twig layout the datastarUrl global.
+     * default shell emits both from getDatastarUrl(); a custom shell uses the {{ import_map }} and
+     * {{ datastar_url }} placeholders, a Twig layout the importMap and datastarUrl variables.
      */
     public function withDatastarRocket(bool $enabled = true): self {
         $this->datastarRocket = $enabled;
@@ -360,12 +369,112 @@ class Config {
      * busts caches, e.g. '/datastar.js?v=727844adfc'. The hash is computed once per bundle.
      */
     public function getDatastarUrl(): string {
-        $path = DatastarBundle::path($this->datastarRocket);
-        if (!\array_key_exists($path, $this->datastarVersions)) {
-            $this->datastarVersions[$path] = DatastarBundle::version($path);
+        return DatastarBundle::url($this->basePath, $this->datastarFingerprint()['version']);
+    }
+
+    /**
+     * Subresource Integrity value (sha384) of the Datastar bundle served at /datastar.js, computed
+     * once per bundle together with the version in getDatastarUrl().
+     *
+     * php-via does not pin Datastar by itself, since a proxy that rewrites the file would then break
+     * every page. To pin it, after withDatastarRocket() and withBasePath():
+     *
+     * ```php
+     * $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
+     * ```
+     *
+     * @throws \RuntimeException if the bundle cannot be read
+     */
+    public function getDatastarIntegrity(): string {
+        return $this->datastarFingerprint()['integrity']
+            ?? throw new \RuntimeException('Cannot read the Datastar bundle ' . DatastarBundle::path($this->datastarRocket));
+    }
+
+    /**
+     * Add entries to the import map php-via writes into its pages, merged with earlier calls: a later
+     * URL for the same specifier, or integrity for the same URL, replaces the earlier one.
+     *
+     * The map is written when this added entries or withDatastarRocket() is on: by the default shell,
+     * by a custom shell's {{ import_map }} placeholder and by a Twig layout's importMap variable. It
+     * always maps 'datastar' to getDatastarUrl(), so that specifier is reserved.
+     *
+     * ```php
+     * $config->withImportMap(
+     *     ['chart' => '/js/chart.min.js'],
+     *     ['https://cdn.example.com/c/slider@1a2b/slider.min.js' => 'sha384-...'],
+     * );
+     * ```
+     *
+     * @param array<string, string> $imports   module specifier => URL, absolute or starting with '/', './' or '../';
+     *                                         a specifier ending in '/' maps a prefix and needs a URL ending in '/'
+     * @param array<string, string> $integrity module URL => Subresource Integrity value ('sha256-', 'sha384-' or
+     *                                         'sha512-' and the base64 digest), checked when the browser loads the module
+     *
+     * @throws \InvalidArgumentException for an entry the browser would ignore, or one for 'datastar'
+     */
+    public function withImportMap(array $imports, array $integrity = []): self {
+        $newImports = [];
+        foreach ($imports as $specifier => $url) {
+            $specifier = self::importMapString($specifier, 'specifier');
+            if ($specifier === 'datastar') {
+                throw new \InvalidArgumentException("The import map specifier 'datastar' is reserved: php-via maps it to getDatastarUrl()");
+            }
+            $url = self::importMapUrl($url, "URL for '{$specifier}'");
+            if (str_ends_with($specifier, '/') && !str_ends_with($url, '/')) {
+                throw new \InvalidArgumentException("Import map specifier '{$specifier}' ends in '/', so its URL has to end in '/' too, got '{$url}'");
+            }
+            $newImports[$specifier] = $url;
         }
 
-        return DatastarBundle::url($this->basePath, $this->datastarVersions[$path]);
+        $newIntegrity = [];
+        foreach ($integrity as $url => $value) {
+            $url = self::importMapUrl($url, 'integrity URL');
+            $value = self::importMapString($value, "integrity for '{$url}'");
+            if (!self::isIntegrity($value)) {
+                throw new \InvalidArgumentException("Invalid integrity for '{$url}': expected 'sha256-', 'sha384-' or 'sha512-' and the base64 digest, got '{$value}'");
+            }
+            $newIntegrity[$url] = $value;
+        }
+
+        $this->importMapImports = array_replace($this->importMapImports, $newImports);
+        $this->importMapIntegrity = array_replace($this->importMapIntegrity, $newIntegrity);
+        $this->importMapTag = null;
+
+        return $this;
+    }
+
+    /**
+     * The import map php-via writes into its pages: 'datastar' => getDatastarUrl() first, then the
+     * entries from withImportMap(), and 'integrity' only when there is any.
+     *
+     * @return array{imports: array<string, string>, integrity?: array<string, string>}
+     */
+    public function getImportMap(): array {
+        $map = ['imports' => ['datastar' => $this->getDatastarUrl()] + $this->importMapImports];
+        if ($this->importMapIntegrity !== []) {
+            $map['integrity'] = $this->importMapIntegrity;
+        }
+
+        return $map;
+    }
+
+    /**
+     * getImportMap() as a <script type="importmap"> tag, or '' when php-via writes no map: without
+     * withImportMap() entries and withDatastarRocket(). The default shell, {{ import_map }} and the
+     * importMap Twig variable hold this tag.
+     */
+    public function getImportMapTag(): string {
+        if (!$this->datastarRocket && $this->importMapImports === [] && $this->importMapIntegrity === []) {
+            return '';
+        }
+
+        $datastarUrl = $this->getDatastarUrl();
+        if ($this->importMapTag === null || $this->importMapTag[0] !== $datastarUrl) {
+            $json = json_encode($this->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR);
+            $this->importMapTag = [$datastarUrl, '<script type="importmap">' . $json . '</script>'];
+        }
+
+        return $this->importMapTag[1];
     }
 
     public function withShellTemplate(string $path): self {
@@ -1255,5 +1364,55 @@ class Config {
 
     public function getTraceMaxBytes(): int {
         return $this->traceMaxBytes;
+    }
+
+    /**
+     * @return array{version: ?string, integrity: ?string}
+     */
+    private function datastarFingerprint(): array {
+        $path = DatastarBundle::path($this->datastarRocket);
+
+        return $this->datastarFingerprints[$path] ??= DatastarBundle::fingerprint($path);
+    }
+
+    /**
+     * @param mixed $value a key or value of a withImportMap() array, whose types PHP does not check; a list
+     *                     or a numeric specifier arrives as an int key
+     */
+    private static function importMapString(mixed $value, string $what): string {
+        if (!\is_string($value) || $value === '' || !mb_check_encoding($value, 'UTF-8')) {
+            throw new \InvalidArgumentException("Invalid import map {$what}: expected a non-empty UTF-8 string, got " . get_debug_type($value));
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param mixed $value a key or value of a withImportMap() array, whose types PHP does not check
+     */
+    private static function importMapUrl(mixed $value, string $what): string {
+        $url = self::importMapString($value, $what);
+        if (preg_match('#^(?:\.{0,2}/|[a-zA-Z][a-zA-Z0-9+.-]*:)#', $url) !== 1) {
+            throw new \InvalidArgumentException("Invalid import map {$what}: expected an absolute URL or one starting with '/', './' or '../', got '{$url}'");
+        }
+
+        return $url;
+    }
+
+    /**
+     * One or more space-separated hashes whose base64 digest has the algorithm's length.
+     */
+    private static function isIntegrity(string $value): bool {
+        foreach (explode(' ', $value) as $hash) {
+            if (preg_match('#^sha(256|384|512)-([A-Za-z0-9+/]+={0,2})$#', $hash, $m) !== 1) {
+                return false;
+            }
+            $digest = base64_decode($m[2], true);
+            if ($digest === false || \strlen($digest) * 8 !== (int) $m[1] || base64_encode($digest) !== $m[2]) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

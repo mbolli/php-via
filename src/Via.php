@@ -1783,7 +1783,7 @@ class Via {
             $context->getId(),
             $this->config->getBasePath(),
             $this->config->getDatastarUrl(),
-            importMap: $this->config->isDatastarRocketEnabled(),
+            $this->config->getImportMapTag(),
         );
 
         // Inject the Dev Bar overlay before </body> when tracing is enabled.

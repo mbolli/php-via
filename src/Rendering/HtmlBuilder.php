@@ -19,7 +19,7 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
-    /** @var array<string, true> Shell paths already checked for a mismatched import map */
+    /** @var array<string, true> Shell paths already checked for a missing or mismatched import map */
     private array $checkedShells = [];
 
     /**
@@ -63,11 +63,11 @@ class HtmlBuilder {
      * @param string      $contextId   Context ID for initial signals
      * @param string      $basePath    Base path for URLs
      * @param null|string $datastarUrl URL of the Datastar bundle, '<basePath>datastar.js' when null
-     * @param bool        $importMap   Fill {{ datastar_import_map }}, which stays empty otherwise (Rocket build only)
+     * @param string      $importMap   The import map tag for {{ import_map }}, see Config::getImportMapTag()
      *
      * @return string Complete HTML document
      */
-    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null, bool $importMap = false): string {
+    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null, string $importMap = ''): string {
         if (stripos($content, '<html') !== false) {
             return $this->injectIntoDocument($content, $context, initial: true);
         }
@@ -96,7 +96,7 @@ class HtmlBuilder {
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
             '{{ datastar_url }}' => htmlspecialchars($datastarUrl, ENT_QUOTES, 'UTF-8'),
-            '{{ datastar_import_map }}' => $importMap ? self::datastarImportMap($datastarUrl) : '',
+            '{{ import_map }}' => $importMap,
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
             '{{ foot_content }}' => implode("\n", $footIncludes),
@@ -111,10 +111,14 @@ class HtmlBuilder {
             throw new \RuntimeException("Failed to load shell template from: {$shellPath}");
         }
 
-        if ($importMap && !isset($this->checkedShells[$shellPath])) {
+        if ($importMap !== '' && !isset($this->checkedShells[$shellPath])) {
             $this->checkedShells[$shellPath] = true;
-            if (str_contains($shell, '{{ datastar_import_map }}') && !str_contains($shell, '{{ datastar_url }}')) {
-                $this->log('warning', "Shell {$shellPath} has {{ datastar_import_map }} but loads Datastar without {{ datastar_url }}: Rocket components will start a second Datastar engine", $context);
+            if (!str_contains($shell, '{{ import_map }}')) {
+                if (!str_contains($shell, 'importmap')) {
+                    $this->log('warning', "Shell {$shellPath} has no {{ import_map }}: the import map from withDatastarRocket() or withImportMap() is left out", $context);
+                }
+            } elseif (!str_contains($shell, '{{ datastar_url }}')) {
+                $this->log('warning', "Shell {$shellPath} has {{ import_map }} but loads Datastar without {{ datastar_url }}: modules that import 'datastar' will start a second Datastar engine", $context);
             }
         }
 
@@ -225,16 +229,6 @@ class HtmlBuilder {
         }
 
         return '<meta data-signals__ifmissing="' . htmlspecialchars($json, ENT_QUOTES, 'UTF-8') . '">';
-    }
-
-    /**
-     * Import map that resolves the bare specifier 'datastar' (what Rocket components import) to the
-     * module the page loads from $datastarUrl, so the page runs one Datastar engine.
-     */
-    private static function datastarImportMap(string $datastarUrl): string {
-        $json = json_encode(['imports' => ['datastar' => $datastarUrl]], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR);
-
-        return '<script type="importmap">' . $json . '</script>';
     }
 
     /**

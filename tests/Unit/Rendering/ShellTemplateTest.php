@@ -33,30 +33,36 @@ describe('default shell template', function (): void {
 });
 
 /**
- * The import map's 'datastar' URL (null without a map), the Datastar script's src (decoded) and their offsets.
+ * The page's import map (decoded, null without one), the Datastar script's src (decoded) and their offsets.
  *
- * @return array{0: ?string, 1: string, 2: ?int, 3: int}
+ * @return array{0: null|array<string, array<string, string>>, 1: string, 2: ?int, 3: int}
  */
-function shellDatastarUrls(string $html): array {
+function shellImportMap(string $html): array {
     preg_match('#<script type="module" src="([^"]*)"></script>\s*</body>#', $html, $src, PREG_OFFSET_CAPTURE);
     $script = html_entity_decode($src[1][0], ENT_QUOTES | ENT_HTML5, 'UTF-8');
     if (preg_match('#<script type="importmap">(.*?)</script>#s', $html, $map, PREG_OFFSET_CAPTURE) !== 1) {
         return [null, $script, null, $src[0][1]];
     }
-    $imports = json_decode($map[1][0], true, flags: JSON_THROW_ON_ERROR)['imports'];
 
-    return [$imports['datastar'], $script, $map[0][1], $src[0][1]];
+    return [json_decode($map[1][0], true, flags: JSON_THROW_ON_ERROR), $script, $map[0][1], $src[0][1]];
 }
 
-describe('the Datastar import map in the default shell', function (): void {
+function shellPage(Config $config, string $headScript = ''): string {
+    $via = createVia($config);
+    if ($headScript !== '') {
+        $via->appendToHead($headScript);
+    }
+    $ctx = new Context(testContextId(), '/', $via);
+    $ctx->view(fn () => '<p>hi</p>');
+
+    return $via->buildHtmlDocument($ctx);
+}
+
+describe('the import map in the default shell', function (): void {
     test('maps datastar to exactly the versioned URL the page loads the Rocket build from', function (Config $config): void {
-        $via = createVia($config);
-        $ctx = new Context(testContextId(), '/', $via);
-        $ctx->view(fn () => '<p>hi</p>');
+        [$map, $src, $mapAt, $srcAt] = shellImportMap(shellPage($config));
 
-        [$mapped, $src, $mapAt, $srcAt] = shellDatastarUrls($via->buildHtmlDocument($ctx));
-
-        expect($mapped)->toBe($src)
+        expect($map)->toBe(['imports' => ['datastar' => $src]])
             ->and($src)->toBe($config->getDatastarUrl())
             ->and($src)->toMatch('#^/(app/)?datastar\.js\?v=[0-9a-f]{10}$#')
             ->and($mapAt)->toBeLessThan($srcAt)
@@ -66,44 +72,48 @@ describe('the Datastar import map in the default shell', function (): void {
         'under a base path' => fn () => (new Config())->withDatastarRocket()->withBasePath('/app'),
     ]);
 
-    test('is left out with the plain bundle, which loads from the versioned URL', function (): void {
+    test('is left out with the plain bundle and no entries, which loads from the versioned URL', function (): void {
         $config = new Config();
-        $via = createVia($config);
-        $ctx = new Context(testContextId(), '/', $via);
-        $ctx->view(fn () => '<p>hi</p>');
+        $html = shellPage($config);
+        [$map, $src] = shellImportMap($html);
 
-        $html = $via->buildHtmlDocument($ctx);
-        [$mapped, $src] = shellDatastarUrls($html);
-
-        expect($mapped)->toBeNull()
+        expect($map)->toBeNull()
             ->and($html)->not->toContain('importmap')
             ->and($src)->toBe($config->getDatastarUrl())
         ;
     });
 
-    test('comes before module scripts added to the head', function (): void {
-        $via = createVia((new Config())->withDatastarRocket());
-        $via->appendToHead('<script type="module" src="/components/sb-input.mjs"></script>');
-        $ctx = new Context(testContextId(), '/', $via);
-        $ctx->view(fn () => '<p>hi</p>');
+    test('is written with the plain bundle once the app adds entries', function (): void {
+        $integrity = 'sha384-' . base64_encode(hash('sha384', 'chart', true));
+        $config = (new Config())->withImportMap(['chart' => '/js/chart.js'], ['/js/chart.js' => $integrity]);
 
-        $html = $via->buildHtmlDocument($ctx);
+        [$map, $src] = shellImportMap(shellPage($config));
 
-        expect(strpos($html, '<script type="importmap">'))->toBeLessThan(strpos($html, '<script type="module"'));
+        expect($map)->toBe(['imports' => ['datastar' => $src, 'chart' => '/js/chart.js'], 'integrity' => ['/js/chart.js' => $integrity]])
+            ->and($src)->toBe((new Config())->getDatastarUrl())
+        ;
     });
 
-    test('escapes the URL for the JSON and the attribute alike', function (): void {
-        $via = createVia();
-        $ctx = new Context(testContextId(), '/', $via);
+    test('comes before module scripts added to the head', function (Config $config): void {
+        $html = shellPage($config, '<script type="module" src="/components/sb-input.mjs"></script>');
+
+        expect(strpos($html, '<script type="importmap">'))->toBeInt()->toBeLessThan(strpos($html, '<script type="module"'));
+    })->with([
+        'Rocket' => fn () => (new Config())->withDatastarRocket(),
+        'entries' => fn () => (new Config())->withImportMap(['sb-input' => '/components/sb-input.mjs']),
+    ]);
+
+    test('escapes the Datastar URL for the attribute and writes the import map tag as given', function (): void {
+        $ctx = new Context(testContextId(), '/', createVia());
         $url = '/x"</script><!--&\'ü/datastar.js?v=1&b=2';
+        $tag = '<script type="importmap">{"imports":{"datastar":"/x/datastar.js"}}</script>';
 
-        $html = (new HtmlBuilder())->buildDocument('<p>hi</p>', $ctx, $ctx->getId(), '/x/', $url, importMap: true);
-        [$mapped, $src] = shellDatastarUrls($html);
-        preg_match('#<script type="importmap">(.*?)</script>#s', $html, $map);
+        $html = (new HtmlBuilder())->buildDocument('<p>hi</p>', $ctx, $ctx->getId(), '/x/', $url, $tag);
+        [, $src] = shellImportMap($html);
 
-        expect($mapped)->toBe($url)
-            ->and($src)->toBe($url)
-            ->and($map[1])->not->toContain('<')
+        expect($src)->toBe($url)
+            ->and($html)->toContain('src="/x&quot;&lt;/script&gt;&lt;!--&amp;&#039;ü/datastar.js?v=1&amp;b=2"')
+            ->and(substr_count($html, $tag))->toBe(1)
         ;
     });
 });
@@ -118,6 +128,12 @@ describe('a custom shell with the import map', function (): void {
 
             return $path;
         };
+        $this->logs = [];
+        $this->builder = fn (string $markup): HtmlBuilder => new HtmlBuilder(
+            ($this->shell)($markup),
+            function (string $level, string $message): void { $this->logs[] = [$level, $message]; },
+        );
+        $this->tag = '<script type="importmap">{"imports":{"datastar":"/datastar.js?v=1"}}</script>';
     });
 
     afterEach(function (): void {
@@ -126,52 +142,87 @@ describe('a custom shell with the import map', function (): void {
         }
     });
 
-    test('warns once when it loads Datastar without {{ datastar_url }}', function (): void {
-        $logs = [];
-        $builder = new HtmlBuilder(
-            ($this->shell)('<head>{{ datastar_import_map }}</head><body>{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script></body>'),
-            function (string $level, string $message) use (&$logs): void { $logs[] = [$level, $message]; },
-        );
+    test('fills {{ import_map }} and {{ datastar_url }}', function (): void {
+        $builder = ($this->builder)('{{ import_map }}{{ content }}<script type="module" src="{{ datastar_url }}"></script>');
         $ctx = new Context(testContextId(), '/', createVia());
 
-        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', importMap: true);
-        $builder->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', importMap: true);
-
-        expect($logs)->toHaveCount(1)
-            ->and($logs[0][0])->toBe('warning')
-            ->and($logs[0][1])->toContain('second Datastar engine')
+        expect($builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', $this->tag))
+            ->toBe($this->tag . '<p>a</p><script type="module" src="/datastar.js?v=1"></script>')
+            ->and($builder->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1'))
+            ->toBe('<p>b</p><script type="module" src="/datastar.js?v=1"></script>')
+            ->and($this->logs)->toBe([])
         ;
     });
 
-    test('does not warn when it loads {{ datastar_url }} or the plain bundle runs', function (): void {
-        $logs = [];
-        $logger = function (string $level, string $message) use (&$logs): void { $logs[] = $message; };
-        $matching = new HtmlBuilder(($this->shell)('{{ datastar_import_map }}{{ content }}<script type="module" src="{{ datastar_url }}"></script>'), $logger);
-        $plain = new HtmlBuilder(($this->shell)('{{ datastar_import_map }}{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script>'), $logger);
+    test('warns once when it loads Datastar without {{ datastar_url }}', function (): void {
+        $builder = ($this->builder)('<head>{{ import_map }}</head><body>{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script></body>');
         $ctx = new Context(testContextId(), '/', createVia());
 
-        $matching->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', importMap: true);
+        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', $this->tag);
+        $builder->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', $this->tag);
+
+        expect($this->logs)->toHaveCount(1)
+            ->and($this->logs[0][0])->toBe('warning')
+            ->and($this->logs[0][1])->toContain('second Datastar engine')
+        ;
+    });
+
+    test('warns once when a map is due and the shell has no {{ import_map }}', function (): void {
+        $builder = ($this->builder)('{{ content }}<script type="module" src="{{ datastar_url }}"></script>');
+        $ctx = new Context(testContextId(), '/', createVia());
+
+        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', $this->tag);
+        $html = $builder->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', $this->tag);
+
+        expect($this->logs)->toHaveCount(1)
+            ->and($this->logs[0][1])->toContain('has no {{ import_map }}')
+            ->and($html)->not->toContain('importmap')
+        ;
+    });
+
+    test('does not warn when the shell writes its own map, or no map is due', function (): void {
+        $own = ($this->builder)('<script type="importmap" nonce="n">{"imports":{}}</script>{{ content }}<script type="module" src="{{ datastar_url }}"></script>');
+        $plain = ($this->builder)('{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script>');
+        $ctx = new Context(testContextId(), '/', createVia());
+
+        $own->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1', $this->tag);
         $html = $plain->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/', '/datastar.js?v=1');
 
-        expect($logs)->toBe([])
+        expect($this->logs)->toBe([])
             ->and($html)->toBe('<p>b</p><script type="module" src="/datastar.js"></script>')
         ;
     });
 });
 
-describe('datastarUrl in Twig templates', function (): void {
-    test('follows the config when it changes after new Via()', function (): void {
+describe('datastarUrl and importMap in Twig templates', function (): void {
+    test('follow the config when it changes after new Via()', function (): void {
         $via = createVia();
-        $via->getTwig()->setLoader(new ArrayLoader(['layout.html.twig' => '{{ datastarUrl }}']));
+        $via->getTwig()->setLoader(new ArrayLoader(['layout.html.twig' => '{{ datastarUrl }}|{{ importMap }}']));
         $ctx = new Context(testContextId(), '/', $via);
         $plain = $ctx->render('layout.html.twig');
 
-        $via->getConfig()->withDatastarRocket();
+        $config = $via->getConfig()->withDatastarRocket();
+        $rocket = $config->getDatastarUrl() . '|' . $config->getImportMapTag();
 
-        expect($plain)->toBe((new Config())->getDatastarUrl())
-            ->and($ctx->render('layout.html.twig'))->toBe($via->getConfig()->getDatastarUrl())
-            ->and($ctx->renderString('{{ datastarUrl }}'))->toBe($via->getConfig()->getDatastarUrl())
-            ->and($via->getConfig()->getDatastarUrl())->not->toBe($plain)
+        expect($plain)->toBe((new Config())->getDatastarUrl() . '|')
+            ->and($ctx->render('layout.html.twig'))->toBe($rocket)
+            ->and($ctx->renderString('{{ datastarUrl }}|{{ importMap }}'))->toBe($rocket)
+            ->and($config->getImportMapTag())->toStartWith('<script type="importmap">{"imports":{"datastar":"' . $config->getDatastarUrl() . '"')
+        ;
+
+        $config->withImportMap(['chart' => '/js/chart.js']);
+
+        expect($ctx->render('layout.html.twig'))->toBe($config->getDatastarUrl() . '|' . $config->getImportMapTag())
+            ->and($config->getImportMapTag())->toContain('"chart":"/js/chart.js"')
+        ;
+    });
+
+    test('a template rendered outside a context gets the values from new Via()', function (): void {
+        $config = (new Config())->withImportMap(['chart' => '/js/chart.js']);
+        $via = createVia($config);
+
+        expect($via->getTwig()->createTemplate('{{ datastarUrl }}|{{ importMap }}')->render([]))
+            ->toBe($config->getDatastarUrl() . '|' . $config->getImportMapTag())
         ;
     });
 });

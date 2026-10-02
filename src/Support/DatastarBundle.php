@@ -18,12 +18,21 @@ final class DatastarBundle {
     }
 
     /**
-     * First 10 hex digits of the file's SHA-256, or null when it cannot be read.
+     * The file's version, the first 10 hex digits of its SHA-256, and its Subresource Integrity value
+     * (sha384), both null when the file cannot be read.
+     *
+     * @return array{version: ?string, integrity: ?string}
      */
-    public static function version(string $path): ?string {
-        $hash = is_file($path) ? hash_file('sha256', $path) : false;
+    public static function fingerprint(string $path): array {
+        $bytes = is_file($path) ? file_get_contents($path) : false;
+        if ($bytes === false) {
+            return ['version' => null, 'integrity' => null];
+        }
 
-        return $hash === false ? null : substr($hash, 0, 10);
+        return [
+            'version' => substr(hash('sha256', $bytes), 0, 10),
+            'integrity' => 'sha384-' . base64_encode(hash('sha384', $bytes, true)),
+        ];
     }
 
     /**
