@@ -280,7 +280,7 @@ class Context {
      * into the Context so page handlers can access them.
      */
     public function getRequestAttribute(string $name, mixed $default = null): mixed {
-        return $this->requestAttributes[$name] ?? $default;
+        return $this->requestOwner()->requestAttributes[$name] ?? $default;
     }
 
     /**
@@ -289,7 +289,7 @@ class Context {
      * @return array<string, mixed>
      */
     public function getRequestAttributes(): array {
-        return $this->requestAttributes;
+        return $this->requestOwner()->requestAttributes;
     }
 
     /**
@@ -316,7 +316,7 @@ class Context {
      * @param mixed  $default Value returned if parameter is not set
      */
     public function input(string $name, mixed $default = null): mixed {
-        return $this->requestInput[$name] ?? $default;
+        return $this->requestOwner()->requestInput[$name] ?? $default;
     }
 
     /**
@@ -334,7 +334,7 @@ class Context {
      * @return null|array{name: string, type: string, tmp_name: string, error: int, size: int}
      */
     public function file(string $name): ?array {
-        $f = $this->requestFiles[$name] ?? null;
+        $f = $this->requestOwner()->requestFiles[$name] ?? null;
         if (!\is_array($f) || $f['error'] !== UPLOAD_ERR_OK) {
             return null;
         }
@@ -362,7 +362,7 @@ class Context {
      * @param string $name Cookie name
      */
     public function cookie(string $name): ?string {
-        $value = $this->requestCookies[$name] ?? null;
+        $value = $this->requestOwner()->requestCookies[$name] ?? null;
 
         return $value !== null ? (string) $value : null;
     }
@@ -392,7 +392,7 @@ class Context {
         bool $httpOnly = true,
         string $sameSite = 'Lax',
     ): void {
-        $this->pendingCookies[] = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
+        $this->requestOwner()->pendingCookies[] = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
     }
 
     /**
@@ -1189,6 +1189,13 @@ class Context {
      */
     public function syncSignals(): void {
         $this->patchManager->syncSignals();
+    }
+
+    /**
+     * The context that holds the current request: the page, for a component, which has none of its own.
+     */
+    private function requestOwner(): self {
+        return $this->componentManager->getParentPageContext() ?? $this;
     }
 
     /**

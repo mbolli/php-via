@@ -183,3 +183,27 @@ describe('Action URL Format', function (): void {
         expect($action1->url())->not->toBe($action2->url());
     });
 });
+
+describe('Component actions and the request', function (): void {
+    test('a component action reads the request input and sets cookies on the page', function (): void {
+        $app = createVia();
+        $page = new Context(testContextId(), '/test', $app);
+        $seen = null;
+        $actionId = null;
+        $page->component(function (Context $w) use (&$seen, &$actionId): void {
+            $w->scope('widgets');
+            $actionId = $w->action(function (Context $c) use (&$seen): void {
+                $seen = $c->input('q');
+                $c->setCookie('picked', 'yes');
+            }, 'pick', Scope::TAB)->id();
+            $w->view(fn (): string => 'widget');
+        }, 'w');
+        $page->setRequestInput(['q' => 'needle'], []);
+
+        $page->executeAction((string) $actionId);
+
+        expect($seen)->toBe('needle')
+            ->and(array_column($page->flushPendingCookies(), 'value', 'name'))->toBe(['picked' => 'yes'])
+        ;
+    });
+});
