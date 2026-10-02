@@ -56,6 +56,8 @@ All notable changes to php-via will be documented in this file.
   with it. It now waits for the new reconnect timeout, 60 s after the last action
   (`withContextReconnectTimeout()`). [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream)
   lists which timer frees a context without a stream.
+- The default shell never showed its "Not connected" warning: it listened with
+  `data-on-datastar-fetch`, which Datastar 1.0 ignores. It now uses `data-on:datastar-fetch`.
 
 ### Known limitations
 
