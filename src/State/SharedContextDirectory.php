@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\State;
 
+use OpenSwoole\Exception;
 use OpenSwoole\Table;
 
 /**
@@ -31,6 +32,8 @@ use OpenSwoole\Table;
  */
 final class SharedContextDirectory {
     private Table $table;
+
+    private int $pruneBlockedUntilNs = 0;
 
     /**
      * @param int $maxRows        Concurrent contexts to track across all workers. As with the
@@ -65,17 +68,26 @@ final class SharedContextDirectory {
         }
 
         $key = self::key($contextId);
-        $rowsBefore = \count($this->table);
-        $isNew = !$this->table->exists($key);
+        $row = ['record' => $serialized, 'expires' => $record['expiresAt']];
 
-        $this->table->set($key, ['record' => $serialized, 'expires' => $record['expiresAt']]);
-
-        if ($isNew && \count($this->table) === $rowsBefore) {
-            throw new \OverflowException(
-                'The shared context directory is full, so contexts can no longer be rebuilt on '
-                . 'other workers. Raise the row count with Config::withContextDirectorySize().'
-            );
+        if ($this->trySet($key, $row)) {
+            return;
         }
+
+        // Expired records leave only when pruned, so a full table may just need a sweep. The
+        // sweep reads every row, so after one that frees nothing the next waits a second.
+        $now = hrtime(true);
+        if ($now >= $this->pruneBlockedUntilNs) {
+            if ($this->prune() > 0 && $this->trySet($key, $row)) {
+                return;
+            }
+            $this->pruneBlockedUntilNs = $now + 1_000_000_000;
+        }
+
+        throw new \OverflowException(
+            'The shared context directory is full, so contexts can no longer be rebuilt on '
+            . 'other workers. Raise the row count with Config::withContextDirectorySize().'
+        );
     }
 
     /**
@@ -162,6 +174,26 @@ final class SharedContextDirectory {
             'sessionId' => $record['sessionId'],
             'expiresAt' => $record['expiresAt'],
         ];
+    }
+
+    /**
+     * Write a row, false when the table has no room for it.
+     *
+     * @param array{record: string, expires: int} $row
+     *
+     * @phpstan-impure
+     */
+    private function trySet(string $key, array $row): bool {
+        try {
+            if ($this->table->set($key, $row) === false) {
+                return false;
+            }
+        } catch (Exception) {
+            // OpenSwoole 26 throws "failed to set key value" on a full table.
+            return false;
+        }
+
+        return $this->table->exists($key);
     }
 
     private static function key(string $contextId): string {

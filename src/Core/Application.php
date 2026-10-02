@@ -92,6 +92,11 @@ class Application {
      */
     private array $revivableContexts = [];
 
+    /** Context directory writes that found the table full, and when that was last logged. */
+    private int $directoryWriteFailures = 0;
+
+    private int $directoryWarnedAt = 0;
+
     private Environment $twig;
 
     public function __construct(
@@ -681,7 +686,12 @@ class Application {
         } catch (\OverflowException $e) {
             // Losing the entry costs cross-worker reachability for this one context, which
             // degrades to the old 400. It must not take the page load down with it.
-            $this->logger->log('warn', 'Context directory write failed: ' . $e->getMessage());
+            ++$this->directoryWriteFailures;
+            $now = time();
+            if ($now - $this->directoryWarnedAt >= 10) {
+                $this->directoryWarnedAt = $now;
+                $this->logger->log('warn', "Context directory write failed ({$this->directoryWriteFailures} times in this worker): " . $e->getMessage());
+            }
         }
     }
 
