@@ -133,6 +133,8 @@ $cssPath = __DIR__ . '/public/css/site.css';
 $twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
 $workerPath = __DIR__ . '/public/upload-worker.js';
 $twig->addGlobal('workerVersion', (string) (file_exists($workerPath) ? filemtime($workerPath) : time()));
+$qrPath = __DIR__ . '/public/js/px-qr.js';
+$twig->addGlobal('qrVersion', (string) (file_exists($qrPath) ? filemtime($qrPath) : time()));
 $siteOrigin = 'https://via.zweiundeins.gmbh';
 $twig->addGlobal('siteUrl', $siteOrigin . '/');
 

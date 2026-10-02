@@ -4,7 +4,7 @@
         <code class="px-tag px-tag--scope">{{ scope }}</code>
     </div>
     <div class="px-pair-body">
-        <div class="px-qr" role="img" aria-label="QR code for {{ url }}">{{ qr | raw }}</div>
+        <div class="px-qr" role="img" aria-label="QR code for {{ url }}"><px-qr value="{{ url }}"></px-qr></div>
         <div class="px-pair-text">
             <h2 id="px-pair-title">
                 <span class="px-pair-desktop">Pair this tab with your phone</span>
