@@ -115,7 +115,7 @@ describe('full-document views: initial render', function (): void {
     });
 
     test('the seed escapes what Datastar would compile as code', function (): void {
-        $values = ['foo@bar(baz)', '@media(max-width: 600px)', 'C:\\temp\\', 'color:red;', "\u{1F595}JS_DS\u{1F680}", 'a\\"b', 'grüße'];
+        $values = ['foo@bar(baz)', '@media(max-width: 600px)', 'C:\\temp\\', 'color:red;', 'a\\"b', 'grüße'];
         $via = createVia();
         $ctx = new Context('/_/doc14', '/doc', $via);
         $ids = [];

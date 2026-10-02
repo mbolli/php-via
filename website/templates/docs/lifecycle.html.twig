@@ -28,6 +28,7 @@
     {% code 'php' %}{% verbatim %}
 $config->withContextCleanupDelay(60_000); // 60 seconds
 {% endverbatim %}{% endcode %}
+    <h3 id="without-stream">Contexts without a stream</h3>
     <p>
         A context whose SSE stream never connects (a crawler, a prefetch, a tab closed before it
         connected) is destroyed after the connect timeout, 30 seconds by default, and its
@@ -35,6 +36,44 @@ $config->withContextCleanupDelay(60_000); // 60 seconds
         applies to a copy an action rebuilt on a worker the tab does not stream from; every action on it
         starts the timeout again. A tab that connects later is rebuilt by revival.
         <code>Config::withContextConnectTimeout(0)</code> keeps such contexts until the worker stops.
+    </p>
+    <p>
+        An action that reaches a tab whose stream is down, because the stream dropped or because the
+        action revived the context after the cleanup delay, keeps the context for the reconnect timeout,
+        60 seconds by default, counted from the last action. Datastar waits at most 30 seconds between
+        two reconnect attempts (<code>retryMaxWait</code>), so the patches the action queued are sent when
+        the stream comes back. If you raise <code>retryMaxWait</code>, raise the timeout above it:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withContextReconnectTimeout(60_000); // default; 0 uses the connect timeout
+{% endverbatim %}{% endcode %}
+    <p>
+        Which timer frees a context without a stream:
+    </p>
+    <ul>
+        <li>Its stream never connected: the connect timeout (30&nbsp;s).</li>
+        <li>Its stream dropped: the cleanup delay (5&nbsp;s).</li>
+        <li>An action reached it while it had no stream: the reconnect timeout (60&nbsp;s) after the last action.</li>
+        <li>An action rebuilt it on a worker the tab does not stream from: the connect timeout after the last action.</li>
+    </ul>
+    <p>
+        Queued patches live in the context. A context freed before its stream returns drops them, together
+        with whatever its actions changed in TAB state. The tab that reconnects later is revived with the
+        signal values it holds and a fresh render of its view, but a one-off patch such as an
+        <code>execScript()</code> is gone.
+    </p>
+
+    <h3 id="reconnect">How the default shell reconnects</h3>
+    <p>
+        The default shell opens the stream with <code>@get('_sse')</code> and Datastar's default retry settings.
+        When the connection fails, Datastar retries after 1, 2, 4, 8 and 16 seconds and then every
+        30 seconds (<code>retryMaxWait</code>), ten times in all (<code>retryMaxCount</code>). Each retry
+        sends the tab's signals as they are at that moment, so a context revived by the retry starts from
+        the current values. Once the retries run out, or when the stream ends, the shell's 15-second
+        interval opens a new stream. A request of your own with <code>retry: 'error'</code> or
+        <code>'always'</code> also retries after an HTTP error, on the same schedule and within the same
+        ten attempts. Datastar also closes the stream while the tab is hidden and opens it
+        again when the tab is shown.
     </p>
 
     <h3 id="disconnect-detection">How a closed tab is detected</h3>

@@ -349,7 +349,9 @@ $config = (new Config())
         or of the revival window, whichever is shorter (150&nbsp;s by default). A context that does not fit
         in the directory is logged, and its actions on other workers answer 400. A copy that an action
         rebuilt on a worker the tab does not stream from is freed after the connect timeout
-        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again.
+        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again. A tab
+        that streams from no worker keeps the reconnect timeout instead
+        (<code>withContextReconnectTimeout()</code>), see <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
     </p>
     <p>
         Each worker keeps the <code>getClients()</code> list it built last, about 2.3&nbsp;KB per client,
@@ -481,13 +483,24 @@ $config->withStaticDir(__DIR__ . '/public');
 
     <p>In production, serve static files from Caddy (or nginx) directly: it's faster and avoids passing binary content through PHP.</p>
     <p>
+        Leave <code>/datastar.js</code> to php-via: it serves the plain Datastar bundle, or the Rocket build
+        with <code>withDatastarRocket()</code>. A proxy that serves it from disk has to pick the matching
+        file, <code>datastar.js</code> or <code>datastar-rocket.js</code> from
+        <code>vendor/mbolli/php-via/public/</code>. An app that
+        <a href="/docs/web-components#pin-datastar">pins Datastar</a> with
+        <code>getDatastarIntegrity()</code> needs a proxy that passes the file on unchanged; compressing
+        it is fine.
+    </p>
+    <p>
         If you do serve <code>withStaticDir()</code> files through php-via itself (no reverse proxy, or a
         proxy that isn't handling <code>/public/*</code>), every response, including the framework's own
         <code>/datastar.js</code> and <code>/via.css</code>, carries an <code>ETag</code> and
         <code>Last-Modified</code>, and honors <code>If-None-Match</code> / <code>If-Modified-Since</code>
         with a <code>304</code>. The <code>Cache-Control</code> policy on top of that follows
         <code>devMode</code> by default (<code>no-cache</code> in dev, so edits show up on the next reload;
-        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly:
+        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly.
+        The default policy caches <code>/datastar.js?v=&lt;hash&gt;</code> with the served bundle's hash for a
+        year (<code>immutable</code>), since a new bundle gets a new URL.
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. if you fingerprint filenames yourself

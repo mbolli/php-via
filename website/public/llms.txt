@@ -17,6 +17,7 @@ php-via is a PHP library (MIT) that turns a standard PHP process into a persiste
 - [Multi-node broker](https://via.zweiundeins.gmbh/docs/broker): Scaling with Redis or NATS
 - [Middleware](https://via.zweiundeins.gmbh/docs/middleware): PSR-15 middleware, authentication, CORS
 - [Templates](https://via.zweiundeins.gmbh/docs/twig): Twig integration, syntax-highlighted code blocks
+- [Web components](https://via.zweiundeins.gmbh/docs/web-components): Rocket and Starbase components, the import map with your own modules and integrity hashes, binding component properties
 - [Deployment](https://via.zweiundeins.gmbh/docs/deployment): Caddy, Docker, systemd, production checklist
 - [Design decisions](https://via.zweiundeins.gmbh/docs/design): Architecture rationale and trade-offs
 - [API reference](https://via.zweiundeins.gmbh/docs/api): Full public API surface

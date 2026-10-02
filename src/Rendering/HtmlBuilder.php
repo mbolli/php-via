@@ -19,6 +19,9 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
+    /** @var array<string, true> Shell paths already checked for a missing or mismatched import map */
+    private array $checkedShells = [];
+
     /**
      * @param null|\Closure(string, string, ?Context): void $logger Receives level, message and context
      */
@@ -55,14 +58,16 @@ class HtmlBuilder {
      * A view that renders its own `<html>` document is completed by injectIntoDocument(); any other
      * view is placed into the shell template.
      *
-     * @param string  $content   Rendered HTML content
-     * @param Context $context   Context for signal injection
-     * @param string  $contextId Context ID for initial signals
-     * @param string  $basePath  Base path for URLs
+     * @param string      $content     Rendered HTML content
+     * @param Context     $context     Context for signal injection
+     * @param string      $contextId   Context ID for initial signals
+     * @param string      $basePath    Base path for URLs
+     * @param null|string $datastarUrl URL of the Datastar bundle, '<basePath>datastar.js' when null
+     * @param string      $importMap   The import map tag for {{ import_map }}, see Config::getImportMapTag()
      *
      * @return string Complete HTML document
      */
-    public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
+    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null, string $importMap = ''): string {
         if (stripos($content, '<html') !== false) {
             return $this->injectIntoDocument($content, $context, initial: true);
         }
@@ -85,10 +90,13 @@ class HtmlBuilder {
             $replacements['{{ ' . $name . '.id }}'] = $signal->id();
         }
 
+        $datastarUrl ??= $basePath . 'datastar.js';
         $replacements = [
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
+            '{{ datastar_url }}' => htmlspecialchars($datastarUrl, ENT_QUOTES, 'UTF-8'),
+            '{{ import_map }}' => $importMap,
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
             '{{ foot_content }}' => implode("\n", $footIncludes),
@@ -101,6 +109,17 @@ class HtmlBuilder {
 
         if ($shell === false) {
             throw new \RuntimeException("Failed to load shell template from: {$shellPath}");
+        }
+
+        if ($importMap !== '' && !isset($this->checkedShells[$shellPath])) {
+            $this->checkedShells[$shellPath] = true;
+            if (!str_contains($shell, '{{ import_map }}')) {
+                if (!str_contains($shell, 'importmap')) {
+                    $this->log('warning', "Shell {$shellPath} has no {{ import_map }}: the import map from withDatastarRocket() or withImportMap() is left out", $context);
+                }
+            } elseif (!str_contains($shell, '{{ datastar_url }}')) {
+                $this->log('warning', "Shell {$shellPath} has {{ import_map }} but loads Datastar without {{ datastar_url }}: modules that import 'datastar' will start a second Datastar engine", $context);
+            }
         }
 
         // strtr() replaces in one pass, so placeholder text inside the content or a value stays as is
@@ -221,8 +240,8 @@ class HtmlBuilder {
             return null;
         }
 
-        // Datastar compiles attributes as JS: it rewrites `@name(` inside strings, misreads `\\"` when splitting
-        // on `;`, and treats its emoji markers as raw code, so those characters stay \u-escaped.
+        // Datastar compiles attributes as JS and splits statements on `;` with a pattern that misreads `\\"`.
+        // `@` stays escaped for layouts on Datastar before 1.0.4, which rewrote `@name(` inside strings.
         return strtr($json, ['@' => '\u0040', ';' => '\u003b', '\\\\' => '\u005c']);
     }
 

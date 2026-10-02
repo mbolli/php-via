@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Signal;
 
@@ -194,5 +195,38 @@ describe('Signal Name Validation', function (): void {
         $signal = $context->signal('value', 'valid_signal_name_123');
 
         expect($signal->id())->toContain('valid_signal_name_123');
+    });
+});
+
+describe('Signal::bind()', function (): void {
+    test('binds the element value by default', function (): void {
+        $signal = (new Context(testContextId(), '/test', createVia()))->signal('', 'name');
+
+        expect($signal->bind())->toBe('data-bind="' . $signal->id() . '"');
+    });
+
+    test('binds an element property with Datastar\'s prop modifier', function (): void {
+        $signal = (new Context(testContextId(), '/test', createVia()))->signal('', 'name');
+
+        expect($signal->bind('value'))->toBe('data-bind__prop.value="' . $signal->id() . '"')
+            ->and($signal->bind(prop: 'checked'))->toBe('data-bind__prop.checked="' . $signal->id() . '"')
+            ->and($signal->bind('selectedIndex'))->toBe('data-bind__prop.selected-index="' . $signal->id() . '"')
+            ->and($signal->bind('selected-index'))->toBe('data-bind__prop.selected-index="' . $signal->id() . '"')
+        ;
+    });
+
+    test('rejects a property name that is not one', function (string $prop): void {
+        $signal = (new Context(testContextId(), '/test', createVia()))->signal('', 'name');
+
+        expect(fn () => $signal->bind($prop))->toThrow(InvalidArgumentException::class);
+    })->with(['', 'Value', 'value"', 'a b', 'value__event.input', 'value.x', '-value', 'value-']);
+
+    test('Twig passes the property through bind() and exposes datastarUrl', function (): void {
+        $via = createVia((new Config())->withDatastarRocket());
+        $signal = (new Context(testContextId(), '/test', $via))->signal('', 'name');
+
+        $out = $via->getTwig()->createTemplate('{{ bind(s) }}|{{ bind(s, "value") }}|{{ datastarUrl }}')->render(['s' => $signal]);
+
+        expect($out)->toBe($signal->bind() . '|' . $signal->bind('value') . '|' . $via->getConfig()->getDatastarUrl());
     });
 });

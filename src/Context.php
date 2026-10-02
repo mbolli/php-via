@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
+use Twig\Markup;
 
 /**
  * Context represents a living bridge between PHP and the browser.
@@ -748,7 +749,7 @@ class Context {
     public function render(string $template, array $data = [], ?string $block = null): string {
         $effectiveBlock = $block ?? ($this->isUpdating ? $this->updateBlock : null);
         $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
-        $data += ['contextId' => $this->id, 'currentRoute' => $this->route];
+        $data += ['contextId' => $this->id, 'currentRoute' => $this->route] + $this->documentData();
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $effectiveBlock);
     }
@@ -761,7 +762,7 @@ class Context {
      */
     public function renderString(string $template, array $data = []): string {
         // Add context data automatically
-        $data += ['contextId' => $this->id];
+        $data += ['contextId' => $this->id] + $this->documentData();
 
         return $this->app->getViewRenderer()->renderString($template, $data);
     }
@@ -1189,6 +1190,18 @@ class Context {
      */
     public function syncSignals(): void {
         $this->patchManager->syncSignals();
+    }
+
+    /**
+     * The current datastarUrl and importMap, which shadow the Twig globals of the same names
+     * so a layout follows Config changes made after new Via().
+     *
+     * @return array{datastarUrl: string, importMap: Markup}
+     */
+    private function documentData(): array {
+        $config = $this->app->getConfig();
+
+        return ['datastarUrl' => $config->getDatastarUrl(), 'importMap' => new Markup($config->getImportMapTag(), 'UTF-8')];
     }
 
     /**

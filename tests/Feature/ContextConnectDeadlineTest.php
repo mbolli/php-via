@@ -53,3 +53,22 @@ test('a copy an action rebuilt on a worker the tab does not stream from is freed
         ->and($r['action_after_free'] ?? null)->toBe('200', 'the next action rebuilds the copy: ' . $r['out'])
     ;
 });
+
+test('a tab an action revived after its stream dropped waits for the reconnect past the connect timeout, and gets the queued patch', function (): void {
+    $r = connectDeadlineFixture('revived');
+
+    expect($r['freed_after_drop'] ?? null)->toBe('1', 'the cleanup delay frees a dropped tab: ' . $r['out'])
+        ->and($r['action'] ?? null)->toBe('200', $r['out'])
+        ->and($r['kept_until_reconnect'] ?? null)->toBe('1', 'the reconnect timeout, not the connect timeout, applies: ' . $r['out'])
+        ->and($r['patch_delivered'] ?? null)->toBe('1', $r['out'])
+    ;
+});
+
+test('a revived tab that reconnects after the reconnect timeout is freed with its queued patch', function (): void {
+    $r = connectDeadlineFixture('revived-late');
+
+    expect($r['action'] ?? null)->toBe('200', $r['out'])
+        ->and($r['kept_until_reconnect'] ?? null)->toBe('0', $r['out'])
+        ->and($r['patch_delivered'] ?? null)->toBe('0', 'the patch went with the freed context: ' . $r['out'])
+    ;
+});

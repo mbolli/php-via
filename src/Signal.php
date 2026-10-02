@@ -328,11 +328,25 @@ class Signal {
     }
 
     /**
-     * Bind this signal to an HTML input element
-     * Returns the data-bind attribute.
+     * Bind this signal to a form field or custom element. Returns the data-bind attribute.
+     *
+     * $prop binds that element property instead, as data-bind__prop.<prop> (Datastar's own modifier).
+     * Use it for custom elements such as Rocket components ('value', 'checked'): plain data-bind binds a
+     * custom element's value property only if its tag is already defined, and the value attribute if not.
+     * A camelCase name is written in kebab case, which Datastar turns back into camelCase.
+     *
+     * @throws \InvalidArgumentException if $prop is not a property name
      */
-    public function bind(): string {
-        return 'data-bind="' . $this->id . '"';
+    public function bind(?string $prop = null): string {
+        if ($prop === null) {
+            return 'data-bind="' . $this->id . '"';
+        }
+
+        if (preg_match('/^[a-z][a-zA-Z0-9]*(?:-[a-z0-9]+)*$/', $prop) !== 1) {
+            throw new \InvalidArgumentException("Invalid property name '{$prop}' for bind()");
+        }
+
+        return 'data-bind__prop.' . strtolower((string) preg_replace('/[A-Z]/', '-$0', $prop)) . '="' . $this->id . '"';
     }
 
     /**

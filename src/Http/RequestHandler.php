@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\ConditionalGet;
+use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Tracing\Tracer;
@@ -701,10 +702,14 @@ class RequestHandler {
     }
 
     /**
-     * Serve Datastar JavaScript file.
+     * Serve the Datastar bundle: the Rocket build with Config::withDatastarRocket(), else the plain one.
      */
     private function serveDatastarJs(Request $request, Response $response): void {
-        $this->sendStaticFile(__DIR__ . '/../../public/datastar.js', 'application/javascript', true, $request, $response);
+        $config = $this->via->getConfig();
+        $path = DatastarBundle::path($config->isDatastarRocketEnabled());
+        $version = $request->get['v'] ?? null;
+        $versioned = \is_string($version) && DatastarBundle::url($config->getBasePath(), $version) === $config->getDatastarUrl();
+        $this->sendStaticFile($path, 'application/javascript', true, $request, $response, $versioned);
     }
 
     /**
@@ -714,7 +719,8 @@ class RequestHandler {
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
         $contentType = match ($ext) {
             'css' => 'text/css; charset=utf-8',
-            'js' => 'application/javascript',
+            'js', 'mjs' => 'application/javascript',
+            'json', 'map' => 'application/json',
             'svg' => 'image/svg+xml',
             'png' => 'image/png',
             'jpg', 'jpeg' => 'image/jpeg',
@@ -726,7 +732,7 @@ class RequestHandler {
         };
 
         $compressible = match ($ext) {
-            'css', 'js', 'svg', 'json', 'txt', 'html', 'xml' => true,
+            'css', 'js', 'mjs', 'svg', 'json', 'map', 'txt', 'html', 'xml' => true,
             default => false,
         };
 
@@ -745,14 +751,16 @@ class RequestHandler {
      * support and the configured Cache-Control policy.
      *
      * Shared by /datastar.js, /via.css, and files served via Config::withStaticDir().
+     *
+     * @param bool $versioned The URL carries the file's current content version
      */
-    private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response): void {
+    private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response, bool $versioned = false): void {
         $mtime = filemtime($filePath);
         $size = filesize($filePath);
         $etag = ConditionalGet::etag($mtime, $size);
         $mimeType = explode(';', $contentType, 2)[0];
 
-        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType));
+        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType, $versioned));
         $response->header('ETag', $etag);
         $response->header('Last-Modified', ConditionalGet::lastModified($mtime));
         if ($compressible && $this->via->getConfig()->getBrotli()) {

@@ -2,6 +2,64 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.14.0] - Unreleased
+
+### Highlights
+
+- **Datastar 1.0.4.** php-via serves Datastar 1.0.4 instead of 1.0.1. The SSE format is the same,
+  but Datastar now cancels an in-flight request when any element sends another one to the same URL,
+  so check pages where two elements post the same action. Breaking Changes lists the rest.
+- **Web components.** `Config::withDatastarRocket()` serves Datastar with Rocket, so Rocket
+  components such as Starbase's run on php-via pages, and `Config::withImportMap()` pins them with
+  integrity hashes. See [Web components](https://via.zweiundeins.gmbh/docs/web-components).
+- **A versioned Datastar URL.** The default shell loads `/datastar.js?v=<hash>`, so browsers fetch
+  the new bundle after an upgrade instead of reusing the cached one.
+
+### Breaking Changes
+
+- **Datastar 1.0.1 to 1.0.4.** PHP code needs no changes, and `starfederation/datastar-php` 1.0.1
+  keeps working. In the browser:
+  - **Requests cancel per method and URL,** from any element, where 1.0.1 cancelled per element. Give
+    two elements that post the same action a query each (`?from=button`). See [Actions](https://via.zweiundeins.gmbh/docs/actions#cancellation).
+  - **Retries** send the current signals and stop after 10 attempts. With `retry: 'error'` or
+    `'always'`, HTTP errors count toward them. See [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#reconnect).
+  - **The `retrying` fetch event** fires only when a retry is scheduled and carries no `message`.
+    Datastar no longer logs each retry with `console.error`.
+  - **`data-bind` on checkboxes and radios** updates the signal on `input` instead of `change`. A
+    script that dispatches `change` has to dispatch `input`, or bind with `__event.change`.
+  - **Deleting a signal,** by a patch or by assigning `null`, fires `data-on-signal-patch`.
+- **`Signal::bind()` and `Config::getStaticCacheControl()` take a new optional parameter.** A
+  subclass that overrides either has to declare it.
+
+### New Features
+
+- **`Config::withDatastarRocket()`** serves Starbase's build of Datastar 1.0.4 with Rocket at
+  `/datastar.js` (22 KB with Brotli, against 12 KB), and the default shell adds the import map Rocket
+  components need. Unlike the official Rocket bundle, the build survives morphs that reorder keyed
+  components. Sources, patches and hashes are in `public/DATASTAR.md`.
+- **`Config::withImportMap()`** adds modules and integrity hashes to the import map php-via writes,
+  so Starbase components load pinned from its catalog. `Config::getDatastarIntegrity()` returns the
+  served bundle's hash for apps that pin Datastar too. Custom shells get the map as
+  `{{ import_map }}`, Twig layouts as `importMap`. See
+  [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-modules).
+- **Versioned Datastar URL.** `Config::getDatastarUrl()` returns `/datastar.js?v=<content hash>`,
+  cached for a year by default. Load Datastar from it in custom shells (`{{ datastar_url }}`) and Twig
+  layouts (`datastarUrl`): an unversioned `datastar.js` stays cached for up to an hour after an
+  upgrade. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
+- **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
+  on web components. The Twig `bind()` function takes the property as a second argument.
+- **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
+  as `application/json`.
+
+### Fixed
+
+- `.json` files from `withStaticDir()` were served as `application/octet-stream`, which breaks JSON
+  module imports. They are now `application/json`.
+
+### Docs
+
+- New [Web components](https://via.zweiundeins.gmbh/docs/web-components) page.
+
 ## [0.13.1] - 2026-10-02
 
 ### Highlights
@@ -51,6 +109,13 @@ All notable changes to php-via will be documented in this file.
   leaving one copy running with its timers. The later one now returns the registered context.
 - A component's actions could not read the request or set cookies. `input()`, `file()`,
   `cookie()` and `setCookie()` on a component now use its page's request.
+- A tab whose stream was down when an action reached it was freed after the connect timeout (30 s),
+  while Datastar's next reconnect attempt can be 30 s away, and the patches the action queued went
+  with it. It now waits for the new reconnect timeout, 60 s after the last action
+  (`withContextReconnectTimeout()`). [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream)
+  lists which timer frees a context without a stream.
+- The default shell never showed its "Not connected" warning: it listened with
+  `data-on-datastar-fetch`, which Datastar 1.0 ignores. It now uses `data-on:datastar-fetch`.
 
 ### Known limitations
 

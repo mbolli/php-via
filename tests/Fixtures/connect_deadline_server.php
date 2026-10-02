@@ -5,7 +5,10 @@ declare(strict_types=1);
 /*
  * Real-server fixture for Config::withContextConnectTimeout(): a context with no SSE stream on its
  * worker is destroyed after the timeout. Cases: page (one worker), off (timeout 0), xworker (two
- * workers, a copy an action rebuilt on the worker the tab does not stream from).
+ * workers, a copy an action rebuilt on the worker the tab does not stream from), revived and
+ * revived-late (a tab whose stream dropped, freed after the cleanup delay, then revived by an action
+ * with only via_ctx that queues a script; the stream returns after the connect timeout, within the
+ * reconnect timeout for revived and after it for revived-late).
  *
  * Prints key=value lines.
  */
@@ -38,6 +41,9 @@ for ($i = 0; $i < 150; ++$i) {
 $config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
     ->withContextConnectTimeout($mode === 'off' ? 0 : ($mode === 'xworker' ? 400 : 300))
 ;
+if (str_starts_with($mode, 'revived')) {
+    $config = $config->withContextCleanupDelay(200)->withContextReconnectTimeout(1500);
+}
 if ($mode === 'xworker') {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker());
 }
@@ -45,6 +51,10 @@ $app = new Via($config);
 
 $app->page('/room', function (Context $c) use ($marker): void {
     $hit = $c->action(static function (): void {}, 'hit');
+    // Answers with a one-shot patch, as a request for the next window of a list does.
+    $c->action(static function (Context $c): void {
+        $c->execScript('window.viaWindow = "WINDOW-PATCH"');
+    }, 'window');
     $c->onDisconnect(static function (Context $c) use ($marker): void {
         file_put_contents($marker, "cleanup {$c->getId()}\n", FILE_APPEND | LOCK_EX);
     });
@@ -169,6 +179,36 @@ $app->setInterval(static function () use ($app, $port, $mode, $marker): void {
 
     Coroutine::create(static function () use ($app, $port, $mode, $marker): void {
         try {
+            if (str_starts_with($mode, 'revived')) {
+                [$sock] = socketOn($port, 0, false);
+                [$id, $cookie] = loadRoom($sock);
+                $sseHead = 'GET ' . ssePath($id) . " HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\nCookie: {$cookie}\r\n\r\n";
+                $sse = stream_socket_client("tcp://127.0.0.1:{$port}", $errno, $error, 5);
+                fwrite($sse, $sseHead);
+                Coroutine::usleep(200_000);
+                fclose($sse);
+                Coroutine::usleep(500_000);
+                echo 'freed_after_drop=', (int) !in_array($id, idsOn($port, 0), true), "\n";
+
+                echo 'action=', postAction($sock, $port, '/_action/window', $cookie, $id), "\n";
+                Coroutine::usleep($mode === 'revived' ? 800_000 : 2_100_000);
+                echo 'kept_until_reconnect=', (int) in_array($id, idsOn($port, 0), true), "\n";
+
+                $sse = stream_socket_client("tcp://127.0.0.1:{$port}", $errno, $error, 5);
+                fwrite($sse, $sseHead);
+                stream_set_timeout($sse, 0, 50_000);
+                $body = '';
+                $until = microtime(true) + 0.6;
+                while (microtime(true) < $until) {
+                    $body .= (string) fread($sse, 65536);
+                }
+                echo 'patch_delivered=', (int) str_contains($body, 'WINDOW-PATCH'), "\n";
+                fclose($sse);
+                fclose($sock);
+
+                return;
+            }
+
             if ($mode === 'page' || $mode === 'off') {
                 [$sock, $pid] = socketOn($port, 0, false);
                 [$idle] = loadRoom($sock);
