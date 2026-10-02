@@ -3044,7 +3044,8 @@ stock-chart {
   border: 2px solid var(--border-strong);
   box-shadow: 4px 4px 0 0 var(--shadow-hard);
 }
-.px-qr-svg { display: block; max-width: 100%; height: auto; }
+/* The QR code is 41 modules at 5 px (px-qr.js); the box is reserved before the script draws it */
+px-qr { display: block; inline-size: 205px; aspect-ratio: 1; background: #f3f4fa; }
 
 .px-pair-link {
   display: flex;

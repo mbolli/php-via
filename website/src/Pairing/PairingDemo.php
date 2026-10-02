@@ -41,7 +41,8 @@ final class PairingDemo {
     }
 
     /**
-     * Set up the homepage component: a pairing code for the tab, its QR code and the widget.
+     * Set up the homepage component: a pairing code for the tab, its URL and the widget.
+     * The browser draws the QR code of the URL (public/js/px-qr.js).
      * Mount it with a name, so its ID and its action survive a revival of the page.
      */
     public function component(Context $c): void {
@@ -49,7 +50,6 @@ final class PairingDemo {
         $origin = $c->getRequestAttribute(RequestOrigin::ATTRIBUTE);
         $code = $this->store->codeForTab($c->getId(), \is_string($origin) ? $origin : $this->fallbackOrigin);
         $url = ($this->store->origin($code) ?? $this->fallbackOrigin) . '/pair/' . $code;
-        $qr = PairingQr::svg($url, modulePx: 5);
         $scope = PairingStore::scope($code);
 
         $c->scope($scope);
@@ -59,7 +59,7 @@ final class PairingDemo {
         // SSE connect, a broadcast to the homepage's route) renders nothing and sends no patch.
         $sent = false;
         $sentColour = null;
-        $c->view(function (bool $isUpdate) use ($c, $code, $scope, $url, $qr, $pick, &$sent, &$sentColour): string {
+        $c->view(function (bool $isUpdate) use ($c, $code, $scope, $url, $pick, &$sent, &$sentColour): string {
             $widget = $this->widget($code, $pick);
             if ($isUpdate && $sent && $widget['colour'] === $sentColour) {
                 return '';
@@ -67,7 +67,7 @@ final class PairingDemo {
             $sent = true;
             $sentColour = $widget['colour'];
 
-            return $c->render('components/pairing.html.twig', ['scope' => $scope, 'url' => $url, 'qr' => $qr, 'widget' => $widget]);
+            return $c->render('components/pairing.html.twig', ['scope' => $scope, 'url' => $url, 'widget' => $widget]);
         }, cacheUpdates: false);
     }
 

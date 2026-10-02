@@ -478,3 +478,7 @@ $app->start();
 </script>
 
 {% endblock %}
+
+{% block foot_scripts %}
+<script type="module" src="{{ basePath }}js/px-qr.js?v={{ qrVersion }}"></script>
+{% endblock %}
