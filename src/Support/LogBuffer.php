@@ -10,7 +10,7 @@ use Mbolli\PhpVia\Tracing\TraceStore;
  * In-process ring buffer of recent log records for the Via Dev Bar.
  *
  * The framework {@see Logger} tees every record here (when tracing is enabled)
- * so the Dev Bar's Logs panel can stream server-side logs live — the same way
+ * so the Dev Bar's Logs panel can stream server-side logs live, the same way
  * {@see TraceStore} buffers traces. Single-worker only,
  * like the trace store; production runs with tracing off.
  */

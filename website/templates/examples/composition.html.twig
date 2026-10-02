@@ -11,7 +11,7 @@
             <input type="text" data-bind="{{ nameInput.id }}" placeholder="Enter your name…" class="flex-1">
             <button data-on:click="@post('{{ saveName.url }}')">Save Name</button>
         </div>
-        <p class="anatomy-desc mt-1">Open another tab — saving here updates the greeting in both tabs instantly.</p>
+        <p class="anatomy-desc mt-1">Open another tab: saving here updates the greeting in both tabs instantly.</p>
     </div>
 
     {# ── Counter with Persist multiplier ──────────────────────────────────── #}
@@ -20,7 +20,7 @@
         <p class="counter-display">
             Count: <span data-text="${{ count.id }}">{{ count.int }}</span>
         </p>
-        <p class="anatomy-desc">Each click adds +1, +2, +3… The multiplier is a server-only <code>#[Persist]</code> property — it survives between action calls but is never sent to the client.</p>
+        <p class="anatomy-desc">Each click adds +1, +2, +3… The multiplier is a server-only <code>#[Persist]</code> property: it survives between action calls but is never sent to the client.</p>
         <div class="flex gap-1 mt-1">
             <button data-on:click="@post('{{ increment.url }}')">Increment</button>
             <button class="danger" data-on:click="@post('{{ resetTab.url }}')">Reset Tab</button>
@@ -33,7 +33,7 @@
         <p class="counter-display">
             Total clicks (all users): <span data-text="${{ totalClicks.id }}">{{ totalClicks.int }}</span>
         </p>
-        <p class="anatomy-desc">Every action on this page increments this counter. Open two browser sessions — clicking in either updates the counter in both.</p>
+        <p class="anatomy-desc">Every action on this page increments this counter. Open two browser sessions: clicking in either updates the counter in both.</p>
     </div>
 
     {# ── Vote widgets × 3 ─────────────────────────────────────────────────── #}

@@ -111,14 +111,14 @@ class Signal {
     /**
      * Read, transform and write this signal's value as one indivisible step.
      *
-     * The supported way to do read-modify-write on a NON-integer scoped signal — appending to a
+     * The supported way to do read-modify-write on a NON-integer scoped signal: appending to a
      * list, updating one key of a map. `setValue($signal->array() + [...])` is a read and a write
      * with a gap in between, so with more than one worker each writes back a result computed
      * from the same stale read; measured over 4 workers appending to one list, 79 of 160 entries
      * survived. increment() covers the numeric case; a wholesale assignment needs nothing.
      *
      * The callback runs on this worker while a lock keeps other workers out, so keep it fast and
-     * free of side effects — it runs inside the lock, and one that blocks holds up every other
+     * free of side effects: it runs inside the lock, and one that blocks holds up every other
      * writer of the same signal.
      *
      * Do not mix mutate() and increment() on the same signal: increment() deliberately skips the
@@ -155,7 +155,7 @@ class Signal {
      *
      * `setValue($signal->int() + 1)` is a read-modify-write: with more than one worker, two
      * of them can read the same value and each write back the same increment, silently losing
-     * one. This routes to an atomic shared-memory increment instead — measured at 100%
+     * one. This routes to an atomic shared-memory increment instead, measured at 100%
      * retention with 8 processes racing, against 31% for read-modify-write.
      *
      * Single-worker behaviour is identical to the equivalent setValue().

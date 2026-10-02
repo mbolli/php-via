@@ -7,16 +7,16 @@ namespace Mbolli\PhpVia\Attributes;
 use Mbolli\PhpVia\Scope;
 
 /**
- * Marks a property as a reactive signal — synced to the browser and
+ * Marks a property as a reactive signal, synced to the browser and
  * auto-injected into Twig templates as a Signal object.
  *
  * The scope controls who shares the value and who receives updates:
  *
- * - Scope::TAB (default) — isolated per browser tab, client-writable via data-bind
- * - Scope::ROUTE         — shared across all users on the same route
- * - Scope::SESSION       — shared across all tabs of the same browser session
- * - Scope::GLOBAL        — shared across ALL users and tabs
- * - custom string        — shared across all contexts in that scope (e.g. "room:lobby")
+ * - Scope::TAB (default): isolated per browser tab, client-writable via data-bind
+ * - Scope::ROUTE:         shared across all users on the same route
+ * - Scope::SESSION:       shared across all tabs of the same browser session
+ * - Scope::GLOBAL:        shared across ALL users and tabs
+ * - custom string:        shared across all contexts in that scope (e.g. "room:lobby")
  *
  * Non-TAB scopes are server-authoritative (the client cannot write them directly)
  * and auto-broadcast to every context in the scope when the value changes.
@@ -24,16 +24,16 @@ use Mbolli\PhpVia\Scope;
  *
  * @example
  * #[Signal]
- * public int $count = 0;                    // TAB — private per tab
+ * public int $count = 0;                    // TAB: private per tab
  *
  * #[Signal(Scope::ROUTE)]
- * public int $sharedCounter = 0;            // ROUTE — shared on this route
+ * public int $sharedCounter = 0;            // ROUTE: shared on this route
  *
  * #[Signal(Scope::SESSION)]
- * public string $username = 'Anonymous';    // SESSION — shared across user's tabs
+ * public string $username = 'Anonymous';    // SESSION: shared across user's tabs
  *
  * #[Signal(Scope::GLOBAL)]
- * public int $totalVisitors = 0;            // GLOBAL — shared across all users
+ * public int $totalVisitors = 0;            // GLOBAL: shared across all users
  *
  * #[Signal(clientWritable: false)]
  * public string $status = '';               // TAB, but the browser cannot overwrite it
@@ -55,8 +55,8 @@ final class Signal {
          *
          * The trade is that assignment stops meaning assignment: `$this->votes = 0` becomes
          * "subtract whatever it currently is", which is both lossy under concurrency and
-         * surprising. Reach for the signal itself when you mean to SET a value —
-         * `$ctx->getSignal('votes')->setValue(0)` — which the mount leaves alone.
+         * surprising. Reach for the signal itself when you mean to SET a value:
+         * `$ctx->getSignal('votes')->setValue(0)`, which the mount leaves alone.
          *
          * Only meaningful for a shared scope; a TAB signal has no second writer to race.
          */

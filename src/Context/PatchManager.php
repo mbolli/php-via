@@ -67,12 +67,12 @@ class PatchManager {
      * Queue a patch for transmission to the client.
      *
      * For component contexts, patches are forwarded to the parent page context's
-     * channel — the SSE loop only reads from the top-level page channel.
+     * channel: the SSE loop only reads from the top-level page channel.
      *
      * @param QueuedPatch $patch
      */
     public function queuePatch(array $patch): void {
-        // Components don't have their own SSE reader — forward to the parent page.
+        // Components don't have their own SSE reader: forward to the parent page.
         if ($this->componentManager->isComponent()) {
             $parent = $this->componentManager->getParentPageContext();
             if ($parent !== null) {
@@ -101,7 +101,7 @@ class PatchManager {
             }
 
             if (!$channel->push($patch)) {
-                // push() returns false on a closed channel — and isFull() still reports
+                // push() returns false on a closed channel, and isFull() still reports
                 // true there while data remains, so without this check the patch was
                 // dropped with no signal to the caller at all.
                 $this->app->log(
@@ -119,7 +119,7 @@ class PatchManager {
      *
      * This loop has failed in both directions historically, so the contract is
      * deliberate. `pop(0)` does NOT mean "non-blocking": in OpenSwoole a timeout of
-     * 0 means *no* timeout, so it parks until a push or close — which is why the
+     * 0 means *no* timeout, so it parks until a push or close, which is why the
      * caller's liveness checks stopped running (idle connections were measured
      * stranded 61s past a 6s deadline). Conversely `pop($timeout)` returns instantly
      * on a CLOSED channel, which spun the loop at 100% CPU after context cleanup
@@ -197,8 +197,8 @@ class PatchManager {
      * Whether the last getPatch() returned null because the channel was closed
      * (cleanup, or replacement by recreatePatchChannel()) rather than merely idle.
      *
-     * Callers must stop consuming when this is true. Continuing would spin — a
-     * closed channel returns immediately regardless of timeout — and re-reading the
+     * Callers must stop consuming when this is true. Continuing would spin (a
+     * closed channel returns immediately regardless of timeout) and re-reading the
      * channel property would let a superseded SSE coroutine steal patches from the
      * live one.
      */
@@ -298,8 +298,8 @@ class PatchManager {
         $updatedSignals = $this->prepareSignalsForPatch($pending);
 
         if (!empty($updatedSignals)) {
-            // Acknowledgement is deferred to delivery. Marking these synced here —
-            // at queue time — meant that any patch destroyed before transmission
+            // Acknowledgement is deferred to delivery. Marking these synced here,
+            // at queue time, meant that any patch destroyed before transmission
             // (evicted when the queue filled, or discarded wholesale by
             // recreatePatchChannel() on an SSE reconnect) was never resent, leaving
             // the client permanently stale on a delta it never received.
@@ -365,8 +365,8 @@ class PatchManager {
     public function recreatePatchChannel(): void {
         if (!$this->useArray) {
             // Carry pending work across the reconnect. Discarding it destroyed every
-            // queued patch on every reconnect — network blip, mobile handoff,
-            // sleep/wake, proxy timeout — and contexts survive contextCleanupDelayMs,
+            // queued patch on every reconnect (network blip, mobile handoff,
+            // sleep/wake, proxy timeout), and contexts survive contextCleanupDelayMs,
             // so up to 5s of broadcasts could be thrown away. Signals now self-heal,
             // but one-shot scripts had no way back.
             $carried = $this->drainChannel($this->patchChannel);
@@ -441,9 +441,9 @@ class PatchManager {
      *
      * Drop-oldest used to be type-blind. 'elements' patches are idempotent
      * full-fragment morphs where the latest supersedes the rest, so evicting one is
-     * harmless. 'script' patches are one-shot side effects with no re-send path — a
+     * harmless. 'script' patches are one-shot side effects with no re-send path: a
      * dropped redirect is a broken login flow (LoginExample uses execScript for
-     * post-login navigation) — so they are evicted only as a last resort, when the
+     * post-login navigation), so they are evicted only as a last resort, when the
      * queue holds nothing else.
      *
      * 'signals' patches are safe to drop since acknowledgement moved to delivery
@@ -555,8 +555,8 @@ class PatchManager {
     /**
      * Prepare signals for patching.
      *
-     * Collects the changed signals but deliberately does NOT mark them synced —
-     * see syncSignals() for why acknowledgement is deferred until delivery.
+     * Collects the changed signals but deliberately does NOT mark them synced.
+     * See syncSignals() for why acknowledgement is deferred until delivery.
      *
      * @param list<Signal> $pending filled with the signals this patch carries
      *

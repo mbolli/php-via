@@ -148,6 +148,6 @@ No mocking framework: tests use real class instantiation with the env guard.
 
 When cutting a new release, update the version string in **all three** of these files:
 
-1. `src/Via.php` — `public const string VERSION = 'x.y.z';`
-2. `website/templates/docs/broker.html.twig` — example health-check JSON response
-3. `README.md` — example health-check JSON response
+1. `src/Via.php`: `public const string VERSION = 'x.y.z';`
+2. `website/templates/docs/broker.html.twig`: example health-check JSON response
+3. `README.md`: example health-check JSON response

@@ -1,11 +1,11 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Deployment — php-via Docs{% endblock %}
+{% block title %}Deployment · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Deployment</h1>
     <p>
         php-via runs as a long-lived <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> server process.
-        Unlike traditional PHP-FPM setups, the process stays running — all state lives in memory.
+        Unlike traditional PHP-FPM setups, the process stays running: all state lives in memory.
         This page covers production setup with systemd, Caddy, and process management.
     </p>
 
@@ -77,7 +77,7 @@ myapp.example.com {
     </p>
     {% code 'php' %}{% verbatim %}
 $config = (new Config())
-    ->withBasePath('/myapp');   // also accepts '/myapp/' — trailing slash is added automatically
+    ->withBasePath('/myapp');   // also accepts '/myapp/' (trailing slash is added automatically)
     {% endverbatim %}{% endcode %}
     <p>
         This sets the <code>{{ basePath }}</code> Twig global used by all action URLs and navigation
@@ -112,7 +112,7 @@ example.com {
 pecl install brotli
     {% endverbatim %}{% endcode %}
 
-    <h3 id="brotli-dev">Dev mode — self-signed cert, no proxy</h3>
+    <h3 id="brotli-dev">Dev mode: self-signed cert, no proxy</h3>
     <p>Generate a self-signed certificate once:</p>
     {% code 'bash' %}{% verbatim %}
 openssl req -x509 -newkey rsa:2048 -keyout dev.key -out dev.crt \
@@ -123,27 +123,27 @@ openssl req -x509 -newkey rsa:2048 -keyout dev.key -out dev.crt \
 $config = (new Config())
     ->withCertificate(__DIR__ . '/dev.crt', __DIR__ . '/dev.key')
     ->withBrotli();
-// Access via https://localhost:3000 (browser will warn about self-signed cert — accept once)
+// Access via https://localhost:3000 (browser will warn about self-signed cert, accept once)
 // curl needs --insecure / -k
     {% endverbatim %}{% endcode %}
 
-    <h3 id="brotli-prod">Prod mode — Caddy holds certs, php-via compresses</h3>
+    <h3 id="brotli-prod">Prod mode: Caddy holds certs, php-via compresses</h3>
     <p>
         Use <code>withH2c()</code> so OpenSwoole speaks HTTP/2 cleartext (h2c) on the internal port
         while Caddy terminates TLS externally. You must disable Caddy's own <code>encode</code>
-        directive — otherwise Caddy would double-compress what php-via already compressed.
+        directive. Otherwise Caddy would double-compress what php-via already compressed.
     </p>
     {% code 'caddy' %}{% verbatim %}
 myapp.example.com {
     reverse_proxy h2c://localhost:3000 {
         header_up X-Real-IP {remote_host}
     }
-    # No `encode` directive — php-via handles Brotli
+    # No `encode` directive: php-via handles Brotli
 }
     {% endverbatim %}{% endcode %}
     {% code 'php' %}{% verbatim %}
 $config = (new Config())
-    ->withH2c()     // enables open_http2_protocol, satisfies withBrotli() — no certs needed here
+    ->withH2c()     // enables open_http2_protocol, satisfies withBrotli(), no certs needed here
     ->withBrotli()
     ->withHost('127.0.0.1')
     ->withPort(3000);
@@ -152,8 +152,8 @@ $config = (new Config())
 
     <p>Compression levels:</p>
     <ul>
-        <li><strong>Pages and SSE</strong> — level 4 (fast; runs in the hot path)</li>
-        <li><strong>Static assets</strong> — level 11 (max ratio; compressed once and cached for the worker lifetime)</li>
+        <li><strong>Pages and SSE</strong>: level 4 (fast; runs in the hot path)</li>
+        <li><strong>Static assets</strong>: level 11 (max ratio; compressed once and cached for the worker lifetime)</li>
     </ul>
 
     <h2 id="production-config">Production config</h2>
@@ -175,7 +175,7 @@ $config = (new Config())
     </p>
     {% code 'ini' %}{% verbatim %}
 opcache.enable=1
-opcache.enable_cli=1                ; required — CLI is off by default
+opcache.enable_cli=1                ; required: CLI is off by default
 opcache.memory_consumption=128
 opcache.interned_strings_buffer=16
 opcache.max_accelerated_files=10000
@@ -187,7 +187,7 @@ opcache.jit_buffer_size=32M
     <h3 id="opcache-findings">Key findings</h3>
     <p class="note">
         Results below are from a synthetic benchmark on a single WSL2 host (PHP 8.4.20, OpenSwoole 25.2.0).
-        Absolute numbers vary by hardware — treat deltas as directional guidance, not guarantees.
+        Absolute numbers vary by hardware. Treat deltas as directional guidance, not guarantees.
     </p>
     <ul>
         <li>
@@ -201,12 +201,12 @@ opcache.jit_buffer_size=32M
         </li>
         <li>
             <strong>IO-bound workloads are unaffected.</strong> If your actions mostly wait on database
-            queries, external APIs, or file IO, OPcache and JIT add &lt;10% — invest in connection
+            queries, external APIs, or file IO, OPcache and JIT add &lt;10%. Invest in connection
             pooling instead.
         </li>
         <li>
-            <strong>SQLite-bound actions see modest JIT gains (+3–8%).</strong> Synchronous SQLite
-            calls are blocking C-extension calls — the coroutine scheduler cannot yield during them,
+            <strong>SQLite-bound actions see modest JIT gains (+3 to 8%).</strong> Synchronous SQLite
+            calls are blocking C-extension calls: the coroutine scheduler cannot yield during them,
             so 100 concurrent coroutines still serialize on SQLite regardless of JIT profile.
             Reduce query count with in-process caching (e.g. caching per-server-lifetime results
             that only change on writes) rather than relying on JIT to compensate.
@@ -216,13 +216,13 @@ opcache.jit_buffer_size=32M
             JIT compiles <code>usleep()</code> / <code>sleep()</code> as regular blocking calls, bypassing
             OpenSwoole's coroutine hook (<code>SWOOLE_HOOK_ALL</code>). This turns a non-blocking 2 ms
             yield into a thread-blocking sleep and reduces IO concurrency by ~89%.
-            Use <code>jit=tracing</code> instead — it does not have this regression.
+            Use <code>jit=tracing</code> instead: it does not have this regression.
         </li>
     </ul>
 
     <h2 id="security">Security hardening</h2>
 
-    <h3 id="security-origins">Trusted origins — CSRF protection</h3>
+    <h3 id="security-origins">Trusted origins: CSRF protection</h3>
     <p>
         By default, when no trusted-origin list is configured, php-via falls back to a
         <em>same-host</em> check: the <code>Origin</code> header of every action request must match
@@ -252,7 +252,7 @@ $config->withAllowMissingOrigin();
     </p>
     <p>
         Note: <code>GET /_action/…</code> always returns <strong>405 Method Not Allowed</strong>
-        regardless of this setting — see <a href="/docs/actions#url">Actions → URL</a> for details.
+        regardless of this setting (see <a href="/docs/actions#url">Actions → URL</a> for details).
     </p>
 
     <h3 id="security-cookie">Secure cookie</h3>
@@ -264,7 +264,7 @@ $config->withAllowMissingOrigin();
     {% code 'php' %}{% verbatim %}
 $config->withSecureCookie(true);
     {% endverbatim %}{% endcode %}
-    <p>Do not enable this in local HTTP development — the browser will silently drop the cookie.</p>
+    <p>Do not enable this in local HTTP development: the browser will silently drop the cookie.</p>
 
     <h3 id="security-embedding">Embedding in a cross-origin iframe</h3>
     <p>
@@ -280,7 +280,7 @@ $config->withEmbeddable('https://parent.example');   // origins allowed to frame
         survives third-party-cookie phase-out) and, when you pass one or more origins, emits
         <code>Content-Security-Policy: frame-ancestors</code> on page responses to restrict who may
         frame the app. It implies <code>withSecureCookie(true)</code> and <strong>requires HTTPS</strong>
-        (<code>withCertificate()</code>) or h2c (<code>withH2c()</code>) — <code>start()</code> hard-errors
+        (<code>withCertificate()</code>) or h2c (<code>withH2c()</code>). <code>start()</code> hard-errors
         otherwise, because a <code>SameSite=None</code> cookie without <code>Secure</code> is dropped.</p>
     <p>
         <code>frame-ancestors</code> (who may <em>frame</em> you) is unrelated to
@@ -424,15 +424,15 @@ $config = (new Config())
         supported. Use one process with several workers, or RedisBroker, if you need those scopes.
     </p>
     {% code 'php' %}{% verbatim %}
-// app.php — run N copies with different VIA_PORT values
+// app.php: run N copies with different VIA_PORT values
 $config = (new Config())
     ->withPort((int) (getenv('VIA_PORT') ?: 3001))
-    ->withWorkerNum(1); // one worker per process — no broker needed
+    ->withWorkerNum(1); // one worker per process, no broker needed
     {% endverbatim %}{% endcode %}
     {% code 'caddy' %}{% verbatim %}
 myapp.example.com {
     reverse_proxy localhost:3001 localhost:3002 localhost:3003 localhost:3004 {
-        lb_policy cookie caddy_lb   # sticky — correctness-critical, not optional
+        lb_policy cookie caddy_lb   # sticky: correctness-critical, not optional
         health_uri     /_health
         health_interval 5s
     }
@@ -444,7 +444,7 @@ myapp.example.com {
         near-linearly with the number of processes up to CPU saturation.
     </p>
 
-    <h3 id="multi-server">Multiple servers — RedisBroker / NatsBroker</h3>
+    <h3 id="multi-server">Multiple servers: RedisBroker / NatsBroker</h3>
     <p>
         For deployments across multiple machines or containers, use
         <a href="/docs/broker#redisbroker">RedisBroker</a> or
@@ -469,11 +469,11 @@ $config = (new Config())
 $config->withStaticDir(__DIR__ . '/public');
     {% endverbatim %}{% endcode %}
 
-    <p>In production, serve static files from Caddy (or nginx) directly — it's faster and avoids passing binary content through PHP.</p>
+    <p>In production, serve static files from Caddy (or nginx) directly: it's faster and avoids passing binary content through PHP.</p>
     <p>
         If you do serve <code>withStaticDir()</code> files through php-via itself (no reverse proxy, or a
-        proxy that isn't handling <code>/public/*</code>), every response — including the framework's own
-        <code>/datastar.js</code> and <code>/via.css</code> — carries an <code>ETag</code> and
+        proxy that isn't handling <code>/public/*</code>), every response, including the framework's own
+        <code>/datastar.js</code> and <code>/via.css</code>, carries an <code>ETag</code> and
         <code>Last-Modified</code>, and honors <code>If-None-Match</code> / <code>If-Modified-Since</code>
         with a <code>304</code>. The <code>Cache-Control</code> policy on top of that follows
         <code>devMode</code> by default (<code>no-cache</code> in dev, so edits show up on the next reload;
@@ -483,7 +483,7 @@ $config->withStaticDir(__DIR__ . '/public');
 $config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. if you fingerprint filenames yourself
     {% endverbatim %}{% endcode %}
     <p>
-        Or pass a closure to fine-tune the value per file — it receives the absolute file path and the
+        Or pass a closure to fine-tune the value per file. It receives the absolute file path and the
         resolved MIME type (no charset suffix, e.g. <code>text/css</code>):
     </p>
     {% code 'php' %}{% verbatim %}
@@ -496,16 +496,16 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): s
 });
     {% endverbatim %}{% endcode %}
     <p>
-        A string is always taken literally, never invoked as a function name — pass a closure, or
+        A string is always taken literally, never invoked as a function name. Pass a closure, or
         first-class callable syntax (<code>$obj->method(...)</code>) for an existing method.
     </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/lifecycle">Lifecycle</a> — onStart, onShutdown, cleanup hooks</li>
-        <li><a href="/docs/actions#url">Actions → URL</a> — why <code>@post()</code> is required</li>
-        <li><a href="/docs/broker">Broker</a> — SwooleBroker, RedisBroker, NatsBroker</li>
-        <li><a href="/docs/api">API Reference</a> — Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>, <code>withEmbeddable</code>)</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: onStart, onShutdown, cleanup hooks</li>
+        <li><a href="/docs/actions#url">Actions → URL</a>: why <code>@post()</code> is required</li>
+        <li><a href="/docs/broker">Broker</a>: SwooleBroker, RedisBroker, NatsBroker</li>
+        <li><a href="/docs/api">API Reference</a>: Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>, <code>withEmbeddable</code>)</li>
     </ul>
 </article>
 

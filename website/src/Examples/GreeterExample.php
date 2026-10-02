@@ -13,7 +13,7 @@ use Mbolli\PhpVia\Via;
  * Composition API version of the greeter.
  *
  * A single #[Signal] property plus two #[Action] methods replace the closure
- * handler entirely. The Twig template is unchanged — signals and actions are
+ * handler entirely. The Twig template is unchanged: signals and actions are
  * auto-injected by name (`greeting`, `greetBob`, `greetAlice`).
  */
 final class GreeterExample {
@@ -24,12 +24,12 @@ final class GreeterExample {
     public function view(Context $ctx): void {
         $ctx->view('examples/greeter.html.twig', [
             'title' => '👋 Greeter',
-            'description' => 'Composition API: one <code>#[Signal]</code> property and two <code>#[Action]</code> methods. The closure handler becomes a small class — the template is unchanged.',
+            'description' => 'Composition API: one <code>#[Signal]</code> property and two <code>#[Action]</code> methods. The closure handler becomes a small class. The template is unchanged.',
             'summary' => [
                 '<strong>#[Signal]</strong> turns the <code>$greeting</code> property into a reactive signal. Writing to <code>$this->greeting</code> inside an action auto-syncs the new value to the browser via SSE.',
                 '<strong>#[Action]</strong> marks <code>greetBob()</code> and <code>greetAlice()</code> as client-callable. Both write to the same <code>$greeting</code> property with different values.',
-                '<strong>Auto-injection</strong> — the template reads <code>{{ greeting.id }}</code> and <code>{{ greetBob.url }}</code> with no view data passed for them. Signals and actions are injected by name automatically.',
-                '<strong>Zero JavaScript</strong> — every button click fires a server round-trip via Datastar. The response patches only the changed signal, not the whole page.',
+                '<strong>Auto-injection</strong>: the template reads <code>{{ greeting.id }}</code> and <code>{{ greetBob.url }}</code> with no view data passed for them. Signals and actions are injected by name automatically.',
+                '<strong>Zero JavaScript</strong>: every button click fires a server round-trip via Datastar. The response patches only the changed signal, not the whole page.',
             ],
             'anatomy' => [
                 'signals' => [
@@ -40,7 +40,7 @@ final class GreeterExample {
                     ['name' => 'greetAlice', 'desc' => '#[Action] method. Sets $this->greeting to "Hello Alice!".'],
                 ],
                 'views' => [
-                    ['name' => 'greeter.html.twig', 'desc' => 'Unchanged from the closure version — buttons trigger the actions; the greeting updates reactively via SSE patch.'],
+                    ['name' => 'greeter.html.twig', 'desc' => 'Unchanged from the closure version: buttons trigger the actions; the greeting updates reactively via SSE patch.'],
                 ],
             ],
             'githubLinks' => [

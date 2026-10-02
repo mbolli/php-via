@@ -18,7 +18,7 @@ use Mbolli\PhpVia\Scope;
  * has an independent counter that persists and syncs across all users.
  */
 final class VoteWidget {
-    // atomic: true — vote() is ++$this->votes, which without it is a read-modify-write
+    // atomic: true. vote() is ++$this->votes, which without it is a read-modify-write
     // across workers and drops concurrent votes.
     #[Signal(Scope::GLOBAL, atomic: true)]
     public int $votes = 0;

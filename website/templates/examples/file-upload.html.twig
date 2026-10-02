@@ -22,7 +22,7 @@
     <div class="fu-form-wrap">
         <h3 class="fu-heading">Simulate a large file upload</h3>
         <p class="fu-subheading">
-            No real data is transferred — the worker sends virtual byte counts.
+            No real data is transferred: the worker sends virtual byte counts.
             Navigate to Browse or Settings while uploading to see the progress bar survive.
         </p>
 
@@ -61,7 +61,7 @@
 
         <p class="fu-tip">
             💡 <strong>Try it:</strong> start the upload, then click <strong>Browse</strong>
-            or <strong>Settings</strong> above — the bar never stops.
+            or <strong>Settings</strong> above. The bar never stops.
         </p>
     </div>
 
@@ -71,7 +71,7 @@
     <div class="fu-form-wrap">
         <h3 class="fu-heading">Upload a real file</h3>
         <p class="fu-subheading">
-            Actual multipart/form-data POST — <code>$c->file('file')</code> reads the upload.
+            Actual multipart/form-data POST: <code>$c->file('file')</code> reads the upload.
             Max {{ realMaxMb }} MB. Server formats the human-readable size and extension.
         </p>
 
@@ -94,7 +94,7 @@
                            const ext = f.name.split('.').pop().toUpperCase() || 'file';
                            const mb  = f.size / 1048576;
                            const sz  = mb >= 1 ? mb.toFixed(1) + ' MB' : Math.ceil(f.size/1024) + ' kB';
-                           info.textContent = f.name + ' — ' + sz + ' · ' + ext;
+                           info.textContent = f.name + ' · ' + sz + ' · ' + ext;
                            info.style.display = '';
                          } else {
                            info.textContent = '';
@@ -123,8 +123,8 @@
             Navigate to
             <a href="{{ basePath }}examples/file-upload/browse">Browse</a>
             or
-            <a href="{{ basePath }}examples/file-upload/settings">Settings</a>
-            — the progress bar will still be there.
+            <a href="{{ basePath }}examples/file-upload/settings">Settings</a>.
+            The progress bar will still be there.
         </p>
         <p class="fu-bytes-info">
             {{ (uploadedBytes.int / 1048576)|number_format(0) }} MB
@@ -251,11 +251,11 @@ window.handleRealUpload = function (form) {
         fileInput.parentNode.appendChild(errEl);
     }
     if (file.size > maxBytes) {
-        errEl.textContent = 'File too large \u2014 maximum is {{ realMaxMb }}\u00a0MB. Use Simulate mode for larger files.';
+        errEl.textContent = 'File too large: maximum is {{ realMaxMb }}\u00a0MB. Use Simulate mode for larger files.';
         return;
     }
     errEl.textContent = '';
-    // Hand the File to the worker — chunk loop runs there so navigation can't abort it
+    // Hand the File to the worker: chunk loop runs there so navigation can't abort it
     window.uploadWorkerPort.postMessage({
         type:           'startReal',
         file:           file,

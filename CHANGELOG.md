@@ -124,17 +124,17 @@ All notable changes to php-via will be documented in this file.
 ### New Features
 
 - **Context revival**: a tab backgrounded long enough that its context is destroyed now rebuilds an
-  equivalent context on reconnect — same context ID, so the already-loaded DOM keeps working — and
+  equivalent context on reconnect (same context ID, so the already-loaded DOM keeps working) and
   re-seeds signal values the client still holds, **instead of hard-reloading the page**. This
   preserves local (`_`-prefixed) signals, scroll position, and focus that a reload would wipe. It is
   on by default (10-minute window) and needs no app code; tune or disable it with
   `Config::withContextRevivalWindow()` (`0` = fall back to the previous reload behavior). Revival
-  re-runs the page handler, so — exactly as on a reload — server-only state (`#[Persist]`) resets and
+  re-runs the page handler, so, exactly as on a reload, server-only state (`#[Persist]`) resets and
   `onDisconnect`/connect hooks re-fire. Named components survive; anonymous components (no explicit
   name) reset. As part of this, TAB-scoped action IDs are now deterministic (previously random per
   registration) so a revived context's action URLs match the ones already in the DOM.
 - **`Config::withContextCleanupDelay()`**: configures the grace period (default: 5 seconds) before
-  an inactive context — one whose SSE connection has closed — is destroyed, allowing time for page
+  an inactive context (one whose SSE connection has closed) is destroyed, allowing time for page
   navigation or a brief reconnect. Previously hardcoded; mirrors the existing
   `Config::withGcInterval()` pattern. Pass `0` to disable the grace period and clean up immediately
   on disconnect.
@@ -147,7 +147,7 @@ All notable changes to php-via will be documented in this file.
   `/via.css`, and files served via `withStaticDir()`. Defaults to `no-cache` in devMode (so
   edits to a `withStaticDir()` file are visible on the next reload) or
   `public, max-age=3600, must-revalidate` otherwise. Pass a string to apply one value to every
-  static response, e.g. `public, max-age=31536000, immutable` for fingerprinted filenames — or a
+  static response, e.g. `public, max-age=31536000, immutable` for fingerprinted filenames, or a
   closure `(string $filePath, string $mimeType): string` to fine-tune the value per file (e.g.
   long-cache fonts and fingerprinted assets, short-cache everything else). A string is always
   taken literally, never invoked as a function name.
@@ -164,7 +164,7 @@ All notable changes to php-via will be documented in this file.
 
 ### Internal
 
-- Extracted static-file conditional-GET logic into `Support\ConditionalGet` — free of OpenSwoole
+- Extracted static-file conditional-GET logic into `Support\ConditionalGet`, free of OpenSwoole
   types so it's unit tested independently of a running server.
 
 ## [0.10.1] - 2026-06-15
@@ -186,15 +186,15 @@ All notable changes to php-via will be documented in this file.
 - **Composition API (class-based pages & components)**: a declarative alternative to the
   closure API, built entirely on top of the existing infrastructure. Annotate a class with
   PHP attributes and mount it with `Via::mount(SomeClass::class, '/route')`;
-  `Context::component()` now also accepts a class-name string. The closure API is unchanged —
+  `Context::component()` now also accepts a class-name string. The closure API is unchanged:
   composition is purely additive.
-  - `#[Signal]` — TAB-scoped, client-writable reactive property.
-  - `#[Signal(Scope::ROUTE|SESSION|GLOBAL|"custom")]` — scoped reactive signal that
+  - `#[Signal]`: TAB-scoped, client-writable reactive property.
+  - `#[Signal(Scope::ROUTE|SESSION|GLOBAL|"custom")]`: scoped reactive signal that
     auto-broadcasts to its scope.
-  - `#[Persist]` — server-only instance state that survives between action calls.
-  - `#[Broadcast(Scope::X)]` — sets the context's primary broadcast scope.
-  - `#[Action(name?, scope?)]` — marks a public method as a client-callable action.
-  - `#[OnDisconnect]` / `#[OnCleanup]` — lifecycle hooks (max one each).
+  - `#[Persist]`: server-only instance state that survives between action calls.
+  - `#[Broadcast(Scope::X)]`: sets the context's primary broadcast scope.
+  - `#[Action(name?, scope?)]`: marks a public method as a client-callable action.
+  - `#[OnDisconnect]` / `#[OnCleanup]`: lifecycle hooks (max one each).
 
 - **Dev Bar**: an opt-in in-page debug overlay with a request-trace waterfall and a
   multi-panel inspector (signals, logs, connections), enabled via `Config::withTracing()`.
@@ -394,7 +394,7 @@ All notable changes to php-via will be documented in this file.
 
 - **`Via::group(string|callable $prefixOrFn, ?callable $fn): RouteGroup`:** Register a group of routes with an optional URL prefix and/or shared middleware.
   ```php
-  // With prefix — routes declared with short paths, prefix prepended automatically
+  // With prefix: routes declared with short paths, prefix prepended automatically
   $app->group('/admin', function (Via $app): void {
       $app->page('/', fn(Context $c) => ...);      // → /admin
       $app->page('/users', fn(Context $c) => ...); // → /admin/users
@@ -442,7 +442,7 @@ All notable changes to php-via will be documented in this file.
 
 - **`Application::scheduleContextCleanup()`:** Accepts an optional `$isActiveCheck` callable. When it returns true (active SSE count > 0), the timer reschedules itself instead of destroying the context, preventing a race where the cleanup timer fires while a new SSE connection is mid-handshake.
 - **`Via::scheduleContextCleanup()`:** Passes `fn(): bool => ($this->activeSseCount[$contextId] ?? 0) > 0` as the guard, wiring the cleanup timer to the live SSE connection counter.
-- **`Via` default server settings:** Added `'max_conn' => 10000` and `'backlog' => 4096` to prevent TCP accept-queue saturation under burst SSE load. Previously the OS default (~128–512) was exhausted at ~200 concurrent connections; tested clean to 2,000 after this change.
+- **`Via` default server settings:** Added `'max_conn' => 10000` and `'backlog' => 4096` to prevent TCP accept-queue saturation under burst SSE load. Previously the OS default (~128 to 512) was exhausted at ~200 concurrent connections; tested clean to 2,000 after this change.
 - **`SseHandler` brotli header ordering:** `Content-Encoding: br` header was set before the expired-context and `hasView()` early-return paths, corrupting raw SSE payloads written before `end()`. Headers are now set only after both early returns are cleared.
 - **`SseHandler` expired-context reload deduplication:** A backgrounded tab that cannot execute `window.location.reload()` would reconnect indefinitely, generating log noise and redundant SSE writes. First reconnect from a dead context sends the reload; subsequent reconnects receive an immediate `response->end()`. Entries evicted after 5 minutes.
 - **`SseHandler` `hasView()` race path:** The post-cleanup race reload event now routes through `$brotliWrite` when brotli is active, so the frame is properly encoded rather than written raw after the brotli header is set.
@@ -583,10 +583,10 @@ All notable changes to php-via will be documented in this file.
   arbitrary clients from overwriting shared state. Pass `clientWritable: true` to opt a scoped signal
   in to client writes:
   ```php
-  // Server-authoritative (default) — client cannot overwrite
+  // Server-authoritative (default): client cannot overwrite
   $counter = $c->signal(0, 'count', Scope::ROUTE);
 
-  // Collaborative — client may push values (e.g. data-bind on a shared input)
+  // Collaborative: client may push values (e.g. data-bind on a shared input)
   $note = $c->signal('', 'note', Scope::ROUTE, clientWritable: true);
   ```
   TAB-scoped signals (the default) are always client-writable and unaffected by this change.
@@ -622,7 +622,7 @@ All notable changes to php-via will be documented in this file.
 ### Website
 - **Consolidated examples:** 11 standalone example apps merged into the website's single Via server under `/examples/{name}`
 - **Tabbed source panel:** each example shows PHP handler and Twig template in switchable tabs (CSS-only, no JS)
-- **Example summaries:** 3–6 paragraph descriptions per example explaining the concepts demonstrated
+- **Example summaries:** 3 to 6 paragraph descriptions per example explaining the concepts demonstrated
 - **Examples-source accuracy:** all source display files updated to match actual handler logic (board model, scope prefixes, signal names, template variables)
 - **Client Monitor revamp:** replaced timer-driven polling with `onClientConnect`/`onClientDisconnect` hooks
 - **Removed Global Notifications** example (concepts merged into All Scopes)

@@ -21,7 +21,7 @@
       enctype="multipart/form-data"
       novalidate
       data-on:submit__prevent="@post('{{ submit.url }}', {contentType: 'form'})">
-    {# Datastar form mode sends raw FormData — signals are not included.
+    {# Datastar form mode sends raw FormData: signals are not included.
        via_ctx must be a hidden field so the server can route this request to the right context. #}
     <input type="hidden" name="via_ctx" value="{{ ctxId }}">
     {# ── Name ─────────────────────────────────────────────────────── #}

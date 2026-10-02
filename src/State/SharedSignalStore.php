@@ -13,7 +13,7 @@ use OpenSwoole\Table;
  * SignalManager holds Signal objects in a plain PHP array, so a ROUTE/SESSION/GLOBAL-scoped
  * signal is shared between the contexts of one worker and no further. Each worker gets its own
  * copy, initialised from the declared default, and they diverge from the first mutation. This
- * store backs the value — and only the value — with an OpenSwoole\Table, which is mmap'd and
+ * store backs the value, and only the value, with an OpenSwoole\Table, which is mmap'd and
  * fork-inherited, so it must be allocated in the master process before $server->start().
  *
  * The Signal object itself stays per-process. Its identity, scope, client-writable flag and
@@ -23,14 +23,14 @@ use OpenSwoole\Table;
  * ## Two storage paths
  *
  * Integers get a dedicated `TYPE_INT` column, because `Table::incr()` on it is atomic across
- * processes — measured at 100% retention with 8 processes racing on one row, against 31% for
+ * processes, measured at 100% retention with 8 processes racing on one row, against 31% for
  * read-modify-write through get()+set(). That makes {@see increment()} race-free by
  * construction, with no lock and no owner worker.
  *
  * Everything else is PHP-serialized into a string column with last-write-wins. That is correct
  * for the mutation shape it actually sees: a value assigned wholesale (a name, a status, a
  * rendered snapshot) has no lost-update problem, because there is nothing to lose. What LWW
- * cannot do is read-modify-write — `setValue($signal->array() + [...])` on two workers at once
+ * cannot do is read-modify-write: `setValue($signal->array() + [...])` on two workers at once
  * drops one side. Signals shaped that way need {@see increment()} where they are numeric, and
  * a single writer where they are not.
  *
@@ -87,7 +87,7 @@ final class SharedSignalStore {
      * Seed a signal's value if no worker has stored one yet, and return the value in force.
      *
      * A worker mounting a route that another worker already serves must ADOPT the live value,
-     * not reset it to the declared default — that is the whole point of a scoped signal. The
+     * not reset it to the declared default. That is the whole point of a scoped signal. The
      * seed race between two workers starting together is benign: both write the same default.
      */
     public function initialize(string $id, mixed $default): mixed {
@@ -130,7 +130,7 @@ final class SharedSignalStore {
         if (\is_array($row) && (int) $row['kind'] !== self::KIND_INT) {
             throw new \LogicException(
                 "Signal \"{$id}\" does not hold an integer, so it cannot be incremented atomically. "
-                . 'Use setValue() — but note that read-modify-write on a non-integer scoped signal '
+                . 'Use setValue(), but note that read-modify-write on a non-integer scoped signal '
                 . 'can lose updates when more than one worker writes it.'
             );
         }
@@ -154,14 +154,14 @@ final class SharedSignalStore {
      * Read, transform and write a signal's value as one indivisible step.
      *
      * This is the answer for the mutation shape neither other path covers: read-modify-write on
-     * a NON-integer value — appending to a list, updating one key of a map. increment() handles
+     * a NON-integer value: appending to a list, updating one key of a map. increment() handles
      * numbers atomically and a wholesale assignment has no lost update to suffer, but
      * `setValue($signal->array() + [...])` is a read and a write with a gap in between, and
      * concurrent workers each write back a result computed from the same stale read. Measured
      * over 4 forked workers appending to one list: 79 of 160 entries survived.
      *
      * $mutator receives the current value and returns the new one. It runs on the calling
-     * worker — no closure crosses a process boundary — while a ticket lock on the row keeps
+     * worker (no closure crosses a process boundary) while a ticket lock on the row keeps
      * every other worker out. Keep it fast and side-effect free: it runs inside the lock, and a
      * callback that blocks holds up every other writer of the same signal. Concurrent callers in
      * one worker queue locally, and one per worker polls the row. Exclusion holds while each holder
@@ -171,7 +171,7 @@ final class SharedSignalStore {
      * Two things to know:
      *  - The mutator receives null for a signal nothing has written yet, so handle that case.
      *  - Do not mix mutate() and increment() on the SAME signal. increment() deliberately skips
-     *    the lock — a single atomic operation needs no help — so a mutate() running beside it
+     *    the lock (a single atomic operation needs no help), so a mutate() running beside it
      *    can read, compute and write back over an increment that landed in between. Pick one
      *    per signal.
      *

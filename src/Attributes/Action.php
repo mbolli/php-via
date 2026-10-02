@@ -7,7 +7,7 @@ namespace Mbolli\PhpVia\Attributes;
 /**
  * Marks a method as a client-callable action.
  *
- * Only methods annotated with #[Action] are registered — this is opt-in
+ * Only methods annotated with #[Action] are registered. This is opt-in
  * to prevent accidentally exposing utility methods.
  *
  * @example

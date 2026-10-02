@@ -12,13 +12,13 @@ namespace Mbolli\PhpVia\Attributes;
  * mutates non-signal state (static arrays, DB rows) and calls $ctx->broadcast()
  * to push a fresh view render to everyone in the scope.
  *
- * This does NOT change the scope of #[Signal] properties — each signal declares
+ * This does NOT change the scope of #[Signal] properties: each signal declares
  * its own scope independently. #[Broadcast] only affects the broadcast target.
  *
  * @example
  * #[Broadcast(Scope::ROUTE)]
  * final class TodoPage {
- *     #[Signal]                       // still TAB-scoped — unaffected by #[Broadcast]
+ *     #[Signal]                       // still TAB-scoped, unaffected by #[Broadcast]
  *     public string $draft = '';
  *
  *     #[Action]

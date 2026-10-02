@@ -7,7 +7,7 @@ namespace Mbolli\PhpVia\Attributes;
 /**
  * Marks a property as server-only state that persists between action calls.
  *
- * - NOT sent to the client — invisible to the browser
+ * - NOT sent to the client, invisible to the browser
  * - No Signal is created
  * - The value survives across action calls because the class instance is kept
  *   alive on the Context for the lifetime of the browser tab

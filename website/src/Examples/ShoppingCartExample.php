@@ -66,13 +66,13 @@ final class ShoppingCartExample {
 
             $c->view(fn (): string => $c->render('examples/shopping_cart.html.twig', [
                 'title' => '🛒 Shopping Cart',
-                'description' => 'Add items across browser tabs — the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
+                'description' => 'Add items across browser tabs: the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
                 'summary' => [
-                    '<strong>SESSION-scoped cart</strong> via a custom <code>cart:{sessionId}</code> scope means the cart is shared across every tab in your browser. Open a new tab — the cart is already populated.',
+                    '<strong>SESSION-scoped cart</strong> via a custom <code>cart:{sessionId}</code> scope means the cart is shared across every tab in your browser. Open a new tab: the cart is already populated.',
                     '<strong>$app->broadcast($cartScope)</strong> pushes the updated cart to all connected tabs of that session simultaneously. No polling, no cache invalidation, no client state sync.',
-                    '<strong>$c->sessionData() / setSessionData()</strong> stores the cart in the framework\'s per-session bucket. No static class, no manual cleanup — and the cart survives a full page reload.',
+                    '<strong>$c->sessionData() / setSessionData()</strong> stores the cart in the framework\'s per-session bucket. No static class, no manual cleanup, and the cart survives a full page reload.',
                     '<strong>CSS @starting-style</strong> animates newly inserted cart rows without a single line of JavaScript. When Datastar morphs in the new item, the browser\'s entry transition fires automatically.',
-                    '<strong>Block partial rendering</strong> — on updates only the #cart-panel fragment is sent, not the product grid. The products are rendered once on initial load and stay static in the DOM.',
+                    '<strong>Block partial rendering</strong>: on updates only the #cart-panel fragment is sent, not the product grid. The products are rendered once on initial load and stay static in the DOM.',
                 ],
                 'anatomy' => [
                     'signals' => [],

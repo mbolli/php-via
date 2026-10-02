@@ -46,7 +46,7 @@ final class SpreadsheetExample {
      * Viewport query results, keyed by "startRow:startCol:rows:cols".
      *
      * A broadcast renders once per client (their viewports, cursors and selections all differ), but
-     * the CELL data behind identical viewports is identical — and clients overwhelmingly share one,
+     * the CELL data behind identical viewports is identical, and clients overwhelmingly share one,
      * since everyone starts at 0,0. Without this the fan-out repeats the same blocking SQLite range
      * query once per client, stalling the worker each time. Cursor-only broadcasts, the common case,
      * touch no cell data at all, so the repeat spans broadcasts as well.
@@ -619,15 +619,15 @@ final class SpreadsheetExample {
                     'title' => '📊 Spreadsheet',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
                     'summary' => [
-                        '<strong>SQLite persistence</strong> — cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
-                        '<strong>Virtual scrolling</strong> — only the visible cells are rendered at a time. Arrow keys, Page Up/Down, Home, mouse wheel, and Tab navigate the viewport. The server fetches only the visible range from SQLite on every render.',
-                        '<strong>Dynamic resize</strong> — drag the bottom-right handle to make the grid any size. A <code>ResizeObserver</code> dispatches a throttled event; the browser computes how many rows and columns fit, writes them into signals, and posts to a <code>resize</code> action that re-renders exactly the right number of cells.',
-                        '<strong>Jump to coordinate</strong> — type a cell reference like <code>AB2000</code> into the toolbar input and press Enter. The server parses column letters and row number, centers the viewport, and moves the cursor in one round-trip.',
-                        '<strong>Collaborative cursors</strong> — each user gets a hue derived from their session ID. Other users\' focused cells show a colored border in real time, broadcast via a custom <code>example:spreadsheet</code> scope.',
-                        '<strong>Copy & paste</strong> — Ctrl+C copies the selected range as tab-separated values to the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
-                        '<strong>Keyboard-first UX</strong> — a single <code>data-on:keydown__window</code> handler covers arrows, Tab, Enter, Escape, F2, Delete, Ctrl+C, and printable-character-to-edit, with an explicit guard so the jump input is never intercepted.',
-                        '<strong>Scope design</strong> — viewport position and editing state are TAB-scoped (private per tab). Cell data and cursor positions use a custom <code>example:spreadsheet</code> scope, so every connected user sees live updates without leaking private state.',
-                        '<strong>Raw PHP rendering</strong> — SSE update hot path uses plain PHP string building instead of Twig. Bypassing the template engine on every broadcast yields a 3–4× throughput increase under concurrent load.',
+                        '<strong>SQLite persistence</strong>: cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
+                        '<strong>Virtual scrolling</strong>: only the visible cells are rendered at a time. Arrow keys, Page Up/Down, Home, mouse wheel, and Tab navigate the viewport. The server fetches only the visible range from SQLite on every render.',
+                        '<strong>Dynamic resize</strong>: drag the bottom-right handle to make the grid any size. A <code>ResizeObserver</code> dispatches a throttled event; the browser computes how many rows and columns fit, writes them into signals, and posts to a <code>resize</code> action that re-renders exactly the right number of cells.',
+                        '<strong>Jump to coordinate</strong>: type a cell reference like <code>AB2000</code> into the toolbar input and press Enter. The server parses column letters and row number, centers the viewport, and moves the cursor in one round-trip.',
+                        '<strong>Collaborative cursors</strong>: each user gets a hue derived from their session ID. Other users\' focused cells show a colored border in real time, broadcast via a custom <code>example:spreadsheet</code> scope.',
+                        '<strong>Copy & paste</strong>: Ctrl+C copies the selected range as tab-separated values to the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
+                        '<strong>Keyboard-first UX</strong>: a single <code>data-on:keydown__window</code> handler covers arrows, Tab, Enter, Escape, F2, Delete, Ctrl+C, and printable-character-to-edit, with an explicit guard so the jump input is never intercepted.',
+                        '<strong>Scope design</strong>: viewport position and editing state are TAB-scoped (private per tab). Cell data and cursor positions use a custom <code>example:spreadsheet</code> scope, so every connected user sees live updates without leaking private state.',
+                        '<strong>Raw PHP rendering</strong>: SSE update hot path uses plain PHP string building instead of Twig. Bypassing the template engine on every broadcast yields a 3 to 4× throughput increase under concurrent load.',
                     ],
                     'anatomy' => [
                         'signals' => [
@@ -635,23 +635,23 @@ final class SpreadsheetExample {
                             ['name' => 'focusRow / focusCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Currently focused cell coordinates. Server-owned, so a key pressed before the last move reached the browser still applies from the new cell.'],
                             ['name' => 'editing', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Whether the focused cell is in edit mode. A commit also needs the edit startEdit opened on the server, so a key pressed before the last commit or Escape arrived writes nothing.'],
                             ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '\"\"', 'desc' => 'Current cell editor input value.'],
-                            ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted — client-writable action parameters for keyboard and mouse events.'],
+                            ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted: client-writable action parameters for keyboard and mouse events.'],
                             ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20×10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
                             ['name' => 'version', 'type' => 'int', 'scope' => 'Custom', 'desc' => 'Shared scope version counter. Bumped on every cursor/edit change to trigger broadcasts.'],
                         ],
                         'actions' => [
                             ['name' => 'focusCell', 'desc' => 'Moves cursor to a cell. Commits pending edits, updates selection, broadcasts cursor position.'],
-                            ['name' => 'navigate', 'desc' => 'Keyboard navigation — arrows, Tab, Enter, Escape, PageUp/Down, Home. Auto-scrolls viewport.'],
+                            ['name' => 'navigate', 'desc' => 'Keyboard navigation: arrows, Tab, Enter, Escape, PageUp/Down, Home. Auto-scrolls viewport.'],
                             ['name' => 'startEdit', 'desc' => 'Enters edit mode on the focused cell. Prefills with typed character or current value.'],
                             ['name' => 'commitEdit', 'desc' => 'Writes the edit value to SQLite and broadcasts the change.'],
-                            ['name' => 'scroll', 'desc' => 'Mouse wheel scrolling — moves viewport by delta rows/columns.'],
+                            ['name' => 'scroll', 'desc' => 'Mouse wheel scrolling: moves viewport by delta rows/columns.'],
                             ['name' => 'scrollTo', 'desc' => 'Absolute viewport positioning on one axis, used by scrollbar drag and track clicks.'],
                             ['name' => 'clearCells', 'desc' => 'Deletes the selected range of cells.'],
                             ['name' => 'paste', 'desc' => 'Pastes TSV clipboard data starting at the focused cell. Compatible with Excel/Sheets.'],
                             ['name' => 'jumpTo', 'desc' => 'Parses a cell reference like AB2000, centers viewport, and moves cursor.'],
                         ],
                         'views' => [
-                            ['name' => 'spreadsheet.html.twig', 'desc' => 'Outer shell rendered on initial page load only. SSE updates are generated with raw PHP string building, yielding a 3–4× throughput improvement over Twig rendering on the hot path.'],
+                            ['name' => 'spreadsheet.html.twig', 'desc' => 'Outer shell rendered on initial page load only. SSE updates are generated with raw PHP string building, yielding a 3 to 4× throughput improvement over Twig rendering on the hot path.'],
                         ],
                     ],
                     'githubLinks' => [
@@ -673,7 +673,7 @@ final class SpreadsheetExample {
 
     /**
      * Render the dynamic inner content (<div id="ss-dynamic">) using raw PHP.
-     * This is the SSE update hot path — no Twig involved.
+     * This is the SSE update hot path, no Twig involved.
      *
      * @param array<string, mixed> $d
      */
@@ -1022,7 +1022,7 @@ final class SpreadsheetExample {
             // IMMEDIATE, not deferred: setCell()'s delete path calls refreshExtentCache(),
             // which reads inside this transaction. A deferred transaction takes its read
             // snapshot at that first SELECT, and if another connection commits before our
-            // first write the upgrade fails with SQLITE_BUSY_SNAPSHOT — which bypasses the
+            // first write the upgrade fails with SQLITE_BUSY_SNAPSHOT, which bypasses the
             // busy handler, so busy_timeout offers no protection and a writer can starve
             // indefinitely. Taking the write lock up front keeps read and write on one
             // snapshot. See tests/Feature/SqliteTransactionSafetyTest.php.

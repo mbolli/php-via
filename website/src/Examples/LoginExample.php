@@ -12,9 +12,9 @@ use PhpVia\Website\Middleware\AuthMiddleware;
  * Login Flow Example.
  *
  * Demonstrates PSR-15 middleware-based authentication:
- *  - /examples/login            — public login form (no middleware)
- *  - /examples/login/dashboard  — protected by AuthMiddleware
- *  - /examples/login/profile    — protected by AuthMiddleware
+ *  - /examples/login:           public login form (no middleware)
+ *  - /examples/login/dashboard: protected by AuthMiddleware
+ *  - /examples/login/profile:   protected by AuthMiddleware
  *
  * The two protected routes are registered inside Via::group(), so a single
  * ->middleware($authMiddleware) call covers both of them.
@@ -30,9 +30,9 @@ final class LoginExample {
     private const string DESCRIPTION = 'PSR-15 middleware-based authentication. The login form is public; the dashboard and profile routes are protected by <code>AuthMiddleware</code> via <code>Via::group()->middleware()</code>.';
 
     private const array SUMMARY = [
-        '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code> — one call shields both.',
+        '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code>: one call shields both.',
         '<strong>AuthMiddleware reads the session cookie</strong> from the PSR-7 request, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute.',
-        '<strong>The handlers read <code>$c->getRequestAttribute(\'auth\')</code></strong> — the middleware-set attribute is automatically bridged from the PSR-7 request to the Via Context. No manual session checks needed.',
+        '<strong>The handlers read <code>$c->getRequestAttribute(\'auth\')</code></strong>: the middleware-set attribute is automatically bridged from the PSR-7 request to the Via Context. No manual session checks needed.',
         '<strong>Logout clears the session</strong> and redirects back to the login form. The middleware will block any subsequent protected access until login succeeds again.',
     ];
 

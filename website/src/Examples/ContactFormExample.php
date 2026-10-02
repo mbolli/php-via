@@ -124,7 +124,7 @@ final class ContactFormExample {
                     return;
                 }
 
-                // All valid — in a real app you'd send an email / persist to DB here.
+                // All valid: in a real app you'd send an email / persist to DB here.
                 $submittedFile = $savedFileName;
                 $submittedFileInfo = $savedFileInfo;
                 $submitted = true;
@@ -146,11 +146,11 @@ final class ContactFormExample {
                     'title' => '📬 Contact Form',
                     'description' => 'Multipart file upload and server-side form validation. The form submits as <code>multipart/form-data</code>; text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>. Per-field error signals are pushed back via SSE.',
                     'summary' => [
-                        '<strong>No base64 overhead.</strong> Datastar\'s <code>contentType: \'form\'</code> modifier submits the nearest <code>&lt;form enctype="multipart/form-data"&gt;</code> as a real multipart POST — files travel as binary, not JSON blobs.',
+                        '<strong>No base64 overhead.</strong> Datastar\'s <code>contentType: \'form\'</code> modifier submits the nearest <code>&lt;form enctype="multipart/form-data"&gt;</code> as a real multipart POST: files travel as binary, not JSON blobs.',
                         '<strong>Two validation layers.</strong> HTML5 <code>required</code> / <code>type="email"</code> / <code>minlength</code> attributes make Datastar call <code>reportValidity()</code> before the request is even sent. The server then re-validates every field independently.',
                         '<strong><code>$c->file(\'attachment\')</code></strong> returns the parsed upload array (<code>name</code>, <code>type</code>, <code>tmp_name</code>, <code>size</code>) if the upload succeeded, or <code>null</code> if no file was sent or the upload failed.',
-                        '<strong>State shared via PHP references.</strong> The action and view closures share mutable variables with <code>use (&amp;$ref)</code>. No signals needed — nothing is client-reactive. The SSE block re-render reads the updated values directly via Twig.',
-                        '<strong>Success toggled server-side.</strong> On clean submission <code>$submitted</code> becomes <code>true</code>; the re-rendered block switches to the confirmation panel — no page reload, no client branching.',
+                        '<strong>State shared via PHP references.</strong> The action and view closures share mutable variables with <code>use (&amp;$ref)</code>. No signals needed: nothing is client-reactive. The SSE block re-render reads the updated values directly via Twig.',
+                        '<strong>Success toggled server-side.</strong> On clean submission <code>$submitted</code> becomes <code>true</code>; the re-rendered block switches to the confirmation panel. No page reload, no client branching.',
                     ],
                     'anatomy' => [
                         'signals' => [],

@@ -16,7 +16,7 @@ use Psr\Http\Server\RequestHandlerInterface;
  * core handler if no middleware short-circuits. Each middleware wraps the next,
  * forming the classic onion model.
  *
- * WARNING: Middleware instances are long-lived in Swoole — they persist across
+ * WARNING: Middleware instances are long-lived in Swoole. They persist across
  * all requests in the worker process. Do NOT store per-request state on
  * middleware properties. Use $request->withAttribute() to pass data downstream.
  */

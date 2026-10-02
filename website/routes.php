@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Route registration — loaded inside each worker via onStart() so that USR1 hot reload
+ * Route registration: loaded inside each worker via onStart() so that USR1 hot reload
  * picks up fresh class definitions from disk. Master process never includes this file
  * directly, which is the key condition for hot reload to work.
  *
@@ -62,7 +62,7 @@ MissionControlExample::register($app);
 
 // ─── Sitemap ─────────────────────────────────────────────────────────────────
 //
-// Generated here (inside worker startup) so it includes all routes — both those
+// Generated here (inside worker startup) so it includes all routes: both those
 // registered in app.php (master) and the example routes registered just above.
 
 (static function () use ($app): void {

@@ -11,7 +11,7 @@ namespace Mbolli\PhpVia\Support;
  */
 final class ConditionalGet {
     /**
-     * Weak ETag derived from file identity (mtime + size), not content — cheap to
+     * Weak ETag derived from file identity (mtime + size), not content: cheap to
      * compute on every request, matching nginx/Apache's default static-file ETag.
      */
     public static function etag(int $mtime, int $size): string {

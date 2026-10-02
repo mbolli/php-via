@@ -135,7 +135,7 @@ final class Tracer {
             return;
         }
 
-        // Never pop the root span (index 0) via endSpan — that is endTrace's job.
+        // Never pop the root span (index 0) via endSpan: that is endTrace's job.
         if (\count($this->states[$cid]['stack']) <= 1) {
             return;
         }

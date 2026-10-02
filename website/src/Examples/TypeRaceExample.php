@@ -45,12 +45,12 @@ final class TypeRaceExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Race state machine</strong> — each race moves through <code>waiting → countdown → racing → done</code>. All transitions happen server-side; the client just sends keystrokes.',
-        '<strong>Custom scope per race</strong> isolates each race\'s broadcasts. Multiple races can run simultaneously — joining players are routed to an open race automatically.',
-        '<strong>Progress is server-computed</strong> — the client sends only the latest typed text; the server counts matching leading characters against the snippet. No snippet logic ships to the browser.',
+        '<strong>Race state machine</strong>: each race moves through <code>waiting → countdown → racing → done</code>. All transitions happen server-side; the client just sends keystrokes.',
+        '<strong>Custom scope per race</strong> isolates each race\'s broadcasts. Multiple races can run simultaneously. Joining players are routed to an open race automatically.',
+        '<strong>Progress is server-computed</strong>: the client sends only the latest typed text; the server counts matching leading characters against the snippet. No snippet logic ships to the browser.',
         '<strong>OpenSwoole countdown timer</strong> ticks 3…2…1 before the race starts, broadcasting to all racers each tick. The race clock also tracks elapsed WPM per player.',
         '<strong>SESSION identity</strong> gives each racer a persistent name across tabs and refreshes. Joining the same race twice from two tabs counts as two racers.',
-        '<strong>Anti-cheat by design</strong> — the server holds the snippet truth and computes every progress value. Sending the wrong text just gives zero progress.',
+        '<strong>Anti-cheat by design</strong>: the server holds the snippet truth and computes every progress value. Sending the wrong text just gives zero progress.',
     ];
 
     /** @var array<string, list<array{name: string, desc?: string, type?: string, scope?: string, default?: string}>> */
@@ -268,7 +268,7 @@ final class TypeRaceExample {
 
                 return $c->render('examples/type_race.html.twig', [
                     'title' => '⌨️ Type Race',
-                    'description' => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer — no client logic.',
+                    'description' => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer, no client logic.',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,

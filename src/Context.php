@@ -38,7 +38,7 @@ class Context {
     /** @var array<string, Action> Named actions keyed by user-supplied name (raw, not camelCased) */
     private array $namedActions = [];
 
-    /** @var null|array<string, mixed> Cached result of buildAutoData() — frozen after first render */
+    /** @var null|array<string, mixed> Cached result of buildAutoData(), frozen after first render */
     private ?array $autoDataCache = null;
 
     private ?string $namespace = null;
@@ -401,7 +401,7 @@ class Context {
      * Sets the cookie value to an empty string with an expiry in the past,
      * causing the browser to remove it.
      *
-     * @param string $path Cookie path — must match the path the cookie was set with
+     * @param string $path Cookie path (must match the path the cookie was set with)
      */
     public function deleteCookie(string $name, string $path = '/'): void {
         $this->setCookie($name, '', expires: 1, path: $path);
@@ -605,7 +605,7 @@ class Context {
      */
     public function removeScope(string $scope): void {
         if ($scope === Scope::TAB) {
-            return; // TAB scope is permanent — it's the per-context identity scope
+            return; // TAB scope is permanent: it's the per-context identity scope
         }
         $key = array_search($scope, $this->scopes, true);
         if ($key !== false) {
@@ -656,7 +656,7 @@ class Context {
     /**
      * Time a block of work as a span in the Dev Bar's current trace.
      *
-     * Wrap any operation worth seeing in the waterfall — a DB query, an HTTP
+     * Wrap any operation worth seeing in the waterfall: a DB query, an HTTP
      * call, an expensive computation. The name's prefix before the first dot
      * (e.g. "db" in "db.list_issues") becomes the colour category. When tracing
      * is disabled the callable simply runs with zero overhead.
@@ -704,7 +704,7 @@ class Context {
         $this->updateBlock = $block;
 
         if (\is_string($view)) {
-            // Twig template name — block is applied automatically by render() during updates
+            // Twig template name: block is applied automatically by render() during updates
             $this->viewFn = fn () => $this->render($view, $data);
         } elseif (\is_callable($view)) {
             // Callable function - don't wrap, let the callable handle its own structure
@@ -927,7 +927,7 @@ class Context {
         } else {
             // TAB scope: deterministic ID so a destroyed context that is later revived
             // (re-created with the same context ID, handler re-run) regenerates byte-identical
-            // action URLs — the already-loaded DOM's buttons keep working without a reload.
+            // action URLs: the already-loaded DOM's buttons keep working without a reload.
             // Keyed on the stable namespace (not the random component context ID): a component's
             // namespace disambiguates its actions from the parent page's (e.g. `a-increment` vs
             // `increment`), which keeps executeAction()'s parent-first lookup unambiguous.
@@ -1194,7 +1194,7 @@ class Context {
      * (keyed by camelCase of user-supplied name) into a single array, plus a
      * `_via` debug key listing all available names.
      *
-     * Result is cached after first call — signals and actions are frozen after
+     * Result is cached after first call: signals and actions are frozen after
      * page setup, so repeated calls during SSE ticks are free.
      *
      * @return array<string, mixed>

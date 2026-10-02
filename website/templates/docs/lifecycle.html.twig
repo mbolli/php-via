@@ -1,26 +1,26 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Lifecycle — php-via Docs{% endblock %}
+{% block title %}Lifecycle · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Lifecycle</h1>
     <p>
-        php-via provides hooks at every stage of a context's life — from server start to client disconnect.
+        php-via provides hooks at every stage of a context's life, from server start to client disconnect.
         Use them to manage timers, presence tracking, and resource cleanup.
     </p>
 
     <h2 id="connection-lifecycle">Connection lifecycle</h2>
     <p>Here's what happens for each client:</p>
     <ol>
-        <li><strong>Page load (GET)</strong> — page handler runs, initial HTML rendered</li>
-        <li><strong>SSE connect (GET /_sse)</strong> — <code>onClientConnect</code> fires, context syncs</li>
-        <li><strong>Actions</strong> — POST to <code>/_action/{name}</code>, callback runs, patches stream back</li>
-        <li><strong>SSE disconnect</strong> — <code>onClientDisconnect</code> fires immediately</li>
-        <li><strong>Cleanup (after timeout)</strong> — <code>onDisconnect</code> / <code>onCleanup</code> fire, timers cancelled</li>
+        <li><strong>Page load (GET)</strong>: page handler runs, initial HTML rendered</li>
+        <li><strong>SSE connect (GET /_sse)</strong>: <code>onClientConnect</code> fires, context syncs</li>
+        <li><strong>Actions</strong>: POST to <code>/_action/{name}</code>, callback runs, patches stream back</li>
+        <li><strong>SSE disconnect</strong>: <code>onClientDisconnect</code> fires immediately</li>
+        <li><strong>Cleanup (after timeout)</strong>: <code>onDisconnect</code> / <code>onCleanup</code> fire, timers cancelled</li>
     </ol>
     <p>
         If the browser reconnects within the cleanup timeout (default: 5 seconds), the context is reused
-        and cleanup is cancelled — you won't see a spurious disconnect/reconnect for normal page refreshes.
-        Configure the timeout with <code>Config::withContextCleanupDelay()</code> — a longer delay
+        and cleanup is cancelled: you won't see a spurious disconnect/reconnect for normal page refreshes.
+        Configure the timeout with <code>Config::withContextCleanupDelay()</code>. A longer delay
         tolerates flakier clients at the cost of holding idle contexts (and their in-memory view
         payloads) in memory longer under concurrent disconnects; pass <code>0</code> to clean up
         immediately with no reconnect grace period:
@@ -67,8 +67,8 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
     <p>
         When a tab is backgrounded, Datastar closes the <code>/_sse</code> stream (the right thing for
         battery and data on mobile). If it stays hidden past the cleanup timeout, the context is
-        destroyed. Rather than hard-reloading the returning tab — which wipes local
-        (<code>_</code>-prefixed) signals the server never saw, scroll position, and focus — php-via
+        destroyed. Rather than hard-reloading the returning tab, which wipes local
+        (<code>_</code>-prefixed) signals the server never saw, scroll position, and focus, php-via
         <strong>revives</strong> it: the server rebuilds an equivalent context with the
         <em>same</em> context ID (so the already-loaded DOM's bindings and action URLs keep working)
         and re-seeds the signal values the client still holds and sends on reconnect. Server-owned
@@ -80,7 +80,7 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
     </p>
     <p>
         This is on by default (10-minute window) and needs no application code. Because revival re-runs
-        the page handler, it is not lossless — server-only state (<code>#[Persist]</code>) resets and
+        the page handler, it is not lossless: server-only state (<code>#[Persist]</code>) resets and
         <code>onDisconnect</code>/connect hooks re-fire, exactly as they would on a reload. Named
         components survive; anonymous components (created without an explicit name) reset. Tune the
         window, or disable revival entirely (falling back to a reload on reconnect), with:
@@ -144,7 +144,7 @@ $c->setInterval(function () use ($elapsed, $c): void {
 }, 1000); // every 1 second
 {% endverbatim %}{% endcode %}
 
-    <p>No need to store the timer ID or cancel it manually — it cleans up with the context.</p>
+    <p>No need to store the timer ID or cancel it manually: it cleans up with the context.</p>
 
     <h2 id="server-timers">Server-level timers</h2>
     <p>
@@ -169,10 +169,10 @@ $app->setInterval(function () use ($app): void {
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to multiple clients</li>
-        <li><a href="/docs/components">Components</a> — component-level lifecycle hooks</li>
-        <li><a href="/docs/api#context-on-disconnect">API: onDisconnect()</a> — method signature</li>
-        <li><a href="/docs/api#via-on-client-connect">API: onClientConnect()</a> — app-level hook signature</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to multiple clients</li>
+        <li><a href="/docs/components">Components</a>: component-level lifecycle hooks</li>
+        <li><a href="/docs/api#context-on-disconnect">API: onDisconnect()</a>: method signature</li>
+        <li><a href="/docs/api#via-on-client-connect">API: onClientConnect()</a>: app-level hook signature</li>
     </ul>
 </article>
 

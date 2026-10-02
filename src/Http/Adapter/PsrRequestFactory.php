@@ -11,7 +11,7 @@ use Psr\Http\Message\ServerRequestInterface;
 /**
  * Converts an OpenSwoole Request into a PSR-7 ServerRequest.
  *
- * Used only at the middleware boundary — internal Via code continues to use
+ * Used only at the middleware boundary. Internal Via code continues to use
  * OpenSwoole types directly.
  */
 class PsrRequestFactory {

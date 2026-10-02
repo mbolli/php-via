@@ -15,10 +15,10 @@ final class StockTickerExample {
     private const array SUMMARY = [
         '<strong>Simulated market data</strong> updates every 2 seconds via a server-side OpenSwoole timer. Prices drift randomly and history is tracked for each symbol.',
         '<strong>ROUTE scope</strong> on the dashboard means all viewers share the same rendered output. Per-stock detail pages use custom scopes so each symbol updates independently.',
-        '<strong>Lazy timers</strong> — the price ticker only runs while at least one client is connected. Zero viewers means zero CPU cost.',
-        '<strong>Deep linking</strong> — each stock has its own URL (<code>/stock/{symbol}</code>). Navigate directly to a ticker or click through from the dashboard.',
+        '<strong>Lazy timers</strong>: the price ticker only runs while at least one client is connected. Zero viewers means zero CPU cost.',
+        '<strong>Deep linking</strong>: each stock has its own URL (<code>/stock/{symbol}</code>). Navigate directly to a ticker or click through from the dashboard.',
         '<strong>Signal-driven charts</strong> on detail pages. Price history is stored in signals so the chart data updates live without re-rendering the entire page.',
-        '<strong>Apache ECharts</strong> renders sparklines on the dashboard and the full chart on detail pages. The chart library receives updated data via Datastar signals — no manual JS refresh needed.',
+        '<strong>Apache ECharts</strong> renders sparklines on the dashboard and the full chart on detail pages. The chart library receives updated data via Datastar signals: no manual JS refresh needed.',
     ];
 
     /** @var array<string, list<array{name: string, desc?: string, type?: string, scope?: string, default?: string}>> */
@@ -115,7 +115,7 @@ final class StockTickerExample {
 
                 return $c->render('examples/stock_detail.html.twig', [
                     'title' => '📈 Stock Ticker',
-                    'description' => $symbol . ' — ' . $stock['name'],
+                    'description' => $symbol . ' · ' . $stock['name'],
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,

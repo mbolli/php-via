@@ -35,7 +35,7 @@ final class Span {
     ) {}
 
     /**
-     * Close the span. Idempotent — only the first call records the end time.
+     * Close the span. Idempotent: only the first call records the end time.
      *
      * @param null|int $endNs hrtime(true) value; defaults to now
      */
@@ -82,7 +82,7 @@ final class Span {
     }
 
     /**
-     * UI-ready representation. Attributes are NOT sanitized here — {@see Trace::toArray()}
+     * UI-ready representation. Attributes are NOT sanitized here: {@see Trace::toArray()}
      * applies {@see Sanitizer} across the whole trace so redaction is centralised.
      *
      * @return array<string, mixed>

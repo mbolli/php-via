@@ -16,7 +16,7 @@ use Psr\Http\Server\MiddlewareInterface;
  * Example: an authentication middleware that should reject unauthenticated SSE
  * connections would implement both MiddlewareInterface and SseAwareMiddleware.
  *
- * WARNING: Middleware instances are long-lived in Swoole — they persist across
+ * WARNING: Middleware instances are long-lived in Swoole: they persist across
  * all requests in the worker process. Do NOT store per-request state on
  * middleware properties. Use $request->withAttribute() to pass data downstream.
  *

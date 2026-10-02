@@ -181,13 +181,13 @@ class ViewRenderer {
      * `addScope()` (and the Composition API's scoped-signal registration) subscribes a context to a
      * broadcast channel without touching the primary scope, and the update cache is keyed on the
      * primary scope alone. A TAB-primary context therefore opts out of caching entirely, and every
-     * client in the shared scope re-renders on each broadcast — with nothing in the code to show it.
+     * client in the shared scope re-renders on each broadcast, with nothing in the code to show it.
      *
      * For almost every caller that is the CORRECT outcome: their views embed per-client data, so a
      * shared cache entry would serve one client's HTML to another (see `b0b8dda`). Warning on those
      * would be pure noise. The narrow case worth reporting is a context that declares no TAB-scoped
      * signals at all, where promoting the shared scope is likely an N-to-1 render win. `hasSignals()`
-     * is a heuristic, not a proof — the view may still read per-context state — so the message asks
+     * is a heuristic, not a proof (the view may still read per-context state), so the message asks
      * for a decision rather than asserting one.
      */
     private function warnSilentCacheOptOut(Context $context, ?string $route): void {
@@ -215,7 +215,7 @@ class ViewRenderer {
         $this->logger->warn(\sprintf(
             'Update cache is disabled for %s: this context broadcasts to %s but its primary scope is still TAB, so every '
             . 'client in that scope re-renders on each broadcast. It declares no TAB-scoped signals, so promoting the '
-            . 'shared scope with scope() would likely render once for all of them — do that only if the view is identical '
+            . 'shared scope with scope() would likely render once for all of them. Do that only if the view is identical '
             . 'for every client; otherwise declare cacheUpdates: false to record that the per-client render is intended.',
             $route ?? 'this route',
             implode(', ', $shared)

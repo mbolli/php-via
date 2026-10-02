@@ -13,8 +13,8 @@ final class PathParamsExample {
     /** @var string[] */
     private const array SUMMARY = [
         '<strong>{year}/{month}/{slug}</strong> placeholders in the route pattern are captured and passed to your handler automatically.',
-        '<strong>Two access styles</strong> — call <code>$c-&gt;getPathParam()</code> manually, or let Via inject matching parameters directly into your callback\'s function signature.',
-        '<strong>Reflection-based injection</strong> matches parameter names to route placeholders. Type-hint <code>int</code> and Via casts the value for you — no manual parsing required.',
+        '<strong>Two access styles</strong>: call <code>$c-&gt;getPathParam()</code> manually, or let Via inject matching parameters directly into your callback\'s function signature.',
+        '<strong>Reflection-based injection</strong> matches parameter names to route placeholders. Type-hint <code>int</code> and Via casts the value for you, no manual parsing required.',
     ];
 
     /** @var array<string, list<array{name: string, desc: string}>> */

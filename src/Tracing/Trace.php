@@ -8,7 +8,7 @@ namespace Mbolli\PhpVia\Tracing;
  * A completed (or in-flight) root operation and all spans collected under it.
  *
  * The first span added is the root; its duration is the trace's total duration.
- * {@see toArray()} emits the UI-ready JSON the dev bar consumes — each span is
+ * {@see toArray()} emits the UI-ready JSON the dev bar consumes: each span is
  * pre-computed with offset+duration so the front-end only maps to bar geometry.
  */
 final class Trace {

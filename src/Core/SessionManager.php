@@ -28,7 +28,7 @@ class SessionManager {
      * Determine which worker should handle a request based on session cookie.
      *
      * NOT WIRED BY DEFAULT. This was installed as OpenSwoole's `dispatch_func` when
-     * `worker_num > 1`, alongside `dispatch_mode = 7` — but `SW_DISPATCH_USERFUNC` is
+     * `worker_num > 1`, alongside `dispatch_mode = 7`, but `SW_DISPATCH_USERFUNC` is
      * 6, and 7 is stream mode, which ignores `dispatch_func` entirely. The affinity
      * therefore never ran, and mode 7 scatters per request where OpenSwoole's default
      * is sticky per connection, so it was worse than its own absence.
@@ -69,7 +69,7 @@ class SessionManager {
             }
         }
 
-        // No session cookie yet (first request) — fall back to fd hash.
+        // No session cookie yet (first request): fall back to fd hash.
         return (int) ($fd % $workerNum);
     }
 
@@ -127,16 +127,16 @@ class SessionManager {
             time() + $maxAge,
             '/',
             '',
-            $secure,    // Secure — set via Config::withSecureCookie(true) for HTTPS deployments
+            $secure,    // Secure: set via Config::withSecureCookie(true) for HTTPS deployments
             true,       // HttpOnly
-            $sameSite,  // SameSite — 'Lax' blocks cross-site POSTs carrying the session cookie
+            $sameSite,  // SameSite: 'Lax' blocks cross-site POSTs carrying the session cookie
         );
         $this->logger->log('debug', "Set session cookie: {$sessionId}, result: " . ($result ? 'success' : 'failed'));
     }
 
     /**
      * Build a Set-Cookie header value. Pure (no Response) so it is directly unit-testable.
-     * __Host- names require Path=/, Secure, and no Domain — all satisfied here.
+     * __Host- names require Path=/, Secure, and no Domain: all satisfied here.
      */
     public static function buildCookieHeader(
         string $name,

@@ -41,12 +41,12 @@ final class ClientMonitorExample {
                     'title' => '👁️ Client Monitor',
                     'description' => 'Live dashboard of connected clients with identicons and IPs.',
                     'summary' => [
-                        '<strong>Hook-driven updates</strong> — the client list re-renders only when someone connects or disconnects. No polling, no timer, no wasted cycles.',
+                        '<strong>Hook-driven updates</strong>: the client list re-renders only when someone connects or disconnects. No polling, no timer, no wasted cycles.',
                         '<strong>getClients()</strong> returns all active SSE connections with their identicon, IP, and connection duration. Open multiple tabs to see them appear.',
                         '<strong>onClientConnect / onClientDisconnect</strong> hooks fire globally. This example broadcasts to the monitor\'s ROUTE scope inside each hook.',
-                        '<strong>Identicons</strong> give each connection a visual fingerprint. They\'re generated server-side from the session ID — same session always gets the same avatar.',
+                        '<strong>Identicons</strong> give each connection a visual fingerprint. They\'re generated server-side from the session ID: same session always gets the same avatar.',
                         '<strong>ROUTE scope</strong> means every viewer of this page shares the same rendered output. The hook broadcasts once and all clients receive the same HTML patch.',
-                        '<strong>Zero idle cost</strong> — unlike a timer, hooks fire only in response to real events. No guard needed to check for active viewers.',
+                        '<strong>Zero idle cost</strong>: unlike a timer, hooks fire only in response to real events. No guard needed to check for active viewers.',
                     ],
                     'anatomy' => [
                         'signals' => [],

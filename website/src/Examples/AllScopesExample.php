@@ -13,11 +13,11 @@ final class AllScopesExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Three scopes on one page</strong> — GLOBAL (status banner), ROUTE (shared page counter), and TAB (personal message). Each component lives in a different scope to show the contrast.',
+        '<strong>Three scopes on one page</strong>: GLOBAL (status banner), ROUTE (shared page counter), and TAB (personal message). Each component lives in a different scope to show the contrast.',
         '<strong>Navigate between sub-pages</strong> to see the difference: the GLOBAL banner stays identical everywhere, the ROUTE counter resets per page, and the TAB message is unique per browser tab.',
         '<strong>Components</strong> encapsulate each scope layer. The same page factory mounts all three components, so adding a new sub-page is a single function call.',
         '<strong>Scope hierarchy</strong> visualised: GLOBAL lives for the entire server lifetime, ROUTE resets when you change URL, and TAB is born and dies with each browser tab.',
-        '<strong>Try it</strong>: open two tabs on the same sub-page and click the ROUTE counter. Both tabs update. Now open a tab on a different sub-page — its counter is independent.',
+        '<strong>Try it</strong>: open two tabs on the same sub-page and click the ROUTE counter. Both tabs update. Now open a tab on a different sub-page: its counter is independent.',
     ];
 
     /** @var array<string, int> */
@@ -29,7 +29,7 @@ final class AllScopesExample {
 
     public static function register(Via $app): void {
         // Seed once, not on every call. register() runs from routes.php, which app.php pulls in
-        // via onStart() — so it re-runs on every worker start AND on every USR1 hot reload.
+        // via onStart(), so it re-runs on every worker start AND on every USR1 hot reload.
         // Unconditional writes here would wipe the persisted tally each time the server came up.
         if ($app->globalState('example:allscopes:status') === null) {
             $app->setGlobalState('example:allscopes:status', 'All systems operational');
@@ -56,7 +56,7 @@ final class AllScopesExample {
                 <div class="card scope-card scope-card--global">
                     <div class="scope-card-header">
                         <div>
-                            <div class="scope-card-label">GLOBAL &mdash; System Status</div>
+                            <div class="scope-card-label">GLOBAL: System Status</div>
                             <div>Status: <strong>{$status}</strong> · Visitors: <strong>{$visitors}</strong></div>
                         </div>
                         <button data-on:click="@post('{$updateStatus->url()}')">Update Status</button>
@@ -89,7 +89,7 @@ final class AllScopesExample {
                 <div class="card scope-card scope-card--route">
                     <div class="scope-card-header">
                         <div>
-                            <div class="scope-card-label">ROUTE &mdash; Shared Page Counter</div>
+                            <div class="scope-card-label">ROUTE: Shared Page Counter</div>
                             <div style="font-size: var(--font-size-5); font-weight: var(--font-weight-9);">{$count}</div>
                         </div>
                         <div style="display: flex; gap: var(--size-2);">
@@ -117,7 +117,7 @@ final class AllScopesExample {
                 <div class="card scope-card scope-card--tab">
                     <div class="scope-card-header">
                         <div style="flex: 1;">
-                            <div class="scope-card-label">TAB &mdash; Your Personal Message</div>
+                            <div class="scope-card-label">TAB: Your Personal Message</div>
                             <input type="text" {$message->bind()} style="width: 100%; margin-block: var(--size-1);">
                             <div>Your message: <span data-text="\${$message->id()}"></span></div>
                         </div>

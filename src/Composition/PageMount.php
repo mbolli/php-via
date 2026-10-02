@@ -58,7 +58,7 @@ final class PageMount {
                 }
             }
 
-            // 5. Apply #[Broadcast] primary scope — AFTER signal registration so that
+            // 5. Apply #[Broadcast] primary scope, AFTER signal registration so that
             //    un-scoped #[Signal] properties are unaffected by it. This only sets
             //    the target of $ctx->broadcast() (with no argument).
             if ($meta->broadcastScope !== null) {
@@ -99,7 +99,7 @@ final class PageMount {
                 );
             }
 
-            // 8. Register lifecycle hooks. Handlers are NOT re-hydrated first — they
+            // 8. Register lifecycle hooks. Handlers are NOT re-hydrated first: they
             //    do cleanup (presence updates, broadcasts) rather than read signals.
             if ($meta->onDisconnect !== null) {
                 $method = $meta->onDisconnect;
@@ -114,7 +114,7 @@ final class PageMount {
                 });
             }
 
-            // 9. Set up view — inject route params if declared on view()
+            // 9. Set up view: inject route params if declared on view()
             $viewArgs = [$ctx];
             foreach ($meta->viewRouteParams as ['name' => $paramName, 'type' => $paramType]) {
                 $raw = $ctx->getPathParam($paramName);
@@ -135,7 +135,7 @@ final class PageMount {
 
     /**
      * Reactive property names: TAB #[Signal] plus scoped #[Signal(Scope::X)].
-     * #[Persist] properties are excluded — they live only on the instance.
+     * #[Persist] properties are excluded: they live only on the instance.
      *
      * @return array<string>
      */
@@ -150,7 +150,7 @@ final class PageMount {
 
     /**
      * Copy current signal values onto the instance's reactive properties.
-     * #[Persist] properties are intentionally skipped — they live on the instance.
+     * #[Persist] properties are intentionally skipped: they live on the instance.
      */
     private static function hydrate(object $instance, ClassMetadata $meta, Context $ctx): void {
         foreach (self::reactiveProps($meta) as $prop) {
@@ -185,7 +185,7 @@ final class PageMount {
      * Three cases, in order:
      *
      *  1. The action wrote the signal directly (its write count moved). The explicit write wins
-     *     and the property is left alone — it is either stale or merely mirroring what was just
+     *     and the property is left alone: it is either stale or merely mirroring what was just
      *     written. Assigning it back used to discard the write entirely: an action whose whole
      *     body was `$ctx->getSignal('votes')->increment()` ended every round back where it
      *     started, because the untouched property still held the pre-increment value.

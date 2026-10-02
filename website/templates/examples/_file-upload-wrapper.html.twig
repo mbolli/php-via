@@ -258,7 +258,7 @@ function applyWorkerState(s) {
     if (nameEl && s.fileName) nameEl.textContent = s.fileName;
 
     // Persist uploading state so a new worker instance can resume after GC
-    // during MPA navigation. Real uploads are not persisted — File is not serialisable.
+    // during MPA navigation. Real uploads are not persisted: File is not serialisable.
     try {
         if (s.status === 'uploading' && !s.isReal) {
             sessionStorage.setItem('_fu_state', JSON.stringify(s));
@@ -278,10 +278,10 @@ function applyWorkerState(s) {
 
 (function () {
     if (!('SharedWorker' in window)) {
-        console.warn('SharedWorker not supported — upload continuity across navigation unavailable.');
+        console.warn('SharedWorker not supported: upload continuity across navigation unavailable.');
         return;
     }
-    // extendedLifetime: true — shipped in Chrome 148 (stable, no flag needed).
+    // extendedLifetime: true, shipped in Chrome 148 (stable, no flag needed).
     // Keeps the worker alive for up to 30 s after the last port disconnects so it
     // survives MPA navigation gaps. Silently ignored on unsupported browsers.
     var worker = new SharedWorker(
@@ -312,7 +312,7 @@ function applyWorkerState(s) {
             try {
                 var prevBorn = sessionStorage.getItem('_fu_worker_born');
                 if (prevBorn && e.data.workerBorn && String(e.data.workerBorn) === prevBorn) {
-                    // Same worker instance — extendedLifetime is active; nav guard not needed.
+                    // Same worker instance: extendedLifetime is active; nav guard not needed.
                     window._fuExtended = true;
                     console.log('[upload-worker] worker survived navigation (extendedLifetime active)');
                 }
@@ -323,7 +323,7 @@ function applyWorkerState(s) {
                 try {
                     var saved = JSON.parse(sessionStorage.getItem('_fu_state') || 'null');
                     if (saved && saved.pct < 100) {
-                        console.log('[upload-worker] worker was GC\'d — resuming from sessionStorage pct=' + saved.pct + '%');
+                        console.log('[upload-worker] worker was GC\'d, resuming from sessionStorage pct=' + saved.pct + '%');
                         worker.port.postMessage(Object.assign({}, saved, {
                             type:      'resume',
                             chunkUrl:  _FU.chunkUrl,

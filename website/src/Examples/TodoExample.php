@@ -16,7 +16,7 @@ use Mbolli\PhpVia\Via;
  *
  * #[Broadcast(Scope::ROUTE)] makes ROUTE the context's primary scope, so a bare
  * $ctx->broadcast() fans out to every browser on this route. The draft input is a
- * TAB-scoped #[Signal] — private per tab. The shared list lives in a static array
+ * TAB-scoped #[Signal], private per tab. The shared list lives in a static array
  * (plain shared state, no attribute needed); each action mutates it and broadcasts.
  *
  * The view is a callable so the static $todos array is re-read on every render
@@ -24,7 +24,7 @@ use Mbolli\PhpVia\Via;
  */
 #[Broadcast(Scope::ROUTE)]
 final class TodoExample {
-    /** Draft input text — TAB-scoped so your typing doesn't leak to other viewers. */
+    /** Draft input text, TAB-scoped so your typing doesn't leak to other viewers. */
     #[Signal]
     public string $newTodo = '';
 
@@ -42,15 +42,15 @@ final class TodoExample {
             'title' => '✓ Todo List',
             'description' => 'Composition API: a static shared list + a TAB-scoped <code>#[Signal]</code> draft. <code>#[Broadcast(Scope::ROUTE)]</code> makes every action fan out to all viewers.',
             'summary' => [
-                '<strong>#[Broadcast(Scope::ROUTE)]</strong> on the class sets ROUTE as the primary scope. A bare <code>$ctx->broadcast()</code> then re-renders the list for every browser on this route — no scope argument needed.',
-                '<strong>Mixed state</strong> — the todo list is a plain <code>static</code> array (shared across the worker, no attribute required), while the input is a TAB-scoped <code>#[Signal]</code> so your draft stays private.',
+                '<strong>#[Broadcast(Scope::ROUTE)]</strong> on the class sets ROUTE as the primary scope. A bare <code>$ctx->broadcast()</code> then re-renders the list for every browser on this route. No scope argument needed.',
+                '<strong>Mixed state</strong>: the todo list is a plain <code>static</code> array (shared across the worker, no attribute required), while the input is a TAB-scoped <code>#[Signal]</code> so your draft stays private.',
                 '<strong>#[Action] methods</strong> mutate the static array, then call <code>$ctx->broadcast()</code>. Adding clears the draft via <code>$this->newTodo = \'\'</code>, which syncs back to the input automatically.',
-                '<strong>Callable view</strong> — the view passes a closure so <code>self::$todos</code> is re-read on every render. A string-template view would freeze the data captured at setup.',
+                '<strong>Callable view</strong>: the view passes a closure so <code>self::$todos</code> is re-read on every render. A string-template view would freeze the data captured at setup.',
                 '<strong>cacheUpdates: false</strong> disables view caching so every broadcast re-renders the full list. Partial rendering sends only the <code>#todo-list</code> block, keeping SSE payloads small.',
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => '#[Signal] draft input — private per tab so your typing doesn\'t leak to others.'],
+                    ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => '#[Signal] draft input, private per tab so your typing doesn\'t leak to others.'],
                 ],
                 'actions' => [
                     ['name' => 'addTodo', 'desc' => 'Appends the trimmed draft to the static list, clears it, and broadcasts to all viewers.'],

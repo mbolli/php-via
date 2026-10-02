@@ -1,5 +1,5 @@
 {% extends 'shells/examples.html.twig' %}
-{% block title %}Examples — php-via{% endblock %}
+{% block title %}Examples · php-via{% endblock %}
 
 {% block content %}
 <article class="docs-article">
@@ -8,7 +8,7 @@
         <h1>Examples</h1>
         <p>
             Every demo on this site runs inside the same php-via server you are connected to right now.
-            There is no separate backend, no compiled JavaScript bundle, and no hydration step —
+            There is no separate backend, no compiled JavaScript bundle, and no hydration step:
             just PHP, Twig, and a persistent SSE stream.
         </p>
     </header>
@@ -17,7 +17,7 @@
         <div class="ex-intro-card">
             <div class="ex-intro-icon">⚡</div>
             <h3>Reactive without JavaScript</h3>
-            <p>Signals live on the server. Actions are PHP closures. The browser sends a POST and receives DOM patches over SSE — no client framework required.</p>
+            <p>Signals live on the server. Actions are PHP closures. The browser sends a POST and receives DOM patches over SSE. No client framework required.</p>
         </div>
         <div class="ex-intro-card">
             <div class="ex-intro-icon">👥</div>
@@ -27,7 +27,7 @@
         <div class="ex-intro-card">
             <div class="ex-intro-icon">🔀</div>
             <h3>MPA navigation</h3>
-            <p>Full page loads, real URLs, browser history — no SPA router. SESSION-scoped signals follow the user across every page change.</p>
+            <p>Full page loads, real URLs, browser history. No SPA router. SESSION-scoped signals follow the user across every page change.</p>
         </div>
     </section>
 
@@ -36,15 +36,15 @@
         <dl class="ex-intro-dl">
             <div>
                 <dt><span class="badge badge-beginner">Beginner</span></dt>
-                <dd>Counter, Greeter, Live Search — signals, actions, and two-way binding in under 50 lines of PHP.</dd>
+                <dd>Counter, Greeter, Live Search: signals, actions, and two-way binding in under 50 lines of PHP.</dd>
             </div>
             <div>
                 <dt><span class="badge badge-intermediate">Intermediate</span></dt>
-                <dd>Shopping Cart, Login Flow, Multi-step Form — SESSION scope, PSR-15 middleware, file uploads, and server-side validation.</dd>
+                <dd>Shopping Cart, Login Flow, Multi-step Form: SESSION scope, PSR-15 middleware, file uploads, and server-side validation.</dd>
             </div>
             <div>
                 <dt><span class="badge badge-advanced">Advanced</span></dt>
-                <dd>Chat Room, Game of Life, SharedWorker Upload — custom scope strings, NATS pub/sub, and <code>extendedLifetime</code> SharedWorkers.</dd>
+                <dd>Chat Room, Game of Life, SharedWorker Upload: custom scope strings, NATS pub/sub, and <code>extendedLifetime</code> SharedWorkers.</dd>
             </div>
         </dl>
     </section>

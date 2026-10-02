@@ -1,11 +1,11 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Composition — php-via Docs{% endblock %}
+{% block title %}Composition · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Composition</h1>
     <p>
         The composition API lets you define reactive pages and components as plain PHP classes annotated
-        with attributes, instead of writing imperative closure-based setup code. It is fully additive —
+        with attributes, instead of writing imperative closure-based setup code. It is fully additive:
         the existing closure API is unchanged.
     </p>
     <p>
@@ -21,9 +21,9 @@
             <tr><td><code>#[Signal(Scope::SESSION)]</code></td><td>SESSION signal</td><td>no</td><td>yes → user's tabs</td></tr>
             <tr><td><code>#[Signal(Scope::GLOBAL)]</code></td><td>GLOBAL signal</td><td>no</td><td>yes → all users</td></tr>
             <tr><td><code>#[Persist]</code></td><td>server-only property</td><td>no</td><td>—</td></tr>
-            <tr><td><code>#[Broadcast(Scope::X)]</code></td><td>class — primary scope</td><td>—</td><td>—</td></tr>
-            <tr><td><code>#[Action]</code></td><td>method — action</td><td>—</td><td>—</td></tr>
-            <tr><td><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></td><td>method — lifecycle</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[Broadcast(Scope::X)]</code></td><td>class: primary scope</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[Action]</code></td><td>method: action</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></td><td>method: lifecycle</td><td>—</td><td>—</td></tr>
         </tbody>
     </table>
 
@@ -64,7 +64,7 @@ $app->mount(Counter::class, '/counter');
     {% endverbatim %}{% endcode %}
 
     <p>
-        The Twig template is identical to the closure API — named signals and actions are auto-injected
+        The Twig template is identical to the closure API. Named signals and actions are auto-injected
         as variables:
     </p>
     {% code 'html' %}{% verbatim %}
@@ -108,7 +108,7 @@ public function view(Context $ctx): void {
 use Mbolli\PhpVia\Attributes\Signal;
 use Mbolli\PhpVia\Scope;
 
-#[Signal]                       // TAB (default) — private per tab, client-writable
+#[Signal]                       // TAB (default): private per tab, client-writable
 public string $query = '';
 
 #[Signal(Scope::ROUTE)]         // shared across all users on this route
@@ -177,14 +177,14 @@ public function increment(Context $ctx): void {
 }
     {% endverbatim %}{% endcode %}
     <p>
-        Plain <code>static</code> class properties also work without any attribute — the framework
+        Plain <code>static</code> class properties also work without any attribute: the framework
         ignores them. They are process-global (shared across every instance and tab). After mutating
         static data in an action, call <code>$ctx->broadcast()</code> to push a fresh render (see below).
     </p>
 
     <h2 id="broadcast">Primary scope with #[Broadcast]</h2>
     <p>
-        <code>#[Broadcast(Scope::X)]</code> on the class sets the context's primary scope — the target
+        <code>#[Broadcast(Scope::X)]</code> on the class sets the context's primary scope, the target
         of <code>$ctx->broadcast()</code> when called with no argument. Use it when an action mutates
         non-signal state (a static array, a database row) and needs to push a re-render to everyone in
         the scope:
@@ -195,7 +195,7 @@ use Mbolli\PhpVia\Scope;
 
 #[Broadcast(Scope::ROUTE)]
 final class TodoList {
-    #[Signal]                          // still TAB-scoped — unaffected by #[Broadcast]
+    #[Signal]                          // still TAB-scoped, unaffected by #[Broadcast]
     public string $draft = '';
 
     /** @var array<int, array{text: string, done: bool}> */
@@ -217,7 +217,7 @@ final class TodoList {
     {% endverbatim %}{% endcode %}
     <p>
         <strong>Important:</strong> <code>#[Broadcast]</code> only controls the broadcast target. It does
-        <em>not</em> change the scope of <code>#[Signal]</code> properties — each signal keeps the scope
+        <em>not</em> change the scope of <code>#[Signal]</code> properties: each signal keeps the scope
         it declares. A <code>#[Signal]</code> with no scope stays TAB-private even on a
         <code>#[Broadcast(Scope::ROUTE)]</code> class.
     </p>
@@ -249,7 +249,7 @@ public function setUsername(Context $ctx): void { }     // session-scoped action
     <p>
         Annotate a method with <code>#[OnDisconnect]</code> or <code>#[OnCleanup]</code> to run cleanup
         when the connection closes. The method receives the <code>Context</code>. At most one method per
-        class may carry each attribute. Handlers are not re-hydrated first — they typically broadcast
+        class may carry each attribute. Handlers are not re-hydrated first. They typically broadcast
         presence changes or release resources rather than read live signals:
     </p>
     {% code 'php' %}{% verbatim %}
@@ -268,10 +268,10 @@ public function leave(Context $ctx): void {
         per client connection. Use it to inject services that the zero-arg constructor cannot reach:
     </p>
     {% code 'php' %}{% verbatim %}
-// Without factory — zero-arg constructor used:
+// Without factory (zero-arg constructor used):
 $app->mount(Counter::class, '/counter');
 
-// With factory — called once per connecting tab:
+// With factory (called once per connecting tab):
 $app->mount(
     ChatPage::class,
     '/chat/{room}',
@@ -312,24 +312,24 @@ $app->mount(BlogPost::class, '/blog/{slug}');
     <h2 id="templates">Twig templates</h2>
     <p>
         Composition classes produce exactly the same named signals and actions as the closure API.
-        Template syntax is identical — <code>&#123;&#123; count.id &#125;&#125;</code>, <code>&#123;&#123; increment.url &#125;&#125;</code>,
+        Template syntax is identical: <code>&#123;&#123; count.id &#125;&#125;</code>, <code>&#123;&#123; increment.url &#125;&#125;</code>,
         <code>data-bind="&#123;&#123; step.id &#125;&#125;"</code>. No template changes are needed when converting a
         closure-based page to a class.
     </p>
     <p>
         Actions registered via <code>#[Action]</code> are injected under their resolved name
         (the <code>name:</code> parameter if set, otherwise the method name). The method is
-        converted to camelCase in the template variable — <code>saveName</code> is available as
+        converted to camelCase in the template variable: <code>saveName</code> is available as
         <code>&#123;&#123; saveName.url &#125;&#125;</code>.
     </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/examples/composition">Live demo</a> — CompositionDemo + VoteWidget, all reactive shapes</li>
-        <li><a href="/docs/components">Components</a> — the closure-based component API</li>
-        <li><a href="/docs/scopes">Scopes</a> — TAB, ROUTE, SESSION, GLOBAL, and custom</li>
-        <li><a href="/docs/api#via-mount">API: mount()</a> — full method signature</li>
-        <li><a href="/docs/api#attributes">API: Attributes</a> — attribute class reference</li>
+        <li><a href="/examples/composition">Live demo</a>: CompositionDemo + VoteWidget, all reactive shapes</li>
+        <li><a href="/docs/components">Components</a>: the closure-based component API</li>
+        <li><a href="/docs/scopes">Scopes</a>: TAB, ROUTE, SESSION, GLOBAL, and custom</li>
+        <li><a href="/docs/api#via-mount">API: mount()</a>: full method signature</li>
+        <li><a href="/docs/api#attributes">API: Attributes</a>: attribute class reference</li>
     </ul>
 </article>
 

@@ -1,13 +1,13 @@
 /**
- * <docs-toc> — internal navigation web component for php-via docs.
+ * <docs-toc>: internal navigation web component for php-via docs.
  *
  * Collects h2 + h3 headings from a content container, renders a sticky
  * "On this page" sidebar (desktop) and a FAB + progress bar (mobile).
  *
  * Attributes:
- *   data-content  — CSS selector for the content container  (default: "article")
- *   data-title    — TOC heading label                       (default: "On this page")
- *   data-intro    — Label for the top-of-page intro link    (default: "Introduction")
+ *   data-content: CSS selector for the content container  (default: "article")
+ *   data-title:   TOC heading label                       (default: "On this page")
+ *   data-intro:   Label for the top-of-page intro link    (default: "Introduction")
  */
 class DocsToc extends HTMLElement {
     #items = [];          // { id, text, level, element }

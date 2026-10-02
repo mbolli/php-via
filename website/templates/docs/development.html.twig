@@ -1,5 +1,5 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Development — php-via Docs{% endblock %}
+{% block title %}Development · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Development</h1>
@@ -22,30 +22,30 @@ composer run dev
     <p>Beyond PHP + OpenSwoole + Composer, the dev workflow needs two extra tools:</p>
     <ul>
         <li>
-            <strong><code>entr</code></strong> — file watcher that triggers a command when watched files change.<br>
+            <strong><code>entr</code></strong>: file watcher that triggers a command when watched files change.<br>
             Ubuntu/Debian: <code>sudo apt install entr</code>&ensp;·&ensp;macOS: <code>brew install entr</code>
         </li>
         <li>
-            <strong><code>pnpm</code></strong> — runs the PostCSS CSS watcher for the website.
+            <strong><code>pnpm</code></strong>: runs the PostCSS CSS watcher for the website.
             Only required for the website; skip if you're working on a project without a CSS pipeline.
             Install from <a href="https://pnpm.io" target="_blank" rel="noopener">pnpm.io</a>.
         </li>
     </ul>
-    <p><code>scripts/dev.sh</code> checks for <code>entr</code> at startup and exits with install instructions if it's missing. <code>pnpm</code> is optional — CSS watch is silently skipped if it's absent.</p>
+    <p><code>scripts/dev.sh</code> checks for <code>entr</code> at startup and exits with install instructions if it's missing. <code>pnpm</code> is optional: CSS watch is silently skipped if it's absent.</p>
 
     <h2 id="dev-server">What <code>composer run dev</code> does</h2>
     <p>It starts three concurrent processes:</p>
     <ol>
-        <li><strong>PHP server</strong> — <code>APP_ENV=dev php website/app.php</code> on <code>:3000</code></li>
-        <li><strong>CSS watcher</strong> — <code>pnpm dev</code> (PostCSS <code>--watch</code>, website only)</li>
-        <li><strong>PHP file watcher</strong> — <code>find … | entr -dn kill -USR1 $MASTER_PID</code></li>
+        <li><strong>PHP server</strong>: <code>APP_ENV=dev php website/app.php</code> on <code>:3000</code></li>
+        <li><strong>CSS watcher</strong>: <code>pnpm dev</code> (PostCSS <code>--watch</code>, website only)</li>
+        <li><strong>PHP file watcher</strong>: <code>find … | entr -dn kill -USR1 $MASTER_PID</code></li>
     </ol>
     <p>Ctrl+C kills all three cleanly.</p>
 
     <p><strong><code>APP_ENV=dev</code></strong> enables:</p>
     <ul>
         <li>Debug-level logging</li>
-        <li>Self-signed TLS certificate loading (if <code>certs/dev.crt</code> and <code>certs/dev.key</code> exist — see <a href="{{ basePath }}docs/deployment#brotli-dev">Deployment → Dev mode</a>)</li>
+        <li>Self-signed TLS certificate loading (if <code>certs/dev.crt</code> and <code>certs/dev.key</code> exist, see <a href="{{ basePath }}docs/deployment#brotli-dev">Deployment → Dev mode</a>)</li>
         <li>CORS logger output</li>
     </ul>
 
@@ -59,23 +59,23 @@ composer run dev
         <li>The current worker finishes its in-flight requests.</li>
         <li>A new worker process is forked from the master.</li>
         <li>The new worker runs <code>onWorkerStart</code>, which executes the <code>onStart</code> callbacks.</li>
-        <li>The <code>onStart</code> callback <code>require</code>s <code>routes.php</code> — loading fresh class definitions from disk.</li>
+        <li>The <code>onStart</code> callback <code>require</code>s <code>routes.php</code>, loading fresh class definitions from disk.</li>
         <li>The route table is refreshed so <code>RequestHandler</code> sees the new routes.</li>
     </ol>
 
     <h3 id="thin-bootstrap">The thin bootstrap pattern</h3>
     <p>
         Hot reload only picks up fresh class definitions for files that were <em>not already loaded in the master process</em>.
-        If a class is loaded during master startup, all forked workers inherit that old definition — USR1 makes no difference.
+        If a class is loaded during master startup, all forked workers inherit that old definition: USR1 makes no difference.
     </p>
     <p>
         The solution is a <strong>thin <code>app.php</code></strong>: the entry script only sets up configuration,
-        middleware, and routes that don't reference app-layer classes. Everything else — example classes, route handlers,
-        and the sitemap — lives in <code>routes.php</code>, which is loaded via <code>onStart()</code> and therefore
+        middleware, and routes that don't reference app-layer classes. Everything else (example classes, route handlers,
+        and the sitemap) lives in <code>routes.php</code>, which is loaded via <code>onStart()</code> and therefore
         runs inside the worker, not master:
     </p>
     {% code 'php' %}{% verbatim %}
-// app.php — thin bootstrap (master process)
+// app.php: thin bootstrap (master process)
 $app = new Via($config);
 $app->middleware(/* ... */);
 
@@ -91,7 +91,7 @@ $app->start();
     {% endverbatim %}{% endcode %}
 
     {% code 'php' %}{% verbatim %}
-// routes.php — loaded inside each worker (hot-reloadable)
+// routes.php: loaded inside each worker (hot-reloadable)
 use MyApp\Examples\CounterExample;
 use MyApp\Examples\ChatExample;
 
@@ -105,7 +105,7 @@ ChatExample::register($app);
         <tbody>
             <tr><td>Files in <code>routes.php</code> and its <code>use</code>d classes</td><td>USR1 (<code>entr</code> automatic)</td><td>Fresh worker re-includes <code>routes.php</code></td></tr>
             <tr><td>Twig templates (<code>.twig</code>)</td><td>USR1 (<code>entr</code> automatic)</td><td>Fresh worker clears in-memory compiled-template cache and ViewCache</td></tr>
-            <tr><td>CSS (<code>.css.src</code>)</td><td>None — already live</td><td><code>pnpm dev</code> watches and rebuilds</td></tr>
+            <tr><td>CSS (<code>.css.src</code>)</td><td>None (already live)</td><td><code>pnpm dev</code> watches and rebuilds</td></tr>
             <tr><td>Changes to <code>app.php</code> itself</td><td>Full restart</td><td>Ctrl+C → <code>composer run dev</code></td></tr>
             <tr><td>Framework files in <code>src/</code></td><td>Full restart</td><td>Framework classes load in master</td></tr>
         </tbody>
@@ -148,7 +148,7 @@ composer run watch-test
     {% endverbatim %}{% endcode %}
     <p>
         Tests use <code>VIA_TEST_MODE=1</code> (set in <code>tests/Pest.php</code>), which prevents
-        OpenSwoole from binding a port — no running server needed.
+        OpenSwoole from binding a port: no running server needed.
     </p>
 
     <h2 id="your-project">Using this pattern in your project</h2>
@@ -191,8 +191,8 @@ done
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="{{ basePath }}docs/deployment">Deployment</a> — systemd, Caddy, TLS, graceful restart in production</li>
-        <li><a href="{{ basePath }}docs/lifecycle">Lifecycle</a> — <code>onStart</code>, <code>onShutdown</code>, timers</li>
+        <li><a href="{{ basePath }}docs/deployment">Deployment</a>: systemd, Caddy, TLS, graceful restart in production</li>
+        <li><a href="{{ basePath }}docs/lifecycle">Lifecycle</a>: <code>onStart</code>, <code>onShutdown</code>, timers</li>
     </ul>
 </article>
 {% endblock %}

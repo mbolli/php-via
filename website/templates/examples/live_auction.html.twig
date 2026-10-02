@@ -11,7 +11,7 @@
             A remarkably preserved 1st-century terracotta storage jar,
             excavated near Pompeii. Museum provenance, authenticated.
         </p>
-        <div class="auction-item-estimate">Estimate: $75 – $200</div>
+        <div class="auction-item-estimate">Estimate: $75 to $200</div>
     </div>
 
     {# ── Main auction panel ──────────────────────────────────────────────── #}
@@ -28,7 +28,7 @@
                 Won by <strong>{{ topBidder }}</strong> for <strong>${{ topBid }}</strong>
             </p>
             {% else %}
-            <p class="auction-sold-winner">No bids placed — item passed.</p>
+            <p class="auction-sold-winner">No bids placed. Item passed.</p>
             {% endif %}
             <button class="auction-reset-btn" data-on:click="@post('{{ resetUrl }}')">
                 🔄 Start New Auction

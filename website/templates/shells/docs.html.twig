@@ -23,7 +23,7 @@
         {
             "@type": "ListItem",
             "position": 3,
-            "name": "{{ block('title') | replace({' — php-via Docs': '', ' — php-via': ''}) | e('js') }}",
+            "name": "{{ block('title') | replace({' · php-via Docs': '', ' · php-via': ''}) | e('js') }}",
             "item": "{{ siteUrl }}{{ currentRoute[1:] }}"
         }{% endif %}
     ]

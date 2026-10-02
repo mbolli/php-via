@@ -32,8 +32,8 @@ final class LiveSearchExample {
         ['name' => 'array_unshift', 'category' => 'Array', 'desc' => 'Prepends one or more elements to the front of an array.'],
         ['name' => 'array_chunk', 'category' => 'Array', 'desc' => 'Splits an array into chunks of a given size.'],
         ['name' => 'array_combine', 'category' => 'Array', 'desc' => 'Creates an array using one array as keys and another as values.'],
-        ['name' => 'array_diff', 'category' => 'Array', 'desc' => 'Computes the difference of arrays — values in first but not the rest.'],
-        ['name' => 'array_intersect', 'category' => 'Array', 'desc' => 'Computes the intersection of arrays — values present in all.'],
+        ['name' => 'array_diff', 'category' => 'Array', 'desc' => 'Computes the difference of arrays: values in first but not the rest.'],
+        ['name' => 'array_intersect', 'category' => 'Array', 'desc' => 'Computes the intersection of arrays: values present in all.'],
         ['name' => 'in_array', 'category' => 'Array', 'desc' => 'Checks whether a given value exists in an array.'],
         ['name' => 'count', 'category' => 'Array', 'desc' => 'Counts elements in an array or countable object.'],
         ['name' => 'sort', 'category' => 'Array', 'desc' => 'Sorts an array by value in ascending order.'],
@@ -57,7 +57,7 @@ final class LiveSearchExample {
         ['name' => 'strlen', 'category' => 'String', 'desc' => 'Returns the byte length of a string.'],
         ['name' => 'mb_strlen', 'category' => 'String', 'desc' => 'Returns the character length of a multibyte string.'],
         ['name' => 'substr', 'category' => 'String', 'desc' => 'Returns part of a string, starting at offset for a given length.'],
-        ['name' => 'mb_substr', 'category' => 'String', 'desc' => 'Returns part of a multibyte string — safe for Unicode.'],
+        ['name' => 'mb_substr', 'category' => 'String', 'desc' => 'Returns part of a multibyte string (safe for Unicode).'],
         ['name' => 'strpos', 'category' => 'String', 'desc' => 'Finds the byte-position of the first occurrence of a substring.'],
         ['name' => 'strrpos', 'category' => 'String', 'desc' => 'Finds the byte-position of the last occurrence of a substring.'],
         ['name' => 'strtolower', 'category' => 'String', 'desc' => 'Converts a string to lowercase.'],
@@ -128,7 +128,7 @@ final class LiveSearchExample {
         ['name' => 'var_export', 'category' => 'Misc', 'desc' => 'Outputs or returns a parsable PHP representation of a value.'],
         ['name' => 'print_r', 'category' => 'Misc', 'desc' => 'Prints human-readable information about a variable.'],
         ['name' => 'gettype', 'category' => 'Misc', 'desc' => 'Returns the type of a variable as a string.'],
-        ['name' => 'get_debug_type', 'category' => 'Misc', 'desc' => 'Returns the debug type — class name for objects, PHP type for scalars.'],
+        ['name' => 'get_debug_type', 'category' => 'Misc', 'desc' => 'Returns the debug type: class name for objects, PHP type for scalars.'],
         ['name' => 'is_array', 'category' => 'Misc', 'desc' => 'Checks whether a variable is an array.'],
         ['name' => 'is_string', 'category' => 'Misc', 'desc' => 'Checks whether a variable is a string.'],
         ['name' => 'is_int', 'category' => 'Misc', 'desc' => 'Checks whether a variable is an integer.'],
@@ -163,13 +163,13 @@ final class LiveSearchExample {
 
             $c->view(fn (): string => $c->render('examples/live_search.html.twig', [
                 'title' => '🔍 Live Search',
-                'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip — and nobody shipped a line of search logic to the browser.',
+                'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip, and nobody shipped a line of search logic to the browser.',
                 'summary' => [
-                    '<strong>data-on:input__throttle.100ms.trailing</strong> fires at most once every 100 ms while the user types, and always fires one final time at the end — so the last keystroke is never dropped. No setTimeout written by you.',
+                    '<strong>data-on:input__throttle.100ms.trailing</strong> fires at most once every 100 ms while the user types, and always fires one final time at the end, so the last keystroke is never dropped. No setTimeout written by you.',
                     '<strong>Server-side filtering</strong> is intentional. The query parser, category filter, and result ranking all live in PHP. Swap the hardcoded array for a database query and nothing else changes.',
-                    '<strong>$c->sync()</strong> re-renders the view for this tab only — no broadcast, no shared state. Other users\' searches are completely isolated.',
+                    '<strong>$c->sync()</strong> re-renders the view for this tab only: no broadcast, no shared state. Other users\' searches are completely isolated.',
                     '<strong>Signals are injected</strong> into the context before the action closure runs. By the time the view callable executes, $query->string() already holds the current input value.',
-                    '<strong>Callable views</strong> re-run on every sync, computing fresh results. The client receives rendered HTML via SSE — no JSON payload, no client-side fetch() logic.',
+                    '<strong>Callable views</strong> re-run on every sync, computing fresh results. The client receives rendered HTML via SSE: no JSON payload, no client-side fetch() logic.',
                 ],
                 'anatomy' => [
                     'signals' => [
@@ -180,7 +180,7 @@ final class LiveSearchExample {
                         ['name' => 'search', 'desc' => 'Reads optional ?cat= param to override category, then calls $c->sync() to re-render the results block.'],
                     ],
                     'views' => [
-                        ['name' => 'live_search.html.twig', 'desc' => 'Callable view — re-runs on every sync, filtering the PHP stdlib dataset from current signal values. Only the results block is re-rendered on updates.'],
+                        ['name' => 'live_search.html.twig', 'desc' => 'Callable view: re-runs on every sync, filtering the PHP stdlib dataset from current signal values. Only the results block is re-rendered on updates.'],
                     ],
                 ],
                 'githubLinks' => [

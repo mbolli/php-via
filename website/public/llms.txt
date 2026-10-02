@@ -2,7 +2,7 @@
 
 > Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using OpenSwoole, Datastar, and Twig.
 
-php-via is a PHP library (MIT) that turns a standard PHP process into a persistent, multiplayer-capable web server. It provides three core primitives — Signals, Actions, and Views — and a Scope system that controls who shares state and receives real-time broadcasts. Built on OpenSwoole for the async server and Datastar for SSE-driven DOM morphing.
+php-via is a PHP library (MIT) that turns a standard PHP process into a persistent, multiplayer-capable web server. It provides three core primitives (Signals, Actions, and Views) and a Scope system that controls who shares state and receives real-time broadcasts. Built on OpenSwoole for the async server and Datastar for SSE-driven DOM morphing.
 
 ## Documentation
 

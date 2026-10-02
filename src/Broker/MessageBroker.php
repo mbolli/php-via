@@ -54,7 +54,7 @@ interface MessageBroker {
      * Register Via's internal scope-invalidation handler.
      *
      * @internal Called once by the Via constructor before connect(). Do not call this
-     *           directly — Via wires it automatically when you pass a broker via Config::withBroker().
+     *           directly: Via wires it automatically when you pass a broker via Config::withBroker().
      *           Custom broker implementations must store the callable and invoke it for every
      *           incoming message whose nodeId does not match getNodeId() (own-message filter).
      *

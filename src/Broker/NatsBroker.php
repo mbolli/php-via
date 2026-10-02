@@ -14,11 +14,11 @@ use OpenSwoole\Coroutine\Client;
  * one connection, unlike Redis). Implements the minimal NATS text protocol
  * needed for Via: INFO/CONNECT handshake, PUB, SUB, MSG dispatch.
  *
- * Adapted from website/src/Support/NatsClient.php — stripped to the subset
+ * Adapted from website/src/Support/NatsClient.php, stripped to the subset
  * required for broker use only. The library does not depend on website code.
  *
  * What crosses the wire: JSON {"scope":"...","nodeId":"..."} on the subject
- * "via.broadcast". State is NOT carried — receiving nodes re-render locally.
+ * "via.broadcast". State is NOT carried: receiving nodes re-render locally.
  *
  * Usage:
  *   (new Config())->withBroker(new NatsBroker())
@@ -245,7 +245,7 @@ final class NatsBroker implements MessageBroker {
                         break; // Intentional disconnect().
                     }
 
-                    // Unexpected drop — null out and retry with backoff.
+                    // Unexpected drop: null out and retry with backoff.
                     $this->client = null;
                     $this->connected = false;
                     $this->notifyError(new \RuntimeException('NatsBroker: connection dropped, reconnecting'));
@@ -279,7 +279,7 @@ final class NatsBroker implements MessageBroker {
                     }
 
                     if ($data['nodeId'] === $this->getNodeId()) {
-                        continue; // Skip own messages — loop prevention.
+                        continue; // Skip own messages (loop prevention).
                     }
 
                     if ($this->handler !== null) {

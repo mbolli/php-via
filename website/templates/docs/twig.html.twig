@@ -1,5 +1,5 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Templates — php-via Docs{% endblock %}
+{% block title %}Templates · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Templates</h1>
@@ -10,11 +10,11 @@
     <h2 id="two-paths">Two rendering paths</h2>
     <div class="code-result-split" style="align-items: start;">
         <div>
-            <h3 style="margin-block-start:0">Shell — <code>shell.html</code></h3>
+            <h3 style="margin-block-start:0">Shell: <code>shell.html</code></h3>
             <p>
                 A static <code>.html</code> file set with <code>withShellTemplate()</code>.
                 php-via performs a simple string replacement of
-                {% verbatim %}<code>{{ placeholder }}</code>{% endverbatim %} tokens —
+                {% verbatim %}<code>{{ placeholder }}</code>{% endverbatim %} tokens,
                 <strong>not Twig</strong>.
                 Besides the ones below it fills {% verbatim %}<code>{{ name }}</code>{% endverbatim %}
                 with a signal's JSON value (HTML-escaped) and {% verbatim %}<code>{{ name.id }}</code>{% endverbatim %}
@@ -39,17 +39,17 @@
             {% endverbatim %}{% endcode %}
         </div>
         <div>
-            <h3 style="margin-block-start:0">Views — Twig or closure</h3>
+            <h3 style="margin-block-start:0">Views: Twig or closure</h3>
             <p>
                 The page content, set with <code>$c-&gt;view()</code>.
                 Re-rendered on every SSE update. Can be a Twig template
                 (requires <code>withTemplateDir()</code>) or a plain PHP closure.
             </p>
             {% code 'php' %}{% verbatim %}
-// Twig template — signals & actions auto-injected by name
+// Twig template: signals & actions auto-injected by name
 $c->view('counter.html.twig');
 
-// PHP closure — no Twig needed, access via use()
+// PHP closure: no Twig needed, access via use()
 $c->view(function () use ($count): string {
     return '<p>' . $count->int() . '</p>';
 });
@@ -61,7 +61,7 @@ $c->view(function () use ($count): string {
     <p>
         Instead of a static <code>shell.html</code>, you can create your own Twig base template that
         defines the full outer document using Twig blocks. When a view extends it, Twig renders
-        the complete <code>&lt;html&gt;...&lt;/html&gt;</code> document — php-via detects this and skips
+        the complete <code>&lt;html&gt;...&lt;/html&gt;</code> document. php-via detects this and skips
         the plain-HTML shell entirely.
     </p>
     <p>
@@ -84,7 +84,7 @@ $c->view(function () use ($count): string {
         the default <code>shell.html</code>.
     </p>
     {% code 'twig' %}{% verbatim %}
-{# templates/base.html.twig — you create this #}
+{# templates/base.html.twig: you create this #}
 <!DOCTYPE html>
 <html>
 <head>
@@ -139,7 +139,7 @@ $app = new Via(
     <h2 id="passing-data">Passing data to templates</h2>
     <p>
         Signals and actions are <strong>auto-injected</strong> into every Twig render. You don't need to pass them
-        manually — just register them and they're available by name:
+        manually. Just register them and they're available by name:
     </p>
     {% code 'php' %}{% verbatim %}
 $count = $c->signal(0, 'count');
@@ -153,14 +153,14 @@ $c->view('counter.html.twig'); // no data needed
 $c->view('todo.html.twig', ['todos' => $todos]);
     {% endverbatim %}{% endcode %}
     <p>
-        Explicit entries in the <code>$data</code> array take priority over auto-injected values —
+        Explicit entries in the <code>$data</code> array take priority over auto-injected values,
         useful when you need to pass a derived or renamed value for a specific render.
     </p>
 
     <h2 id="reactive-text">Reactive text</h2>
     <p>Use <code>data-text</code> to keep an element in sync with a signal. Always seed the initial value to avoid a flash:</p>
     {% code 'html' %}{% verbatim %}
-<!-- counter.html.twig — count is auto-injected as a Signal object -->
+<!-- counter.html.twig: count is auto-injected as a Signal object -->
 <span data-text="${{ count.id() }}">{{ count.int }}</span>
     {% endverbatim %}{% endcode %}
 
@@ -218,7 +218,7 @@ $c->view('counter.html.twig', [
 $c->view(fn () => $c->render('page.html.twig', $data), block: 'demo');
     {% endverbatim %}{% endcode %}
     <p>
-        This keeps SSE payloads small — the outer layout, nav, and static content are sent once on
+        This keeps SSE payloads small: the outer layout, nav, and static content are sent once on
         page load and never re-transmitted. Wrap the block content in
         <code>&lt;div id="via-block-{name}"&gt;</code> so Datastar can target it.
         See <a href="/docs/views#partial-updates">Views → Partial updates</a> for details.
@@ -242,10 +242,10 @@ $c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getCl
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/signals">Signals</a> — reactive state primitives</li>
-        <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
-        <li><a href="/docs/views">Views</a> — view lifecycle and caching</li>
-        <li><a href="/docs/api">API Reference</a> — complete method signatures</li>
+        <li><a href="/docs/signals">Signals</a>: reactive state primitives</li>
+        <li><a href="/docs/actions">Actions</a>: server-side event handlers</li>
+        <li><a href="/docs/views">Views</a>: view lifecycle and caching</li>
+        <li><a href="/docs/api">API Reference</a>: complete method signatures</li>
     </ul>
 </article>
 {% endblock %}

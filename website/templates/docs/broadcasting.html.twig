@@ -1,11 +1,11 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Broadcasting — php-via Docs{% endblock %}
+{% block title %}Broadcasting · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Broadcasting</h1>
     <p>
         Broadcasting is how php-via pushes updates to multiple clients at once. When a user's action should
-        change what <em>everyone</em> sees — not just themselves — you broadcast to a scope.
+        change what <em>everyone</em> sees (not just themselves), you broadcast to a scope.
     </p>
 
     <h2 id="the-basics">The basics</h2>
@@ -41,7 +41,7 @@ $c->broadcast(); // broadcasts to $c's primary scope
 
     <h2 id="auto-broadcast">Auto-broadcast on scoped signals</h2>
     <p>
-        Scoped signals auto-broadcast when <code>setValue()</code> is called — you don't always need
+        Scoped signals auto-broadcast when <code>setValue()</code> is called. You don't always need
         an explicit <code>broadcast()</code>. The auto-broadcast fires to the signal's scope:
     </p>
     {% code 'php' %}{% verbatim %}
@@ -50,7 +50,7 @@ $shared = $c->signal(0, 'count', Scope::routeScope('/'));
 
 $c->action(function (Context $c) use ($shared): void {
     $shared->increment();
-    // No explicit broadcast needed — auto-broadcast fires for Scope::routeScope('/')
+    // No explicit broadcast needed: auto-broadcast fires for Scope::routeScope('/')
 }, 'inc');
 {% endverbatim %}{% endcode %}
     <p>
@@ -156,7 +156,7 @@ $send = $c->action(function (Context $c) use ($app): void {
         whenever a client joins or leaves. This replaces polling timers for presence features:
     </p>
     {% code 'php' %}{% verbatim %}
-// Broadcast to the route when occupancy changes — presence counter stays live
+// Broadcast to the route when occupancy changes: presence counter stays live
 $app->onClientConnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
 $app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
 {% endverbatim %}{% endcode %}
@@ -194,11 +194,11 @@ $send = $c->action(function (Context $c) use ($app): void {
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/scopes">Scopes</a> — understanding scope types and targets</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a> — connect/disconnect hooks and timers</li>
-        <li><a href="/docs/actions">Actions</a> — server-side handlers that trigger broadcasts</li>
-        <li><a href="/docs/broker">Multi-node broker</a> — fan out broadcasts across servers with Redis or NATS</li>
-        <li><a href="/docs/api#via-broadcast">API: broadcast()</a> — method signature</li>
+        <li><a href="/docs/scopes">Scopes</a>: understanding scope types and targets</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect/disconnect hooks and timers</li>
+        <li><a href="/docs/actions">Actions</a>: server-side handlers that trigger broadcasts</li>
+        <li><a href="/docs/broker">Multi-node broker</a>: fan out broadcasts across servers with Redis or NATS</li>
+        <li><a href="/docs/api#via-broadcast">API: broadcast()</a>: method signature</li>
         <li><a href="/docs/api#via-flush-broadcasts">API: flushBroadcasts()</a>: run scheduled broadcasts now</li>
     </ul>
 </article>

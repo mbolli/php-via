@@ -204,7 +204,7 @@ class RequestHandler {
             return;
         }
 
-        // Handle stats endpoint (devMode only — exposes client IPs and memory usage)
+        // Handle stats endpoint (devMode only: exposes client IPs and memory usage)
         if ($path === '/_stats' && $method === 'GET') {
             if (!$this->via->getConfig()->getDevMode()) {
                 $response->status(404);
@@ -218,7 +218,7 @@ class RequestHandler {
             return;
         }
 
-        // Health endpoint — always available, no sensitive data
+        // Health endpoint: always available, no sensitive data
         if ($path === '/_health' && $method === 'GET') {
             $this->handleHealth($response);
             $this->logRequest($method, $path, 200, $requestStart);
@@ -226,7 +226,7 @@ class RequestHandler {
             return;
         }
 
-        // Dev Bar endpoints (/_via/*, /_traces) — gated on tracing being enabled.
+        // Dev Bar endpoints (/_via/*, /_traces), gated on tracing being enabled.
         // 404 when disabled so production never advertises the surface.
         if ($path === '/_via' || $path === '/_traces' || str_starts_with($path, '/_via/')) {
             if (!$this->via->getConfig()->isTracingEnabled()) {
@@ -364,7 +364,7 @@ class RequestHandler {
         $response->header('Content-Type', 'text/html; charset=utf-8');
 
         // Restrict who may frame this app, when configured via Config::withEmbeddable().
-        // Document responses only — not SSE/action/static responses.
+        // Document responses only, not SSE/action/static responses.
         $ancestors = $this->via->getConfig()->getFrameAncestors();
         if ($ancestors !== null) {
             $response->header('Content-Security-Policy', 'frame-ancestors ' . implode(' ', $ancestors));
@@ -472,7 +472,7 @@ class RequestHandler {
                     $request->getAttributes(),
                 );
 
-                // Return a dummy response — the real response was already sent via OpenSwoole
+                // Return a dummy response: the real response was already sent via OpenSwoole
                 return new Psr7Response(200);
             }
 

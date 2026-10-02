@@ -12,7 +12,7 @@ use OpenSwoole\Coroutine\Client;
  * Minimal OpenSwoole-native NATS client.
  *
  * Uses Coroutine\Client (non-blocking TCP) so it integrates seamlessly with
- * OpenSwoole's coroutine scheduler — no event-loop conflict.
+ * OpenSwoole's coroutine scheduler: no event-loop conflict.
  *
  * Supports: Core pub/sub, JetStream stream management, JetStream push consumers
  * (for replay), and JetStream-backed KV buckets.

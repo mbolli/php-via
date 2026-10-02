@@ -10,7 +10,7 @@ use Psr\Http\Message\ResponseInterface;
 /**
  * Writes a PSR-7 Response into an OpenSwoole Response.
  *
- * Used only at the middleware boundary — when middleware short-circuits
+ * Used only at the middleware boundary: when middleware short-circuits
  * (e.g. returns 401), this emitter converts the PSR-7 response back into
  * the OpenSwoole response that the client receives.
  */

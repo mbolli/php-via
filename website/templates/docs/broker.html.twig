@@ -1,10 +1,10 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Multi-node Broker — php-via Docs{% endblock %}
+{% block title %}Multi-node Broker · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Multi-node Broker</h1>
     <p>
-        By default php-via keeps all state in a single worker process. That's correct for most deployments —
+        By default php-via keeps all state in a single worker process. That's correct for most deployments:
         OpenSwoole handles thousands of concurrent SSE connections comfortably in one worker.
         When you need multiple workers on the same machine (CPU parallelism) or multiple servers,
         a <strong>broker</strong> fans out <code>broadcast()</code> calls so every worker can react
@@ -24,7 +24,7 @@
         </tbody>
     </table>
     <p>
-        TAB scope is always fully isolated per-connection — no broker ever carries TAB broadcasts.
+        TAB scope is always fully isolated per-connection: no broker ever carries TAB broadcasts.
     </p>
     <p>
         A worker publishes a scope at most once per broadcast flush, however often it was broadcast in between,
@@ -36,11 +36,11 @@
     <p>
         No configuration needed. Correct for single-worker deployments. Has zero overhead and no
         external dependencies. Calling <code>withWorkerNum(N)</code> with <code>N &gt; 1</code> and
-        leaving <code>InMemoryBroker</code> as the broker is a startup error — php-via will throw
+        leaving <code>InMemoryBroker</code> as the broker is a startup error: php-via will throw
         a <code>\RuntimeException</code> with a clear message.
     </p>
     {% code 'php' %}{% verbatim %}
-// These are equivalent — InMemoryBroker is the implicit default
+// These are equivalent: InMemoryBroker is the implicit default
 $config = new Config();
 $config = (new Config())->withBroker(new InMemoryBroker());
 {% endverbatim %}{% endcode %}
@@ -50,7 +50,7 @@ $config = (new Config())->withBroker(new InMemoryBroker());
         Uses OpenSwoole's built-in inter-worker pipe (<code>Server::sendMessage</code> /
         <code>onPipeMessage</code>) to fan-out scope invalidations across all worker processes on
         the same machine. <strong>No external infrastructure required.</strong>
-        GlobalState is backed by <code>OpenSwoole\Table</code> — shared memory that is
+        GlobalState is backed by <code>OpenSwoole\Table</code>, shared memory that is
         allocated in the master process and mmap'd into every worker on fork.
     </p>
     {% code 'php' %}{% verbatim %}
@@ -96,7 +96,7 @@ $config->withBroker(new RedisBroker('127.0.0.1', 6379));
     <p>
         Pass <code>$password</code> for <code>requirepass</code> setups, or both
         <code>$password</code> and <code>$username</code> for Redis 6+ ACL users. Keep credentials
-        out of source code — use environment variables or a secrets manager.
+        out of source code: use environment variables or a secrets manager.
     </p>
     {% code 'php' %}{% verbatim %}
 // requirepass (Redis default auth)
@@ -119,7 +119,7 @@ $config->withBroker(new RedisBroker(
 
     <h3 id="redis-tls">TLS</h3>
     {% code 'php' %}{% verbatim %}
-// TLS — verify against system CA bundle
+// TLS: verify against system CA bundle
 $config->withBroker(new RedisBroker(
     host: 'redis.internal',
     port: 6380,
@@ -161,7 +161,7 @@ new RedisBroker(
 
     <h2 id="natsbroker">NatsBroker</h2>
     <p>
-        Uses a raw OpenSwoole coroutine TCP socket with the minimal NATS protocol — no extra PHP
+        Uses a raw OpenSwoole coroutine TCP socket with the minimal NATS protocol: no extra PHP
         extension required beyond OpenSwoole itself. Good choice for containerised deployments where
         NATS already runs for other services.
     </p>
@@ -182,7 +182,7 @@ $config->withBroker(new NatsBroker(
 
     <h3 id="nats-tls">TLS</h3>
     {% code 'php' %}{% verbatim %}
-// TLS — verify against system CA bundle (port 4243 is the TLS convention)
+// TLS: verify against system CA bundle (port 4243 is the TLS convention)
 $config->withBroker(new NatsBroker(host: 'nats.internal', port: 4243, tls: true));
 
 // TLS + custom CA + token
@@ -219,7 +219,7 @@ new NatsBroker(
     </p>
     {% code 'php' %}{% verbatim %}
 $config->onBrokerError(function (\Throwable $e): void {
-    // Safe summary only — do NOT log $e->getMessage() verbatim if it may
+    // Safe summary only: do NOT log $e->getMessage() verbatim if it may
     // contain connection strings or credentials (OWASP: sensitive data exposure).
     error_log('[broker] connection lost: ' . get_class($e));
     $metrics->increment('broker.error');
@@ -233,7 +233,7 @@ $config->onBrokerError(function (\Throwable $e): void {
 
     <h2 id="health-endpoint">Health endpoint</h2>
     <p>
-        Every php-via server exposes <code>GET /_health</code> — no configuration needed, no devMode
+        Every php-via server exposes <code>GET /_health</code>, no configuration needed, no devMode
         gate. Use it with your load balancer, Kubernetes liveness probes, or uptime monitors:
     </p>
     {% code 'bash' %}{% verbatim %}
@@ -290,9 +290,9 @@ reverse_proxy node1:3000 node2:3000 {
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/broadcasting">Broadcasting</a> — the broadcast() API and scope targets</li>
-        <li><a href="/docs/scopes">Scopes</a> — which scopes cross node boundaries</li>
-        <li><a href="/docs/deployment">Deployment</a> — systemd, Caddy, TLS setup</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: the broadcast() API and scope targets</li>
+        <li><a href="/docs/scopes">Scopes</a>: which scopes cross node boundaries</li>
+        <li><a href="/docs/deployment">Deployment</a>: systemd, Caddy, TLS setup</li>
     </ul>
 </article>
 {% endblock %}

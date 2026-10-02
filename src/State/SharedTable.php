@@ -22,7 +22,7 @@ use OpenSwoole\Table;
  * Integers get a dedicated `TYPE_INT` column, because `Table::incr()` on it is atomic across
  * processes. That makes {@see increment()} race-free by construction, with no lock and no owner
  * worker. Everything else is PHP-serialized into a string column with last-write-wins, which is
- * correct for a value assigned wholesale — there is nothing to lose. Read-modify-write on a
+ * correct for a value assigned wholesale: there is nothing to lose. Read-modify-write on a
  * non-integer is the shape LWW cannot handle, and {@see mutate()} covers it with a ticket lock.
  *
  * Which column a key uses follows its current value and can change with it: writing a string
@@ -37,8 +37,8 @@ use OpenSwoole\Table;
  * Limits (measured on ext-openswoole 26.2.0):
  *   - Row capacity is fixed at construction time, but it is NOT $maxRows. OpenSwoole rounds the
  *     allocation up (power of two, floor 64) and the usable count runs well past that: 1024 rows
- *     admits ~1776 keys, 4096 admits ~8043. Rejection is per-key-hash and intermittent — at
- *     $maxRows = 1024 the first failure came at insert 1621 yet 1776 succeeded in total — so the
+ *     admits ~1776 keys, 4096 admits ~8043. Rejection is per-key-hash and intermittent (at
+ *     $maxRows = 1024 the first failure came at insert 1621 yet 1776 succeeded in total), so the
  *     effective ceiling is not a number a caller can plan against. Treat $maxRows as a floor.
  *     There is no eviction: once full, further distinct keys are rejected.
  *   - Maximum serialized byte size of a single value is $maxValueBytes.
@@ -53,8 +53,8 @@ final class SharedTable {
      * OpenSwoole's usable key length is 63, not 64.
      *
      * At 64 it accepts the write but emits "key[...] is too long" as a PHP warning on EVERY
-     * write. It does not truncate — two 64-character keys differing only in the final character
-     * stay distinct — so the old limit of 64 was log noise on the hot path rather than
+     * write. It does not truncate (two 64-character keys differing only in the final character
+     * stay distinct), so the old limit of 64 was log noise on the hot path rather than
      * corruption. Rejecting at 64 turns a per-write warning into one clear exception.
      */
     private const int MAX_KEY_LENGTH = 63;
@@ -126,7 +126,7 @@ final class SharedTable {
         $key = $this->normalizeKey($key);
         $serialized = serialize($value);
 
-        // Check size limit in all modes — prevents silent data loss in production
+        // Check size limit in all modes: prevents silent data loss in production
         // and makes the constraint visible during development/testing.
         if (\strlen($serialized) > $this->maxValueBytes) {
             throw new \OverflowException(
@@ -153,7 +153,7 @@ final class SharedTable {
             throw new \OverflowException(
                 "GlobalState has no room for key \"{$key}\": the shared table is full. "
                 . 'Raise the row count with Config::withGlobalStateTableSize(). Note that the '
-                . 'usable capacity is not exactly the configured row count — OpenSwoole rounds '
+                . 'usable capacity is not exactly the configured row count: OpenSwoole rounds '
                 . 'the allocation and rejects keys by hash, so leave headroom.',
                 0,
                 $e
@@ -212,7 +212,7 @@ final class SharedTable {
         if (!\is_array($row)) {
             // First touch. This MUST be a partial set naming only 'kind': it creates the row
             // with n = 0 when absent, and touches nothing but 'kind' when another worker got
-            // there first. Seeding 'n' => 0 here instead loses that worker's increment — two
+            // there first. Seeding 'n' => 0 here instead loses that worker's increment: two
             // workers both find the row missing, and the second one's write resets the counter
             // the first has already advanced. Observed as a barrier that never fills.
             $this->table->set($key, ['kind' => self::KIND_INT]);
@@ -221,7 +221,7 @@ final class SharedTable {
         $next = (int) $this->table->incr($key, 'n', $by);
         // incr() touches only 'n', so the durable tier has to be told separately. Doing it
         // after the increment means a takeDirty() landing in between re-flushes next tick
-        // rather than dropping the write — the same benign race takeDirty() already documents.
+        // rather than dropping the write, the same benign race takeDirty() already documents.
         $this->table->set($key, ['dirty' => 1]);
 
         return $next;
@@ -231,13 +231,13 @@ final class SharedTable {
      * Read, transform and write a value as one indivisible step.
      *
      * The answer for the shape neither other path covers: read-modify-write on a NON-integer
-     * value — appending to a list, updating one key of a map. increment() handles numbers
+     * value (appending to a list, updating one key of a map). increment() handles numbers
      * atomically and a wholesale assignment has no lost update to suffer, but
      * `set($k, $table->get($k) + [...])` is a read and a write with a gap in between, and
      * concurrent workers each write back a result computed from the same stale read.
      *
      * $mutator receives the current value (null if nothing has been written yet) and returns
-     * the new one. It runs on the calling worker — no closure crosses a process boundary —
+     * the new one. It runs on the calling worker (no closure crosses a process boundary)
      * while a ticket lock on the row keeps every other worker out. Keep it fast and side-effect
      * free: it runs inside the lock, and a callback that blocks holds up every other writer of
      * the same key. Concurrent callers in one worker queue locally, and one per worker polls the row.
@@ -245,7 +245,7 @@ final class SharedTable {
      * that is next in line but cannot run for 2 s, is skipped, and its write can overlap the next.
      *
      * Do not mix mutate() and increment() on the SAME key. increment() deliberately skips the
-     * lock — a single atomic operation needs no help — so a mutate() running beside it can
+     * lock (a single atomic operation needs no help), so a mutate() running beside it can
      * read, compute and write back over an increment that landed in between. Pick one per key.
      *
      * @template T
@@ -297,7 +297,7 @@ final class SharedTable {
      *
      * Integers are unwrapped onto the atomic column rather than left as a blob. A counter
      * restored as KIND_SERIALIZED would still read back correctly and then throw on its next
-     * increment() — a failure that surfaces only after a restart.
+     * increment(), a failure that surfaces only after a restart.
      */
     public function seed(string $key, string $serialized): void {
         $key = $this->normalizeKey($key);
@@ -321,7 +321,7 @@ final class SharedTable {
      * Racy by construction and deliberately so: a write landing between the read and the clear
      * has its flag reset while its value is already in the batch, so it is persisted once rather
      * than twice. A write landing after the clear stays dirty for the next tick. Neither loses
-     * data — the table always holds the authoritative value.
+     * data: the table always holds the authoritative value.
      *
      * @return array<string, string> key => serialized value
      */
@@ -341,7 +341,7 @@ final class SharedTable {
         $dirty = [];
         foreach ($this->table as $key => $row) {
             if ((int) ($row['dirty'] ?? 0) === 1) {
-                // Integer rows live in 'n', so serialize them here — the durable tier stores
+                // Integer rows live in 'n', so serialize them here: the durable tier stores
                 // blobs, and seed() unwraps them back onto the atomic column at start-up.
                 $dirty[(string) $key] = (int) ($row['kind'] ?? self::KIND_SERIALIZED) === self::KIND_INT
                     ? serialize((int) $row['n'])
@@ -371,7 +371,7 @@ final class SharedTable {
         if (!\is_int($current)) {
             throw new \LogicException(
                 "GlobalState key \"{$key}\" does not hold an integer, so it cannot be incremented "
-                . 'atomically. Use setGlobalState() — but note that read-modify-write on a shared '
+                . 'atomically. Use setGlobalState(), but note that read-modify-write on a shared '
                 . 'value can lose updates when more than one worker writes it, and mutateGlobalState() '
                 . 'is the race-free way to transform a non-integer.'
             );

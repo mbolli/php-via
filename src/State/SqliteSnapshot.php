@@ -8,15 +8,15 @@ namespace Mbolli\PhpVia\State;
  * Durable backing for GlobalState, written behind the in-memory table rather than in front of it.
  *
  * `OpenSwoole\Table` is memory-only: it survives a worker restart, because it is allocated in the
- * master and inherited on fork, but not a server restart. SQLite fixes that — but putting SQLite
+ * master and inherited on fork, but not a server restart. SQLite fixes that, but putting SQLite
  * *in front* of reads would be the wrong trade. A point SELECT is 2.8 us against 0.19 us for a
  * SharedTable read, and every one of those microseconds is non-yielding CPU that stalls the whole
  * worker's event loop, not just the calling coroutine.
  *
  * So reads never touch SQLite. Writes land in the table at full speed and set a dirty flag; a
  * timer on the leader worker drains the dirty set into one batched transaction. That is the same
- * shape Anders Murphy's writer process uses — drain a queue on a fixed tick inside one
- * transaction — implemented with the leader-gated timer php-via already has, so it needs no extra
+ * shape Anders Murphy's writer process uses (drain a queue on a fixed tick inside one
+ * transaction), implemented with the leader-gated timer php-via already has, so it needs no extra
  * process and changes no read semantics.
  *
  * Measured flush cost (WAL, synchronous=NORMAL):
@@ -105,7 +105,7 @@ final class SqliteSnapshot {
         } catch (\Throwable $e) {
             throw new \RuntimeException(
                 'GlobalState snapshot could not begin a write transaction: ' . $e->getMessage()
-                . '. Another process is writing this file — it is meant to have a single writer.',
+                . '. Another process is writing this file. It is meant to have a single writer.',
                 0,
                 $e
             );
@@ -141,7 +141,7 @@ final class SqliteSnapshot {
     /**
      * Fold the WAL back into the database file.
      *
-     * Returns false when a reader blocked it, which is not an error — it means try again later.
+     * Returns false when a reader blocked it, which is not an error: it means try again later.
      * The health signal for this store is WAL size and blocked-checkpoint count, never
      * SQLITE_BUSY, which is not raised here at all.
      */

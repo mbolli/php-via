@@ -16,8 +16,8 @@ use Psr\Http\Server\RequestHandlerInterface;
  * response->end() / response->write() callsites, which own the OpenSwoole response.
  *
  * PSR-7 request attributes set by this middleware:
- *   brotli_write  — fn(string $chunk): string|false  — BROTLI_FLUSH per chunk
- *   brotli_finish — fn(): string|false               — BROTLI_FINISH, must be called after last chunk
+ *   brotli_write:  fn(string $chunk): string|false  (BROTLI_FLUSH per chunk)
+ *   brotli_finish: fn(): string|false               (BROTLI_FINISH, must be called after last chunk)
  *
  * Implements SseAwareMiddleware so it also runs on the /_sse handshake, where
  * the SSE handler extracts the writers and applies them in the streaming write loop.

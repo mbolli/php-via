@@ -11,7 +11,7 @@ use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
 
 /**
- * File Upload example — SharedWorker extendedLifetime demo.
+ * File Upload example: SharedWorker extendedLifetime demo.
  *
  * Shows how an MPA can gain SPA-like continuity with no SPA routing code:
  *  - SharedWorker survives page navigations; extendedLifetime (Chrome 148+)
@@ -57,7 +57,7 @@ final class FileUploadExample {
             $c->signal('sim', 'uploadMode'); // 'sim' | 'real'
             $fileError = '';
 
-            // ── setMode — instantly switches between sim and real forms
+            // ── setMode: instantly switches between sim and real forms
             $c->action(function (Context $ctx) use (&$fileError): void {
                 $mode = (string) $ctx->input('mode', 'sim');
                 if (!\in_array($mode, ['sim', 'real'], strict: true)) {
@@ -116,23 +116,23 @@ final class FileUploadExample {
     private static function meta(): array {
         return [
             'title' => '🧵 Background Upload via SharedWorker',
-            'description' => 'A demonstration of how <code>SharedWorker</code> + <code>extendedLifetime</code> (Chrome 148+) lets an MPA behave like an SPA — background work survives page navigations without a single line of SPA routing code.',
+            'description' => 'A demonstration of how <code>SharedWorker</code> + <code>extendedLifetime</code> (Chrome 148+) lets an MPA behave like an SPA: background work survives page navigations without a single line of SPA routing code.',
             'summary' => [
-                '<strong>The core idea</strong>: in a classic MPA, navigating away tears down the page, kills any in-flight XHR, and resets all client state. A <strong>SharedWorker</strong> partially breaks that rule — it is shared across tabs and not tied to a single page lifecycle. But the browser is still allowed to terminate it the moment all ports disconnect, which happens briefly during every navigation.',
-                '<strong>extendedLifetime</strong> (Chrome 148+) closes the last gap: without it, the browser may terminate the SharedWorker during the brief moment between pages when the port count drops to zero. On Chrome 148+, a real upload continues chunking with zero user friction. On other browsers, that gap can kill the worker — hence the navigation guard.',
-                '<strong>SESSION-scoped signals</strong> are the server-side complement. They hold <code>uploadStatus</code>, <code>uploadPct</code>, <code>uploadFileName</code>, and byte counters across all tabs. When the new page\'s SSE stream opens, the server immediately pushes the current state — no polling, no local storage.',
+                '<strong>The core idea</strong>: in a classic MPA, navigating away tears down the page, kills any in-flight XHR, and resets all client state. A <strong>SharedWorker</strong> partially breaks that rule: it is shared across tabs and not tied to a single page lifecycle. But the browser is still allowed to terminate it the moment all ports disconnect, which happens briefly during every navigation.',
+                '<strong>extendedLifetime</strong> (Chrome 148+) closes the last gap: without it, the browser may terminate the SharedWorker during the brief moment between pages when the port count drops to zero. On Chrome 148+, a real upload continues chunking with zero user friction. On other browsers, that gap can kill the worker, hence the navigation guard.',
+                '<strong>SESSION-scoped signals</strong> are the server-side complement. They hold <code>uploadStatus</code>, <code>uploadPct</code>, <code>uploadFileName</code>, and byte counters across all tabs. When the new page\'s SSE stream opens, the server immediately pushes the current state (no polling, no local storage).',
                 '<strong>Real file mode</strong> shows the full picture: the worker slices the file into 512 KB chunks (<code>File.slice()</code>) and POSTs them one by one to the <code>uploadChunk</code> action. Between each <code>await</code> the worker may receive a <code>connect</code> message with fresh URLs from the new page, making mid-upload navigation transparent.',
                 '<strong>Graceful fallback</strong>: on browsers where the worker can be killed between pages, an in-page confirm dialog intercepts subnav clicks and a <code>beforeunload</code> handler covers other navigation. The guard is automatically suppressed on Chrome 148+ once the worker\'s <code>workerBorn</code> timestamp confirms it survived.',
             ],
             'anatomy' => [
                 'signals' => [
                     ['name' => 'uploadStatus', 'type' => 'string', 'scope' => 'SESSION', 'default' => '"idle"', 'desc' => 'Upload lifecycle: idle | uploading | complete | cancelled.'],
-                    ['name' => 'uploadPct', 'type' => 'int', 'scope' => 'SESSION', 'default' => '0', 'desc' => 'Upload progress 0–100. Authoritative server value — navigation gaps self-heal on next chunk.'],
+                    ['name' => 'uploadPct', 'type' => 'int', 'scope' => 'SESSION', 'default' => '0', 'desc' => 'Upload progress 0 to 100. Authoritative server value: navigation gaps self-heal on next chunk.'],
                     ['name' => 'uploadFileName', 'type' => 'string', 'scope' => 'SESSION', 'default' => '""', 'desc' => 'Filename displayed in the progress bar.'],
                     ['name' => 'uploadTotalBytes', 'type' => 'int', 'scope' => 'SESSION', 'default' => '0', 'desc' => 'Total file size in bytes (virtual or real).'],
                     ['name' => 'uploadedBytes', 'type' => 'int', 'scope' => 'SESSION', 'default' => '0', 'desc' => 'Bytes transferred so far.'],
                     ['name' => 'uploadFileInfo', 'type' => 'string', 'scope' => 'SESSION', 'default' => '""', 'desc' => 'Human-readable file metadata for real uploads, e.g. "3.2 MB · PDF". Empty for simulated uploads.'],
-                    ['name' => 'uploadMode', 'type' => 'string', 'scope' => 'TAB', 'default' => '"sim"', 'desc' => 'Which form is shown: sim (SharedWorker simulation) or real (multipart upload). TAB-scoped — each tab can differ.'],
+                    ['name' => 'uploadMode', 'type' => 'string', 'scope' => 'TAB', 'default' => '"sim"', 'desc' => 'Which form is shown: sim (SharedWorker simulation) or real (multipart upload). TAB-scoped: each tab can differ.'],
                 ],
                 'actions' => [
                     ['name' => 'startUpload', 'scope' => 'SESSION', 'desc' => 'Initialises upload SESSION signals (status=uploading, total, filename) and broadcasts to all tabs. Called by the worker before the chunk loop.'],
@@ -181,7 +181,7 @@ final class FileUploadExample {
         $uploadScope = Scope::build('upload', $c->getSessionId() ?? $c->getId());
         $c->addScope($uploadScope);
 
-        // SESSION-scoped signals — shared across all contexts in the upload scope
+        // SESSION-scoped signals, shared across all contexts in the upload scope
         $status = $c->signal('idle', 'uploadStatus', $uploadScope);
         $pct = $c->signal(0, 'uploadPct', $uploadScope);
         $uploadedBytes = $c->signal(0, 'uploadedBytes', $uploadScope);
@@ -189,7 +189,7 @@ final class FileUploadExample {
         $fileName = $c->signal('', 'uploadFileName', $uploadScope);
         $uploadFileInfo = $c->signal('', 'uploadFileInfo', $uploadScope);
 
-        // ── startUpload — called once by the page JS before the worker begins chunking
+        // ── startUpload: called once by the page JS before the worker begins chunking
         $startUpload = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
             $total = (int) $ctx->input('total', 0);
             $name = (string) $ctx->input('file', 'file.bin');
@@ -208,7 +208,7 @@ final class FileUploadExample {
             $app->broadcast($uploadScope);
         }, 'startUpload');
 
-        // ── receiveChunk — called by SharedWorker every 200 ms
+        // ── receiveChunk: called by SharedWorker every 200 ms
         // The worker sends its authoritative pct so navigation gaps self-heal:
         // if two chunks were missed, the next chunk jumps pct forward correctly.
         $receiveChunk = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
@@ -246,7 +246,7 @@ final class FileUploadExample {
             $app->broadcast($uploadScope);
         }, 'receiveChunk');
 
-        // ── cancelUpload — resets to idle; works from any sub-page
+        // ── cancelUpload: resets to idle; works from any sub-page
         $cancelUpload = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
             $ctx->getSignal('uploadStatus')->setValue('idle');
             $ctx->getSignal('uploadFileName')->setValue('');
@@ -258,7 +258,7 @@ final class FileUploadExample {
             $app->broadcast($uploadScope);
         }, 'cancelUpload');
 
-        // ── resetUpload — clears complete/cancelled; allows starting again
+        // ── resetUpload: clears complete/cancelled; allows starting again
         $resetUpload = $c->action(function (Context $ctx) use ($uploadScope, $app): void {
             $ctx->getSignal('uploadStatus')->setValue('idle');
             $ctx->getSignal('uploadFileName')->setValue('');
@@ -270,8 +270,8 @@ final class FileUploadExample {
             $app->broadcast($uploadScope);
         }, 'resetUpload');
 
-        // ── uploadChunk — receives a real file slice from the SharedWorker chunk loop.
-        // NOTE: this is a demo — the chunk bytes are intentionally discarded after
+        // ── uploadChunk: receives a real file slice from the SharedWorker chunk loop.
+        // NOTE: this is a demo. The chunk bytes are intentionally discarded after
         //       validation. A real implementation would write them to disk or object storage.
         $uploadChunk = $c->action(function (Context $ctx) use ($app, $uploadScope): void {
             $status = $ctx->getSignal('uploadStatus');
@@ -294,7 +294,7 @@ final class FileUploadExample {
                 return;
             }
 
-            // A04 – Insecure Design: guard total size server-side; client-supplied value
+            // A04 (Insecure Design): guard total size server-side; client-supplied value
             // is not trusted. Log the violation so probing attempts leave a trace.
             if ($total > self::REAL_MAX_BYTES) {
                 $app->log('warn', 'uploadChunk: rejected oversized claim total=' . $total . ' limit=' . self::REAL_MAX_BYTES);
@@ -304,9 +304,9 @@ final class FileUploadExample {
                 return;
             }
 
-            // A04 – Insecure Design: derive progress from server-side tracking, not from
+            // A04 (Insecure Design): derive progress from server-side tracking, not from
             // a client-supplied offset. Use the amount already recorded + this chunk's
-            // actual byte count — never trust $offset alone as proof bytes were delivered.
+            // actual byte count. Never trust $offset alone as proof bytes were delivered.
             //
             // This prevents fake completion via `offset = total - 2, chunk = 2 bytes`.
             // It also bounds chunk count: once server-tracked bytes reach $total the upload
@@ -325,7 +325,7 @@ final class FileUploadExample {
                 $totalBytes->setValue($total);
             }
 
-            // A03 – Injection: strip path separators and null bytes from filename before
+            // A03 (Injection): strip path separators and null bytes from filename before
             // storing it in a signal. basename() handles the common cases.
             if ($fileName->string() === '' && $name !== '') {
                 $safeName = basename(str_replace("\0", '', $name));

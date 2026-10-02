@@ -96,12 +96,12 @@ class SseHandler {
         // tab keeps its view without a reload; on success we fall through to normal SSE handling.
         // Otherwise send a reload on the FIRST reconnect from this dead context so active tabs
         // recover. Subsequent reconnects (backgrounded/throttled tabs that can't execute
-        // the JS) are closed silently — no log noise, no retransmitting a useless event.
-        // NOTE: brotli headers are intentionally NOT set on the reload path — we write raw SSE and
+        // the JS) are closed silently: no log noise, no retransmitting a useless event.
+        // NOTE: brotli headers are intentionally NOT set on the reload path: we write raw SSE and
         // close immediately, so compression is pointless and would corrupt the payload.
         if (!isset($this->via->contexts[$contextId])) {
             if ($this->via->reviveContext($contextId, $request, byConnect: true) !== null) {
-                // Rebuilt — clear any stale reload marker and continue with the revived context.
+                // Rebuilt: clear any stale reload marker and continue with the revived context.
                 unset($this->reloadedContextIds[$contextId]);
             } else {
                 if (isset($this->reloadedContextIds[$contextId])) {
@@ -145,7 +145,7 @@ class SseHandler {
         if (!$context->hasView()) {
             $this->via->log('info', "Context has no view (post-cleanup race), sending reload: {$contextId}");
             unset($this->via->contexts[$contextId]);
-            // Brotli headers are already set above if brotli is active — use brotliWrite to send
+            // Brotli headers are already set above if brotli is active. Use brotliWrite to send
             // the event through the proper encoder, otherwise write raw.
             $output = $sse->executeScript('window.location.reload()');
             if ($brotliWrite !== null) {
@@ -449,7 +449,7 @@ class SseHandler {
                     $lastWriteNs = hrtime(true);
 
                     // Delivery acknowledgement. Signal patches carry deltas and are only
-                    // marked synced here, once the bytes are actually on the wire — a patch
+                    // marked synced here, once the bytes are actually on the wire: a patch
                     // that dies in the queue therefore leaves its signals dirty and is
                     // resent by the next sync instead of silently stranding the client.
                     // Note write() returning true means "buffered", not "received".
@@ -485,7 +485,7 @@ class SseHandler {
                 if (!isset($this->via->contexts[$contextId])) {
                     $this->via->log('info', "Context destroyed while SSE active, sending reload: {$contextId}");
 
-                    // isWritable() guard: defensive check — context destruction and
+                    // isWritable() guard: defensive check. Context destruction and
                     // response close can race in separate coroutines on reconnect.
                     // @phpstan-ignore if.alwaysTrue
                     if ($response->isWritable()) {
@@ -519,7 +519,7 @@ class SseHandler {
                 try {
                     $response->write($last);
                 } catch (\Throwable) {
-                    // Client already gone — ignore
+                    // Client already gone, ignore
                 }
             }
         }
@@ -537,7 +537,7 @@ class SseHandler {
 
         // Decrement active SSE counter. Only perform cleanup when this is the last
         // active SSE coroutine for this context. If a newer SSE coroutine is already
-        // running (reconnect race), skip cleanup — the new coroutine owns the context.
+        // running (reconnect race), skip cleanup: the new coroutine owns the context.
         $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 1) - 1;
         $isLastSse = $this->via->activeSseCount[$contextId] <= 0;
         if ($isLastSse) {
@@ -644,7 +644,7 @@ class SseHandler {
     /**
      * Check whether the caller's session is authorised to open an SSE stream for the context.
      *
-     * @see ActionHandler::isSessionAuthorized() — identical contract
+     * @see ActionHandler::isSessionAuthorized() (identical contract)
      */
     private function isSessionAuthorized(string $contextId, ?string $callerSessionId): bool {
         $storedSessionId = $this->via->getContextSessionId($contextId);

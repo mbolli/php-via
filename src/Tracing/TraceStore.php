@@ -15,7 +15,7 @@ namespace Mbolli\PhpVia\Tracing;
  * (the default and the common dev case) it sees every request. Under
  * worker_num > 1, each worker keeps its own buffer; a dev-console stream is
  * pinned to one worker and therefore shows that worker's traces only. That is
- * an accepted limitation for a development tool — production runs with tracing
+ * an accepted limitation for a development tool: production runs with tracing
  * off.
  */
 final class TraceStore {

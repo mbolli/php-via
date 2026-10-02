@@ -80,7 +80,7 @@
                 <div class="mc-service-label">
                     {{ svc.label }}
                     <span class="mc-delivery-badge"
-                          title="{{ svc.guaranteed ? 'JetStream durable — guaranteed delivery: events buffer while consumer is paused' : 'Core pub/sub — best-effort: events are lost if the service is killed' }}">
+                          title="{{ svc.guaranteed ? 'JetStream durable, guaranteed delivery: events buffer while consumer is paused' : 'Core pub/sub, best-effort: events are lost if the service is killed' }}">
                         {{ svc.guaranteed ? '🔒' : '📡' }}
                     </span>
                 </div>
@@ -94,9 +94,9 @@
                 <div class="mc-service-count">{{ svc.count }} events</div>
             </div>
             {% if not svc.killed %}
-            <button class="mc-kill-btn" data-on:click="@post('{{ svc.killUrl }}')" title="{{ svc.guaranteed ? 'Pause consumer — events buffer in JetStream' : 'Stop service — events will be lost' }}">⏸</button>
+            <button class="mc-kill-btn" data-on:click="@post('{{ svc.killUrl }}')" title="{{ svc.guaranteed ? 'Pause consumer: events buffer in JetStream' : 'Stop service: events will be lost' }}">⏸</button>
             {% else %}
-            <button class="mc-revive-btn" data-on:click="@post('{{ svc.reviveUrl }}')" title="{{ svc.guaranteed ? 'Resume — catch up buffered events' : 'Restart service' }}">▶</button>
+            <button class="mc-revive-btn" data-on:click="@post('{{ svc.reviveUrl }}')" title="{{ svc.guaranteed ? 'Resume: catch up buffered events' : 'Restart service' }}">▶</button>
             {% endif %}
         </div>
         {% endfor %}

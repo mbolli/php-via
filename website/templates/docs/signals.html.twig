@@ -1,5 +1,5 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Signals — php-via Docs{% endblock %}
+{% block title %}Signals · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Signals</h1>
@@ -21,7 +21,7 @@ $count->int();        // read as int
 $count->string();     // read as string
 $count->getValue();   // raw value
 
-$count->setValue(42); // update — queues a patch to every subscribed client
+$count->setValue(42); // update: queues a patch to every subscribed client
     {% endverbatim %}{% endcode %}
 
     <h2 id="binding-in-templates">Binding in templates</h2>
@@ -58,7 +58,7 @@ $c->scope(Scope::ROUTE);  // equivalent shorthand
     {% endverbatim %}{% endcode %}
 
     <div class="docs-demo">
-        <div class="docs-demo-header">▶ TAB scope vs ROUTE scope — live comparison</div>
+        <div class="docs-demo-header">▶ TAB scope vs ROUTE scope: live comparison</div>
         <div class="docs-demo-body">
             <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
                 Open another browser tab with this page open, then increment both counters. The TAB counter is yours alone; the ROUTE counter is shared.

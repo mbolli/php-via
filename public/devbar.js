@@ -1,4 +1,4 @@
-// Via Dev Bar — a self-contained debug overlay web component.
+// Via Dev Bar: a self-contained debug overlay web component.
 //
 // Renders inside a Shadow DOM so neither the host page's CSS nor its Datastar
 // runtime can interfere. Boot data arrives as data-* attributes from the
@@ -409,7 +409,7 @@ class ViaDevBar extends HTMLElement {
   renderSignals() {
     if (!this.signals.length) return `<div class="empty">No named signals on this context.</div>`;
     const note = this.writes
-      ? `<div class="note">Editing enabled — values write back to the server.</div>`
+      ? `<div class="note">Editing enabled: values write back to the server.</div>`
       : `<div class="note">Read-only. Enable Config::withTracingWrites() in devMode to edit.</div>`;
     const rows = this.signals.map((s) => {
       const editable = this.writes && s.clientWritable;
@@ -432,7 +432,7 @@ class ViaDevBar extends HTMLElement {
       const entries = Object.entries(e.args || {});
       const isErr = e.type === 'error';
 
-      // Lifecycle markers (started/finished) carry no payload — render muted and
+      // Lifecycle markers (started/finished) carry no payload: render muted and
       // non-expandable so the content-bearing patch events stand out.
       if (!entries.length) {
         return `

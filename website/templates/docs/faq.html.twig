@@ -1,5 +1,5 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Common Pitfalls — php-via Docs{% endblock %}
+{% block title %}Common Pitfalls · php-via Docs{% endblock %}
 {% block head %}
 {{ parent() }}
 <script type="application/ld+json">
@@ -20,7 +20,7 @@
             "name": "Shared counter uses globalState + manual broadcast instead of scoped signals",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Scoped signals already are shared state. When a context has a non-TAB scope, every $c->signal() call for the same name returns the same Signal object across all contexts in that scope. Fix: use $c->scope(Scope::ROUTE) and $c->signal(0) — the signal auto-broadcasts on setValue(). Drop globalState and the manual broadcast() call."
+                "text": "Scoped signals already are shared state. When a context has a non-TAB scope, every $c->signal() call for the same name returns the same Signal object across all contexts in that scope. Fix: use $c->scope(Scope::ROUTE) and $c->signal(0). The signal auto-broadcasts on setValue(). Drop globalState and the manual broadcast() call."
             }
         },
         {
@@ -114,7 +114,7 @@
         </p>
         <p><strong>Why:</strong> When <code>broadcast()</code> fires, every context in the scope re-runs its view
         closure. If the view reads from a per-client signal (e.g. <code>$votes->getValue()</code>), each client
-        reads its <em>own</em> signal — which was only updated for the client that triggered the action.
+        reads its <em>own</em> signal, which was only updated for the client that triggered the action.
         Clients that didn't trigger the action still have stale signal values.
         </p>
         <p><strong>Fix:</strong> Read shared state directly inside the view closure instead of from a
@@ -146,7 +146,7 @@ $c->view(function () use ($app) {
         <code>globalState</code> creates two sources of truth you must synchronize manually.
         </p>
         {% code 'php' %}{% verbatim %}
-// ❌ dual state — globalState + signal kept in sync manually
+// ❌ dual state: globalState + signal kept in sync manually
 $c->scope(Scope::GLOBAL);
 $count = $c->signal($app->globalState('count'));
 
@@ -167,7 +167,7 @@ $increment = $c->action(
 );
         {% endverbatim %}{% endcode %}
         <p><strong>When <em>is</em> <code>globalState</code> appropriate?</strong> For server-side values
-        that are not signals — e.g. a status string read inside a view closure, or data shared across
+        that are not signals, e.g. a status string read inside a view closure, or data shared across
         different routes that don't have a common scope. If the value drives a <code>data-text</code>
         or <code>data-bind</code> in the browser, use a scoped signal instead.</p>
     </details>
@@ -309,7 +309,7 @@ $c->view(fn () => $c->render('template.html.twig', $data), block: 'demo');
         </p>
         <p><strong>Why:</strong> Datastar's merge-fragments mode looks for a DOM element matching the
         root element's <code>id</code> in the patch. If your fragment and the shell both use
-        <code>id="content"</code>, Datastar replaces the outer <code>&lt;main&gt;</code> — wiping out
+        <code>id="content"</code>, Datastar replaces the outer <code>&lt;main&gt;</code>, wiping out
         everything around the fragment.
         </p>
         <p><strong>Fix:</strong> Give the block's root element a unique ID that doesn't collide
@@ -320,7 +320,7 @@ $c->view(fn () => $c->render('template.html.twig', $data), block: 'demo');
 <div id="content">...</div>
 {% endblock %}
 
-{# ✅ unique ID — Datastar morphs only this element #}
+{# ✅ unique ID: Datastar morphs only this element #}
 {% block demo %}
 <div id="todo-list">...</div>
 {% endblock %}
@@ -359,7 +359,7 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
     </details>
 
     <details>
-        <summary><strong>Shell templates don't support Twig — use page-level inheritance instead</strong></summary>
+        <summary><strong>Shell templates don't support Twig: use page-level inheritance instead</strong></summary>
         {% verbatim %}<p>
             You try to use <code>{% extends %}</code>, <code>{% block %}</code>, or other Twig tags inside
             a shell template (the HTML file passed to <code>withShellTemplate()</code> or
@@ -400,7 +400,7 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
     &lt;h1&gt;Hello&lt;/h1&gt;
 {% endblock %}</code></pre>
         <p>The key variable is <code>{{ contextId }}</code> (injected automatically by
-        <code>Context::render()</code>) — not <code>{{ context_id }}</code> or
+        <code>Context::render()</code>), not <code>{{ context_id }}</code> or
         <code>{{ via_ctx }}</code> which are the <code>HtmlBuilder</code> placeholders.</p>{% endverbatim %}
     </details>
 
@@ -414,7 +414,7 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         identifies the server-side context. The server looks up this ID in its in-memory context
         registry. A 400 means the ID is missing or doesn't match any active context. Common causes:</p>
         <ul>
-            <li>The server was restarted — all contexts from the previous process are gone, but the
+            <li>The server was restarted: all contexts from the previous process are gone, but the
                 browser still has stale action URLs and signal values from the old session.</li>
             <li>The SSE connection dropped and the context was cleaned up via <code>onDisconnect</code>,
                 but the UI wasn't refreshed.</li>
@@ -424,10 +424,10 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         <ul>
             <li><strong>Stale context after restart or disconnect:</strong> Refresh the page. This creates
                 a new context with a fresh ID. If this happens frequently, check that your SSE connection
-                is stable — a flaky connection causes repeated context creation and teardown.</li>
+                is stable: a flaky connection causes repeated context creation and teardown.</li>
             <li><strong>Custom payload in e.g. <code>@post()</code>:</strong> If you pass a custom object to
                 actions like <code>@post('/action', {some: 'payload'})</code>, the custom
-                object <em>replaces</em> the signal store — <code>via_ctx</code> and all other signals
+                object <em>replaces</em> the signal store: <code>via_ctx</code> and all other signals
                 are no longer included. Either omit the second argument and let Datastar send the full
                 store, or include <code>via_ctx</code> explicitly in your custom payload.</li>
         </ul>
@@ -437,21 +437,21 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
     <ul>
         <li>Add <code>&lt;pre data-json-signals&gt;&lt;/pre&gt;</code> to your template to see the live
             Datastar signal store in the browser. Remove before deploying.</li>
-        <li>Check signal IDs with <code>var_dump($signal->id())</code> — namespace prefixing can produce
+        <li>Check signal IDs with <code>var_dump($signal->id())</code>: namespace prefixing can produce
             unexpected IDs.</li>
         <li>Run the server with <code>LOG_LEVEL=debug</code> to see every render, cache hit, and broadcast
             in the terminal output.</li>
-        <li>If the view closure is never called, confirm <code>$c->view()</code> is actually reached —
+        <li>If the view closure is never called, confirm <code>$c->view()</code> is actually reached:
             missing or mis-ordered <code>use</code> variables silently skip execution if a
             required call throw for a null object.</li>
     </ul>
 
     <h2 id="more">See also</h2>
     <ul>
-        <li><a href="/docs/broadcasting">Broadcasting</a> — scope targets and update strategies</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, timers</li>
-        <li><a href="/docs/views">Views</a> — caching behaviour and update cycles</li>
-        <li><a href="/docs/signals">Signals</a> — scope types and sharing state</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: scope targets and update strategies</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, timers</li>
+        <li><a href="/docs/views">Views</a>: caching behaviour and update cycles</li>
+        <li><a href="/docs/signals">Signals</a>: scope types and sharing state</li>
     </ul>
 </article>
 

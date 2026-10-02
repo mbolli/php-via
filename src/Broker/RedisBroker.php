@@ -18,10 +18,10 @@ use OpenSwoole\Coroutine;
  * See: https://openswoole.com/docs/modules/swoole-coroutine-redis
  *
  * Two connections are required because subscribing blocks the connection for
- * reads — the publish connection remains free for sending messages.
+ * reads. The publish connection remains free for sending messages.
  *
  * What crosses the wire: JSON {"scope":"...","nodeId":"..."} only.
- * State is NOT serialised — each receiving node re-renders from its own
+ * State is NOT serialised: each receiving node re-renders from its own
  * local state. Shared mutable state must live in Redis or another external
  * store for cross-node reads to be consistent.
  *
@@ -113,7 +113,7 @@ final class RedisBroker implements MessageBroker {
         try {
             $this->pubConn->publish($this->channel, $payload);
         } catch (\RedisException) {
-            // Publish connection dropped — attempt one reconnect and retry.
+            // Publish connection dropped: attempt one reconnect and retry.
             try {
                 $this->pubConn->close();
             } catch (\Throwable) {
@@ -124,7 +124,7 @@ final class RedisBroker implements MessageBroker {
                 $this->pubConn = $this->createRedisConnection();
                 $this->pubConn->publish($this->channel, $payload);
             } catch (\Throwable) {
-                // Swallow — best-effort; subscribe loop will reconnect independently.
+                // Swallow: best-effort; subscribe loop will reconnect independently.
             }
         }
     }
@@ -182,7 +182,7 @@ final class RedisBroker implements MessageBroker {
                             return;
                         }
 
-                        // Skip own messages — loop prevention.
+                        // Skip own messages (loop prevention).
                         if ($data['nodeId'] === $this->getNodeId()) {
                             return;
                         }
@@ -196,7 +196,7 @@ final class RedisBroker implements MessageBroker {
                         }
                     });
 
-                    // subscribe() returned cleanly — intentional disconnect().
+                    // subscribe() returned cleanly: intentional disconnect().
                     break;
                 } catch (\RedisException) {
                     // $this->running may be false if disconnect() was called concurrently
@@ -205,7 +205,7 @@ final class RedisBroker implements MessageBroker {
                         break;
                     }
 
-                    // Unexpected drop — null out and retry with backoff.
+                    // Unexpected drop: null out and retry with backoff.
                     $this->subConn = null;
                     $this->connected = false;
                     $this->notifyError(new \RuntimeException('RedisBroker: subscribe connection dropped, reconnecting'));

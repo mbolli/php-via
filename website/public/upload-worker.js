@@ -1,5 +1,5 @@
 /**
- * Shared Worker — file upload simulation.
+ * Shared Worker: file upload simulation.
  *
  * Lives as long as at least one browser tab is connected. Survives MPA
  * navigation: when the user navigates to a sub-page the old port disconnects
@@ -8,28 +8,28 @@
  * and are silently dropped; the next chunk uses the new URLs.
  *
  * Protocol (messages FROM page TO worker):
- *   {type:'connect',   chunkUrl, cancelUrl, ctxId}               — sent on every page load
+ *   {type:'connect',   chunkUrl, cancelUrl, ctxId}                 sent on every page load
  *   {type:'start',     fileName, virtualSize, speedBps,
- *          startUrl, chunkUrl, cancelUrl, ctxId}                  — start simulated upload (worker notifies server)
+ *          startUrl, chunkUrl, cancelUrl, ctxId}                    start simulated upload (worker notifies server)
  *   {type:'startReal', file, startUrl, uploadUrl,
- *          chunkUrl, cancelUrl, ctxId}                            — start real file XHR inside worker
+ *          chunkUrl, cancelUrl, ctxId}                              start real file XHR inside worker
  *   {type:'resume',    fileName, virtualTotal, virtualUploaded,
- *          pct, speedBps, chunkUrl, cancelUrl, ctxId}             — resume simulated upload after worker GC
- *   {type:'cancel'}                                               — cancel current upload
- *   {type:'reset'}                                                — reset to idle state
+ *          pct, speedBps, chunkUrl, cancelUrl, ctxId}               resume simulated upload after worker GC
+ *   {type:'cancel'}                                                 cancel current upload
+ *   {type:'reset'}                                                  reset to idle state
  *
- * No 'disconnect' message is sent on navigation — pages let ports go stale and
+ * No 'disconnect' message is sent on navigation: pages let ports go stale and
  * broadcast() prunes them via try/catch. This keeps the timer alive across the
  * navigation gap so uploads survive MPA transitions.
  *
  * Protocol (messages FROM worker TO page):
  *   {type:'state', status, fileName, pct, virtualUploaded, virtualTotal}
- *   {type:'log',   msg}                                  — relayed to page console
+ *   {type:'log',   msg}                                    relayed to page console
  */
 
 'use strict';
 
-const INTERVAL_MS      = 200;          // simulation tick interval – 5 per second
+const INTERVAL_MS      = 200;          // simulation tick interval (5 per second)
 const CHUNK_SIZE_BYTES = 512 * 1024;   // 512 KB per real chunk
 const WORKER_BORN      = Date.now();   // unique per worker instance; used by pages to detect survival
 
@@ -73,19 +73,19 @@ self.onconnect = function (e) {
         switch (msg.type) {
 
             case 'connect':
-                // New page connected — update routing info with fresh context URLs
+                // New page connected: update routing info with fresh context URLs
                 if (msg.chunkUrl)       state.chunkUrl       = msg.chunkUrl;
                 if (msg.cancelUrl)      state.cancelUrl      = msg.cancelUrl;
                 if (msg.ctxId)          state.ctxId          = msg.ctxId;
                 if (msg.uploadChunkUrl) state.uploadChunkUrl = msg.uploadChunkUrl;
-                log('routing updated — status=' + state.status + ' pct=' + state.pct + '%');
+                log('routing updated: status=' + state.status + ' pct=' + state.pct + '%');
                 // Immediately push current state so the reconnected page shows the right progress
                 port.postMessage({ type: 'state', ...snapshot() });
                 break;
 
             case 'start':
                 if (state.status === 'uploading') {
-                    log('ignoring start — already uploading');
+                    log('ignoring start: already uploading');
                     break;
                 }
                 // Update routing info (page passes everything in the start message)
@@ -102,7 +102,7 @@ self.onconnect = function (e) {
                 log('starting upload: ' + state.fileName + ' size=' + state.virtualTotal + ' speed=' + state.speedBps);
                 broadcast({ type: 'state', ...snapshot() });
 
-                // Worker notifies the server to initialise SESSION signals —
+                // Worker notifies the server to initialise SESSION signals:
                 // this used to be done by the page but the page may navigate away
                 // before the fetch completes. Doing it here is safe.
                 if (msg.startUrl && state.ctxId) {
@@ -129,14 +129,14 @@ self.onconnect = function (e) {
                 break;
 
             case 'resume':
-                // Worker was GC'd during navigation — page restored state from sessionStorage.
+                // Worker was GC'd during navigation: page restored state from sessionStorage.
                 if (state.status === 'uploading') {
-                    log('ignoring resume — already uploading');
+                    log('ignoring resume: already uploading');
                     break;
                 }
                 if (msg.isReal) {
-                    // Real file XHR can\'t be resumed — the File object is gone.
-                    log('resume: real upload was interrupted — resetting to idle');
+                    // Real file XHR can\'t be resumed: the File object is gone.
+                    log('resume: real upload was interrupted, resetting to idle');
                     resetState();
                     broadcast({ type: 'state', ...snapshot() });
                     break;
@@ -157,7 +157,7 @@ self.onconnect = function (e) {
 
             case 'startReal': {
                 if (state.status === 'uploading') {
-                    log('ignoring startReal — already uploading');
+                    log('ignoring startReal: already uploading');
                     break;
                 }
                 if (msg.chunkUrl)       state.chunkUrl       = msg.chunkUrl;
@@ -174,7 +174,7 @@ self.onconnect = function (e) {
                 state.pct             = 0;
                 state.speedBps        = 0;
                 log('real chunked upload: ' + file.name + ' (' + file.size + ' bytes)' +
-                    ' — ' + Math.ceil(file.size / CHUNK_SIZE_BYTES) + ' chunks');
+                    ', ' + Math.ceil(file.size / CHUNK_SIZE_BYTES) + ' chunks');
                 broadcast({ type: 'state', ...snapshot() });
 
                 // 1. Initialise server SESSION signals so all tabs see "uploading"
@@ -187,10 +187,10 @@ self.onconnect = function (e) {
                         via_ctx: state.ctxId,
                     }),
                 }).then(async function () {
-                    log('startUrl OK — beginning chunk loop');
+                    log('startUrl OK, beginning chunk loop');
                     let offset = 0;
 
-                    // 2. Send file in slices — each chunk is a separate POST so the
+                    // 2. Send file in slices: each chunk is a separate POST so the
                     //    loop is suspend/resumable: navigation updates state.ctxId and
                     //    state.uploadChunkUrl via "connect" messages between awaits.
                     while (offset < file.size && state.status === 'uploading') {
@@ -238,7 +238,7 @@ self.onconnect = function (e) {
                         state.virtualUploaded = state.virtualTotal;
                         state.isReal          = false;
                         broadcast({ type: 'state', ...snapshot() });
-                        log('all chunks sent — upload complete');
+                        log('all chunks sent, upload complete');
                     }
                 }).catch(function (err) {
                     log('startReal: startUrl error: ' + err);
@@ -343,10 +343,10 @@ async function sendChunk() {
     state.virtualUploaded += chunkBytes;
     state.pct = Math.min(100, Math.round(state.virtualUploaded / state.virtualTotal * 100));
 
-    // Broadcast locally first — keeps animation smooth without waiting for server RTT
+    // Broadcast locally first: keeps animation smooth without waiting for server RTT
     broadcast({ type: 'state', ...snapshot() });
 
-    // Best-effort delivery to server — may fail during navigation (old context GC'd)
+    // Best-effort delivery to server: may fail during navigation (old context GC'd)
     if (state.chunkUrl && state.ctxId) {
         try {
             const res = await fetch(state.chunkUrl, {
@@ -364,7 +364,7 @@ async function sendChunk() {
                 log('chunk POST failed: ' + res.status + ' (ctxId=' + state.ctxId.slice(-6) + ')');
             }
         } catch (err) {
-            // Network temporarily unavailable (tab navigating) — continue locally.
+            // Network temporarily unavailable (tab navigating): continue locally.
             // The next chunk will use updated URLs from the 'connect' message.
             log('chunk fetch error (likely navigating): ' + err);
         }

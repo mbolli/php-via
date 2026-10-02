@@ -12,7 +12,7 @@ namespace Mbolli\PhpVia\Attributes;
  * It receives the Context as its only argument. At most one method per class
  * may carry this attribute.
  *
- * Instance reactive properties are NOT re-hydrated before the handler runs —
+ * Instance reactive properties are NOT re-hydrated before the handler runs:
  * disconnect handlers typically do cleanup (presence updates, broadcasts)
  * rather than read live signal values.
  *

@@ -1,11 +1,11 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Components — php-via Docs{% endblock %}
+{% block title %}Components · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Components</h1>
     <p>
         Components are reusable UI blocks backed by their own sub-context. Each component has isolated signals, actions,
-        and a view — but shares the parent connection. They're the building block for composable real-time UIs.
+        and a view, but shares the parent connection. They're the building block for composable real-time UIs.
     </p>
 
     <h2 id="creating">Creating a component</h2>
@@ -77,7 +77,7 @@ $c->view(fn (): string => $c->render('page.html.twig', [
     <h2 id="scoped-components">Scoped components</h2>
     <p>
         Components can set their own scope, independent of the parent. This is how the website's
-        shared counter and presence indicator work — they're ROUTE-scoped components inside a page:
+        shared counter and presence indicator work. They're ROUTE-scoped components inside a page:
     </p>
     {% code 'php' %}{% verbatim %}
 $presenceComponent = function (Context $c) use ($app, $twig): void {
@@ -112,10 +112,10 @@ $roomComponent = function (Context $c) use ($room, $app): void {
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/scopes">Scopes</a> — share component state across users</li>
-        <li><a href="/docs/views">Views</a> — how component views update independently</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, and timer hooks</li>
-        <li><a href="/docs/api#context-component">API: component()</a> — full method signature</li>
+        <li><a href="/docs/scopes">Scopes</a>: share component state across users</li>
+        <li><a href="/docs/views">Views</a>: how component views update independently</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, and timer hooks</li>
+        <li><a href="/docs/api#context-component">API: component()</a>: full method signature</li>
     </ul>
 </article>
 

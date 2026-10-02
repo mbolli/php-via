@@ -27,7 +27,7 @@ use OpenSwoole\Http\Server;
  *
  * Limitations:
  * - Single machine only. For multi-server deployments use RedisBroker or NatsBroker.
- * - Worker restarts (SIGUSR1) temporarily disconnect workers — brief broadcast gaps
+ * - Worker restarts (SIGUSR1) temporarily disconnect workers: brief broadcast gaps
  *   are possible during hot reload. Acceptable for most use cases.
  */
 final class SwooleBroker implements MessageBroker, ServerAwareBroker {
@@ -77,7 +77,7 @@ final class SwooleBroker implements MessageBroker, ServerAwareBroker {
 
     public function subscribe(callable $handler): void {
         // SwooleBroker's receive path is handled by Via.php via Swoole's pipeMessage
-        // event — the callable is not invoked here. subscribe() satisfies the interface.
+        // event. The callable is not invoked here. subscribe() satisfies the interface.
     }
 
     public function isConnected(): bool {

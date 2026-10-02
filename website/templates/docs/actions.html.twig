@@ -1,11 +1,11 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Actions — php-via Docs{% endblock %}
+{% block title %}Actions · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Actions</h1>
     <p>
         Actions are server-side event handlers that the browser can trigger. When a user clicks a button or submits a form,
-        Datastar POSTs to the action's URL and your PHP callback runs — signals update, views re-render, and patches stream back via SSE.
+        Datastar POSTs to the action's URL and your PHP callback runs: signals update, views re-render, and patches stream back via SSE.
     </p>
 
     <h2 id="creating">Creating an action</h2>
@@ -36,9 +36,9 @@ $increment->url();  // '/_action/increment'
         <strong>Always use <code>@post()</code> for actions.</strong>
         <code>GET /_action/…</code> returns <strong>405 Method Not Allowed</strong>.
         Accepting actions over GET would allow top-level browser navigation (a link or redirect from any
-        origin) to trigger state changes without the user's intent — a classic
+        origin) to trigger state changes without the user's intent, a classic
         <a href="https://owasp.org/www-community/attacks/csrf" target="_blank" rel="noopener">CSRF</a> vector.
-        Use <code>@post()</code>, <code>@patch()</code>, <code>@put()</code>, or <code>@delete()</code> —
+        Use <code>@post()</code>, <code>@patch()</code>, <code>@put()</code>, or <code>@delete()</code>:
         all of these require an explicit browser <code>fetch()</code> call, which the browser's
         cross-origin policy controls. <code>@get()</code> is fine for the SSE endpoint
         (<code>/_sse</code>), just not for actions.
@@ -71,7 +71,7 @@ $vote = $c->action(function (Context $c) use ($app, $votes): void {
     {% code 'php' %}{% verbatim %}
 $c->action(function (Context $c) use ($label): void {
     $label->setValue('Saved!');
-    $c->syncSignals(); // only the signal changed — skip view re-render
+    $c->syncSignals(); // only the signal changed: skip view re-render
 }, 'save');
     {% endverbatim %}{% endcode %}
 
@@ -116,10 +116,10 @@ $c->onDisconnect(function (Context $c) use ($room, $app): void {
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/signals">Signals</a> — the state that actions modify</li>
-        <li><a href="/docs/broadcasting">Broadcasting</a> — pushing updates to multiple clients</li>
-        <li><a href="/docs/views">Views</a> — how <code>sync()</code> triggers a view re-render</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a> — cleanup hooks and timers</li>
+        <li><a href="/docs/signals">Signals</a>: the state that actions modify</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to multiple clients</li>
+        <li><a href="/docs/views">Views</a>: how <code>sync()</code> triggers a view re-render</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: cleanup hooks and timers</li>
     </ul>
 </article>
 

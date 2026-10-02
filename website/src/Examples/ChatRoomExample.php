@@ -14,12 +14,12 @@ final class ChatRoomExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Custom scopes</strong> isolate each room. Messages in "lobby" never leak to "general" — each room has its own broadcast channel built with <code>Scope::build()</code>.',
+        '<strong>Custom scopes</strong> isolate each room. Messages in "lobby" never leak to "general": each room has its own broadcast channel built with <code>Scope::build()</code>.',
         '<strong>Session-scoped usernames</strong> persist across tabs. Your username is stored in SESSION scope, so switching rooms or opening a new tab keeps the same identity.',
         '<strong>Presence + typing</strong> indicators update in real time. When a user disconnects, the <code>onDisconnect</code> hook removes them from the room\'s user list.',
         '<strong>addScope()</strong> lets a context join a broadcast channel mid-flight. The room page starts in TAB scope for private input, then adds the room scope for shared messages.',
-        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code> and the last 50 are loaded on connect — no in-memory state required.',
-        '<strong>Multi-room architecture</strong> — open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
+        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code> and the last 50 are loaded on connect, no in-memory state required.',
+        '<strong>Multi-room architecture</strong>: open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
     ];
 
     /** @var array<string, list<array<string, string>>> */
@@ -158,7 +158,7 @@ final class ChatRoomExample {
 
         // Per-client render, declared: the view embeds this user's name, their context ID and
         // their TAB signal IDs, so one client's HTML must never be served to another. Today the
-        // TAB primary scope already disables the update cache and this is a no-op — the point is
+        // TAB primary scope already disables the update cache and this is a no-op: the point is
         // that promoting $roomScope with scope() can no longer silently start sharing it.
         $c->view(fn (): string => $c->render('examples/chat_room.html.twig', [
             'title' => '💬 Chat Room',

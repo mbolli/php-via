@@ -400,7 +400,7 @@ class Application {
     /**
      * Read, transform and write a global-state value as one indivisible step.
      *
-     * The supported way to do read-modify-write on a NON-integer global-state value — appending
+     * The supported way to do read-modify-write on a NON-integer global-state value: appending
      * to a list, updating one key of a map. incrementGlobalState() covers the numeric case, and
      * a wholesale assignment needs nothing.
      *
@@ -511,8 +511,8 @@ class Application {
      * @param null|int              $delayMs       Grace period in milliseconds. Null uses
      *                                             Config::getContextCleanupDelayMs().
      * @param null|callable(): bool $isActiveCheck If provided, called when the timer fires.
-     *                                             Returns true if an SSE connection is active —
-     *                                             the timer reschedules itself instead of destroying.
+     *                                             Returns true if an SSE connection is active
+     *                                             (the timer reschedules itself instead of destroying).
      */
     public function scheduleContextCleanup(string $contextId, ?int $delayMs = null, ?callable $isActiveCheck = null): void {
         $delayMs ??= $this->config->getContextCleanupDelayMs();

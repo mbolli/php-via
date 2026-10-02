@@ -1,5 +1,5 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Scopes — php-via Docs{% endblock %}
+{% block title %}Scopes · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Scopes</h1>
@@ -21,7 +21,7 @@
         <tbody>
             <tr style="border-block-end: 1px solid var(--border);">
                 <td style="padding: var(--size-2) var(--size-3);"><code>Scope::TAB</code></td>
-                <td style="padding: var(--size-2) var(--size-3);">Nobody — this tab only</td>
+                <td style="padding: var(--size-2) var(--size-3);">Nobody (this tab only)</td>
                 <td style="padding: var(--size-2) var(--size-3);">Personal UI state, form input</td>
             </tr>
             <tr style="border-block-end: 1px solid var(--border);">
@@ -62,7 +62,7 @@ $c->addScope('room:lobby');
 
     <h3 id="scope-and-the-view-cache">Scope and the view cache</h3>
     <p>
-        Update renders are cached per <strong>primary</strong> scope &mdash; the one set by
+        Update renders are cached per <strong>primary</strong> scope: the one set by
         <code>scope()</code>, which is <code>Scope::TAB</code> unless you change it. One render is
         then shared by every client in that scope.
     </p>
@@ -73,15 +73,15 @@ $c->addScope('room:lobby');
         broadcast</strong>.
     </p>
     <p>
-        That is usually what you want: if the view embeds anything client-specific &mdash; a
-        username, a per-tab signal ID, a personal viewport &mdash; a shared cache entry would serve
+        That is usually what you want: if the view embeds anything client-specific (a
+        username, a per-tab signal ID, a personal viewport), a shared cache entry would serve
         one client's HTML to another. Say so explicitly with <code>cacheUpdates: false</code> so the
         per-client render is a decision rather than a side effect of scope ordering:
     </p>
     {% code 'php' %}{% verbatim %}
 $c->addScope($roomScope);
 
-// Renders per client — the view embeds this user's name and TAB signal IDs.
+// Renders per client: the view embeds this user's name and TAB signal IDs.
 $c->view(fn () => $c->render('room.html.twig', [...]), cacheUpdates: false);
 {% endverbatim %}{% endcode %}
     <p>
@@ -100,7 +100,7 @@ $app->broadcast('room:lobby');
 {% endverbatim %}{% endcode %}
 
     <div class="docs-demo">
-        <div class="docs-demo-header">▶ TAB vs ROUTE — feel the difference</div>
+        <div class="docs-demo-header">▶ TAB vs ROUTE: feel the difference</div>
         <div class="docs-demo-body">
             <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
                 Open a second tab, then increment both sides. One is private to you; one goes to everyone.

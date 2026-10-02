@@ -28,8 +28,8 @@ class ActionHandler {
     public function __construct(Via $via) {
         $this->via = $via;
 
-        // Allocated here — Via's constructor, so the master process, before $server->start()
-        // forks the workers — because an OpenSwoole\Table is only shared with processes that
+        // Allocated here (Via's constructor, so the master process, before $server->start()
+        // forks the workers) because an OpenSwoole\Table is only shared with processes that
         // inherit it. Single-worker deployments keep plain per-process counters.
         $this->rateLimiter = new RateLimiter(shared: $via->getConfig()->getWorkerNum() > 1);
     }
@@ -70,7 +70,7 @@ class ActionHandler {
         $signals = Via::readSignals($request);
 
         // For multipart/form-data (Datastar contentType:'form'), signals are not included in the
-        // request — only raw FormData fields are sent. Fall back to $request->post for via_ctx.
+        // request: only raw FormData fields are sent. Fall back to $request->post for via_ctx.
         $contextId = $signals['via_ctx'] ?? $request->post['via_ctx'] ?? null;
 
         if (!$contextId) {
@@ -82,7 +82,7 @@ class ActionHandler {
 
         // Rebuild the context if this worker has never seen it. SseHandler has always done
         // this; without it here, a context lived only on the worker that served its page and
-        // action success tracked 1/worker_num — every other worker answered 400. Also covers
+        // action success tracked 1/worker_num: every other worker answered 400. Also covers
         // the single-worker case SseHandler already handled: a backgrounded tab whose context
         // was cleaned up, then fires an action before its SSE stream reconnects.
         if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request) === null) {
@@ -166,8 +166,8 @@ class ActionHandler {
      * Check if the IP is within the configured rate limit.
      *
      * Delegates to RateLimiter, whose counters are shared across workers. They used to be a
-     * plain property on this class, which — since the handler is built before the workers are
-     * forked — gave each worker its own budget and made the effective limit `limit * worker_num`.
+     * plain property on this class, which, since the handler is built before the workers are
+     * forked, gave each worker its own budget and made the effective limit `limit * worker_num`.
      * See tests/Feature/ActionRateLimitTest.php.
      */
     private function checkRateLimit(string $ip): bool {

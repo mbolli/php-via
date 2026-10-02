@@ -61,7 +61,7 @@ class SignalFactory {
 
         // Resolve ROUTE scope to the route-qualified scope ("route:/path").
         // Without this an explicit Scope::ROUTE stays the literal string "route",
-        // which no context ever belongs to — so syncScopedSignals() (which walks the
+        // which no context ever belongs to, so syncScopedSignals() (which walks the
         // context's own scopes) never finds the signal and no patch is ever emitted.
         // The literal bucket is also shared across every route, so two routes using
         // this form collide on signal ids.
@@ -88,7 +88,7 @@ class SignalFactory {
             // Check if signal already exists in this scope
             $existingSignal = $this->app->getScopedSignal($scope, $signalId);
             if ($existingSignal !== null) {
-                // Signal already exists in this scope — return it without modification.
+                // Signal already exists in this scope: return it without modification.
                 // The initial value is only used on first creation; subsequent calls
                 // (e.g. when a second context joins the scope, or on view re-render)
                 // must not overwrite the live value with a potentially stale initialValue.

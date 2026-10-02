@@ -1,5 +1,5 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Middleware — php-via Docs{% endblock %}
+{% block title %}Middleware · php-via Docs{% endblock %}
 {% block content %}
 <article>
     <h1>Middleware</h1>
@@ -53,7 +53,7 @@ $app->page('/api/data', fn(Context $c) => $c->view('data.html.twig'))
     <h2 id="writing-middleware">Writing middleware</h2>
     <p>
         Implement <code>Psr\Http\Server\MiddlewareInterface</code>. Use
-        <code>$request-&gt;withAttribute()</code> to pass data downstream — the attributes are
+        <code>$request-&gt;withAttribute()</code> to pass data downstream: the attributes are
         automatically bridged to <code>$context-&gt;getRequestAttribute()</code> in your page handler.
     </p>
     {% code 'php' %}{% verbatim %}
@@ -85,14 +85,14 @@ class AuthMiddleware implements MiddlewareInterface
     {% endverbatim %}{% endcode %}
 
     <div class="callout callout-warning">
-        <strong>Swoole warning:</strong> Middleware instances are long-lived — they persist across all
+        <strong>Swoole warning:</strong> Middleware instances are long-lived. They persist across all
         requests in the worker process. Do <strong>not</strong> store per-request state on middleware
         properties. Use <code>$request-&gt;withAttribute()</code> to pass data downstream.
     </div>
 
     <h2 id="sse-middleware">SSE-aware middleware</h2>
     <p>
-        By default, middleware only runs on page and action requests — not on the SSE handshake.
+        By default, middleware only runs on page and action requests, not on the SSE handshake.
         If you need middleware to also guard the SSE connection (e.g. auth), implement the
         <code>SseAwareMiddleware</code> marker interface:
     </p>
@@ -179,9 +179,9 @@ $config = (new Config())
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/actions">Actions</a> — server-side event handlers</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a> — connect, disconnect, intervals, cleanup</li>
-        <li><a href="/docs/deployment">Deployment</a> — production configuration</li>
+        <li><a href="/docs/actions">Actions</a>: server-side event handlers</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, intervals, cleanup</li>
+        <li><a href="/docs/deployment">Deployment</a>: production configuration</li>
     </ul>
 </article>
 

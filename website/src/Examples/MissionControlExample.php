@@ -17,7 +17,7 @@ final class MissionControlExample {
 
     /**
      * Services whose browser consumer uses a JetStream durable push consumer.
-     * Killing these pauses the consumer only — simulator keeps publishing, JetStream buffers.
+     * Killing these pauses the consumer only: simulator keeps publishing, JetStream buffers.
      * Reviving re-subscribes and the buffered events arrive in a burst.
      *
      * @var list<string>
@@ -34,20 +34,20 @@ final class MissionControlExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>OpenSwoole-native NATS client</strong> — a thin coroutine-native TCP client replaces third-party NATS libraries that require incompatible event loops. The read loop runs in a dedicated coroutine and yields cooperatively on every <code>recv()</code>.',
-        '<strong>Core pub/sub (best-effort)</strong> — Auth and Inventory subscribe via wildcard Core pub/sub (<code>via.events.*</code>). Fire-and-forget: if you kill one of these services its simulator stops and any events published while it is offline are gone forever.',
-        '<strong>Guaranteed delivery (JetStream durable consumers)</strong> — Orders and Payments subscribe via named durable push consumers with explicit ACK. Kill = pause the consumer: the simulator keeps publishing, JetStream buffers un-ACKed messages. Revive = re-subscribe: the burst of missed events arrives immediately.',
-        '<strong>JetStream persistence</strong> — the <code>VIAEVENTS</code> stream captures every message in memory. The durable consumer tracks its last-delivered sequence across subscribe/unsubscribe cycles — a revived subscriber never misses a message.',
-        '<strong>KV health heartbeats</strong> — each service publishes a heartbeat to <code>$KV.viahealth.{service}</code> every 2 s. Guaranteed services always heartbeat (only the consumer is paused); best-effort services stop heartbeating when killed. The health grid reads KV age.',
-        '<strong>Lazy init</strong> — the NATS connection is established on the first page load inside the HTTP coroutine, where coroutine APIs are always safe. A double-init guard (flag set before <code>Coroutine::create()</code>) prevents race conditions.',
+        '<strong>OpenSwoole-native NATS client</strong>: a thin coroutine-native TCP client replaces third-party NATS libraries that require incompatible event loops. The read loop runs in a dedicated coroutine and yields cooperatively on every <code>recv()</code>.',
+        '<strong>Core pub/sub (best-effort)</strong>: Auth and Inventory subscribe via wildcard Core pub/sub (<code>via.events.*</code>). Fire-and-forget: if you kill one of these services its simulator stops and any events published while it is offline are gone forever.',
+        '<strong>Guaranteed delivery (JetStream durable consumers)</strong>: Orders and Payments subscribe via named durable push consumers with explicit ACK. Kill = pause the consumer: the simulator keeps publishing, JetStream buffers un-ACKed messages. Revive = re-subscribe: the burst of missed events arrives immediately.',
+        '<strong>JetStream persistence</strong>: the <code>VIAEVENTS</code> stream captures every message in memory. The durable consumer tracks its last-delivered sequence across subscribe/unsubscribe cycles: a revived subscriber never misses a message.',
+        '<strong>KV health heartbeats</strong>: each service publishes a heartbeat to <code>$KV.viahealth.{service}</code> every 2 s. Guaranteed services always heartbeat (only the consumer is paused); best-effort services stop heartbeating when killed. The health grid reads KV age.',
+        '<strong>Lazy init</strong>: the NATS connection is established on the first page load inside the HTTP coroutine, where coroutine APIs are always safe. A double-init guard (flag set before <code>Coroutine::create()</code>) prevents race conditions.',
     ];
 
     /** @var array<string, list<array{name: string, desc?: string, type?: string, scope?: string, default?: string}>> */
     private const array ANATOMY = [
         'signals' => [],
         'actions' => [
-            ['name' => 'kill-orders / kill-payments', 'desc' => 'Pauses the JetStream durable consumer (unsubscribes from the deliver inbox). Simulator keeps publishing; NATS buffers un-ACKed messages. Health tile stays green — the service is still alive, only the consumer is paused.'],
-            ['name' => 'kill-auth / kill-inventory', 'desc' => 'Stops the event simulator entirely. Events are silently dropped — Core pub/sub has no persistence. Health tile flips to DOWN after 8 s of silence.'],
+            ['name' => 'kill-orders / kill-payments', 'desc' => 'Pauses the JetStream durable consumer (unsubscribes from the deliver inbox). Simulator keeps publishing; NATS buffers un-ACKed messages. Health tile stays green: the service is still alive, only the consumer is paused.'],
+            ['name' => 'kill-auth / kill-inventory', 'desc' => 'Stops the event simulator entirely. Events are silently dropped: Core pub/sub has no persistence. Health tile flips to DOWN after 8 s of silence.'],
             ['name' => 'revive-{service} (×4)', 'desc' => 'Guaranteed services: re-subscribes to the deliver inbox; JetStream immediately delivers all buffered events in a burst. Best-effort: restarts the simulator and publishes a fresh KV heartbeat.'],
         ],
         'views' => [
@@ -128,7 +128,7 @@ final class MissionControlExample {
         });
 
         $app->page('/examples/mission-control', function (Context $c) use ($app): void {
-            // Lazy connect on first page load — inside HTTP coroutine, always safe.
+            // Lazy connect on first page load (inside HTTP coroutine, always safe).
             if (self::$nats === null && !self::$initializing) {
                 self::$initializing = true;
                 Coroutine::create(fn () => self::init($app));
@@ -162,7 +162,7 @@ final class MissionControlExample {
                                 self::$nats->unsubscribe(self::$jsConsumerSids[$serviceKey]);
                                 unset(self::$jsConsumerSids[$serviceKey]);
                             }
-                            // Note: simulator keeps running — events accumulate in JetStream.
+                            // Note: simulator keeps running. Events accumulate in JetStream.
                         }
                         // Best-effort services: simulator is skipped in runSimulator() when killed.
 
@@ -309,7 +309,7 @@ final class MissionControlExample {
             $nats->ensureStream('VIAEVENTS', 'via.events.>', 500);
             $app->log('info', '[MissionControl] Stream ready, setting up KV bucket...');
             $nats->ensureKvBucket('viahealth');
-            $app->log('info', '[MissionControl] KV ready — fully connected.');
+            $app->log('info', '[MissionControl] KV ready, fully connected.');
 
             self::$nats = $nats;
             self::$connected = true;
@@ -362,7 +362,7 @@ final class MissionControlExample {
             });
 
             // Second independent subscriber: Audit Logger
-            // A separate NATS subscription (new sid) on the same subject — NATS
+            // A separate NATS subscription (new sid) on the same subject: NATS
             // fans out every published message to all matching subscribers independently.
             $nats->subscribe('via.events.*', static function (string $subject, string $payload): void {
                 $data = json_decode($payload, true);
@@ -459,7 +459,7 @@ final class MissionControlExample {
             }
 
             if (self::$serviceState[$service]['emitId'] !== $capturedEmitId) {
-                return; // a newer event arrived — leave isEmitting=true
+                return; // a newer event arrived, leave isEmitting=true
             }
 
             self::$serviceState[$service]['isEmitting'] = false;

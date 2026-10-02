@@ -11,7 +11,7 @@ use OpenSwoole\Table;
  *
  * A context object cannot cross a process boundary, but it does not have to: php-via already
  * rebuilds one by re-running its route handler under the original ID. All a worker needs to do
- * that is a flat record — route, params, session — and that record is small enough to live in
+ * that is a flat record (route, params, session), and that record is small enough to live in
  * an OpenSwoole\Table, which is mmap'd and fork-inherited.
  *
  * Without it a context exists only on the worker that served its page. An action landing
@@ -135,7 +135,7 @@ final class SharedContextDirectory {
      *
      * The shape is checked rather than asserted: these rows outlive a deploy, so a record
      * written by an older build can still be sitting in shared memory when a new one reads it.
-     * A malformed record has to mean "cannot revive" — the caller's existing fallback — not a
+     * A malformed record has to mean "cannot revive" (the caller's existing fallback), not a
      * TypeError inside the action path.
      *
      * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}

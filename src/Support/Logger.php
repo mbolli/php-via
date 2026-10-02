@@ -23,7 +23,7 @@ class Logger {
      * Accepted spellings that are not the canonical level name.
      *
      * 'warning' is used at eight call sites. Without this it fell through to the info default,
-     * so those messages printed a "[WARNING]" label while being filtered as info — and
+     * so those messages printed a "[WARNING]" label while being filtered as info, and
      * withLogLevel('warn'), the setting that exists to show warnings, suppressed every one.
      */
     private const array LEVEL_ALIASES = [

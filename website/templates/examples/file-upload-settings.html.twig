@@ -6,7 +6,7 @@
     <h3 class="fu-settings-heading">Account Settings</h3>
     <p class="fu-settings-subhead">
         This is a placeholder page to demonstrate that uploads survive navigation.
-        The progress bar above is still tracking your upload — driven by SESSION-scoped signals.
+        The progress bar above is still tracking your upload, driven by SESSION-scoped signals.
     </p>
 
     <form class="fu-settings-form" onsubmit="return false">
@@ -53,7 +53,7 @@
         style="{{ uploadStatus.string == 'uploading' ? '' : 'display:none' }}">
         <strong>Server state, not browser state.</strong>
         If this were a real settings page, navigating here, changing a setting, and going
-        back would not have interrupted the upload — because neither the worker nor the
+        back would not have interrupted the upload, because neither the worker nor the
         SESSION signals depend on which page you are viewing.
     </div>
 

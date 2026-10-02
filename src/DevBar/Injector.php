@@ -29,7 +29,7 @@ final class Injector {
         $base = $this->config->getBasePath();
 
         // Boot config rides in a single NON-`data-` attribute. Datastar only
-        // scans `data-*` attributes, so `via-config` is invisible to it — using
+        // scans `data-*` attributes, so `via-config` is invisible to it. Using
         // `data-signals` here would make Datastar load the manifest as real
         // signals (with numeric keys), corrupting the page's signal store.
         $config = json_encode([

@@ -108,10 +108,10 @@ class Config {
      */
     private bool $brotli = false;
 
-    /** Brotli level for dynamic responses (pages, SSE). 0–11; default 4. */
+    /** Brotli level for dynamic responses (pages, SSE). 0 to 11; default 4. */
     private int $brotliDynamicLevel = 4;
 
-    /** Brotli level for static assets. 0–11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
+    /** Brotli level for static assets. 0 to 11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
     private int $brotliStaticLevel = 11;
 
     /**
@@ -264,7 +264,7 @@ class Config {
      * Cache-Control header value for file-backed static responses: files served via
      * withStaticDir(), plus the framework's own /datastar.js and /via.css. All three
      * emit ETag/Last-Modified with conditional-GET (304) support regardless of this
-     * setting — this only controls the expiry policy on top of that.
+     * setting. This only controls the expiry policy on top of that.
      *
      * null (default) = auto: 'no-cache' in devMode (always revalidate, so edits to a
      * withStaticDir() file are visible on the next refresh instead of waiting out a
@@ -273,7 +273,7 @@ class Config {
      * Pass a string to apply one Cache-Control value to every static response, e.g.
      * 'public, max-age=31536000, immutable' if you fingerprint filenames yourself.
      *
-     * Pass a closure(string $filePath, string $mimeType): string to fine-tune per file —
+     * Pass a closure(string $filePath, string $mimeType): string to fine-tune per file:
      * $filePath is the absolute path being served, $mimeType is the resolved MIME type
      * without a charset suffix (e.g. 'text/css', 'image/png'). A string is always taken
      * literally (never invoked as a function name); use first-class callable syntax
@@ -382,7 +382,7 @@ class Config {
      * Set the per-connection unsent-backlog threshold for dropping element frames.
      *
      * A slow client otherwise parks its SSE coroutine inside write() until it drains
-     * or disconnects — measured at 20s — during which that connection stops observing
+     * or disconnects (measured at 20s), during which that connection stops observing
      * shutdown and disconnect. Element patches are idempotent, so a backed-up client
      * catches up on the next broadcast. Signals and scripts are never dropped.
      *
@@ -515,7 +515,7 @@ class Config {
      * Make this app safe to embed in a cross-origin <iframe>.
      *
      * Sets the session cookie to SameSite=None; Secure (+ Partitioned/CHIPS) so the browser
-     * sends it inside a cross-site frame — required for the SSE session-auth gate to pass.
+     * sends it inside a cross-site frame (required for the SSE session-auth gate to pass).
      * Optionally emits Content-Security-Policy: frame-ancestors to restrict who may frame the app.
      *
      * Implies withSecureCookie(true). Requires HTTPS (withCertificate) or h2c (withH2c): a
@@ -659,7 +659,7 @@ class Config {
     /**
      * Configure the context cleanup grace period.
      *
-     * When an SSE stream disconnects, php-via doesn't destroy the context immediately —
+     * When an SSE stream disconnects, php-via doesn't destroy the context immediately:
      * it waits this long for a page navigation or reconnect before tearing it down. Longer
      * delays tolerate flakier clients at the cost of holding idle contexts (and their
      * in-memory view payloads) in memory for longer under concurrent disconnects.
@@ -702,8 +702,8 @@ class Config {
      *
      * When a tab is backgrounded long enough that its context is destroyed (past
      * {@see withContextCleanupDelay()}), a returning tab normally hard-reloads. With revival
-     * enabled, the server instead rebuilds an equivalent context — same ID, so the already-loaded
-     * DOM keeps working — by re-running the page handler and re-seeding signal values the client
+     * enabled, the server instead rebuilds an equivalent context (same ID, so the already-loaded
+     * DOM keeps working) by re-running the page handler and re-seeding signal values the client
      * still holds. This preserves local (underscore) signals, scroll, and focus that a reload
      * would destroy. Revival re-runs the page handler, so it is not lossless: server-only state
      * (e.g. #[Persist]) resets and onDisconnect/connect hooks re-fire, exactly as on a reload.
@@ -755,17 +755,17 @@ class Config {
      * A hard error is thrown at start() if either requirement is not met.
      *
      * @param bool $enabled      enable or disable Brotli compression
-     * @param int  $dynamicLevel Compression level for pages and SSE (0–11). Default 4 — fast,
+     * @param int  $dynamicLevel Compression level for pages and SSE (0 to 11). Default 4: fast,
      *                           low CPU overhead on the hot path.
-     * @param int  $staticLevel  Compression level for static assets (0–11). Default 11 — maximum
+     * @param int  $staticLevel  Compression level for static assets (0 to 11). Default 11: maximum
      *                           ratio; paid once per file then served from an in-memory cache.
      */
     /**
      * Enable Brotli compression for pages, static assets and the SSE stream.
      *
      * **The dynamic level is a memory decision, not just a bandwidth one.** A streaming Brotli
-     * encoder holds per-connection state that grows toward the window cap as the stream feeds it
-     * — lazily (7 KB at init) but saturating after ~8 MB of traffic, and it never shrinks.
+     * encoder holds per-connection state that grows toward the window cap as the stream feeds it,
+     * lazily (7 KB at init) but saturating after ~8 MB of traffic, and it never shrinks.
      * Measured on real 127 KB Game-of-Life SSE frames, ext-brotli 0.21.0:
      *
      *   level | per encoder | at 2,000 conns |   ratio | CPU per frame
@@ -924,7 +924,7 @@ class Config {
      * Tune the OpenSwoole\Table that backs GlobalState in multi-worker mode.
      *
      * $maxRows is a FLOOR, not a ceiling. OpenSwoole rounds the allocation up (power of two,
-     * floor 64) and then admits well past it — 1024 rows takes ~1776 keys, 4096 takes ~8043 —
+     * floor 64) and then admits well past it (1024 rows takes ~1776 keys, 4096 takes ~8043),
      * after which keys are rejected by hash, intermittently, with no eviction. Size for the key
      * count you need and treat anything above $maxRows as headroom you cannot rely on. Exceeding
      * it raises \OverflowException from GlobalState writes.
@@ -937,7 +937,7 @@ class Config {
      * nominal size is not resident memory: a 1024-row table costs a flat ~8 MB whether the value
      * column is 4 KB or 64 KB, and grows only as rows are actually written with large values
      * (1024 full 64 KB rows measured at +60 MB, 1024 full 4 KB rows at +0.1 MB). The cap is
-     * therefore a guardrail against a runaway value, not a memory budget — raise it freely for
+     * therefore a guardrail against a runaway value, not a memory budget. Raise it freely for
      * values you intend to store.
      *
      * @param int $maxRows       Guaranteed number of distinct global-state keys (default 1024)
@@ -954,7 +954,7 @@ class Config {
      * Tune the OpenSwoole\Table that backs scoped signal VALUES in multi-worker mode.
      *
      * One row per distinct scoped (non-TAB) signal. As with withGlobalStateTableSize(),
-     * $maxRows is a floor rather than a ceiling — size for the count you need.
+     * $maxRows is a floor rather than a ceiling: size for the count you need.
      *
      * Integer signals are stored in a dedicated atomic column and ignore $maxValueBytes;
      * everything else is PHP-serialized and must fit within it.
@@ -964,7 +964,7 @@ class Config {
      * nominal size is not resident memory: a 1024-row table costs a flat ~8 MB whether the value
      * column is 4 KB or 64 KB, and grows only as rows are actually written with large values
      * (1024 full 64 KB rows measured at +60 MB, 1024 full 4 KB rows at +0.1 MB). The cap is
-     * therefore a guardrail against a runaway value, not a memory budget — raise it freely for
+     * therefore a guardrail against a runaway value, not a memory budget. Raise it freely for
      * values you intend to store.
      *
      * @param int $maxRows       Guaranteed number of distinct scoped signals (default 1024)
@@ -1064,7 +1064,7 @@ class Config {
      * Reads never touch SQLite. Writes land in shared memory at full speed and set a dirty flag;
      * a timer on the leader worker drains the dirty set into one batched transaction. Measured
      * flush cost is ~1 us per changed key (100 keys in 102 us), plus a sub-millisecond WAL
-     * checkpoint every few thousand writes — versus 2.8 us on EVERY read if SQLite sat in front
+     * checkpoint every few thousand writes, versus 2.8 us on EVERY read if SQLite sat in front
      * instead, each one non-yielding CPU that stalls the whole worker's event loop.
      *
      * The trade is a bounded loss window: anything written since the last flush is lost if the
@@ -1106,7 +1106,7 @@ class Config {
      * `/_via/*` endpoints and standalone console.
      *
      * Like `/_stats`, the Dev Bar exposes timings, routes, and live signal
-     * state — it is for development. It defaults to `getDevMode()`, but you may
+     * state: it is for development. It defaults to `getDevMode()`, but you may
      * force it on (e.g. to demo it on a public site) by passing `true`, or off
      * with `false`. Even when forced on, signal *editing* stays disabled unless
      * devMode is also on (see {@see withTracingWrites()}).
@@ -1128,7 +1128,7 @@ class Config {
      *
      * **Hard production guard:** writes require `devMode` *in addition to* this
      * flag and tracing being enabled. The leading devMode check means an
-     * explicit `withTracingWrites(true)` is ignored when devMode is off — so
+     * explicit `withTracingWrites(true)` is ignored when devMode is off, so
      * `withTracing(true)` on a public site is always read-only. Editing is
      * opt-in for local dev via this call or the `VIA_DEVBAR_WRITES=1` env var.
      *

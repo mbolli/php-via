@@ -148,7 +148,7 @@ $app->notFound(function ($request, $response) use ($twig, $cssPath): void {
 
 // ─── Shared state ────────────────────────────────────────────────────────────
 
-// (Scoped signals handle shared counter state — no globalState needed)
+// (Scoped signals handle shared counter state, no globalState needed)
 
 // ─── Presence: broadcast globally on connect/disconnect ──────────────────────
 //
@@ -197,7 +197,7 @@ $presenceDemo = function (Context $c) use ($app, $twig): void {
 
 /**
  * Shared multiplayer counter. ROUTE-scoped: all visitors share one counter.
- * The "aha" moment — click and everyone sees it.
+ * The "aha" moment: click and everyone sees it.
  */
 $sharedCounterDemo = function (Context $c) use ($twig): void {
     $c->scope(Scope::ROUTE);
@@ -299,7 +299,7 @@ $routeScopeDemo = function (Context $c) use ($app): void {
     $c->scope(Scope::routeScope($c->getRoute()));
     $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount');
     $incRoute = $c->action(function (Context $c) use ($app, $routeCount): void {
-        // GlobalState is the counter of record — it is what survives a restart, and it
+        // GlobalState is the counter of record: it is what survives a restart, and it
         // reseeds the signal above on first mount. Both stores are advanced atomically, so
         // neither drops a click when two workers handle one at the same moment.
         $routeCount->setValue($app->incrementGlobalState('scope_demo_count'));
@@ -323,7 +323,7 @@ $routeScopeDemo = function (Context $c) use ($app): void {
 };
 
 /**
- * Live poll: vote on "Favorite scope?" — bars shift in real-time for everyone.
+ * Live poll: vote on "Favorite scope?" (bars shift in real-time for everyone).
  */
 $livePollDemo = function (Context $c) use ($app, $twig): void {
     $c->scope(Scope::routeScope('/'));
@@ -392,7 +392,7 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
     $poll = $c->component($livePollDemo, 'poll');
 
-    // On broadcast updates, skip re-rendering the full page — component sub-contexts
+    // On broadcast updates, skip re-rendering the full page: component sub-contexts
     // handle their own patches via their own target divs. Re-rendering here with stale
     // embedded component HTML would overwrite those fresh patches.
     $c->view(function (bool $isUpdate) use ($c, $presence, $sharedCounter, $sessionCounter, $poll): string {
@@ -564,7 +564,7 @@ $app->page('/support', function (Context $c): void {
 //
 // Including routes.php via onStart() means it runs inside onWorkerStart, AFTER
 // the worker is forked from master. Master never loads Example classes directly,
-// so each fresh worker autoloads them from disk — enabling USR1 hot reload.
+// so each fresh worker autoloads them from disk, enabling USR1 hot reload.
 // The sitemap is also regenerated there with the full route set.
 // Via::onWorkerStart() calls setRoutes() after startCallbacks, so RequestHandler
 // always sees the up-to-date route table.

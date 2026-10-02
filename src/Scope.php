@@ -128,7 +128,7 @@ class Scope {
      * Accepts:
      * - Built-in names: tab, route, session, global
      * - Route-qualified: route:/any/path
-     * - Custom scopes: colon-separated segments of [a-zA-Z0-9_\-.*:/] — max 256 chars
+     * - Custom scopes: colon-separated segments of [a-zA-Z0-9_\-.*:/], max 256 chars
      *
      * Rejects NUL bytes, shell metacharacters, overly long strings, or strings that
      * don't match the expected scope grammar. This prevents a compromised or

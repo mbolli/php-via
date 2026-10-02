@@ -106,7 +106,7 @@ final class RateLimiter {
         // so the increment has to happen before the comparison rather than after it.
         $curr = $this->bump($ip . '|' . $bucket, 1);
         if ($curr === null) {
-            return true; // capacity exhausted — see reportOverflow()
+            return true; // capacity exhausted, see reportOverflow()
         }
 
         $prev = $this->read($ip . '|' . ($bucket - 1));
@@ -151,7 +151,7 @@ final class RateLimiter {
 
         // Only a key that does not exist yet needs a row allocated, and once the store is known
         // to be full every such attempt is doomed until the next sweep frees something. Skipping
-        // them matters: at capacity incr() does not throw the way Table::set() does — it emits
+        // them matters: at capacity incr() does not throw the way Table::set() does. It emits
         // "unable to allocate memory" as a PHP warning, once per request, under exactly the load
         // that filled the table.
         $isNew = !$this->table->exists($key);
@@ -223,7 +223,7 @@ final class RateLimiter {
             $this->table->del($key);
         }
 
-        // Rows may have been freed — let allocation be attempted again.
+        // Rows may have been freed: let allocation be attempted again.
         $this->full = false;
     }
 }

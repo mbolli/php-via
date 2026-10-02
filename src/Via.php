@@ -364,7 +364,7 @@ class Via {
      * Set global state value.
      *
      * Last-write-wins. For a counter use {@see incrementGlobalState()} and for any other
-     * read-modify-write use {@see mutateGlobalState()} — with more than one worker, reading a
+     * read-modify-write use {@see mutateGlobalState()}: with more than one worker, reading a
      * value here and writing back a result computed from it loses concurrent updates.
      */
     public function setGlobalState(string $key, mixed $value): void {
@@ -386,7 +386,7 @@ class Via {
     /**
      * Read, transform and write a global-state value as one indivisible step.
      *
-     * The race-free way to do read-modify-write on a non-integer — appending to a list,
+     * The race-free way to do read-modify-write on a non-integer: appending to a list,
      * updating one key of a map. The mutator receives null for a key nothing has written yet,
      * runs on this worker, and must not block: it holds a lock on the key.
      *
@@ -469,7 +469,7 @@ class Via {
      * Middleware implementing SseAwareMiddleware will additionally run on SSE
      * handshake requests.
      *
-     * WARNING: Middleware instances are long-lived in Swoole — they persist across
+     * WARNING: Middleware instances are long-lived in Swoole: they persist across
      * all requests in the worker process. Do NOT store per-request state on
      * middleware properties. Use $request->withAttribute() to pass data downstream.
      */
@@ -525,7 +525,7 @@ class Via {
      *
      * @param class-string  $class   Page class name
      * @param string        $route   URL pattern (may contain {params})
-     * @param null|callable $factory Optional factory — called instead of `new $class()` per connection.
+     * @param null|callable $factory Optional factory, called instead of `new $class()` per connection.
      *                               Use this to inject constructor dependencies.
      *                               The factory should return an instance of $class.
      *
@@ -553,7 +553,7 @@ class Via {
     /**
      * Register a group of routes that share a URL prefix and/or middleware.
      *
-     * Optionally pass a URL prefix as the first argument — every `page()` call inside
+     * Optionally pass a URL prefix as the first argument: every `page()` call inside
      * the closure will have the prefix prepended to its route. Call `->middleware()` on
      * the returned RouteGroup to apply shared middleware to all routes in the group.
      *
@@ -834,7 +834,7 @@ class Via {
     public function start(): void {
         // Lazy initialization: create server only when starting
         if ($this->server === null) {
-            // Multi-worker guard: InMemoryBroker is a no-op — cross-worker broadcasts
+            // Multi-worker guard: InMemoryBroker is a no-op. Cross-worker broadcasts
             // will be silently lost. Fail loudly so operators don't run with broken config.
             if ($this->config->getWorkerNum() > 1 && $this->broker instanceof InMemoryBroker) {
                 throw new \RuntimeException(
@@ -907,7 +907,7 @@ class Via {
             $this->requestHandler->setRoutes($this->router->getRoutes());
 
             // SharedTable: allocate in master process so it is mmap'd into all workers
-            // on fork. Only needed when worker_num > 1 — single-worker uses a plain PHP array.
+            // on fork. Only needed when worker_num > 1 (single-worker uses a plain PHP array).
             // The shared table is needed whenever GlobalState has to be visible beyond one
             // process OR dirty-tracked for persistence, so persistence pulls it in even when
             // running single-worker.
@@ -1037,7 +1037,7 @@ class Via {
                 //
                 // Armed on the leader worker only unless the caller opted into every worker.
                 // These are registered inside workerStart, so without the gate each of the N
-                // workers armed its own Timer::tick and a "once per server" job ran N times —
+                // workers armed its own Timer::tick and a "once per server" job ran N times,
                 // and, if it broadcasts, delivered N^2 times.
                 foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
                     if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
@@ -1143,7 +1143,7 @@ class Via {
                         $this->log('info', 'Broker ' . \get_class($this->broker) . " connected in worker {$workerId}");
                     }
                 } catch (\Throwable $e) {
-                    $this->log('error', "Broker connect failed in worker {$workerId}: " . $e->getMessage() . ' — running without multi-node broadcast');
+                    $this->log('error', "Broker connect failed in worker {$workerId}: " . $e->getMessage() . ' (running without multi-node broadcast)');
                 }
             });
 
@@ -1222,14 +1222,14 @@ class Via {
      *
      * By default the timer is armed on the leader worker only, so the job runs once per server
      * however many workers are configured. Pass `everyWorker: true` for work that is genuinely
-     * per-process — trimming a per-worker cache, reporting per-worker metrics.
+     * per-process: trimming a per-worker cache, reporting per-worker metrics.
      *
      * Note that "once per server" governs the TIMER, not the state it touches. A job that mutates
      * a PHP static or a per-worker signal still only mutates the leader's copy, and the other
      * workers render from their own. Simulations that keep state that way need `worker_num = 1`
      * until that state is shared.
      *
-     * The callback is wrapped in a try/catch — errors are logged and the timer continues.
+     * The callback is wrapped in a try/catch: errors are logged and the timer continues.
      * All registered intervals are automatically cleared on graceful shutdown.
      *
      * Example:
@@ -1508,9 +1508,9 @@ class Via {
      * Parse Datastar signals from raw request parts.
      *
      * Signal source priority:
-     *  1. GET  ?datastar=<json>          — Datastar GET actions
-     *  2. Raw JSON body                  — Datastar POST/PATCH actions (application/json)
-     *  3. POST datastar=<json> field     — Datastar POST via multipart/form-data or
+     *  1. GET  ?datastar=<json>:           Datastar GET actions
+     *  2. Raw JSON body:                   Datastar POST/PATCH actions (application/json)
+     *  3. POST datastar=<json> field:      Datastar POST via multipart/form-data or
      *                                      application/x-www-form-urlencoded
      *
      * Exposed as a public static method so it can be tested without an OpenSwoole
@@ -1561,7 +1561,7 @@ class Via {
         // Register a cleanup callback so Via::$contexts is also cleared when Application fires the cleanup.
         // Application::unregisterContext only removes from its own map; Via::$contexts is separate and must
         // be cleared here, otherwise zombie contexts (no viewFn) survive and break SSE reconnection.
-        // Guard: register at most once per context — this method is called on every SSE disconnect, so
+        // Guard: register at most once per context. This method is called on every SSE disconnect, so
         // repeated reconnections would otherwise accumulate unbounded closures in cleanupCallbacks.
         if (isset($this->contexts[$contextId]) && !isset($this->viaUnsetCallbackRegistered[$contextId])) {
             $this->viaUnsetCallbackRegistered[$contextId] = true;
@@ -1600,10 +1600,10 @@ class Via {
      * Rebuild a destroyed context so a returning tab keeps its view instead of hard-reloading.
      *
      * When an SSE reconnect names a context that was already cleaned up, this re-creates it with
-     * the *same* ID (so signal IDs regenerate byte-identical and the already-loaded DOM — bindings,
-     * action URLs, via_ctx — keeps working), re-runs the page handler, and re-seeds TAB signal
-     * values from what the client still holds (sent with the reconnect). Returns null — and the
-     * caller falls back to a full reload — when revival is disabled, no record exists, it expired,
+     * the *same* ID (so signal IDs regenerate byte-identical and the already-loaded DOM (bindings,
+     * action URLs, via_ctx) keeps working), re-runs the page handler, and re-seeds TAB signal
+     * values from what the client still holds (sent with the reconnect). Returns null (and the
+     * caller falls back to a full reload) when revival is disabled, no record exists, it expired,
      * the requester's session doesn't own the context, or the route is no longer registered.
      *
      * @param bool $byConnect Whether an SSE connect revives it, which seeds the context itself
@@ -1651,7 +1651,7 @@ class Via {
         $route = $record['route'];
         $handler = $this->router->getRoutes()[$route] ?? null;
         if ($handler === null) {
-            // Route no longer registered (e.g. after a code change) — fall back to reload.
+            // Route no longer registered (e.g. after a code change): fall back to reload.
             $this->app->forgetRevivable($contextId);
 
             return null;
@@ -1689,7 +1689,7 @@ class Via {
             $this->log('info', "Revived context {$contextId} without client signals, waiting for its SSE connect to seed it", $context);
         }
 
-        // Local record consumed — drop it so this worker's map never holds already-rebuilt
+        // Local record consumed: drop it so this worker's map never holds already-rebuilt
         // contexts. The SHARED directory entry deliberately survives: it is how every other
         // worker rebuilds this same context, and registerContext() above has just refreshed it.
         $this->app->forgetLocalRevivable($contextId);
@@ -1792,10 +1792,10 @@ class Via {
      * precisely how they survived: `SessionManager::workerForRequest()` was well
      * covered, but nothing ever asserted that it was wired up correctly.
      *
-     * NOTE — no `dispatch_mode` / `dispatch_func` is set, deliberately.
+     * NOTE: no `dispatch_mode` / `dispatch_func` is set, deliberately.
      * Multi-worker previously set `dispatch_mode = 7` with a `dispatch_func`, but
      * `SW_DISPATCH_USERFUNC` is 6; 7 is stream mode and ignores `dispatch_func`
-     * entirely, so session affinity never ran — and mode 7 scatters per REQUEST
+     * entirely, so session affinity never ran, and mode 7 scatters per REQUEST
      * where OpenSwoole's default is sticky per CONNECTION, making the feature
      * measurably worse than its absence (56.5% vs 100% OK for a keep-alive client
      * at 16 workers).
@@ -1804,7 +1804,7 @@ class Via {
      * runs on the master reactor thread, where the stack-limit check mis-detects
      * the stack base and fatals on every dispatch ("Maximum call stack size ...
      * reached. Infinite recursion?"). Only `zend.max_allowed_stack_size=-1` clears
-     * it, and that ini is not settable at runtime — so this cannot be fixed from
+     * it, and that ini is not settable at runtime, so this cannot be fixed from
      * PHP, and PHP 8.4 is this project's minimum.
      *
      * OpenSwoole's default dispatch is therefore left in place; it is sticky per
@@ -1834,7 +1834,7 @@ class Via {
             'reload_async' => true,  // Enable async reload
             'enable_reuse_port' => true,  // Allow immediate rebind on restart
             'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
-            'log_level' => 4,  // SWOOLE_LOG_WARNING — suppress NOTICE about sending to closed connections
+            'log_level' => 4,  // SWOOLE_LOG_WARNING: suppress NOTICE about sending to closed connections
             // Connection limits: prevent a burst of SSE connections from exhausting the
             // accept queue and making the server unresponsive. Callers can override via
             // Config::withSwooleSettings(). 10k connections is generous for single-worker.
@@ -1891,7 +1891,7 @@ class Via {
      * ext-openswoole 26 exposes this as `$server->setting['worker_num']` and has no
      * `worker_num` property. Reading the property directly emitted an "Undefined
      * property" warning and passed null into ServerAwareBroker::setServer(), whose
-     * TypeError was swallowed by the surrounding catch — leaving the broker without a
+     * TypeError was swallowed by the surrounding catch, leaving the broker without a
      * server reference and silently disabling all cross-worker broadcast.
      *
      * The legacy property is still honoured so older builds keep working.
@@ -1952,7 +1952,7 @@ class Via {
             } catch (\Throwable $e) {
                 // A key or value that no longer fits the configured table is not a reason to
                 // refuse to boot; the rest of the snapshot is still usable.
-                $this->log('warn', "GlobalState snapshot: skipped \"{$key}\" — " . $e->getMessage());
+                $this->log('warn', "GlobalState snapshot: skipped \"{$key}\": " . $e->getMessage());
             }
         }
 
@@ -2010,7 +2010,7 @@ class Via {
     private function syncLocally(string $scope, ?array &$rendered = null): void {
         // Serialize fan-outs per scope.
         //
-        // doSyncLocally() renders each context in a loop, and a render can suspend —
+        // doSyncLocally() renders each context in a loop, and a render can suspend:
         // a first-ever Twig compile, or any hooked file I/O in a view, yields under
         // SWOOLE_HOOK_ALL. A second broadcast could then run its ENTIRE fan-out before
         // the first resumed, so the first loop's remaining contexts rendered against

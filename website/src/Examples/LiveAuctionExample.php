@@ -19,19 +19,19 @@ final class LiveAuctionExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Server-side countdown</strong> — the clock is an OpenSwoole <code>Timer::tick()</code> that decrements on the server every second and broadcasts to all viewers. No client-side drift, no JS timers.',
-        '<strong>Anti-snipe protection</strong> — if a bid arrives with fewer than 30 seconds remaining, the clock resets to 30s. Classic auction UX, implemented in four lines of PHP.',
+        '<strong>Server-side countdown</strong>: the clock is an OpenSwoole <code>Timer::tick()</code> that decrements on the server every second and broadcasts to all viewers. No client-side drift, no JS timers.',
+        '<strong>Anti-snipe protection</strong>: if a bid arrives with fewer than 30 seconds remaining, the clock resets to 30s. Classic auction UX, implemented in four lines of PHP.',
         '<strong>GLOBAL scope</strong> broadcasts every state change (bids, clock, sold status) to every connected viewer simultaneously, regardless of which tab or session they are on.',
         '<strong>SESSION-scoped username</strong> persists across page refreshes and new tabs, giving each bidder a consistent identity throughout the auction lifecycle.',
-        '<strong>Lazy timer</strong> — the countdown only runs while at least one viewer is connected. Zero viewers means zero CPU cost; the auction resumes from saved state when someone reconnects.',
-        '<strong>Full auction lifecycle</strong> — active bidding, sold state with winner banner, and a reset action to restart the auction. All state transitions happen in PHP with no client logic.',
+        '<strong>Lazy timer</strong>: the countdown only runs while at least one viewer is connected. Zero viewers means zero CPU cost; the auction resumes from saved state when someone reconnects.',
+        '<strong>Full auction lifecycle</strong>: active bidding, sold state with winner banner, and a reset action to restart the auction. All state transitions happen in PHP with no client logic.',
     ];
 
     /** @var array<string, list<array{name: string, desc?: string, type?: string, scope?: string, default?: string}>> */
     private const array ANATOMY = [
         'signals' => [
             ['name' => 'username', 'type' => 'string', 'scope' => 'SESSION', 'desc' => 'Bidder identity, auto-assigned on first visit. Persists across tabs and refreshes.'],
-            ['name' => 'bidInput', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Draft bid amount. Private to this tab — not broadcast.'],
+            ['name' => 'bidInput', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Draft bid amount. Private to this tab, not broadcast.'],
         ],
         'actions' => [
             ['name' => 'placeBid', 'desc' => 'Validates bid > current top, updates top bid/bidder, resets clock if anti-snipe triggered, broadcasts to all viewers.'],
@@ -124,7 +124,7 @@ final class LiveAuctionExample {
 
             $c->view(fn (): string => $c->render('examples/live_auction.html.twig', [
                 'title' => '🔨 Live Auction',
-                'description' => 'A timed auction with anti-snipe protection. Place a bid — the server clock, bid history, and winner banner update for every viewer in real time.',
+                'description' => 'A timed auction with anti-snipe protection. Place a bid: the server clock, bid history, and winner banner update for every viewer in real time.',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,

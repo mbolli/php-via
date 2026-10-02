@@ -8,10 +8,10 @@ namespace Mbolli\PhpVia\Broker;
  * Fork-safe node identity for brokers.
  *
  * Every broker tags outgoing messages with its nodeId and drops incoming messages
- * carrying that same id ("skip own messages — loop prevention").
+ * carrying that same id ("skip own messages: loop prevention").
  *
  * Brokers are constructed in user code *before* `$server->start()`, so generating
- * the id in the constructor means every worker forked afterwards inherits it — and
+ * the id in the constructor means every worker forked afterwards inherits it, and
  * therefore discards 100% of its siblings' messages. Same-machine cross-worker
  * broadcast dies silently; cross-machine keeps working because separate process
  * trees produce different ids, which is exactly what masked the bug.
