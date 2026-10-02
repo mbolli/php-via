@@ -117,7 +117,7 @@ class Config {
     private bool $h2c = false;
 
     /**
-     * Whether to enable Brotli compression for HTTP responses.
+     * Whether pages and SSE streams are Brotli-compressed.
      * Requires either withCertificate() (direct HTTPS) or withH2c() (proxy h2c),
      * and the ext-brotli PHP extension. Hard error at start() if either is missing.
      */
@@ -126,7 +126,7 @@ class Config {
     /** Brotli level for dynamic responses (pages, SSE). 0 to 11; default 4. */
     private int $brotliDynamicLevel = 4;
 
-    /** Brotli level for static assets. 0 to 11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
+    /** Brotli level for static files, applied whenever ext-brotli is loaded. 0 turns it off; default 11. */
     private int $brotliStaticLevel = 11;
 
     /**
@@ -271,6 +271,10 @@ class Config {
         return $this->twigCacheDir;
     }
 
+    /**
+     * Serve the files in $dir: a path with a file extension before routing, any other once no route matched.
+     * Compressible files get Brotli, see withBrotli().
+     */
     public function withStaticDir(string $dir): self {
         $this->staticDir = rtrim($dir, '/');
 
@@ -940,18 +944,17 @@ class Config {
     }
 
     /**
-     * Enable Brotli compression for HTTP responses (pages, static assets, SSE streams).
-     * Requires withCertificate() (direct HTTPS) or withH2c() (proxy h2c), and ext-brotli.
-     * A hard error is thrown at start() if either requirement is not met.
+     * Brotli compression: $enabled turns it on for pages and the SSE stream, $staticLevel sets it for static files.
      *
-     * @param bool $enabled      enable or disable Brotli compression
-     * @param int  $dynamicLevel Compression level for pages and SSE (0 to 11). Default 4: fast,
-     *                           low CPU overhead on the hot path.
-     * @param int  $staticLevel  Compression level for static assets (0 to 11). Default 11: maximum
-     *                           ratio; paid once per file then served from an in-memory cache.
-     */
-    /**
-     * Enable Brotli compression for pages, static assets and the SSE stream.
+     * **Pages and SSE** need $enabled, withCertificate() (direct HTTPS) or withH2c() (proxy h2c), and ext-brotli;
+     * start() throws if one is missing.
+     *
+     * **Static files** (withStaticDir() files of a compressible type, /datastar.js, /via.css and the Dev Bar
+     * assets) are compressed at $staticLevel whenever ext-brotli is loaded, whatever $enabled says. 0 turns that
+     * off: `withBrotli(false, staticLevel: 0)` sends no Brotli at all. Files are compressed in the master process
+     * before the server listens (up to 2 s, not in dev mode), later ones by a helper process, so a worker never
+     * compresses at this level. A precompressed foo.css.br next to foo.css, at least as new, is sent as it is,
+     * even without ext-brotli. See https://via.zweiundeins.gmbh/docs/deployment#static-compression
      *
      * **The dynamic level is a memory decision, not just a bandwidth one.** A streaming Brotli
      * encoder holds per-connection state that grows toward the window cap as the stream feeds it,
@@ -980,8 +983,9 @@ class Config {
      * be lowered to save memory or raised for the compression Anders Murphy reports from larger
      * windows. Changing that needs an upstream extension change.
      *
-     * $staticLevel applies to one-shot asset compression, which is cached per file+mtime, so its
-     * 94 ms at level 11 is paid once rather than per request.
+     * @param bool $enabled      Brotli for pages and SSE
+     * @param int  $dynamicLevel level for pages and SSE (0 to 11)
+     * @param int  $staticLevel  level for static files (1 to 11), 0 for none
      */
     public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, int $staticLevel = 11): self {
         $this->brotli = $enabled;

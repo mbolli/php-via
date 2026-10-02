@@ -7,6 +7,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Http\StaticBodyCache;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use Tests\Support\FakeStaticResponse;
@@ -294,6 +295,123 @@ describe('Config::getStaticCacheControl() wired into withStaticDir() responses',
     });
 });
 
+describe('Brotli for static files', function (): void {
+    $dir = null;
+
+    beforeEach(function () use (&$dir): void {
+        if (!function_exists('brotli_compress')) {
+            $this->markTestSkipped('ext-brotli required');
+        }
+        $dir = sys_get_temp_dir() . '/via-static-br-' . bin2hex(random_bytes(6));
+        mkdir($dir);
+        file_put_contents($dir . '/app.css', str_repeat('body { color: red; } ', 50));
+    });
+
+    afterEach(function () use (&$dir): void {
+        exec('rm -rf ' . escapeshellarg((string) $dir));
+    });
+
+    test('is on without withBrotli(), with Vary for every client', function () use (&$dir): void {
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)));
+        $br = new FakeStaticResponse();
+        $plain = new FakeStaticResponse();
+        $revalidated = new FakeStaticResponse();
+
+        $handler->handleRequest(fakeStaticRequest('/app.css', ['accept-encoding' => 'gzip, br']), $br);
+        $handler->handleRequest(fakeStaticRequest('/app.css'), $plain);
+        $handler->handleRequest(fakeStaticRequest('/app.css', ['if-none-match' => $br->headers['ETag']]), $revalidated);
+
+        expect($br->headers['Content-Encoding'])->toBe('br')
+            ->and($br->headers['Vary'])->toBe('Accept-Encoding')
+            ->and($br->body)->toBe(brotli_compress(str_repeat('body { color: red; } ', 50), 11, BROTLI_TEXT))
+            ->and($plain->headers)->not->toHaveKey('Content-Encoding')
+            ->and($plain->headers['Vary'])->toBe('Accept-Encoding')
+            ->and($plain->headers['ETag'])->toBe($br->headers['ETag'])
+            ->and($revalidated->statusCode)->toBe(304)
+            ->and($revalidated->headers['Vary'])->toBe('Accept-Encoding')
+        ;
+    });
+
+    test('a static level of 0 turns it off, Vary included', function () use (&$dir): void {
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli(staticLevel: 0)));
+        $response = new FakeStaticResponse();
+
+        $handler->handleRequest(fakeStaticRequest('/app.css', ['accept-encoding' => 'br']), $response);
+
+        expect($response->headers)->not->toHaveKey('Content-Encoding')
+            ->and($response->headers)->not->toHaveKey('Vary')
+        ;
+    });
+
+    test('covers /via.css and both Datastar bundles', function (): void {
+        $forms = [];
+        foreach (['/via.css' => new Config(), '/datastar.js' => new Config(), 'rocket' => (new Config())->withDatastarRocket()] as $name => $config) {
+            $response = new FakeStaticResponse();
+            requestHandlerFor(createVia($config))->handleRequest(fakeStaticRequest($name === 'rocket' ? '/datastar.js' : $name, ['accept-encoding' => 'br']), $response);
+            $forms[$name] = [$response->headers['Content-Encoding'] ?? null, strlen((string) brotli_uncompress($response->body))];
+        }
+
+        expect($forms)->toBe([
+            '/via.css' => ['br', filesize(__DIR__ . '/../../public/via.css')],
+            '/datastar.js' => ['br', filesize(__DIR__ . '/../../public/datastar.js')],
+            'rocket' => ['br', filesize(__DIR__ . '/../../public/datastar-rocket.js')],
+        ]);
+    });
+
+    test('compressible types get their content type and Brotli, compressed formats neither', function () use (&$dir): void {
+        $types = [
+            'favicon.ico' => 'image/x-icon',
+            'site.webmanifest' => 'application/manifest+json',
+            'module.wasm' => 'application/wasm',
+            'font.ttf' => 'font/ttf',
+            'font.otf' => 'font/otf',
+            'notes.md' => 'text/markdown; charset=utf-8',
+            'data.csv' => 'text/csv; charset=utf-8',
+            'feed.rss' => 'application/rss+xml',
+            'feed.atom' => 'application/atom+xml',
+            'robots.txt' => 'text/plain; charset=utf-8',
+            'page.html' => 'text/html; charset=utf-8',
+            'sitemap.xml' => 'application/xml',
+            'font.woff2' => 'font/woff2',
+            'font.woff' => 'font/woff',
+            'photo.png' => 'image/png',
+            'photo.webp' => 'image/webp',
+            'archive.zip' => 'application/octet-stream',
+        ];
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)));
+
+        $seen = [];
+        $encodings = [];
+        foreach (array_keys($types) as $file) {
+            file_put_contents("{$dir}/{$file}", str_repeat("{$file} ", 40));
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest("/{$file}", ['accept-encoding' => 'br']), $response);
+            $seen[$file] = $response->headers['Content-Type'];
+            $encodings[$file] = $response->headers['Content-Encoding'] ?? 'identity';
+        }
+
+        expect($seen)->toBe($types)
+            ->and(array_keys(array_filter($encodings, fn (string $e): bool => $e === 'identity')))
+            ->toBe(['font.woff2', 'font.woff', 'photo.png', 'photo.webp', 'archive.zip'])
+        ;
+    });
+
+    test('a sidecar over 2 MiB goes out with sendfile(), marked as Brotli', function () use (&$dir): void {
+        touch($dir . '/app.css', time() - 10);
+        $fp = fopen($dir . '/app.css.br', 'w');
+        ftruncate($fp, (2 << 20) + 1);
+        fclose($fp);
+        $response = new FakeStaticResponse();
+
+        requestHandlerFor(createVia((new Config())->withStaticDir($dir)))->handleRequest(fakeStaticRequest('/app.css', ['accept-encoding' => 'br']), $response);
+
+        expect($response->sentFile)->toBe(realpath($dir . '/app.css.br'))
+            ->and($response->headers['Content-Encoding'])->toBe('br')
+            ->and($response->headers['Content-Type'])->toBe('text/css; charset=utf-8')
+        ;
+    });
+});
+
 describe('the static file cache', function (): void {
     $dir = null;
 
@@ -316,11 +434,8 @@ describe('the static file cache', function (): void {
         touch($path, $mtime);
     };
 
-    /** @return array<string, array<string, array{mtime: int, size: int, body: string}>> */
-    $cacheOf = fn (RequestHandler $handler): array => (new ReflectionProperty(RequestHandler::class, 'staticCache'))->getValue($handler);
-
-    /** @return array<string, int> */
-    $bytesOf = fn (RequestHandler $handler): array => (new ReflectionProperty(RequestHandler::class, 'staticCacheBytes'))->getValue($handler);
+    /** The uncompressed bodies a handler keeps. */
+    $cacheOf = fn (RequestHandler $handler): StaticBodyCache => (new ReflectionProperty(RequestHandler::class, 'staticCache'))->getValue($handler);
 
     test('a Brotli hit is served from memory without reading the file', function () use (&$dir): void {
         $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()));
@@ -369,8 +484,9 @@ describe('the static file cache', function (): void {
         ;
     });
 
-    test('an edited file replaces its cached copy instead of adding one per mtime', function () use (&$dir, $cacheOf, $bytesOf): void {
-        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()->withDevMode()));
+    test('an edited file replaces its cached copy instead of adding one per mtime', function () use (&$dir): void {
+        $via = createVia((new Config())->withStaticDir($dir)->withDevMode());
+        $handler = requestHandlerFor($via);
         $etags = [];
         foreach (['red', 'blue', 'green'] as $i => $color) {
             file_put_contents($dir . '/app.css', "body { color: {$color}; }");
@@ -381,30 +497,35 @@ describe('the static file cache', function (): void {
             $etags[] = $response->headers['ETag'];
         }
 
-        $br = $cacheOf($handler)['br'];
+        $br = $via->getStaticBrotli()->workerCache();
         expect(array_unique($etags))->toHaveCount(3)
-            ->and($br)->toHaveCount(1)
-            ->and($bytesOf($handler)['br'])->toBe(strlen(reset($br)['body']))
+            ->and($br->entries())->toHaveCount(1)
+            ->and($br->bytes())->toBe(strlen(array_values($br->entries())[0]['body']))
         ;
     });
 
-    test('a file over 2 MiB goes out with sendfile(), uncompressed and uncached', function () use (&$dir, $cacheOf): void {
-        $big = str_repeat('a', (2 << 20) + 1) . '{}';
+    test('a file over 2 MiB goes out with sendfile() to clients without Brotli, and compressed to the others', function () use (&$dir, $cacheOf): void {
+        $big = '{"a":"' . str_repeat('a', (2 << 20) + 1) . '"}';
         file_put_contents($dir . '/big.json', $big);
-        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withBrotli()));
-        $response = new FakeStaticResponse();
+        $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)));
+        $plain = new FakeStaticResponse();
+        $br = new FakeStaticResponse();
 
-        $handler->handleRequest(fakeStaticRequest('/big.json', ['accept-encoding' => 'br']), $response);
+        $handler->handleRequest(fakeStaticRequest('/big.json'), $plain);
+        $handler->handleRequest(fakeStaticRequest('/big.json', ['accept-encoding' => 'br']), $br);
 
-        expect($response->sentFile)->toBe(realpath($dir . '/big.json'))
-            ->and($response->headers)->not->toHaveKey('Content-Encoding')
-            ->and($response->headers['Content-Type'])->toBe('application/json')
-            ->and($response->body)->toBe($big)
-            ->and($cacheOf($handler)['br'])->toBe([])
+        expect($plain->sentFile)->toBe(realpath($dir . '/big.json'))
+            ->and($plain->headers)->not->toHaveKey('Content-Encoding')
+            ->and($plain->headers['Content-Type'])->toBe('application/json')
+            ->and($plain->body)->toBe($big)
+            ->and($cacheOf($handler)->entries())->toBe([])
+            ->and($br->sentFile)->toBeNull()
+            ->and($br->headers['Content-Encoding'])->toBe('br')
+            ->and(brotli_uncompress($br->body))->toBe($big)
         ;
     });
 
-    test('once 16 MiB are cached, further files go out with sendfile()', function () use (&$dir, $bytesOf): void {
+    test('once 16 MiB are cached, further files go out with sendfile()', function () use (&$dir, $cacheOf): void {
         for ($i = 0; $i < 9; ++$i) {
             file_put_contents($dir . "/f{$i}.png", str_repeat((string) $i, 2 << 20));
         }
@@ -418,11 +539,11 @@ describe('the static file cache', function (): void {
         }
 
         expect($sent)->toBe([false, false, false, false, false, false, false, false, true])
-            ->and($bytesOf($handler)['identity'])->toBe(16 << 20)
+            ->and($cacheOf($handler)->bytes())->toBe(16 << 20)
         ;
     });
 
-    test('in dev mode, deleted files make room once the cache is full, and live ones stay', function () use (&$dir, $cacheOf, $bytesOf): void {
+    test('in dev mode, deleted files make room once the cache is full, and live ones stay', function () use (&$dir, $cacheOf): void {
         $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)->withDevMode()));
         $handler->handleRequest(fakeStaticRequest('/app.css'), new FakeStaticResponse());
         $sent = [];
@@ -436,11 +557,11 @@ describe('the static file cache', function (): void {
             unlink($dir . "/app.{$i}.js");
         }
 
-        $identity = $cacheOf($handler)['identity'];
+        $identity = $cacheOf($handler);
         expect($sent)->not->toContain(true)
-            ->and($identity)->toHaveKey(realpath($dir . '/app.css'))
-            ->and($identity)->toHaveCount(6)
-            ->and($bytesOf($handler)['identity'])->toBe(strlen('body { color: red; }') + 5 * (3 << 19))
+            ->and($identity->entries())->toHaveKey(realpath($dir . '/app.css'))
+            ->and($identity->entries())->toHaveCount(6)
+            ->and($identity->bytes())->toBe(strlen('body { color: red; }') + 5 * (3 << 19))
         ;
     });
 });

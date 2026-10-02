@@ -31,11 +31,44 @@ use Psr\Http\Server\RequestHandlerInterface;
  * Handles incoming HTTP requests and routes them appropriately.
  */
 class RequestHandler {
-    /** Static files up to this size are served from memory; larger ones go out with sendfile(), uncompressed. */
+    /** Static files up to this size are served from memory; larger ones go out with sendfile(). */
     private const int STATIC_CACHE_FILE_BYTES = 2 << 20;
 
-    /** Memory a worker spends on static file bodies, per encoding; files past it go out with sendfile(). */
+    /** Memory a worker spends on uncompressed static file bodies; files past it go out with sendfile(). */
     private const int STATIC_CACHE_TOTAL_BYTES = 16 << 20;
+
+    /**
+     * Content type, and whether Brotli pays off, by static file extension. Fonts other than ttf and otf, and images
+     * other than svg and ico, are compressed already.
+     *
+     * @var array<string, array{0: string, 1: bool}>
+     */
+    private const array STATIC_TYPES = [
+        'css' => ['text/css; charset=utf-8', true],
+        'js' => ['application/javascript', true],
+        'mjs' => ['application/javascript', true],
+        'json' => ['application/json', true],
+        'map' => ['application/json', true],
+        'webmanifest' => ['application/manifest+json', true],
+        'wasm' => ['application/wasm', true],
+        'svg' => ['image/svg+xml', true],
+        'ico' => ['image/x-icon', true],
+        'ttf' => ['font/ttf', true],
+        'otf' => ['font/otf', true],
+        'txt' => ['text/plain; charset=utf-8', true],
+        'md' => ['text/markdown; charset=utf-8', true],
+        'csv' => ['text/csv; charset=utf-8', true],
+        'html' => ['text/html; charset=utf-8', true],
+        'xml' => ['application/xml', true],
+        'rss' => ['application/rss+xml', true],
+        'atom' => ['application/atom+xml', true],
+        'png' => ['image/png', false],
+        'jpg' => ['image/jpeg', false],
+        'jpeg' => ['image/jpeg', false],
+        'webp' => ['image/webp', false],
+        'woff2' => ['font/woff2', false],
+        'woff' => ['font/woff', false],
+    ];
 
     /** @var array<string, callable> */
     private array $routes = [];
@@ -48,18 +81,8 @@ class RequestHandler {
     private PsrResponseEmitter $psrResponseEmitter;
     private ?DevBarController $devBar = null;
 
-    /**
-     * Static file bodies by encoding ('br' or 'identity') and path, kept while the file's mtime and size match.
-     *
-     * @var array<string, array<string, array{mtime: int, size: int, body: string}>>
-     */
-    private array $staticCache = ['br' => [], 'identity' => []];
-
-    /** @var array<string, int> Bytes the static cache holds per encoding */
-    private array $staticCacheBytes = ['br' => 0, 'identity' => 0];
-
-    /** @var array<string, int> When dev mode last dropped deleted and changed files from each encoding's cache */
-    private array $staticCacheSweptAt = ['br' => 0, 'identity' => 0];
+    /** Uncompressed static file bodies, kept while the file's mtime and size match. */
+    private StaticBodyCache $staticCache;
 
     /** @var null|array{0: string, 1: string} The configured static dir and its realpath, resolved once */
     private ?array $staticBase = null;
@@ -70,6 +93,7 @@ class RequestHandler {
         $this->actionHandler = $actionHandler;
         $this->psrRequestFactory = new PsrRequestFactory();
         $this->psrResponseEmitter = new PsrResponseEmitter();
+        $this->staticCache = new StaticBodyCache(self::STATIC_CACHE_TOTAL_BYTES, self::STATIC_CACHE_FILE_BYTES);
     }
 
     public function setRequestLogger(RequestLogger $logger): void {
@@ -134,6 +158,26 @@ class RequestHandler {
                 $tracer->endTrace();
             }
         }
+    }
+
+    /**
+     * A static file's content type, and whether Brotli pays off for it.
+     *
+     * @return array{0: string, 1: bool}
+     *
+     * @internal
+     */
+    public static function staticType(string $filePath): array {
+        return self::STATIC_TYPES[strtolower(pathinfo($filePath, PATHINFO_EXTENSION))] ?? ['application/octet-stream', false];
+    }
+
+    /**
+     * The path of php-via's own stylesheet, served at /via.css.
+     *
+     * @internal
+     */
+    public static function viaCssPath(): string {
+        return \dirname(__DIR__, 2) . '/public/via.css';
     }
 
     private function dispatch(Request $request, Response $response): void {
@@ -741,26 +785,7 @@ class RequestHandler {
      * Serve a static file with correct Content-Type.
      */
     private function serveStaticFile(string $filePath, Request $request, Response $response): void {
-        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-        $contentType = match ($ext) {
-            'css' => 'text/css; charset=utf-8',
-            'js', 'mjs' => 'application/javascript',
-            'json', 'map' => 'application/json',
-            'svg' => 'image/svg+xml',
-            'png' => 'image/png',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'webp' => 'image/webp',
-            'ico' => 'image/x-icon',
-            'woff2' => 'font/woff2',
-            'woff' => 'font/woff',
-            default => 'application/octet-stream',
-        };
-
-        $compressible = match ($ext) {
-            'css', 'js', 'mjs', 'svg', 'json', 'map', 'txt', 'html', 'xml' => true,
-            default => false,
-        };
-
+        [$contentType, $compressible] = self::staticType($filePath);
         $this->sendStaticFile($filePath, $contentType, $compressible, $request, $response);
     }
 
@@ -808,7 +833,7 @@ class RequestHandler {
      * Serve Via CSS file.
      */
     private function serveViaCss(Request $request, Response $response): void {
-        $this->sendStaticFile(__DIR__ . '/../../public/via.css', 'text/css; charset=utf-8', true, $request, $response);
+        $this->sendStaticFile(self::viaCssPath(), 'text/css; charset=utf-8', true, $request, $response);
     }
 
     /**
@@ -826,13 +851,18 @@ class RequestHandler {
         }
         $mtime = filemtime($filePath);
         $size = filesize($filePath);
+        // Weak, so it holds for the uncompressed body and each Brotli form of it alike.
         $etag = ConditionalGet::etag($mtime, $size);
         $mimeType = explode(';', $contentType, 2)[0];
+        $brotli = $compressible ? $this->via->getStaticBrotli() : null;
+        if ($brotli !== null && !$brotli->enabled()) {
+            $brotli = null;
+        }
 
         $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType, $versioned));
         $response->header('ETag', $etag);
         $response->header('Last-Modified', ConditionalGet::lastModified($mtime));
-        if ($compressible && $this->via->getConfig()->getBrotli()) {
+        if ($brotli !== null) {
             $response->header('Vary', 'Accept-Encoding');
         }
 
@@ -848,40 +878,38 @@ class RequestHandler {
 
         $response->header('Content-Type', $contentType);
 
-        $brotli = $compressible && $this->via->getConfig()->getBrotli()
-            && str_contains($request->header['accept-encoding'] ?? '', 'br');
-        $this->sendStaticBody($response, $filePath, $mtime, $size, $brotli);
+        if ($brotli !== null && str_contains($request->header['accept-encoding'] ?? '', 'br')) {
+            $compressed = $brotli->lookup($filePath, $mtime, $size);
+            if ($compressed !== null) {
+                $response->header('Content-Encoding', 'br');
+                if (isset($compressed['file'])) {
+                    $response->sendfile($compressed['file']);
+                } else {
+                    $response->end($compressed['body']);
+                }
+
+                return;
+            }
+        }
+
+        $this->sendStaticBody($response, $filePath, $mtime, $size);
     }
 
     /**
-     * Send a static file's body from memory, reading and Brotli-compressing it only on a miss.
-     *
-     * A file over STATIC_CACHE_FILE_BYTES, or one the cache has no room for, goes out with
-     * sendfile() uncompressed, so the worker never reads it.
+     * Send a static file's uncompressed body from memory, reading it only on a miss. A file over
+     * STATIC_CACHE_FILE_BYTES, or one the cache has no room for, goes out with sendfile(), so the
+     * worker never reads it.
      */
-    private function sendStaticBody(Response $response, string $filePath, int $mtime, int $size, bool $brotli): void {
-        $encoding = $brotli ? 'br' : 'identity';
-        $cached = $this->staticCache[$encoding][$filePath] ?? null;
-        if ($cached !== null && $cached['mtime'] === $mtime && $cached['size'] === $size) {
-            if ($brotli) {
-                $response->header('Content-Encoding', 'br');
-            }
+    private function sendStaticBody(Response $response, string $filePath, int $mtime, int $size): void {
+        $cached = $this->staticCache->get($filePath, $mtime, $size);
+        if ($cached !== null) {
             $response->end($cached['body']);
 
             return;
         }
 
-        if ($cached !== null) {
-            unset($this->staticCache[$encoding][$filePath]);
-            $this->staticCacheBytes[$encoding] -= \strlen($cached['body']);
-        }
-
-        // The compressed size is unknown until compressing, so the raw size is checked against the budget.
-        $tooBig = $size > self::STATIC_CACHE_FILE_BYTES;
-        if (!$tooBig && $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES && $this->via->getConfig()->getDevMode()) {
-            $this->dropStaleStaticEntries($encoding);
-        }
-        if ($tooBig || $this->staticCacheBytes[$encoding] + $size > self::STATIC_CACHE_TOTAL_BYTES) {
+        $devMode = $this->via->getConfig()->getDevMode();
+        if (!$this->staticCache->fits($size, $devMode, $filePath)) {
             $response->sendfile($filePath);
 
             return;
@@ -896,40 +924,8 @@ class RequestHandler {
             return;
         }
 
-        if ($brotli) {
-            $compressed = brotli_compress($body, $this->via->getConfig()->getBrotliStaticLevel(), BROTLI_TEXT);
-            if ($compressed === false) {
-                $response->end($body);
-
-                return;
-            }
-            $body = $compressed;
-            $response->header('Content-Encoding', 'br');
-        }
-
-        $this->staticCache[$encoding][$filePath] = ['mtime' => $mtime, 'size' => $size, 'body' => $body];
-        $this->staticCacheBytes[$encoding] += \strlen($body);
+        $this->staticCache->put($filePath, $mtime, $size, $body, true, $devMode);
         $response->end($body);
-    }
-
-    /**
-     * Drop cached files that were deleted or changed since, such as the previous builds of a bundle with a
-     * content hash in its name. Runs at most once a second per encoding, since each entry costs a stat().
-     */
-    private function dropStaleStaticEntries(string $encoding): void {
-        $now = time();
-        if ($this->staticCacheSweptAt[$encoding] === $now) {
-            return;
-        }
-        $this->staticCacheSweptAt[$encoding] = $now;
-
-        foreach ($this->staticCache[$encoding] as $path => $entry) {
-            clearstatcache(true, $path);
-            if (!is_file($path) || filemtime($path) !== $entry['mtime'] || filesize($path) !== $entry['size']) {
-                unset($this->staticCache[$encoding][$path]);
-                $this->staticCacheBytes[$encoding] -= \strlen($entry['body']);
-            }
-        }
     }
 
     /**

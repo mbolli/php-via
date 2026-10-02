@@ -30,10 +30,19 @@ use OpenSwoole\Http\Response;
 final class DevBarController {
     private const string ASSET_DIR = __DIR__ . '/../../public';
 
-    /** @var array<string, array{mtime: int, body: string, etag: string, br: null|false|string}> by file name */
+    /** @var array<string, array{mtime: int, body: string, etag: string}> by file name */
     private array $assets = [];
 
     public function __construct(private Via $via, private string $assetDir = self::ASSET_DIR) {}
+
+    /**
+     * Where a shipped Dev Bar asset lives.
+     *
+     * @internal used to compress the assets at start
+     */
+    public static function defaultAssetPath(string $file): string {
+        return self::ASSET_DIR . '/' . $file;
+    }
 
     /**
      * Dispatch a `/_via/*` request. Caller has already verified tracing is on
@@ -152,8 +161,8 @@ final class DevBarController {
     }
 
     /**
-     * A Dev Bar asset, read once and served from memory with an ETag, and with Brotli when
-     * withBrotli() is on and the client accepts it. Dev mode re-reads a file after an edit.
+     * A Dev Bar asset, read once and served from memory with an ETag, and with Brotli at the static
+     * level when the client accepts it. Dev mode re-reads a file after an edit.
      *
      * @param array<string, string> $requestHeaders lower-cased names, as OpenSwoole passes them
      *
@@ -165,14 +174,13 @@ final class DevBarController {
             return ['status' => 404, 'headers' => [], 'body' => 'Not Found'];
         }
 
-        $config = $this->via->getConfig();
-        $brotli = $config->getBrotli() && \function_exists('brotli_compress');
+        $brotli = $this->via->getStaticBrotli();
         $headers = [
             'Cache-Control' => 'no-cache',
             'ETag' => $asset['etag'],
             'Last-Modified' => ConditionalGet::lastModified($asset['mtime']),
         ];
-        if ($brotli) {
+        if ($brotli->enabled()) {
             $headers['Vary'] = 'Accept-Encoding';
         }
 
@@ -181,12 +189,12 @@ final class DevBarController {
         }
 
         $headers['Content-Type'] = $contentType;
-        if ($brotli && str_contains($requestHeaders['accept-encoding'] ?? '', 'br')) {
-            $compressed = $this->assets[$file]['br'] ??= brotli_compress($asset['body'], $config->getBrotliStaticLevel(), BROTLI_TEXT);
-            if ($compressed !== false) {
+        if ($brotli->enabled() && str_contains($requestHeaders['accept-encoding'] ?? '', 'br')) {
+            $compressed = $brotli->lookup($this->assetDir . '/' . $file, $asset['mtime'], \strlen($asset['body']), $asset['body']);
+            if (isset($compressed['body'])) {
                 $headers['Content-Encoding'] = 'br';
 
-                return ['status' => 200, 'headers' => $headers, 'body' => $compressed];
+                return ['status' => 200, 'headers' => $headers, 'body' => $compressed['body']];
             }
         }
 
@@ -250,7 +258,7 @@ final class DevBarController {
     }
 
     /**
-     * @return null|array{mtime: int, body: string, etag: string, br: null|false|string}
+     * @return null|array{mtime: int, body: string, etag: string}
      */
     private function loadAsset(string $file): ?array {
         $cached = $this->assets[$file] ?? null;
@@ -274,7 +282,7 @@ final class DevBarController {
             return null;
         }
 
-        return $this->assets[$file] = ['mtime' => $mtime, 'body' => $body, 'etag' => 'W/"' . hash('xxh3', $body) . '"', 'br' => null];
+        return $this->assets[$file] = ['mtime' => $mtime, 'body' => $body, 'etag' => 'W/"' . hash('xxh3', $body) . '"'];
     }
 
     private function serveConsole(Response $response): void {

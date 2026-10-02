@@ -13,6 +13,7 @@ use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
@@ -20,6 +21,7 @@ use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\RouteGroup;
 use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Http\StaticBrotli;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Rendering\ViewRenderer;
@@ -33,6 +35,7 @@ use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\State\SqliteSnapshot;
+use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
@@ -199,6 +202,7 @@ class Via {
     private SessionManager $sessionManager;
     private RequestHandler $requestHandler;
     private SseHandler $sseHandler;
+    private StaticBrotli $staticBrotli;
     private Logger $logger;
     private RequestLogger $requestLogger;
     private Stats $stats;
@@ -273,6 +277,7 @@ class Via {
         $this->sessionManager = new SessionManager($this->logger);
 
         // Initialize HTTP handlers
+        $this->staticBrotli = new StaticBrotli($this->config, $this->log(...));
         $this->sseHandler = new SseHandler($this);
         $actionHandler = new ActionHandler($this);
         $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler);
@@ -358,6 +363,13 @@ class Via {
      */
     public function getRouter(): Router {
         return $this->router;
+    }
+
+    /**
+     * @internal Used by HTTP handlers and the Dev Bar
+     */
+    public function getStaticBrotli(): StaticBrotli {
+        return $this->staticBrotli;
     }
 
     /**
@@ -985,6 +997,11 @@ class Via {
             // in SwooleBroker::publish(), but kept as a belt-and-suspenders guard).
             $this->server->on('pipeMessage', function (Server $server, int $srcWorkerId, string $data): void {
                 try {
+                    if (str_starts_with($data, StaticBrotli::MESSAGE_PREFIX)) {
+                        $this->staticBrotli->receive($data);
+
+                        return;
+                    }
                     $this->handlePipeMessage($srcWorkerId, $data);
                 } catch (\Throwable $e) {
                     $this->log('error', "pipeMessage from worker {$srcWorkerId} failed: " . Logger::describe($e));
@@ -1024,6 +1041,7 @@ class Via {
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
                 $this->workerStarted = true;
                 $this->app->claimWorker($workerId);
+                $this->staticBrotli->setWorkerId($workerId);
 
                 // Register signal handlers in worker process (where timers run)
                 $this->registerSignalHandlers();
@@ -1209,6 +1227,15 @@ class Via {
                     }
                 });
             }
+
+            // Last, after the settings are final: the helper process is added and the static files compressed in
+            // the master process, so every worker inherits them.
+            $assets = [DatastarBundle::path($this->config->isDatastarRocketEnabled()), RequestHandler::viaCssPath()];
+            if ($this->config->isTracingEnabled()) {
+                $assets[] = DevBarController::defaultAssetPath('devbar.css');
+                $assets[] = DevBarController::defaultAssetPath('devbar.js');
+            }
+            $this->staticBrotli->prepare($this->server, $assets, $this->config->getStaticDir());
         }
 
         $this->server->start();

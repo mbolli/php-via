@@ -1,0 +1,66 @@
+<?php
+
+declare(strict_types=1);
+
+/*
+ * Static files get Brotli at level 11 without withBrotli(), and a worker never compresses at that level itself:
+ * files present at start are compressed before the server listens, later ones by a helper process while the
+ * worker answers at once. Before, a 700 KB bundle written after start held its worker for over a second on its
+ * first Brotli request, and nothing was compressed without withBrotli().
+ */
+
+/** @return array<string, string> key => value from the fixture's key=value lines */
+function staticBrotliServer(string $mode): array {
+    $out = (string) shell_exec(
+        'timeout 90 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/static_brotli_server.php')
+        . ' ' . escapeshellarg($mode) . ' 2>&1'
+    );
+    preg_match_all('/^([a-z0-9_]+)=(.*)$/m', $out, $m, PREG_SET_ORDER);
+
+    $values = [];
+    foreach ($m as [, $key, $value]) {
+        $values[$key] = $value;
+    }
+
+    expect($values)->toHaveKey('client_done', '1', 'fixture output: ' . var_export($out, true));
+
+    return $values + ['out' => $out];
+}
+
+beforeEach(function (): void {
+    if (!function_exists('pcntl_fork') || !function_exists('posix_kill') || !function_exists('brotli_compress')) {
+        $this->markTestSkipped('ext-pcntl, ext-posix and ext-brotli required');
+    }
+});
+
+test('files present at start go out at level 11 from the first request, without withBrotli()', function (): void {
+    $r = staticBrotliServer('boot');
+
+    expect($r['boot_form'])->toBe('l11', $r['out'])
+        ->and((float) $r['boot_ms'])->toBeLessThan(50.0, $r['out'])
+        ->and($r['boot_vary'])->toBe('Accept-Encoding')
+        ->and($r['datastar_form'])->toBe('l11', $r['out'])
+        ->and($r['plain_form'])->toBe('identity')
+        ->and($r['out'])->toContain('Brotli level 11: compressed 3 static files')
+    ;
+});
+
+test('a file written after start is answered at once and gets level 11 from the helper', function (string $mode): void {
+    $r = staticBrotliServer($mode);
+
+    expect($r['big_first'])->toBe('identity', $r['out'])
+        ->and((float) $r['big_first_ms'])->toBeLessThan(500.0, $r['out'])
+        ->and($r['small_first'])->toBe('l4', $r['out'])
+        ->and((float) $r['small_first_ms'])->toBeLessThan(500.0, $r['out'])
+        ->and($r['level11_everywhere'])->toBe('1', $r['out'])
+        ->and((float) $r['health_max_ms'])->toBeLessThan(100.0, $r['out'])
+    ;
+})->with(['one worker' => 'later', 'two workers' => 'workers']);
+
+test('a fresh .br sidecar is sent as it is, and a stale one is ignored', function (): void {
+    $r = staticBrotliServer('sidecar');
+
+    expect($r['fresh_sidecar'])->toBe('1', $r['out'])
+        ->and($r['stale_form'])->toBe('l11', $r['out'])
+    ;
+});

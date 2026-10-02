@@ -238,12 +238,12 @@ describe('DevBarController::assetResponse()', function (): void {
         expect($second['headers']['ETag'])->not->toBe($first['headers']['ETag']);
     });
 
-    test('sends Brotli when withBrotli() is on and the client accepts it', function (): void {
+    test('sends Brotli at the static level, without withBrotli(), when the client accepts it', function (): void {
         if (!function_exists('brotli_uncompress')) {
             $this->markTestSkipped('ext-brotli required');
         }
 
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)->withBrotli()));
+        $controller = new DevBarController(createVia((new Config())->withTracing(true)));
         $file = (string) file_get_contents(dirname(__DIR__, 3) . '/public/devbar.js');
 
         $br = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'gzip, deflate, br']);
@@ -258,8 +258,8 @@ describe('DevBarController::assetResponse()', function (): void {
         expect($plain['body'])->toBe($file);
     });
 
-    test('never sends Brotli without withBrotli()', function (): void {
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)));
+    test('never sends Brotli with a static level of 0', function (): void {
+        $controller = new DevBarController(createVia((new Config())->withTracing(true)->withBrotli(true, staticLevel: 0)));
         $r = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'br']);
 
         expect($r['headers'])->not->toHaveKey('Content-Encoding');
