@@ -329,6 +329,11 @@ $c->onDisconnect(function (Context $c): void { /* ... */ });
   comment (`withSseKeepAliveMs()`, `0` turns it off).
 - **A context whose stream never connects is freed** after the connect timeout
   (`withContextConnectTimeout()`, 30 s by default), running its cleanup hooks.
+- **An action on a tab whose stream is down keeps it for the reconnect.** The stream
+  dropped or the action revived the context: it is freed the reconnect timeout
+  (`withContextReconnectTimeout()`, 60 s by default) after the last action, longer than
+  Datastar's 30 s `retryMaxWait`. A context freed before its stream returns drops its
+  queued patches; the revived tab gets its signals and a fresh view, not one-off patches.
 - **Revival.** A tab that comes back after its context was cleaned up is rebuilt with the
   same id and the signal values it still holds, within the revival window
   (`withContextRevivalWindow()`, 10 minutes by default), instead of reloading.
@@ -424,6 +429,7 @@ $config = (new Config())
     ->withSseMaxQueuedBytes(1_048_576)        // drop element frames for a slow client
     ->withContextCleanupDelay(5_000)          // after a stream closes
     ->withContextConnectTimeout(30_000)       // free a context whose stream never connects
+    ->withContextReconnectTimeout(60_000)     // keep a tab whose stream is down after an action
     ->withContextRevivalWindow(600_000)       // rebuild a returning tab
     ->withStrictTabSignals()                  // TAB signals server-owned by default
     ->withPersistentGlobalState(__DIR__ . '/state.db')

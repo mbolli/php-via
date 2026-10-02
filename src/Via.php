@@ -1608,6 +1608,31 @@ class Via {
     }
 
     /**
+     * After an action, destroy a context that has no SSE stream on this worker unless one attaches in time.
+     *
+     * A tab that streams from another worker needs this copy only for its actions, so it gets the connect
+     * timeout. A tab whose stream is down (it dropped, or this action revived the context) reconnects after
+     * the client's backoff, and the patches the action queued wait for it, so it gets the reconnect timeout.
+     *
+     * @internal used by the action handler
+     */
+    public function armActionDeadline(string $contextId): void {
+        // Only a running server has an event loop to fire the timer; a CLI script or test would wait for it.
+        if ($this->server === null || ($this->activeSseCount[$contextId] ?? 0) > 0) {
+            return;
+        }
+
+        $connectMs = $this->config->getContextConnectTimeoutMs();
+        $timeoutMs = isset($this->app->getClients()[$contextId]) ? $connectMs : $this->config->getContextReconnectTimeoutMs();
+        if ($timeoutMs <= 0) {
+            $timeoutMs = $connectMs;
+        }
+        if ($timeoutMs > 0) {
+            $this->scheduleContextCleanup($contextId, $timeoutMs);
+        }
+    }
+
+    /**
      * Rebuild a destroyed context so a returning tab keeps its view instead of hard-reloading.
      *
      * When an SSE reconnect names a context that was already cleaned up, this re-creates it with

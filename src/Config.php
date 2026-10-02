@@ -185,6 +185,12 @@ class Config {
     private int $contextConnectTimeoutMs = 30_000;
 
     /**
+     * How long (milliseconds) a context whose stream is down waits for the browser to reconnect
+     * after an action reached it. 0 uses the connect timeout.
+     */
+    private int $contextReconnectTimeoutMs = 60_000;
+
+    /**
      * How long (milliseconds) after a context is destroyed a returning tab may rebuild an
      * equivalent one (same ID, handler re-run, signals re-seeded from the client) instead of
      * hard-reloading. 0 disables revival, falling back to a full page reload on reconnect.
@@ -683,7 +689,9 @@ class Config {
      * connected) and a context an action rebuilt on a worker the tab does not stream from are
      * destroyed after this long, running their onCleanup/onDisconnect callbacks. An SSE connect
      * cancels the timer, and every action on such a context starts it again. A tab that connects
-     * later than this is rebuilt by revival (see withContextRevivalWindow()).
+     * later than this is rebuilt by revival (see withContextRevivalWindow()). A tab whose stream
+     * dropped is freed after withContextCleanupDelay(), or after withContextReconnectTimeout()
+     * once an action reaches it.
      *
      * @param int $ms Lifetime in milliseconds. Pass 0 to keep such contexts until the worker stops.
      */
@@ -695,6 +703,28 @@ class Config {
 
     public function getContextConnectTimeoutMs(): int {
         return $this->contextConnectTimeoutMs;
+    }
+
+    /**
+     * Configure how long a tab whose stream is down waits for it to reconnect after an action.
+     *
+     * An action that reaches a context without a stream anywhere (its stream dropped, or the action
+     * just revived it) keeps it for this long, and each further action starts the timer again. The
+     * patches the action queued wait in the context, and a freed context takes them with it, so this
+     * must exceed the client's longest wait between reconnect attempts: Datastar backs off to 30 s
+     * by default (retryMaxWait). A copy rebuilt for an action on a worker the tab does not stream
+     * from keeps the connect timeout.
+     *
+     * @param int $ms Wait in milliseconds. Pass 0 to use withContextConnectTimeout().
+     */
+    public function withContextReconnectTimeout(int $ms): self {
+        $this->contextReconnectTimeoutMs = max(0, $ms);
+
+        return $this;
+    }
+
+    public function getContextReconnectTimeoutMs(): int {
+        return $this->contextReconnectTimeoutMs;
     }
 
     /**

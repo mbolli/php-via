@@ -51,6 +51,11 @@ All notable changes to php-via will be documented in this file.
   leaving one copy running with its timers. The later one now returns the registered context.
 - A component's actions could not read the request or set cookies. `input()`, `file()`,
   `cookie()` and `setCookie()` on a component now use its page's request.
+- A tab whose stream was down when an action reached it was freed after the connect timeout (30 s),
+  while Datastar's next reconnect attempt can be 30 s away, and the patches the action queued went
+  with it. It now waits for the new reconnect timeout, 60 s after the last action
+  (`withContextReconnectTimeout()`). [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream)
+  lists which timer frees a context without a stream.
 
 ### Known limitations
 

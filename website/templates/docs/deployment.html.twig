@@ -349,7 +349,9 @@ $config = (new Config())
         or of the revival window, whichever is shorter (150&nbsp;s by default). A context that does not fit
         in the directory is logged, and its actions on other workers answer 400. A copy that an action
         rebuilt on a worker the tab does not stream from is freed after the connect timeout
-        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again.
+        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again. A tab
+        that streams from no worker keeps the reconnect timeout instead
+        (<code>withContextReconnectTimeout()</code>), see <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
     </p>
     <p>
         Each worker keeps the <code>getClients()</code> list it built last, about 2.3&nbsp;KB per client,
