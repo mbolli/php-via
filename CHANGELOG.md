@@ -73,7 +73,8 @@ All notable changes to php-via will be documented in this file.
 - **`signal()` needs a name.** Unnamed signals all shared one object, so two of them on one page
   were the same signal. An empty name throws.
 - **`Signal::text()` is removed** and throws; use `ref()`.
-- **`component()` needs a namespace:** `$c->component($fn, 'cart')`.
+- **`component()` needs a namespace, unique on its page:** `$c->component($fn, 'cart')`. A second
+  component with the same namespace throws, since both would share its signals and actions.
 - **`#[OnDisconnect]` is removed.** A class that uses it throws at `Via::mount()` and
   `component()`. Use `#[OnCleanup]`, which runs at the same moment, when the context is destroyed.
 - **Datastar 1.0.1 to 1.0.4.** PHP code needs no changes, and `starfederation/datastar-php` 1.0.1

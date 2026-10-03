@@ -89,6 +89,16 @@ class ComponentManager {
         // A named component gets the same ID every time its page is built, so a revived page's
         // patches find the wrappers the browser still has.
         if ($namespace !== null) {
+            // Its signal ids and action URLs carry only the namespace, so a second one would share them.
+            $page = $this->getParentPageContext() ?? $context;
+            $taken = self::hasNamespace($page, $namespace)
+                || ($context !== $page && ($context->getNamespace() === $namespace || self::hasNamespace($context, $namespace)));
+            if ($taken) {
+                throw new \InvalidArgumentException(
+                    "A component named '{$namespace}' is already on this page, and both would share its signals and actions. "
+                    . "Give each component() its own namespace, such as '{$namespace}-' . \$key in a loop."
+                );
+            }
             $base = $context->getId() . '/_component/' . mb_substr(md5($namespace), 0, 16);
             $componentId = $base;
             for ($n = 2; isset($this->componentRegistry[$componentId]); ++$n) {
@@ -155,5 +165,18 @@ class ComponentManager {
      */
     public function clearComponents(): void {
         $this->componentRegistry = [];
+    }
+
+    /**
+     * Whether a component under $context, at any depth, has $namespace.
+     */
+    private static function hasNamespace(Context $context, string $namespace): bool {
+        foreach ($context->getComponentRegistry() as $component) {
+            if ($component->getNamespace() === $namespace || self::hasNamespace($component, $namespace)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

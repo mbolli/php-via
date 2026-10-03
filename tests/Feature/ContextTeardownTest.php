@@ -203,13 +203,15 @@ describe('Component IDs', function (): void {
         ;
     });
 
-    test('two components with one name on a page get distinct IDs', function (): void {
+    test('a second component with one name on a page throws and leaves the first in place', function (): void {
         $app = createVia();
         $page = new Context('/p_/abc', '/p', $app);
         $page->component(fn (Context $w) => $w->view(fn (): string => 'a'), 'widget');
-        $page->component(fn (Context $w) => $w->view(fn (): string => 'b'), 'widget');
 
-        expect(array_unique(array_keys($page->getComponentRegistry())))->toHaveCount(2);
+        expect(fn () => $page->component(fn (Context $w) => $w->view(fn (): string => 'b'), 'widget'))
+            ->toThrow(InvalidArgumentException::class, "A component named 'widget' is already on this page")
+            ->and($page->getComponentRegistry())->toHaveCount(1)
+        ;
     });
 });
 

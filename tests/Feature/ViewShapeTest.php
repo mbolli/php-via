@@ -81,6 +81,29 @@ describe('view() shapes', function (): void {
             ->toThrow(ArgumentCountError::class)
         ;
     });
+
+    test('component() refuses a namespace another component on the page has', function (): void {
+        $c = new Context('ctx1', '/p', viewShapeApp());
+        $leaf = fn (Context $k) => $k->view(fn (): string => 'k');
+        $outer = fn (string $inner) => function (Context $o) use ($leaf, $inner): void {
+            $o->component($leaf, $inner);
+            $o->view(fn (): string => 'o');
+        };
+        $c->component($leaf, 'item');
+        $c->component($outer('row'), 'list-a');
+
+        expect(fn () => $c->component($leaf, 'item'))->toThrow(InvalidArgumentException::class, "A component named 'item' is already on this page")
+            ->and(fn () => $c->component($outer('item'), 'list-b'))->toThrow(InvalidArgumentException::class, "'item'")
+            ->and(fn () => $c->component($outer('row'), 'list-c'))->toThrow(InvalidArgumentException::class, "'row'")
+            ->and(fn () => $c->component($leaf, 'list-a'))->toThrow(InvalidArgumentException::class, "'list-a'")
+            ->and(fn () => $c->component($outer('box'), 'box'))->toThrow(InvalidArgumentException::class, "'box'")
+            ->and(fn () => $c->component(function (Context $o) use ($leaf): void {
+                $o->component($leaf, 'cell');
+                $o->component($leaf, 'cell');
+            }, 'grid'))->toThrow(InvalidArgumentException::class, "'cell'")
+            ->and($c->getComponentRegistry())->toHaveCount(2)
+        ;
+    });
 });
 
 describe('shareRender', function (): void {
