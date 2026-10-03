@@ -76,12 +76,18 @@
         PHP's cycle collector frees objects that refer to each other in a loop, and every run walks all live
         objects of the worker, every live context included. PHP starts a run once 10,000 possible roots have
         piled up, raises that threshold after a run that frees nothing and lowers it again after one that frees
-        something. A php-via worker turns those runs off and starts one itself, checked every 100&nbsp;ms, when:
+        something. A php-via worker keeps those runs and also runs the collector every 30&nbsp;s:
+        <code>Config::withGcIntervalMs($ms)</code> sets that interval, and 0 turns the timed runs off.
+    </p>
+    <p>
+        In a burst of page views, or in an app whose requests leave cycles, PHP's runs come often, and each one
+        walks every live context. <code>withGcIntervalMs(30_000, onGrowth: true)</code> turns PHP's runs off, and the
+        worker starts a run itself, checked every 100&nbsp;ms, when:
     </p>
     <ul>
         <li>its memory has grown by half since the last run, and by 32&nbsp;MiB at least,</li>
         <li>half the room that was left below <code>memory_limit</code> after the last run is used,</li>
-        <li>or 30&nbsp;s have passed since the last run and possible roots wait.</li>
+        <li>or the interval, 30&nbsp;s by default, has passed since the last run and possible roots wait.</li>
     </ul>
     <p>
         The collector's work then grows with the memory a worker allocates, not with how many objects its
@@ -92,15 +98,15 @@
         <thead><tr><th>Burst</th><th>Runs</th><th>In the collector</th><th>Longest pause</th></tr></thead>
         <tbody>
             <tr><td>No cycles, PHP's runs</td><td>25</td><td>2.2 to 2.8&nbsp;s</td><td>0.30 to 0.37&nbsp;s</td></tr>
-            <tr><td>No cycles, php-via's runs</td><td>8 to 9</td><td>0.5 to 0.8&nbsp;s</td><td>0.24 to 0.40&nbsp;s</td></tr>
+            <tr><td>No cycles, <code>onGrowth</code></td><td>8 to 9</td><td>0.5 to 0.8&nbsp;s</td><td>0.24 to 0.40&nbsp;s</td></tr>
             <tr><td>A cycle per view, PHP's runs</td><td>201 to 206</td><td>16.0 to 16.2&nbsp;s</td><td>0.19 to 0.27&nbsp;s</td></tr>
-            <tr><td>A cycle per view, php-via's runs</td><td>10</td><td>1.1&nbsp;s</td><td>0.35 to 0.43&nbsp;s</td></tr>
+            <tr><td>A cycle per view, <code>onGrowth</code></td><td>10</td><td>1.1&nbsp;s</td><td>0.35 to 0.43&nbsp;s</td></tr>
         </tbody>
     </table>
     <p>
-        Without cycles, php-via's runs let the worker serve 29,700 views a second instead of 24,600. With a
+        Without cycles, <code>onGrowth</code> let the worker serve 29,700 views a second instead of 24,600. With a
         cycle per view and PHP's runs, it spent 16 of the 20&nbsp;s in the collector and served 128,000 views;
-        with php-via's runs it served all 250,000 in 9&nbsp;s.
+        with <code>onGrowth</code> it served all 250,000 in 9&nbsp;s.
     </p>
     <p class="note">
         Three runs each, held at full clock as above, without Brotli. The longest pause follows the number of
@@ -108,18 +114,17 @@
     </p>
     <p>
         A run still walks every live context, so the longest pause stays about one such walk, and runs that
-        come less often each handle more possible roots. Between runs, cycles can take as much memory as the
+        come less often each handle more possible roots. Between <code>onGrowth</code> runs, cycles can take as much memory as the
         growth that makes a run due: half of what the worker used after the last run and at least 32&nbsp;MiB,
         or half the room left below <code>memory_limit</code> when that is less. A worker of 5&nbsp;MB can thus
         hold more than six times its live memory in cycles.
     </p>
     <p id="cycle-collector-loops">
-        The check runs between coroutines, so a loop that creates cycles without waiting on I/O, such as a
-        CPU-bound import inside one action, frees them only once it ends. If they outgrow the room below
-        <code>memory_limit</code> first, the worker dies with a fatal error and every tab on it with it, where
-        PHP's own runs would have freed them as the loop went. Call <code>gc_collect_cycles()</code> inside such
-        a loop, once per batch of rows say, or keep PHP's runs with <code>withGcIntervalMs(0)</code>.
-        <code>Config::withGcIntervalMs($ms)</code> otherwise sets the longest time between runs.
+        With <code>onGrowth</code>, the check runs between coroutines, so a loop that creates cycles without waiting
+        on I/O, such as a CPU-bound import inside one action, frees them only once it ends. If they outgrow the room
+        below <code>memory_limit</code> first, the worker dies with a fatal error and every tab on it with it, where
+        PHP's own runs would have freed them as the loop went. Turn <code>onGrowth</code> on only where no request
+        runs such a loop, or call <code>gc_collect_cycles()</code> inside it, once per batch of rows say.
     </p>
 
     <h2 id="broadcasts">Keeping broadcasts narrow</h2>

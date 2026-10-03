@@ -587,13 +587,15 @@ returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`) renders a 
 Size the shared context directory for peak open tabs plus peak page views per second times 630.
 The harness is bench/capacity in the repository.
 
-Workers turn PHP's own cycle collector runs off and run it themselves, checked every 100 ms between
-coroutines, when memory has grown by half since the last run (by 32 MiB at least, or by half the
-room left below `memory_limit` when that is less), or after `withGcIntervalMs()` (30 s) while
-possible roots wait. A loop that creates cycles without waiting on I/O, such as a CPU-bound import
-in one action, frees them only once it ends; when they outgrow `memory_limit` first, the worker dies
-with a fatal error and every tab on it with it. Call `gc_collect_cycles()` in such a loop, or keep
-PHP's runs with `withGcIntervalMs(0)`. https://via.zweiundeins.gmbh/docs/performance#cycle-collector
+Workers keep PHP's own cycle collector runs and also run the collector every `withGcIntervalMs()`
+(30 s; 0 for no timed runs). `withGcIntervalMs(30_000, onGrowth: true)` turns PHP's runs off: a worker
+then runs the collector, checked every 100 ms between coroutines, when its memory has grown by half
+since the last run (by 32 MiB at least, or by half the room left below `memory_limit` when that is
+less), or every interval while possible roots wait. In a 250,000-view burst that is 9 runs instead of
+25. A loop that creates cycles without waiting on I/O, such as a CPU-bound import in one action, then
+frees them only once it ends; when they outgrow `memory_limit` first, the worker dies with a fatal
+error and every tab on it with it. Use `onGrowth` only where no request runs such a loop, or call
+`gc_collect_cycles()` in it. https://via.zweiundeins.gmbh/docs/performance#cycle-collector
 
 ---
 
@@ -662,7 +664,7 @@ $config = (new Config())
         forwardMs: 60_000,                    // wait for the worker that holds a tab, then answer 504
     )
     ->withContextDirectorySize(4096, maxTabStateBytes: 1024)
-    ->withGcIntervalMs(30_000)                // cycle collector, see Capacity and memory; 0 = PHP's own runs
+    ->withGcIntervalMs(30_000)                // timed collector runs next to PHP's; onGrowth: true replaces PHP's runs
     ->withStrictTabSignals()                  // TAB signals server-owned by default
     ->withPersistentGlobalState(__DIR__ . '/state.db')
     ->withTrustedOrigins(['https://example.com'])
@@ -741,8 +743,8 @@ OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);
 
 `start()` throws for `hook_flags` with `SWOOLE_HOOK_STDIO` but not `SWOOLE_HOOK_FILE` (includes
 would suspend halfway and concurrent requests fail with "Class not found") and for a
-`RedisBroker` without the socket hook it needs. The dev-mode `/_stats` shows the flags, the
-thread pool and the event loop lag under `runtime`. OpenSwoole 26.2 bugs: Guzzle 7.15's default
+`RedisBroker` without the socket hook it needs. The Dev Bar's Stats panel and the dev-mode `/_stats`
+show the flags, the thread pool and the event loop lag. OpenSwoole 26.2 bugs: Guzzle 7.15's default
 client throws on every request under `SWOOLE_HOOK_NATIVE_CURL` (use its `StreamHandler`); that
 hook leaks about 2.8 KB per request with a header callback on PHP 8.4+; `mysqli_init()` plus a
 failed `real_connect()` crashes the worker (use `new mysqli()` or PDO); Symfony Lock's
@@ -773,7 +775,7 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `<html data-nonce="...">`; without it, it compiles expressions with `Function()`
   (`'unsafe-eval'`) and a nonce policy blocks the scripts of `execScript()` and `dispatch()`.
 - `withDevBar(true)` in production is read-only but shows every visitor's traces, scopes and
-  context ids to anyone who opens a page.
+  context ids, and the server's stats (`/_via/stats`), to anyone who opens a page.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
 
 ---

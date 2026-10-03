@@ -400,8 +400,8 @@ $app->start();
     <h3 id="hooks-check">Checking the flags at runtime</h3>
     <p>
         <code>OpenSwoole\Runtime::getHookFlags()</code> returns the flags in effect in a worker; test one hook
-        with <code>(OpenSwoole\Runtime::getHookFlags() &amp; SWOOLE_HOOK_FILE) !== 0</code>. In dev mode,
-        <code>/_stats</code> reports them under <code>runtime</code>, with the worker's thread pool
+        with <code>(OpenSwoole\Runtime::getHookFlags() &amp; SWOOLE_HOOK_FILE) !== 0</code>. The Dev Bar's Stats panel
+        shows them wherever the Dev Bar is on. In dev mode, <code>/_stats</code> reports them under <code>runtime</code>, with the worker's thread pool
         (<code>aio_worker_num</code> threads, <code>aio_task_num</code> tasks) and its event loop lag, which
         grows when a call blocks the worker:
     </p>
@@ -556,7 +556,7 @@ $app->page('/', function (Context $c): void {
         The Dev Bar is off outside dev mode, and its endpoints answer 404. <code>withDevBar(true)</code> turns it on in
         production, read-only: signal writes stay off whatever <code>withDevBarOptions(writes:)</code> says. Read-only does
         not mean private. Everyone who opens a page sees the traces, logs, scopes and context ids of every visitor's tabs,
-        with SESSION scopes as hashes. Its endpoints under <code>/_via/</code> do not pass through
+        with SESSION scopes as hashes, and the server's request counts and runtime figures in the Stats panel. Its endpoints under <code>/_via/</code> do not pass through
         your middleware, so keep it off on a site where that is too much, or block <code>/_via</code>, <code>/_via/*</code>
         and <code>/_traces</code> for other visitors in the proxy. See <a href="/docs/dev-bar">Dev Bar</a>.
     </p>
@@ -749,8 +749,9 @@ myapp.example.com {
         per second &times; 630; the default 4&nbsp;096 rows (about 8&nbsp;000 in practice) covers about
         12 page views per second. When it is full, new contexts get no row and a warning is logged at most
         every 10&nbsp;s per worker; those tabs work, but their actions on other workers answer 400. With
-        <code>withContextTimeouts(revivalWindowMs: 0)</code> no rows are written, so no worker knows where a tab
-        lives: keep revival on with more than one worker.
+        <code>withContextTimeouts(revivalWindowMs: 0)</code> a row holds only the tab's worker and goes when the
+        context is destroyed: actions on other workers still reach the tab, but a stream that reaches another worker
+        reloads the page, since no worker rebuilds a tab.
     </p>
     <p>
         Session data takes one row per session that holds data, with all of its keys, and
