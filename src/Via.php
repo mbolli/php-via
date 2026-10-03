@@ -262,6 +262,9 @@ class Via {
     private ?Tracer $tracer = null;
     private ?LogBuffer $logBuffer = null;
     private ?Injector $devBarInjector = null;
+
+    /** The last update decorateUpdate() left as it was: a fan-out of a shared render passes it for every tab. */
+    private string $plainUpdate = '';
     private ViewCache $viewCache;
     private ViewRenderer $viewRenderer;
     private HtmlBuilder $htmlBuilder;
@@ -2066,15 +2069,20 @@ class Via {
      * @internal Used by PatchManager during sync
      */
     public function decorateUpdate(string $html, Context $context): string {
-        if ($context->getComponentManager()->isComponent()) {
+        if ($html === $this->plainUpdate || $context->getComponentManager()->isComponent()) {
             return $html;
         }
 
-        if (stripos($html, '<html') !== false) {
+        $isDocument = stripos($html, '<html') !== false;
+        if ($isDocument) {
             $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
         }
 
         if ($this->devBarInjector === null || stripos($html, '</body>') === false) {
+            if (!$isDocument) {
+                $this->plainUpdate = $html;
+            }
+
             return $html;
         }
 
