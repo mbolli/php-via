@@ -968,18 +968,22 @@ class Context {
 
     /**
      * Register an action shared by every context of $scope, as #[Action(scope: ...)] does. The first callback
-     * registered for a name in a scope serves the whole scope and receives the context that posts it.
+     * registered for an id in a scope serves the whole scope and receives the context that posts it and the id.
      *
      * @internal used by PageMount
+     *
+     * @param callable(Context, string): void $fn
      */
     public function scopedAction(callable $fn, string $name, string $scope): Action {
         $actionScope = Scope::resolve($scope, $this, '#[Action(scope: ...)]');
+        // The id holds no context id, so a shared render carries the same URL for every context. A component's
+        // namespace is in it, as in action(), so two components that declare one name keep apart.
+        $namespace = $this->getNamespace();
+        $actionId = $namespace !== null ? $namespace . '-' . $name : $name;
         if ($actionScope === Scope::TAB) {
-            return $this->action($fn, $name);
+            return $this->action(static fn (Context $caller) => $fn($caller, $actionId), $name);
         }
 
-        // The name is the id, so a shared render carries the same URL for every context
-        $actionId = $name;
         $action = new Action($actionId, $this->getConfig()->getBasePath());
         $this->namedActions[$name] = $action;
 
@@ -990,7 +994,7 @@ class Context {
         }
 
         $this->app->log('debug', "[{$this->getId()}] Registering new action {$actionId} in scope {$actionScope}", $this);
-        $this->app->registerScopedAction($actionScope, $actionId, $fn);
+        $this->app->registerScopedAction($actionScope, $actionId, static fn (Context $caller) => $fn($caller, $actionId));
 
         return $action;
     }

@@ -233,7 +233,7 @@ describe('Composition actions', function (): void {
         }
         $componentId = static fn (Context $page): string => array_values($page->getComponentRegistry())[0]->getId();
 
-        $pages['B']->executeAction('bumpRoute');
+        $pages['B']->executeAction('card-bumpRoute');
 
         expect(SemanticsScopedActionPage::$ran)->toBe([$componentId($pages['B']) . '@' . $componentId($pages['B'])]);
     });

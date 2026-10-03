@@ -157,4 +157,25 @@ describe('SESSION actions', function (): void {
             ->and($app->getScopedActions(Scope::sessionScope(RESOLVER_SID_A)))->toHaveKey('bump')
         ;
     });
+
+    test('a SESSION action is dropped with the last tab of its session', function (): void {
+        $app = createVia();
+        $app->mount(ResolverSessionActionPage::class, '/s');
+        $handler = $app->getRouter()->getRoutes()['/s'];
+        foreach (['A', 'B'] as $id) {
+            $ctx = new Context($id, '/s', $app, null, RESOLVER_SID_A);
+            $app->contexts[$id] = $ctx;
+            $app->getApp()->registerContext($ctx);
+            $app->registerContextInScope($ctx, Scope::TAB);
+            $app->invokeHandlerWithParams($handler, $ctx, []);
+        }
+
+        $app->getApp()->destroyContext('A');
+        $afterFirst = $app->getScopedActions(Scope::sessionScope(RESOLVER_SID_A));
+        $app->getApp()->destroyContext('B');
+
+        expect($afterFirst)->toHaveKey('bump')
+            ->and($app->getScopedActions(Scope::sessionScope(RESOLVER_SID_A)))->toBe([])
+        ;
+    });
 });

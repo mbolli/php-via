@@ -238,9 +238,25 @@ describe('#[Action] runs on the calling context\'s instance', function (): void 
         $p2->component(PmScopedWidget::class, 'w');
         $component = (string) array_key_first($p2->getComponentRegistry());
 
-        $p2->executeAction('vote');
+        $p2->executeAction('w-vote');
 
         expect(PageMountLog::$calls)->toBe([[$component, $component]]);
+    });
+
+    test('two components of one class each run their own scoped action', function (): void {
+        $app = pageMountApp();
+        $page = new Context('P', '/p', $app, null, 's1');
+        $page->component(PmScopedWidget::class, 'cats');
+        $page->component(PmScopedWidget::class, 'dogs');
+        [$cats, $dogs] = array_values($page->getComponentRegistry());
+
+        $page->executeAction('dogs-vote');
+        $page->executeAction('cats-vote');
+
+        expect(PageMountLog::$calls)->toBe([[$dogs->getId(), $dogs->getId()], [$cats->getId(), $cats->getId()]])
+            ->and($cats->getAction('vote')?->url())->toBe('/_action/cats-vote')
+            ->and($dogs->getAction('vote')?->url())->toBe('/_action/dogs-vote')
+        ;
     });
 
     test('a scoped action keeps no instance alive once its context is gone', function (): void {

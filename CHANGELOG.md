@@ -219,14 +219,17 @@ All notable changes to php-via will be documented in this file.
   answered 500 "Action not found".
 - Composition actions ran on the first tab's instance under `#[Broadcast]` or
   `#[Action(scope: ...)]`, so one tab's click changed another tab's properties. Each tab's own
-  instance runs now, and a scoped action no longer keeps the first tab's instance alive.
+  instance runs now, and a scoped action no longer keeps the first tab's instance alive. A
+  component's scoped action URL starts with its namespace, as a per-tab action's does, so two
+  components of one class no longer both run the first.
 - `#[Broadcast]` dropped the scopes of the class's scoped `#[Signal]` properties, so their writes
   never reached the page.
 - Property changes an `#[Action]` method made before it threw were lost. They reach their signals
   now, as a closure action's writes do.
 - `addScope(Scope::ROUTE)` and `addScope(Scope::SESSION)` joined the literal scopes `route` and
   `session`.
-- SESSION-scoped actions were never found.
+- SESSION-scoped actions were never found. Their tab joins its session's scope now, as for a
+  custom scope.
 - SESSION and custom-scope signals declared in a page closure reached no tab unless the page also
   called `addScope()`.
 - Components had no session: `getSessionId()` returned null, session data went nowhere, and a class

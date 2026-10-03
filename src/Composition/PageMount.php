@@ -49,12 +49,13 @@ final class PageMount {
                     continue;
                 }
 
-                self::bindScoped($ctx, $name, $run);
-                $ctx->scopedAction(static function (Context $caller) use ($name): void {
-                    self::runScoped($caller, $name);
+                $action = $ctx->scopedAction(static function (Context $caller, string $actionId): void {
+                    self::runScoped($caller, $actionId);
                 }, $name, $scope);
-                // Context::executeAction() looks in the ROUTE, GLOBAL and session scopes without membership.
-                if ($scope !== Scope::ROUTE && $scope !== Scope::GLOBAL && $scope !== Scope::SESSION) {
+                self::bindScoped($ctx, $action->id(), $run);
+                // ROUTE and GLOBAL actions are found without membership. A session or custom scope is joined,
+                // so that its registration goes with the scope's last context.
+                if ($scope !== Scope::ROUTE && $scope !== Scope::GLOBAL) {
                     $joinScopes[] = $scope;
                 }
             }
@@ -73,7 +74,7 @@ final class PageMount {
             }
             // #[Persist] → no signal, pure instance property
 
-            // 5. Join the custom scopes of scoped actions, so that executeAction() finds them.
+            // 5. Join the session and custom scopes of scoped actions, so that executeAction() finds them.
             foreach (array_unique($joinScopes) as $scope) {
                 $ctx->addScope($scope);
             }
@@ -132,7 +133,7 @@ final class PageMount {
     /**
      * @param \Closure(Context): void $run
      */
-    private static function bindScoped(Context $ctx, string $name, \Closure $run): void {
+    private static function bindScoped(Context $ctx, string $actionId, \Closure $run): void {
         $runners = self::scopedRunners();
         if (!isset($runners[$ctx])) {
             // Dropped with the context's other action callbacks, so an instance that keeps its
@@ -142,7 +143,7 @@ final class PageMount {
             });
             $runners[$ctx] = [];
         }
-        $runners[$ctx] = [...$runners[$ctx], $name => $run];
+        $runners[$ctx] = [...$runners[$ctx], $actionId => $run];
     }
 
     /**
@@ -150,25 +151,25 @@ final class PageMount {
      *
      * @throws \RuntimeException if neither the caller nor one of its components mounted it
      */
-    private static function runScoped(Context $caller, string $name): void {
-        [$owner, $run] = self::findScopedRunner($caller, $name)
-            ?? throw new \RuntimeException("Action not found: {$name} (no instance on this context declares it)");
+    private static function runScoped(Context $caller, string $actionId): void {
+        [$owner, $run] = self::findScopedRunner($caller, $actionId)
+            ?? throw new \RuntimeException("Action not found: {$actionId} (no instance on this context declares it)");
         $run($owner);
     }
 
     /**
-     * The caller's runner for $name, else the first component's: Context::executeAction() tries
-     * the page's ROUTE and GLOBAL actions before its components'.
+     * The caller's runner for $actionId, else its component's: Context::executeAction() tries
+     * the page's ROUTE and GLOBAL actions before its components'. A component's id carries its namespace.
      *
      * @return null|array{Context, \Closure(Context): void}
      */
-    private static function findScopedRunner(Context $ctx, string $name): ?array {
-        $run = self::scopedRunners()[$ctx][$name] ?? null;
+    private static function findScopedRunner(Context $ctx, string $actionId): ?array {
+        $run = self::scopedRunners()[$ctx][$actionId] ?? null;
         if ($run !== null) {
             return [$ctx, $run];
         }
         foreach ($ctx->getComponentRegistry() as $component) {
-            $found = self::findScopedRunner($component, $name);
+            $found = self::findScopedRunner($component, $actionId);
             if ($found !== null) {
                 return $found;
             }
