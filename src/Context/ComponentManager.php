@@ -116,6 +116,8 @@ class ComponentManager {
         $fn($componentContext);
 
         $this->componentRegistry[$componentId] = $componentContext;
+        // Scopes it joined in $fn, before it was listed here, count for a page already connected.
+        $this->app->getApp()->refreshClientScopes($this->getParentPageContext() ?? $context);
 
         return function () use ($componentContext, $componentId): string {
             $html = $componentContext->renderView();

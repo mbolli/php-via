@@ -247,6 +247,9 @@ message that names the new one.
 - **`$c->dispatch($event, $detail)`** fires a CustomEvent on the browser's window with a
   JSON-encoded detail, for toasts and the like, in place of a script built by hand for
   `execScript()`. Listen with `data-on:toast__window`.
+- **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on every
+  worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples use it
+  to tell whether anyone is watching.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
   actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.

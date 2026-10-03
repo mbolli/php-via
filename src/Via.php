@@ -796,6 +796,7 @@ class Via {
      */
     public function registerContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->registerContext($context, $scope);
+        $this->app->refreshClientScopes($context->getPageContext());
     }
 
     /**
@@ -805,6 +806,7 @@ class Via {
      */
     public function unregisterContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->unregisterContext($context, $scope);
+        $this->app->refreshClientScopes($context->getPageContext());
     }
 
     /**
@@ -817,6 +819,24 @@ class Via {
      */
     public function getLocalContexts(string $scope): array {
         return $this->scopeRegistry->getContextsByScope($scope);
+    }
+
+    /**
+     * How many tabs with an open stream a broadcast of $scope reaches, on every worker: whether anyone is watching.
+     *
+     * A tab is in a scope when its page or one of its components joined it, with scope(), addScope() or a scoped
+     * signal, and in Scope::routeScope('/path') when it is on that route. Scope::GLOBAL counts every connected tab,
+     * and a wildcard such as 'room:*' each tab in a matching scope once. A tab counts from its SSE connect until its
+     * stream closes, so unlike getLocalContexts() it leaves out a page that has not connected yet. With one worker
+     * this worker's tabs are all; with more it reads the shared client registry, as getClients() does, which holds
+     * 512 bytes of scopes per tab.
+     *
+     * @param string $scope a resolved scope, as for broadcast(): Scope::routeScope('/path'), not Scope::ROUTE
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
+     */
+    public function countClients(string $scope): int {
+        return $this->app->countClients(Scope::resolve($scope, null, 'Via::countClients()'), $this->readEpochs->current());
     }
 
     /**

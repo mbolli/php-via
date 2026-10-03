@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SharedClientRegistry;
@@ -59,6 +60,15 @@ class Application {
 
     /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}> Client info by context ID */
     private array $clients = [];
+
+    /** @var array<string, list<string>> The scopes a broadcast reaches each connected client through, by context ID */
+    private array $clientScopes = [];
+
+    /** @var null|array<string, array<string, true>> The client scopes by scope, built when countClients() needs it */
+    private ?array $clientScopeIndex = null;
+
+    /** Whether a client's scopes were too many for the shared registry, which is logged once. */
+    private bool $clientScopesOverflowReported = false;
 
     /** @var array<string, mixed> Global state shared across all routes and clients */
     private array $globalState = [];
@@ -200,6 +210,10 @@ class Application {
      */
     public function registerClient(string $contextId, array $clientInfo): void {
         $this->clients[$contextId] = $clientInfo + ['context_id' => $contextId];
+        $context = $this->contexts[$contextId] ?? null;
+        $scopes = $context === null ? [] : $this->reachedScopes($context);
+        $this->clientScopes[$contextId] = $scopes;
+        $this->clientScopeIndex = null;
 
         // The identicon is not published: it is derived from the ID, so every worker can
         // regenerate it rather than store 1.5 KB of SVG per client.
@@ -207,7 +221,8 @@ class Application {
             $contextId,
             $clientInfo['id'],
             $clientInfo['ip'],
-            $clientInfo['connected_at']
+            $clientInfo['connected_at'],
+            $scopes,
         );
 
         if ($registered === false) {
@@ -220,7 +235,55 @@ class Application {
      */
     public function unregisterClient(string $contextId): void {
         $this->clientRegistry?->unregister($contextId);
-        unset($this->clients[$contextId]);
+        unset($this->clients[$contextId], $this->clientScopes[$contextId]);
+        $this->clientScopeIndex = null;
+    }
+
+    /**
+     * Note the scopes of a connected page again after it or one of its components joined or left one.
+     *
+     * @internal called when a context's scopes change
+     */
+    public function refreshClientScopes(Context $page): void {
+        $contextId = $page->getId();
+        if (!isset($this->clients[$contextId]) || ($this->contexts[$contextId] ?? null) !== $page) {
+            return;
+        }
+
+        $scopes = $this->reachedScopes($page);
+        if ($scopes === ($this->clientScopes[$contextId] ?? null)) {
+            return;
+        }
+        $this->clientScopes[$contextId] = $scopes;
+        $this->clientScopeIndex = null;
+        $this->clientRegistry?->setScopes($contextId, $scopes);
+    }
+
+    /**
+     * How many connected clients a broadcast of $scope reaches: across workers with the shared registry, else on
+     * this worker. See Via::countClients().
+     *
+     * @param string $scope     a resolved scope, wildcards allowed
+     * @param int    $readEpoch the caller's fan-out read epoch, or 0; see SharedClientRegistry::all()
+     */
+    public function countClients(string $scope, int $readEpoch = 0): int {
+        if ($scope === Scope::GLOBAL) {
+            return \count($this->getClients($readEpoch));
+        }
+
+        $index = $this->clientRegistry?->scopeIndex($readEpoch) ?? $this->localClientScopeIndex();
+        if (!str_contains($scope, '*')) {
+            return \count($index[$scope] ?? []);
+        }
+
+        $matched = [];
+        foreach ($index as $joined => $contextIds) {
+            if (Scope::matches($joined, $scope)) {
+                $matched += $contextIds;
+            }
+        }
+
+        return \count($matched);
     }
 
     /**
@@ -676,6 +739,55 @@ class Application {
         } catch (\Throwable $e) {
             $this->logger->log('error', "Context cleanup failed for {$contextId}: " . Logger::describe($e));
         }
+    }
+
+    /**
+     * The scopes a broadcast reaches a page through, its route's first: the scopes it and its components joined.
+     *
+     * @return list<string>
+     */
+    private function reachedScopes(Context $page): array {
+        $scopes = [Scope::routeScope($page->getRoute()) => true];
+        self::collectJoinedScopes($page, $scopes);
+        $scopes = array_keys($scopes);
+
+        if ($this->clientRegistry !== null && !$this->clientScopesOverflowReported && \strlen(implode("\n", $scopes)) > SharedClientRegistry::SCOPES_BYTES) {
+            $this->clientScopesOverflowReported = true;
+            $this->logger->log('warning', "The scopes of {$page->getId()} take more than " . SharedClientRegistry::SCOPES_BYTES . ' bytes, so countClients() on other workers leaves it out of the last ones: ' . implode(', ', $scopes));
+        }
+
+        return $scopes;
+    }
+
+    /**
+     * @param array<string, true> $scopes the scopes $context and its components joined are added to
+     */
+    private static function collectJoinedScopes(Context $context, array &$scopes): void {
+        foreach ($context->getScopes() as $scope) {
+            if ($scope !== Scope::TAB) {
+                $scopes[$scope] = true;
+            }
+        }
+        foreach ($context->getComponentRegistry() as $component) {
+            self::collectJoinedScopes($component, $scopes);
+        }
+    }
+
+    /**
+     * @return array<string, array<string, true>> scope => the context IDs of this worker's clients in it
+     */
+    private function localClientScopeIndex(): array {
+        if ($this->clientScopeIndex === null) {
+            $this->clientScopes = array_intersect_key($this->clientScopes, $this->clients);
+            $this->clientScopeIndex = [];
+            foreach ($this->clientScopes as $contextId => $scopes) {
+                foreach ($scopes as $scope) {
+                    $this->clientScopeIndex[$scope][$contextId] = true;
+                }
+            }
+        }
+
+        return $this->clientScopeIndex;
     }
 
     /**

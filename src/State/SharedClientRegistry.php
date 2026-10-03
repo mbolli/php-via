@@ -33,8 +33,14 @@ use OpenSwoole\Table;
  *
  * Every change bumps a version shared by all workers. Each worker keeps the list it built last
  * and returns it until the version moves, then rebuilds it, reusing the identicons it already made.
+ *
+ * A row also holds the scopes a broadcast reaches the tab through, for Via::countClients(): as many
+ * whole scopes as fit in SCOPES_BYTES.
  */
 final class SharedClientRegistry {
+    /** Room for a client's scopes, separated by newlines. */
+    public const int SCOPES_BYTES = 512;
+
     /** Most scans a removal makes while other workers keep writing to the table. */
     private const int MAX_REMOVAL_SCANS = 5;
 
@@ -48,6 +54,9 @@ final class SharedClientRegistry {
 
     /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}> */
     private array $snapshot = [];
+
+    /** @var array<string, array<string, true>> Scope => the context ids of the snapshot in it */
+    private array $scopeIndex = [];
 
     /** Version $snapshot was read at; -1 before the first read. */
     private int $snapshotVersion = -1;
@@ -69,6 +78,7 @@ final class SharedClientRegistry {
         $table->column('at', Table::TYPE_INT, 8);
         $table->column('wid', Table::TYPE_INT, 8);
         $table->column('pid', Table::TYPE_INT, 8);
+        $table->column('scopes', Table::TYPE_STRING, self::SCOPES_BYTES);
         $table->create();
         $this->table = $table;
         $this->version = new Long(0);
@@ -114,9 +124,11 @@ final class SharedClientRegistry {
     /**
      * Record a connected client, owned by this process.
      *
+     * @param list<string> $scopes the scopes a broadcast reaches it through; those past SCOPES_BYTES are left out
+     *
      * @return bool false when the table is full, which costs an inaccurate list and must not fail the SSE connection
      */
-    public function register(string $contextId, string $clientId, string $ip, int $connectedAt): bool {
+    public function register(string $contextId, string $clientId, string $ip, int $connectedAt, array $scopes = []): bool {
         try {
             $this->table->set(self::key($contextId, $this->workerId, getmypid()), [
                 'ctx' => $contextId,
@@ -125,6 +137,7 @@ final class SharedClientRegistry {
                 'at' => $connectedAt,
                 'wid' => $this->workerId,
                 'pid' => getmypid(),
+                'scopes' => self::packScopes($scopes),
             ]);
         } catch (Exception) {
             return false;
@@ -132,6 +145,33 @@ final class SharedClientRegistry {
         $this->changed();
 
         return true;
+    }
+
+    /**
+     * Replace the scopes of the client this process registered for a context.
+     *
+     * @param list<string> $scopes as for register()
+     */
+    public function setScopes(string $contextId, array $scopes): void {
+        $key = self::key($contextId, $this->workerId, getmypid());
+        if (!$this->table->exists($key)) {
+            return;
+        }
+        $this->table->set($key, ['scopes' => self::packScopes($scopes)]);
+        $this->changed();
+    }
+
+    /**
+     * The clients of all() by scope, from the same read.
+     *
+     * @param int $readEpoch as for all()
+     *
+     * @return array<string, array<string, true>> scope => context ids
+     */
+    public function scopeIndex(int $readEpoch = 0): array {
+        $this->all($readEpoch);
+
+        return $this->scopeIndex;
     }
 
     /**
@@ -228,6 +268,7 @@ final class SharedClientRegistry {
     private function scan(): array {
         $previous = $this->snapshot;
         $clients = [];
+        $scopes = [];
 
         foreach ($this->table as $row) {
             $contextId = (string) $row['ctx'];
@@ -236,6 +277,7 @@ final class SharedClientRegistry {
             if (isset($clients[$contextId]) && $clients[$contextId]['connected_at'] > $connectedAt) {
                 continue;
             }
+            $scopes[$contextId] = (string) $row['scopes'];
 
             $clientId = (string) $row['id'];
             $known = $previous[$contextId] ?? null;
@@ -252,7 +294,31 @@ final class SharedClientRegistry {
             ];
         }
 
+        $this->scopeIndex = [];
+        foreach ($scopes as $contextId => $packed) {
+            foreach ($packed === '' ? [] : explode("\n", $packed) as $scope) {
+                $this->scopeIndex[$scope][$contextId] = true;
+            }
+        }
+
         return $clients;
+    }
+
+    /**
+     * The scopes joined by newlines, as many whole ones as fit in SCOPES_BYTES.
+     *
+     * @param list<string> $scopes
+     */
+    private static function packScopes(array $scopes): string {
+        $packed = '';
+        foreach ($scopes as $scope) {
+            $next = $packed === '' ? $scope : $packed . "\n" . $scope;
+            if (\strlen($next) <= self::SCOPES_BYTES) {
+                $packed = $next;
+            }
+        }
+
+        return $packed;
     }
 
     /** After a write by this process: tell every worker, and stop reusing a pinned list. */
