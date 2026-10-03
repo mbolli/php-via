@@ -233,3 +233,75 @@ describe('Scope state after a component is released', function (): void {
         expect($app->getScopedSignalByName('widgets', 'clicks', 'widget')?->int())->toBe(7);
     });
 });
+
+describe('Cycle-free teardown', function (): void {
+    test('a destroyed context is freed by its last reference and leaves no garbage for the cycle collector', function (): void {
+        $app = createVia();
+        $handlers = [
+            '/counter' => function (Context $c): void {
+                $count = $c->signal(0, 'count');
+                $inc = $c->action(function (Context $ctx) use ($count): void {
+                    $count->setValue($count->int() + 1);
+                    $ctx->sync();
+                }, 'inc');
+                $c->view(fn (): string => '<div id="counter">' . $count->int() . $inc->url() . '</div>');
+            },
+            '/components' => function (Context $c): void {
+                $widget = $c->component(function (Context $w): void {
+                    $n = $w->signal(1, 'n');
+                    $inner = $w->component(fn (Context $x) => $x->view(fn (): string => 'inner'));
+                    $w->action(fn () => $n->setValue(2), 'bump');
+                    $w->view(fn (): string => 'widget ' . $n->int() . $inner());
+                }, 'widget');
+                $shared = $c->component(function (Context $w) use ($c): void {
+                    $w->scope('widgets');
+                    $w->view(fn (): string => 'shared on ' . $c->getId());
+                });
+                $c->view(fn (): string => '<div id="page">' . $widget() . $shared() . '</div>');
+            },
+            '/room' => function (Context $c): void {
+                $c->scope('room:1');
+                $c->onDisconnect(fn () => $c->getId());
+                $c->view(fn (): string => '<div id="room">room</div>');
+            },
+        ];
+        $wasEnabled = gc_enabled();
+        // No collector run may free what refcounting alone has to.
+        gc_disable();
+
+        try {
+            gc_collect_cycles();
+            $collectedBefore = gc_status()['collected'];
+            $refs = [];
+            foreach ($handlers as $route => $handler) {
+                for ($i = 0; $i < 50; ++$i) {
+                    $ctx = teardownMintPage($app, $route, $handler);
+                    $id = $ctx->getId();
+                    $app->contexts[$id] = $ctx;
+                    $app->buildHtmlDocument($ctx);
+                    $app->scheduleContextCleanup($id, 60_000);
+                    foreach ([$ctx, ...array_values($ctx->getComponentRegistry())] as $owner) {
+                        foreach ($owner->getNamedActions() as $action) {
+                            $ctx->executeAction($action->id());
+                        }
+                        $refs[] = WeakReference::create($owner);
+                    }
+                    $ctx->sync();
+                    while ($ctx->getPatch() !== null);
+                    unset($ctx, $owner, $action);
+
+                    $app->getApp()->destroyContext($id);
+                }
+            }
+
+            expect(array_filter($refs, static fn (WeakReference $ref): bool => $ref->get() !== null))->toBe([])
+                ->and(gc_collect_cycles())->toBe(0)
+                ->and(gc_status()['collected'] - $collectedBefore)->toBe(0)
+            ;
+        } finally {
+            if ($wasEnabled) {
+                gc_enable();
+            }
+        }
+    });
+});

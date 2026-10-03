@@ -25,8 +25,11 @@ class ContextLifecycle {
     /** @var array<int> Timer IDs created by this context */
     private array $timerIds = [];
 
+    /**
+     * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
+     */
     public function __construct(
-        private Context $context,
+        private \WeakReference $context,
         private Via $via,
     ) {}
 
@@ -52,7 +55,7 @@ class ContextLifecycle {
             try {
                 $callback(...$args);
             } catch (\Throwable $e) {
-                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $this->context);
+                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $this->context->get());
             }
         });
         $this->timerIds[] = $timerId;
@@ -64,6 +67,8 @@ class ContextLifecycle {
      * Execute cleanup callbacks and release resources.
      */
     public function cleanup(): void {
+        $context = $this->context->get() ?? throw new \LogicException('Cleanup of a freed context');
+
         // Clear all timers first
         foreach ($this->timerIds as $timerId) {
             Timer::clear($timerId);
@@ -72,7 +77,7 @@ class ContextLifecycle {
 
         foreach ($this->cleanupCallbacks as $callback) {
             try {
-                $callback($this->context);
+                $callback($context);
             } catch (\Throwable $e) {
                 error_log('Cleanup callback error: ' . $e->getMessage());
             }

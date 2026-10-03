@@ -29,8 +29,11 @@ class SignalFactory {
     /** @var array<string, true> Re-declaration warnings already logged, keyed by kind and name */
     private array $redeclarationWarned = [];
 
+    /**
+     * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
+     */
     public function __construct(
-        private Context $context,
+        private \WeakReference $context,
         private Via $app,
     ) {}
 
@@ -49,10 +52,11 @@ class SignalFactory {
      */
     public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         $baseName = $name ?? 'signal';
+        $context = $this->context();
 
         // If no explicit scope provided, inherit from context's primary scope
         if ($scope === null) {
-            $contextScope = $this->context->getPrimaryScope();
+            $contextScope = $context->getPrimaryScope();
             // Only inherit if context has a non-TAB scope
             if ($contextScope !== Scope::TAB) {
                 $scope = $contextScope;
@@ -66,12 +70,12 @@ class SignalFactory {
         // The literal bucket is also shared across every route, so two routes using
         // this form collide on signal ids.
         if ($scope === Scope::ROUTE) {
-            $scope = Scope::routeScope($this->context->getRoute());
+            $scope = Scope::routeScope($context->getRoute());
         }
 
         // Resolve SESSION scope to actual session ID
         if ($scope === Scope::SESSION) {
-            $sessionId = $this->context->getSessionId();
+            $sessionId = $context->getSessionId();
             if ($sessionId === null) {
                 throw new \RuntimeException('Cannot use SESSION scope without session ID');
             }
@@ -83,7 +87,7 @@ class SignalFactory {
         if ($scope !== null && $scope !== Scope::TAB) {
             // Scoped signal: shared across contexts in this scope. The component namespace is part
             // of the id, so sibling instances (cats, dogs) get independent but shared counters.
-            $signalId = SignalId::scoped($scope, $this->context->getNamespace(), $baseName);
+            $signalId = SignalId::scoped($scope, $context->getNamespace(), $baseName);
 
             // Check if signal already exists in this scope
             $existingSignal = $this->app->getScopedSignal($scope, $signalId);
@@ -111,7 +115,7 @@ class SignalFactory {
 
         // TAB scope: context-specific signal, not shared
         // A namespace of '' or '0' counts as none here, as it always has for TAB signals.
-        $signalId = SignalId::tab($this->context->getNamespace() ?: null, $baseName, $this->context->getId());
+        $signalId = SignalId::tab($context->getNamespace() ?: null, $baseName, $context->getId());
 
         if (isset($this->signals[$signalId])) {
             $existing = $this->signals[$signalId];
@@ -170,7 +174,7 @@ class SignalFactory {
         $signals = $this->signals; // TAB-scoped signals
 
         // Add scoped signals from all scopes this context belongs to
-        foreach ($this->context->getScopes() as $scope) {
+        foreach ($this->context()->getScopes() as $scope) {
             $scopedSignals = $this->app->getScopedSignals($scope);
             foreach ($scopedSignals as $signalId => $signal) {
                 $signals[$signalId] = $signal;
@@ -235,6 +239,7 @@ class SignalFactory {
      * @param array<string, mixed> $flat
      */
     public function injectFlat(array $flat): void {
+        $context = $this->context();
         foreach ($flat as $signalId => $value) {
             if (isset($this->signals[$signalId])) {
                 $signal = $this->signals[$signalId];
@@ -249,7 +254,7 @@ class SignalFactory {
                 continue;
             }
 
-            foreach ($this->context->getScopes() as $scope) {
+            foreach ($context->getScopes() as $scope) {
                 $signal = $this->app->getScopedSignal($scope, $signalId);
                 if ($signal !== null) {
                     if ($signal->isClientWritable()) {
@@ -266,7 +271,7 @@ class SignalFactory {
             return;
         }
 
-        foreach ($this->context->getComponentManager()->getComponents() as $component) {
+        foreach ($context->getComponentManager()->getComponents() as $component) {
             $component->getSignalFactory()->injectFlat($flat);
         }
     }
@@ -276,6 +281,10 @@ class SignalFactory {
      */
     public function clearSignals(): void {
         $this->signals = [];
+    }
+
+    private function context(): Context {
+        return $this->context->get() ?? throw new \LogicException('Signal factory of a freed context');
     }
 
     /**
@@ -291,7 +300,7 @@ class SignalFactory {
                 $name,
                 self::describeValue($initialValue),
                 self::describeValue($live),
-            ), $this->context);
+            ), $this->context());
         }
 
         if ($clientWritable !== null && $clientWritable !== $existing->isClientWritable() && !isset($this->redeclarationWarned['writable:' . $name])) {
@@ -301,7 +310,7 @@ class SignalFactory {
                 $name,
                 var_export($clientWritable, true),
                 var_export($existing->isClientWritable(), true),
-            ), $this->context);
+            ), $this->context());
         }
     }
 
@@ -365,13 +374,14 @@ class SignalFactory {
             return true;
         }
 
-        foreach ($this->context->getScopes() as $scope) {
+        $context = $this->context();
+        foreach ($context->getScopes() as $scope) {
             if ($this->app->getScopedSignal($scope, $signalId) !== null) {
                 return true;
             }
         }
 
-        foreach ($this->context->getComponentManager()->getComponents() as $component) {
+        foreach ($context->getComponentManager()->getComponents() as $component) {
             if ($component->getSignalFactory()->ownsSignalId($signalId)) {
                 return true;
             }

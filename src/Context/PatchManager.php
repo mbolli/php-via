@@ -42,12 +42,18 @@ class PatchManager {
     /** Whether the last getPatch() found the channel closed rather than merely idle. */
     private bool $channelClosed = false;
 
+    private string $contextId;
+
+    /**
+     * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
+     */
     public function __construct(
-        private Context $context,
+        private \WeakReference $context,
         private Via $app,
         private SignalFactory $signalFactory,
         private ComponentManager $componentManager,
     ) {
+        $this->contextId = $context->get()?->getId() ?? '';
         // In test mode (no OpenSwoole server running), use array instead of Channel
         $inTestMode = getenv('VIA_TEST_MODE') === '1';
 
@@ -106,7 +112,7 @@ class PatchManager {
                 // dropped with no signal to the caller at all.
                 $this->app->log(
                     'debug',
-                    "Patch rejected (channel closed) for context {$this->context->getId()}"
+                    "Patch rejected (channel closed) for context {$this->contextId}"
                 );
             }
         }
@@ -214,27 +220,29 @@ class PatchManager {
             return;
         }
 
+        $context = $this->context();
+
         // Skip sync if view is not defined (e.g., during broadcast before client connects)
-        if (!$this->context->hasView()) {
+        if (!$context->hasView()) {
             // Still sync signals even without a view
-            $this->app->log('debug', "Context {$this->context->getId()} has no view, syncing signals only");
+            $this->app->log('debug', "Context {$this->contextId} has no view, syncing signals only");
             $this->syncSignals();
 
             return;
         }
 
         $isPage = !$this->componentManager->isComponent();
-        $render = fn (): string => $this->context->renderView(isUpdate: true);
+        $render = static fn (): string => $context->renderView(isUpdate: true);
         [$viewHtml, $renderedWithPage] = $isPage ? $this->componentManager->renderCollecting($render) : [$render(), []];
 
         // A full document morphs <head> too: re-add the includes and the Dev Bar.
-        $viewHtml = $this->app->decorateUpdate($viewHtml, $this->context);
+        $viewHtml = $this->app->decorateUpdate($viewHtml, $context);
         $pageFrame = null;
 
         if (!empty(trim($viewHtml))) {
             if (!$isPage) {
                 // Create valid CSS ID by replacing slashes and prefixing with 'c-'
-                $cssId = 'c-' . str_replace(['/', '_'], '-', $this->context->getId());
+                $cssId = 'c-' . str_replace(['/', '_'], '-', $this->contextId);
                 $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
                 $this->queuePatch([
                     'type' => 'elements',
@@ -383,7 +391,7 @@ class PatchManager {
 
             $this->app->log(
                 'debug',
-                "Recreated patch channel for context {$this->context->getId()} (carried " . \count($carried) . ' pending)'
+                "Recreated patch channel for context {$this->contextId} (carried " . \count($carried) . ' pending)'
             );
         } else {
             // In test mode the queue is a plain array; carry it across unchanged.
@@ -396,7 +404,7 @@ class PatchManager {
      * hold the defaults a revival declared, and anything queued now reaches the tab before the seed.
      */
     private function isHeldForSeed(): bool {
-        $page = $this->componentManager->getParentPageContext() ?? $this->context;
+        $page = $this->componentManager->getParentPageContext() ?? $this->context();
         if (!$page->isAwaitingSeed()) {
             return false;
         }
@@ -404,6 +412,10 @@ class PatchManager {
         $this->app->log('debug', "Sync held until the SSE connect seeds context {$page->getId()}");
 
         return true;
+    }
+
+    private function context(): Context {
+        return $this->context->get() ?? throw new \LogicException("Patch manager of freed context {$this->contextId}");
     }
 
     /**
@@ -418,7 +430,7 @@ class PatchManager {
             }
         }
 
-        foreach ($this->context->getScopes() as $scope) {
+        foreach ($this->context()->getScopes() as $scope) {
             if ($scope === Scope::TAB) {
                 continue;
             }
@@ -461,7 +473,7 @@ class PatchManager {
                     unset($patches[$i]);
                     $this->app->log(
                         'debug',
-                        "Evicted oldest {$preferredType} patch for context {$this->context->getId()} - queue full"
+                        "Evicted oldest {$preferredType} patch for context {$this->contextId} - queue full"
                     );
 
                     return array_values($patches);
@@ -473,7 +485,7 @@ class PatchManager {
         array_shift($patches);
         $this->app->log(
             'warning',
-            "Queue full of script patches for context {$this->context->getId()} - dropped the oldest side effect"
+            "Queue full of script patches for context {$this->contextId} - dropped the oldest side effect"
         );
 
         return $patches;
@@ -518,7 +530,7 @@ class PatchManager {
             if ($channel->isFull() || !$channel->push($patch)) {
                 $this->app->log(
                     'warning',
-                    "Lost a patch refilling the queue for context {$this->context->getId()}"
+                    "Lost a patch refilling the queue for context {$this->contextId}"
                 );
             }
         }
@@ -530,7 +542,7 @@ class PatchManager {
     private function syncScopedSignals(): void {
         $flat = [];
 
-        foreach ($this->context->getScopes() as $scope) {
+        foreach ($this->context()->getScopes() as $scope) {
             // Skip TAB scope - already handled by prepareSignalsForPatch
             if ($scope === Scope::TAB) {
                 continue;
@@ -623,10 +635,6 @@ class PatchManager {
      * @return Channel|list<QueuedPatch>
      */
     private function getPatchChannel(): array|Channel {
-        if ($this->componentManager->isComponent()) {
-            return $this->componentManager->getParentPageContext()->getPatchManager()->patchChannel;
-        }
-
-        return $this->patchChannel;
+        return $this->componentManager->getParentPageContext()?->getPatchManager()->patchChannel ?? $this->patchChannel;
     }
 }

@@ -109,11 +109,12 @@ class Context {
         $this->namespace = $namespace;
         $this->sessionId = $sessionId;
 
-        // Initialize managers
-        $this->lifecycle = new ContextLifecycle($this, $app);
-        $this->signalFactory = new SignalFactory($this, $app);
-        $this->componentManager = new ComponentManager($this, $app);
-        $this->patchManager = new PatchManager($this, $app, $this->signalFactory, $this->componentManager);
+        // Weak, so that the last reference to a context frees it without PHP's cycle collector.
+        $self = \WeakReference::create($this);
+        $this->lifecycle = new ContextLifecycle($self, $app);
+        $this->signalFactory = new SignalFactory($self, $app);
+        $this->componentManager = new ComponentManager($self, $app);
+        $this->patchManager = new PatchManager($self, $app, $this->signalFactory, $this->componentManager);
 
         // Default scope is TAB (per-context isolation)
         $this->scopes = [Scope::TAB];
