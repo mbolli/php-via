@@ -1,15 +1,17 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Getting Started · php-via Docs{% endblock %}
+{% block title %}Getting started · php-via Docs{% endblock %}
 {% block content %}
 <article>
-    <h1>Getting Started</h1>
+    <h1>Getting started with php-via</h1>
     <p>
-        php-via is a real-time engine for PHP. It brings server-centric reactivity to PHP using
-        <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> as the runtime and
-        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> as the client-side reactive layer.
+        php-via is a PHP framework for server-side reactive UIs. Your app runs as a long-lived
+        <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> server, and
+        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> applies the server's
+        updates in the browser.
     </p>
     <p>
-        The result: you write PHP, the browser updates in real-time. No JavaScript. No build step. No API layer to maintain.
+        You write signals, actions and views in PHP. Each tab receives new HTML and signal values over one
+        SSE stream, so you write no JavaScript, run no build step and keep no separate API.
     </p>
 
     <h2 id="requirements">Requirements</h2>
@@ -27,12 +29,12 @@ composer require mbolli/php-via
 
     <h2 id="your-first-app">Your first app</h2>
     <p>
-        Create <code>app.php</code> in a new directory. Here's the most minimal
-        php-via application, a counter:
+        Create <code>app.php</code> in a new directory and put this counter in it. It is a complete
+        php-via app:
     </p>
 
     <div class="docs-demo">
-        <div class="docs-demo-header">▶ Complete source + live result</div>
+        <div class="docs-demo-header">The counter, running on this server</div>
         <div class="docs-demo-body">
             {{ demo | raw }}
         </div>
@@ -40,29 +42,29 @@ composer require mbolli/php-via
 
     {% code 'bash' %}{% verbatim %}
 php app.php
-# ⚡ Server started on http://0.0.0.0:3000
+# [INFO] Via server started on http://0.0.0.0:3000
     {% endverbatim %}{% endcode %}
 
-    <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. Then open a second tab: the counter stays independent. That's <strong>TAB scope</strong>, the default.</p>
+    <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. A second tab starts again at 0, because each tab keeps its own count. That is <strong>TAB scope</strong>, the default.</p>
 
     <h2 id="how-it-works">How it works</h2>
-    <p>When the page loads, php-via:</p>
+    <p>A php-via page goes through these steps:</p>
     <ol>
-        <li>Executes your page handler to build the initial HTML</li>
-        <li>Injects signal state into the page as JSON <code>&lt;meta data-signals&gt;</code></li>
-        <li>Datastar establishes an SSE connection to <code>/_sse</code></li>
-        <li>When you click a button, Datastar POSTs to <code>/_action/{id}</code></li>
-        <li>Your action callback runs, signals update, view re-renders</li>
-        <li>The patch arrives via SSE and Datastar morphs the DOM</li>
+        <li>php-via runs your page handler and sends the initial HTML.</li>
+        <li>The signal values come with it as JSON, in a <code>&lt;meta data-signals&gt;</code> tag.</li>
+        <li>Datastar opens an SSE connection to <code>/_sse</code>.</li>
+        <li>A click makes Datastar POST to <code>/_action/{id}</code>.</li>
+        <li>Your action runs and changes signals, and php-via renders the view again.</li>
+        <li>The patch arrives over SSE, and Datastar morphs it into the page.</li>
     </ol>
-    <p>No page reload. No flash. Just seamless updates.</p>
+    <p>The page does not reload. Datastar changes only the elements that differ.</p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/signals">Signals</a>: reactive state and two-way binding</li>
         <li><a href="/docs/scopes">Scopes</a>: share state across users with one line</li>
         <li><a href="/docs/components">Components</a>: compose complex pages from isolated sub-contexts</li>
-        <li><a href="/examples">Examples</a>: live, editable examples of every feature</li>
+        <li><a href="/examples">Examples</a>: running examples with their PHP and Twig source</li>
     </ul>
 
     <h2 id="professional-support">Professional support</h2>

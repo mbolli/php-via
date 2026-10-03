@@ -290,6 +290,33 @@ $app->appendToHead('<script type="module" src="/js/slider/slider.min.js"></scrip
         tab's import map points at a copy of <code>datastar-rocket.js</code> you would host yourself; leave
         it out, since php-via serves the build at <code>/datastar.js</code>.
     </p>
+    <p>
+        With <code>withImportMap()</code>, a copied module can also get a name and its hashes, and a page
+        imports it by name where it uses it. This website loads its copy buttons, its visitor count and
+        the pairing QR code that way:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withDatastarRocket()->withImportMap(
+    ['sb-qr-code' => '/vendor/starbase/qr-code@ecc5a99c314a/qr-code.min.js'],
+    [
+        '/vendor/starbase/qr-code@ecc5a99c314a/qr-code.min.js' => 'sha384-<hash>',
+        '/vendor/starbase/qr-code@ecc5a99c314a/vendor/uqr.min.mjs' => 'sha384-<hash>',
+    ],
+);
+    {% endverbatim %}{% endcode %}
+    {% code 'twig' %}{% verbatim %}
+{# in the template of a page that shows a QR code #}
+<script type="module">import 'sb-qr-code'</script>
+    {% endverbatim %}{% endcode %}
+    <p>
+        Keep the version in the folder name, as Starbase's URLs do. A browser that still has the old file
+        in its cache checks it against the new hash and refuses it, so a copy updated under the same URL
+        breaks the component for returning visitors until their cached copy expires. Versioned folders
+        can then be cached for a year, as this website does with a
+        <a href="/docs/deployment#static-assets"><code>withStaticCacheControl()</code></a> closure that
+        returns <code>'public, max-age=31536000, immutable'</code> for them and <code>null</code> for
+        every other file.
+    </p>
 
     <h2 id="binding">Binding signals to component properties</h2>
     <p>

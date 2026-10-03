@@ -8,7 +8,11 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use OpenSwoole\Timer;
+use PhpVia\Website\Pairing\PairingDemo;
+use PhpVia\Website\Pairing\PairingStore;
+use PhpVia\Website\Pairing\RequestOrigin;
+use PhpVia\Website\PresenceDemo;
+use PhpVia\Website\StarbaseComponents;
 use PhpVia\Website\StaticPage;
 use PhpVia\Website\SyntaxHighlightExtension;
 use PhpVia\Website\Twig\CodeRuntime;
@@ -50,6 +54,10 @@ $config = (new Config())
     // still capping a flood.
     ->withActionRateLimit((int) (getenv('VIA_ACTION_RATE_LIMIT') ?: 1200), 60)
 ;
+
+// The Datastar + Rocket build, and the Starbase components the site copies into public/vendor/starbase
+StarbaseComponents::register($config->withDatastarRocket());
+$config->withStaticCacheControl(StarbaseComponents::cacheControl(...));
 
 if (!$isDev) {
     // Production hardening: Secure cookie flag (HTTPS) + explicit trusted origins.
@@ -130,7 +138,8 @@ $cssPath = __DIR__ . '/public/css/site.css';
 $twig->addGlobal('assetVersion', (string) (file_exists($cssPath) ? filemtime($cssPath) : time()));
 $workerPath = __DIR__ . '/public/upload-worker.js';
 $twig->addGlobal('workerVersion', (string) (file_exists($workerPath) ? filemtime($workerPath) : time()));
-$twig->addGlobal('siteUrl', 'https://via.zweiundeins.gmbh/');
+$siteOrigin = 'https://via.zweiundeins.gmbh';
+$twig->addGlobal('siteUrl', $siteOrigin . '/');
 
 // ─── 404 handler ─────────────────────────────────────────────────────────────
 
@@ -140,7 +149,7 @@ $app->notFound(function ($request, $response) use ($twig, $cssPath): void {
     $html = $twig->render('pages/404.html.twig', [
         'basePath' => '/',
         'assetVersion' => $assetVersion,
-        'requestedPath' => htmlspecialchars($requestedPath, ENT_QUOTES, 'UTF-8'),
+        'requestedPath' => $requestedPath,
     ]);
     $response->status(404);
     $response->header('Content-Type', 'text/html; charset=utf-8');
@@ -151,55 +160,16 @@ $app->notFound(function ($request, $response) use ($twig, $cssPath): void {
 
 // (Scoped signals handle shared counter state, no globalState needed)
 
-// ─── Presence: broadcast globally on connect/disconnect ──────────────────────
-//
-// Debounced: rapid connect/disconnect bursts (e.g. load tests) collapse into a
-// single broadcast. Without this, N connections joining simultaneously triggers
-// N broadcasts × N contexts = O(N²) renders that saturate the server.
-// Timer fires 200ms after the last event.
-/** @var null|int $presenceTimer */
-$presenceTimer = null;
+// ─── Presence ────────────────────────────────────────────────────────────────
 
-$broadcastPresence = function () use ($app, &$presenceTimer): void {
-    if ($presenceTimer !== null) {
-        Timer::clear($presenceTimer);
-    }
-    $presenceTimer = Timer::after(200, function () use ($app, &$presenceTimer): void {
-        $presenceTimer = null;
-        $app->broadcast(PRESENCE_SCOPE);
-    });
-};
-
-$app->onClientConnect(function (Context $c) use ($broadcastPresence): void {
-    $broadcastPresence();
-});
-
-$app->onClientDisconnect(function (Context $c) use ($broadcastPresence): void {
-    $broadcastPresence();
-});
+$presenceDemo = new PresenceDemo($app);
+$presenceDemo->register();
 
 // ─── Demo components ─────────────────────────────────────────────────────────
 
-// Custom scopes for the busiest widgets. A broadcast to the page's own scope re-renders every
-// component on the page, so a click on one of these reaches only that widget.
-const PRESENCE_SCOPE = 'site:presence';
+// A custom scope for the busiest widget, like PresenceDemo::SCOPE. A broadcast to the page's own
+// scope re-renders every component on the page, so a click here reaches only this widget.
 const COUNTER_SCOPE = 'home:counter';
-
-/**
- * Presence indicator: "N people on this website right now". Its own scope, so a visitor
- * arriving or leaving re-renders the indicators and not every open page.
- */
-$presenceDemo = function (Context $c) use ($app, $twig): void {
-    $c->scope(PRESENCE_SCOPE);
-    $c->view(function () use ($app, $twig): string {
-        $count = count($app->getClients());
-
-        return $twig->render('components/presence.html.twig', [
-            'count' => $count,
-            'person' => $count === 1 ? 'person' : 'people',
-        ]);
-    });
-};
 
 /**
  * Shared multiplayer counter: all visitors share one counter.
@@ -393,14 +363,18 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// Phone pairing in the hero: a code per homepage tab, and the phone page at /pair/{code}
+$pairingDemo = new PairingDemo($app, new PairingStore(), $siteOrigin);
+
 // Home page
-$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo): void {
+$app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $homeSessionDemo, $livePollDemo, $pairingDemo): void {
     $c->scope(Scope::routeScope('/'));
 
-    $presence = $c->component($presenceDemo, 'presence');
+    $presence = $c->component($presenceDemo->component(...), 'presence');
     $sharedCounter = $c->component($sharedCounterDemo, 'shared-counter');
     $sessionCounter = $c->component($homeSessionDemo, 'session-counter');
     $poll = $c->component($livePollDemo, 'poll');
+    $pairing = $c->component($pairingDemo->component(...), 'pairing');
 
     // Components patch their own target divs, so updates leave the page itself alone.
     StaticPage::view($c, 'pages/home.html.twig', fn (): array => [
@@ -408,8 +382,9 @@ $app->page('/', function (Context $c) use ($presenceDemo, $sharedCounterDemo, $h
         'sharedCounter' => $sharedCounter(),
         'sessionCounter' => $sessionCounter(),
         'poll' => $poll(),
+        'pairing' => $pairing(),
     ]);
-});
+})->middleware(new RequestOrigin($siteOrigin, $config->isHttps()));
 
 // ─── Docs routes ─────────────────────────────────────────────────────────────
 
@@ -551,6 +526,9 @@ $app->page('/examples', function (Context $c): void {
     $c->scope(Scope::routeScope('/examples'));
     StaticPage::view($c, 'pages/examples-intro.html.twig');
 });
+
+// Phone side of the homepage pairing demo
+$pairingDemo->register();
 
 // Professional support / body-leasing page
 $app->page('/support', function (Context $c): void {

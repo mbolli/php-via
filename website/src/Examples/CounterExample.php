@@ -36,12 +36,12 @@ final class CounterExample {
                 'title' => '⚡ Counter',
                 'description' => 'Counter with configurable step. Uses data-bind for two-way input binding.',
                 'summary' => [
-                    '<strong>Signals</strong> hold reactive state. The count and step values are signals: when they change on the server, the UI updates instantly via SSE.',
+                    '<strong>Signals</strong> hold reactive state. The count and the step are signals, and their new values reach the page over the SSE stream.',
                     '<strong>data-bind</strong> creates two-way binding between an input and a signal. Type a new step value and it syncs to the server automatically.',
                     '<strong>Actions</strong> are server-side functions triggered by button clicks. Each action modifies the signal and pushes the new value to the browser.',
-                    '<strong>No JavaScript authored</strong>: every interaction is a server round-trip. Datastar handles the SSE connection, DOM patching, and signal store transparently.',
+                    '<strong>No JavaScript authored</strong>: every interaction is a server round-trip. Datastar handles the SSE connection, the DOM patches and the signal store.',
                     '<strong>TAB scope</strong> (the default) means each browser tab has its own independent counter. Open two tabs: clicking in one will not affect the other.',
-                    '<strong>syncSignals()</strong> flushes changed signal values down the SSE channel. It is called automatically after an action, so the UI always reflects the latest state.',
+                    '<strong>syncSignals()</strong> sends the changed signal values down the SSE stream without rendering the view again. A TAB signal reaches the browser only on a sync, so each action here ends with it.',
                 ],
                 'anatomy' => [
                     'signals' => [

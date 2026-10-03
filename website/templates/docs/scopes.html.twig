@@ -100,10 +100,10 @@ $app->broadcast('room:lobby');
 {% endverbatim %}{% endcode %}
 
     <div class="docs-demo">
-        <div class="docs-demo-header">▶ TAB vs ROUTE: feel the difference</div>
+        <div class="docs-demo-header">A TAB counter beside a ROUTE counter</div>
         <div class="docs-demo-body">
             <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
-                Open a second tab, then increment both sides. One is private to you; one goes to everyone.
+                Open a second tab, then increment both counters. The TAB counter belongs to this tab; everyone on this page shares the ROUTE counter.
             </p>
             <div class="scope-split" id="scope-demo">
                 {{ tabDemo | raw }}
