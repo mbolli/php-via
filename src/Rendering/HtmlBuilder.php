@@ -16,6 +16,14 @@ class HtmlBuilder {
     /** A data-signals attribute that declares via_ctx, keyed (data-signals:via_ctx) or in its value */
     private const string VIA_CTX_SIGNAL = '/<[a-z][^>]*\sdata-signals(?:[:-]via_ctx\b|[^\s=>]*\s*=\s*(?:"[^"]*via_ctx[^"]*"|\'[^\']*via_ctx[^\']*\'))/i';
 
+    /** The default shell's Live Signals panel, shown in dev mode only */
+    private const string DEV_SIDEBAR = <<<'HTML'
+        <aside class="debug-sidebar">
+                    <h3>🔍 Live Signals</h3>
+                    <pre data-json-signals></pre>
+                </aside>
+        HTML;
+
     /** A script whose URL names Datastar, such as via_foot's or a bundle of the page's own */
     private const string DATASTAR_SCRIPT = '/<script\b[^>]*\ssrc\s*=\s*["\']?[^"\'\s>]*datastar/i';
 
@@ -129,6 +137,7 @@ class HtmlBuilder {
             '{{ content }}' => $content,
             '{{ foot_content }}' => implode("\n", $footIncludes),
             '{{ via_foot }}' => str_contains($shell, '{{ via_foot }}') ? $context->viaFoot() : '',
+            '{{ dev_sidebar }}' => $this->devMode ? self::DEV_SIDEBAR : '',
             '{{ styles }}' => '',
         ] + $replacements;
 

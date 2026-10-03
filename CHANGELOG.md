@@ -110,6 +110,7 @@ All notable changes to php-via will be documented in this file.
 - **Routes win over extension-less static files.** A path without a file extension, such as
   `/about`, that matches both a route and a file in `withStaticDir()` now serves the route. Paths
   with an extension are still served from the static directory first.
+- **The default shell shows its Live Signals panel in dev mode only.**
 - **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
   where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied. A clone of a
   frozen Config is a new Config that is not frozen.

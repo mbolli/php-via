@@ -32,6 +32,14 @@ describe('default shell template', function (): void {
         ;
     });
 
+    test('shows the Live Signals panel in dev mode only', function (bool $devMode): void {
+        $page = shellPage((new Config())->withDevMode($devMode)->withDevBar(false));
+
+        expect(str_contains($page, '<pre data-json-signals></pre>'))->toBe($devMode)
+            ->and($page)->not->toContain('{{')
+        ;
+    })->with(['dev mode' => true, 'production' => false]);
+
     test('writes via_head right after <meta charset> and via_foot last in <body>, and leaves no placeholder', function (): void {
         $via = createVia();
         $ctx = new Context(testContextId(), '/', $via);
