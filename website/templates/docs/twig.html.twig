@@ -173,14 +173,11 @@ $c->view('todo.html.twig', ['todos' => $todos]);
 <span data-text="${{ count.id() }}">{{ count.int }}</span>
     {% endverbatim %}{% endcode %}
 
-    <p>Or use <code>$signal-&gt;text()</code> in PHP to generate the span directly, then output with <code>| raw</code>:</p>
+    <p>In a PHP view, <code>$signal-&gt;ref()</code> gives the same reference:</p>
     {% code 'php' %}{% verbatim %}
-$c->view('counter.html.twig', [
-    'count_span' => $count->text(), // '<span data-text="$count"></span>'
-]);
-    {% endverbatim %}{% endcode %}
-    {% code 'html' %}{% verbatim %}
-{{ count_span | raw }}
+$c->view(fn (): string => <<<HTML
+    <span data-text="{$count->ref()}">{$count->int()}</span>
+    HTML);
     {% endverbatim %}{% endcode %}
 
     <h2 id="two-way-binding">Two-way binding</h2>

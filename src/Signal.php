@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\State\SharedSignalStore;
+use Mbolli\PhpVia\Support\Removed;
 
 /**
  * Signal represents a reactive value synchronized between server and browser.
@@ -351,10 +352,19 @@ class Signal {
     }
 
     /**
-     * Display this signal's value as text in an HTML element
-     * Returns a span element with the signal binding.
+     * This signal as a Datastar expression reference: '$' plus its id.
+     *
+     * Use it in any data-* expression, for example data-text="{$count->ref()}" or
+     * data-show="{$open->ref()}".
      */
-    public function text(): string {
-        return '<span data-text="$' . $this->id . '"></span>';
+    public function ref(): string {
+        return '$' . $this->id;
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names ref()
+     */
+    public function text(): never {
+        Removed::method('Signal::text()', 'Use <span data-text="{$signal->ref()}">{$signal->string()}</span>, which also renders the current value.');
     }
 }

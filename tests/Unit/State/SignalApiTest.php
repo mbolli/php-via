@@ -35,3 +35,17 @@ describe('Signal::bool()', function (): void {
         'other text' => ['maybe', false],
     ]);
 });
+
+describe('Signal::ref()', function (): void {
+    test('is the Datastar reference to the signal', function (): void {
+        $signal = new Signal('room_lobby_count', 0, 'room:lobby');
+
+        expect($signal->ref())->toBe('$room_lobby_count');
+    });
+
+    test('text() is a tombstone that names ref()', function (): void {
+        expect(fn () => (new Signal('count', 1))->text())
+            ->toThrow(BadMethodCallException::class, 'Signal::text() was removed in php-via 0.14. Use <span data-text="{$signal->ref()}">')
+        ;
+    });
+});

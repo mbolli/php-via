@@ -520,7 +520,7 @@ $s->mutate(fn (array $items) => [...$items, $item]); // read-modify-write under 
 $s->id();     // browser id, not the name: 'global_count' for a GLOBAL signal 'count'
 $s->bind();   // 'data-bind="global_count"'
 $s->bind('value');  // 'data-bind__prop.value="global_count"': binds a property, for web components
-$s->text();   // '<span data-text="$global_count"></span>'
+$s->ref();    // '$global_count', for Datastar expressions: data-text="{$s->ref()}"
     {% endverbatim %}{% endcode %}
     <p>
         <code>bind(?string $prop = null)</code> with a property name binds that element property
