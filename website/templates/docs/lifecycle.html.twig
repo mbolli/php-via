@@ -133,6 +133,13 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
     {% code 'php' %}{% verbatim %}
 $config->withContextTimeouts(revivalWindowMs: 600_000); // 10 minutes (default); pass 0 to disable
 {% endverbatim %}{% endcode %}
+    <p>
+        The page handler of a revived tab reads the request attributes of the request that revived it: what
+        global middleware set on an action, or <code>SseAwareMiddleware</code> on an SSE reconnect.
+        Per-route middleware runs on page loads only, so an attribute it sets is null after a revival. Read
+        what the page needs from the session there, as the
+        <a href="/examples/login">login example</a>'s dashboard does.
+    </p>
 
     <h2 id="on-client-connect">onClientConnect (app-level)</h2>
     <p>

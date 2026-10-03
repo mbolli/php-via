@@ -90,7 +90,7 @@ class ActionHandler {
         // action success tracked 1/worker_num: every other worker answered 400. Also covers
         // the single-worker case SseHandler already handled: a backgrounded tab whose context
         // was cleaned up, then fires an action before its SSE stream reconnects.
-        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request) === null) {
+        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request, attributes: $attributes) === null) {
             $response->status(400);
             $response->end('Invalid context');
 

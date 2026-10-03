@@ -230,6 +230,20 @@ class RequestHandler {
         $response->end($body);
     }
 
+    /**
+     * The middleware attributes of a request that a context takes, minus the response's Brotli writers and session,
+     * which belong to this response and not to the tab.
+     *
+     * @internal also used by the action and SSE handlers that middleware wraps
+     *
+     * @param array<string, mixed> $attributes
+     *
+     * @return array<string, mixed>
+     */
+    public static function contextAttributes(array $attributes): array {
+        return array_diff_key($attributes, ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
+    }
+
     private function dispatch(Request $request, Response $response): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
@@ -453,9 +467,8 @@ class RequestHandler {
         $context->setRequestCookies($request->cookie ?? []);
         $context->setPageInput($request->get ?? []);
 
-        // Bridge PSR-7 request attributes from middleware into Context, minus the response's
-        // Brotli writers and session, which belong to this response and not to the tab.
-        $contextAttributes = array_diff_key($requestAttributes, ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
+        // Bridge PSR-7 request attributes from middleware into Context.
+        $contextAttributes = self::contextAttributes($requestAttributes);
         if ($contextAttributes !== []) {
             $context->setRequestAttributes($contextAttributes);
         }
@@ -739,8 +752,7 @@ class RequestHandler {
 
             public function handle(ServerRequestInterface $request): ResponseInterface {
                 $this->handled = true;
-                $attributes = array_diff_key($request->getAttributes(), ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
-                $this->actionHandler->handleAction($this->swooleRequest, $this->swooleResponse, $this->actionId, $attributes);
+                $this->actionHandler->handleAction($this->swooleRequest, $this->swooleResponse, $this->actionId, RequestHandler::contextAttributes($request->getAttributes()));
 
                 return new Psr7Response(200);
             }
@@ -796,7 +808,7 @@ class RequestHandler {
 
                 /** @var null|(callable(): string|false) $brotliFinish */
                 $brotliFinish = $request->getAttribute('brotli_finish');
-                $this->sseHandler->handleSSE($this->swooleRequest, $this->swooleResponse, $brotliWrite, $brotliFinish);
+                $this->sseHandler->handleSSE($this->swooleRequest, $this->swooleResponse, $brotliWrite, $brotliFinish, RequestHandler::contextAttributes($request->getAttributes()));
 
                 return new Psr7Response(200);
             }

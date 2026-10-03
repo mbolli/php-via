@@ -76,10 +76,11 @@ class SseHandler {
     /**
      * Handle SSE connection for real-time updates.
      *
-     * @param null|callable $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
-     * @param null|callable $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
+     * @param null|callable        $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
+     * @param null|callable        $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
+     * @param array<string, mixed> $attributes   PSR-7 request attributes from the SSE-aware middleware, for a context this connect revives
      */
-    public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null): void {
+    public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null, array $attributes = []): void {
         // Get context ID from signals
         $signals = SignalParser::read($request);
         $contextId = $signals['via_ctx'] ?? null;
@@ -107,7 +108,7 @@ class SseHandler {
         // NOTE: brotli headers are intentionally NOT set on the reload path: we write raw SSE and
         // close immediately, so compression is pointless and would corrupt the payload.
         if (!isset($this->via->contexts[$contextId])) {
-            if ($this->via->reviveContext($contextId, $request, byConnect: true) !== null) {
+            if ($this->via->reviveContext($contextId, $request, byConnect: true, attributes: $attributes) !== null) {
                 // Rebuilt: clear any stale reload marker and continue with the revived context.
                 unset($this->reloadedContextIds[$contextId]);
             } else {

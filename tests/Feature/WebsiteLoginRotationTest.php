@@ -88,3 +88,24 @@ test('the login example rotates the session cookie at login and logout, so an ea
         ->and(websiteLoginDashboard($app, $loggedOut))->toBe(302)
     ;
 });
+
+test('a dashboard tab rebuilt after it was away still shows the user, and goes to the login form after a logout in another tab', function (): void {
+    $now = 1_000_000;
+    $app = websiteLoginApp($now);
+    $login = $app->open('/examples/login', connect: false);
+    $login->action('login', signals: ['username' => 'grace', 'password' => 'hopper']);
+    $dashboard = $login->open('/examples/login/dashboard');
+    $other = $login->open('/examples/login/dashboard');
+    $dashboard->patches();
+
+    $dashboard->disconnect(expire: true)->connect();
+    $revived = json_encode($dashboard->patches(), JSON_UNESCAPED_SLASHES);
+    $other->action('logout');
+    $dashboard->disconnect(expire: true)->connect();
+    $afterLogout = json_encode($dashboard->patches(), JSON_UNESCAPED_SLASHES);
+
+    expect($revived)->toContain('Grace Hopper')
+        ->and($afterLogout)->not->toContain('Grace Hopper')
+        ->and($afterLogout)->toContain("window.location.href = '/examples/login'")
+    ;
+});

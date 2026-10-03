@@ -5,11 +5,16 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
+use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\SessionTokens;
+use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Response;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 use Tests\Support\FakeActionRequest;
 use Tests\Support\FakeStaticResponse;
 
@@ -617,5 +622,42 @@ describe('Revival from an action without signals, with coalesced broadcasts', fu
             ->and($r['written'])->toContain("data: elements <div id=\"h\">n=2 mine=typed</div>\n")
             ->and($r['warnings'])->toBe([])
         ;
+    });
+});
+
+/** Global middleware that also runs on SSE and passes the signed-in user on, as an auth middleware does. */
+final class ReviveAuthMiddleware implements SseAwareMiddleware {
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        return $handler->handle($request->withAttribute('user', 'ada'));
+    }
+}
+
+/** A page that renders the 'user' attribute its handler read, behind ReviveAuthMiddleware. */
+function reviveAttributeApp(): TestApp {
+    return new TestApp((new Config())->withLogLevel('error'), static function (Via $via): void {
+        $via->middleware(new ReviveAuthMiddleware());
+        $via->page('/me', static function (Context $c): void {
+            $user = (string) $c->getRequestAttribute('user', 'nobody');
+            $c->action(static fn () => null, 'noop');
+            $c->view(static fn (): string => '<p id="me">' . $user . '</p>');
+        });
+    });
+}
+
+describe('Revival and middleware attributes', function (): void {
+    test('a context an SSE reconnect revives reads the attributes its middleware set', function (): void {
+        $tab = reviveAttributeApp()->open('/me');
+        $tab->patches();
+        $tab->disconnect(expire: true)->connect();
+
+        expect(json_encode($tab->patches()))->toContain('<p id=\"me\">ada<\/p>');
+    });
+
+    test('a context an action revives reads the attributes its middleware set', function (): void {
+        $tab = reviveAttributeApp()->open('/me');
+        $tab->patches();
+        $tab->disconnect(expire: true)->action('noop')->connect();
+
+        expect(json_encode($tab->patches()))->toContain('<p id=\"me\">ada<\/p>');
     });
 });

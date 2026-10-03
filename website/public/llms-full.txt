@@ -369,6 +369,8 @@ $c->onCleanup(function (Context $c): void { /* ... */ });
 - **Revival.** A tab that comes back after its context was cleaned up is rebuilt with the
   same id and the signal values it still holds, within the revival window
   (`withContextRevivalWindow()`, 10 minutes by default), instead of reloading.
+  Its page handler reads the attributes of the reviving action's or reconnect's middleware;
+  per-route middleware does not run, so read what it would set from the session.
 - **Reconnects.** After a network error Datastar retries the stream after 1, 2, 4, 8 and
   16 s, then every 30 s, ten times in all, each time with the tab's current signals. Once
   the retries run out or the stream ends, the default shell opens a new one within 15 s.

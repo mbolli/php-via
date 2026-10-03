@@ -1890,17 +1890,19 @@ class Via {
      * caller falls back to a full reload) when revival is disabled, no record exists, it expired,
      * the requester's session doesn't own the context, or the route is no longer registered.
      *
-     * @param bool $byConnect Whether an SSE connect revives it, which seeds the context itself
+     * @param bool                 $byConnect  Whether an SSE connect revives it, which seeds the context itself
+     * @param array<string, mixed> $attributes PSR-7 request attributes the middleware of the reviving request set
      *
      * @internal used by SseHandler on reconnect to a missing context
      */
-    public function reviveContext(string $contextId, Request $request, bool $byConnect = false): ?Context {
+    public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = []): ?Context {
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
             SignalParser::read($request),
             $request->cookie ?? [],
             $byConnect,
+            $attributes,
         );
     }
 
@@ -1912,10 +1914,12 @@ class Via {
      * @param array<string, mixed>  $clientSignals    Signal values the client still holds
      * @param array<string, string> $cookies          Request cookies (forwarded to the context)
      * @param bool                  $byConnect        Whether an SSE connect revives it, which seeds the context itself
+     * @param array<string, mixed>  $attributes       PSR-7 request attributes the middleware of the reviving request set,
+     *                                                which the page handler reads as on a page load
      *
      * @internal
      */
-    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false): ?Context {
+    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false, array $attributes = []): ?Context {
         if ($this->settings->contextRevivalWindowMs <= 0) {
             return null;
         }
@@ -1948,6 +1952,9 @@ class Via {
         $this->contextSessions[$contextId] = $sessionId;
         $context->injectRouteParams($record['params']);
         $context->setRequestCookies($cookies);
+        if ($attributes !== []) {
+            $context->setRequestAttributes($attributes);
+        }
         if (($record['query'] ?? '') !== '') {
             parse_str($record['query'], $query);
             $context->setPageInput($query);

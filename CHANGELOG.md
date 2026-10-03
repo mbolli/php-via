@@ -433,6 +433,9 @@ message that names the new one.
   other's `input()`, `file()` and `cookie()`, and its cookies could go out with the other's
   response. Each action has its own request now; see
   [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
+- A tab rebuilt after it was away (revival) lost the attributes middleware set on the request that
+  rebuilt it, so the login example's dashboard answered 500 on every reconnect. See
+  [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival) for per-route middleware.
 
 ### Tests
 

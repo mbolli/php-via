@@ -136,8 +136,12 @@ final class LoginExample {
         // ── Protected routes (dashboard + profile) behind AuthMiddleware ──
         $app->group(function (Via $app): void {
             $app->page('/examples/login/dashboard', function (Context $c): void {
-                /** @var array{user: string, name: string, role: string, at: int} $auth */
-                $auth = $c->getRequestAttribute('auth');
+                $auth = self::auth($c);
+                if ($auth === null) {
+                    $c->view(static fn (): string => '<div id="login-demo"></div>');
+
+                    return;
+                }
 
                 $logout = $c->action(function (Context $ctx): void {
                     $ctx->clearSessionData('auth');
@@ -163,8 +167,12 @@ final class LoginExample {
             });
 
             $app->page('/examples/login/profile', function (Context $c): void {
-                /** @var array{user: string, name: string, role: string, at: int} $auth */
-                $auth = $c->getRequestAttribute('auth');
+                $auth = self::auth($c);
+                if ($auth === null) {
+                    $c->view(static fn (): string => '<div id="login-demo"></div>');
+
+                    return;
+                }
 
                 $logout = $c->action(function (Context $ctx): void {
                     $ctx->clearSessionData('auth');
@@ -189,5 +197,21 @@ final class LoginExample {
                 ], block: 'demo');
             });
         })->middleware($authMiddleware);
+    }
+
+    /**
+     * The auth record AuthMiddleware set on the page request. A tab rebuilt after it was away runs no per-route
+     * middleware, so it reads the session, and after a logout in another tab it goes to the login form.
+     *
+     * @return null|array{user: string, name: string, role: string, at: int}
+     */
+    private static function auth(Context $c): ?array {
+        /** @var null|array{user: string, name: string, role: string, at: int} $auth */
+        $auth = $c->getRequestAttribute('auth') ?? $c->sessionData('auth');
+        if ($auth === null) {
+            $c->execScript("window.location.href = '/examples/login'");
+        }
+
+        return $auth;
     }
 }
