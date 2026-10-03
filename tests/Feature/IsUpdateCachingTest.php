@@ -157,7 +157,7 @@ test('scoped view: update renders can use cache, initial loads do not', function
 
     // Now simulate SSE updates (stock price ticks) on first context
     $ctx1->renderView(isUpdate: true);
-    expect($renderCount)->toBe(4)->and('First SSE update should render (cacheUpdates: false)');
+    expect($renderCount)->toBe(4)->and('First SSE update should render (shareRender: false)');
 
     $ctx1->renderView(isUpdate: true);
     expect($renderCount)->toBe(5)->and('Second SSE update should render');

@@ -56,6 +56,22 @@ final class PostActionCounter {
     }
 }
 
+final class PostActionFailingCounter {
+    #[SignalAttr]
+    public int $count = 0;
+
+    #[Action]
+    public function fail(Context $ctx): void {
+        $this->count = 4;
+
+        throw new RuntimeException('after the change');
+    }
+
+    public function view(Context $ctx): void {
+        $ctx->view(fn (): string => '<p id="n">' . $this->count . '</p>');
+    }
+}
+
 describe('signals after an action', function (): void {
     test('a closure action that writes a TAB signal reaches the tab without syncSignals()', function (): void {
         $via = createVia();
@@ -150,5 +166,21 @@ describe('signals after an action', function (): void {
         expect($frames)->toHaveCount(1)
             ->and(json_encode($frames[0]))->toContain('1')
         ;
+    });
+
+    test('a composition action that throws after changing a property still sends it', function (): void {
+        $via = createVia();
+        $page = new Context('/p_/a', '/p', $via);
+        $page->component(PostActionFailingCounter::class, 'counter');
+        $component = array_values($page->getComponentRegistry())[0];
+        foreach ($component->getSignals() as $signal) {
+            $signal->markSynced();
+        }
+        $action = $component->getAction('fail');
+        expect($action)->not->toBeNull();
+
+        $frames = postActionSignalFrames($via, $page, $action->id());
+
+        expect($frames)->toBe([[$component->getSignal('count')?->id() => 4]]);
     });
 });
