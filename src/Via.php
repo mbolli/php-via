@@ -205,6 +205,14 @@ class Via {
     /** Bumped on every (re)schedule and cancel, so a superseded callback does nothing. */
     private int $flushGeneration = 0;
 
+    /** @var array<string, int> Scopes with a Config::withBroadcastThrottle() => hrtime(true) when their last render began */
+    private array $throttledAt = [];
+
+    /** The timer that flushes the scopes a throttle holds back once the first is due, and hrtime(true) when it fires. */
+    private ?int $throttleTimerId = null;
+
+    private int $throttleDueNs = 0;
+
     /**
      * Flushes run side by side, each on scopes no other one is rendering, so a view that waits on
      * I/O holds up only its own scope.
@@ -721,6 +729,7 @@ class Via {
      * sent by this call or, when another coroutine is publishing, by that one. When the scope's
      * fan-out is already running in another coroutine, that fan-out runs once more for it instead,
      * and after 8 passes in a row the next flush renders it, except during shutdown, which drops it.
+     * A scope with a Config::withBroadcastThrottle() renders at most once per its interval.
      *
      * @param string $scope Scope to broadcast to: a resolved one, so Scope::routeScope('/path') or
      *                      Scope::sessionScope($id) rather than the bare ROUTE or SESSION
@@ -730,7 +739,7 @@ class Via {
     public function broadcast(string $scope): void {
         $scope = Scope::resolve($scope, null, 'Via::broadcast()');
 
-        if ($this->shouldCoalesce()) {
+        if ($this->shouldCoalesce($scope)) {
             $this->tracer?->span('broadcast.schedule', static fn () => null, ['scope' => $scope], 'sse');
             $this->markDirty($scope, publish: true);
             $this->rememberCallerMark($scope);
@@ -768,7 +777,8 @@ class Via {
      * such as `broadcast(); flushBroadcasts(); execScript(...)`, or before shared state is
      * changed back. It ignores the broadcast tick. When a scope this coroutine broadcast is
      * being rendered by another flush, it waits for that fan-out first, up to 1 s; past that it
-     * logs a warning, and that scope's frame follows on a later flush. Publishing to other
+     * logs a warning, and that scope's frame follows on a later flush. Broadcasts that a
+     * Config::withBroadcastThrottle() holds back render now too. Publishing to other
      * workers or nodes is done here too, unless a publish is already running, which then sends
      * these as well. A no-op when nothing is pending.
      */
@@ -785,7 +795,7 @@ class Via {
         }
 
         $this->cancelScheduledFlush();
-        $this->runTickFlush(inlinePublish: true);
+        $this->runTickFlush(inlinePublish: true, throttle: false);
         $this->scheduleFlush();
     }
 
@@ -2295,6 +2305,9 @@ class Via {
         }
 
         $this->syncInFlight[$scope] = ['cid' => Coroutine::getCid(), 'lastCid' => (int) (Coroutine::stats()['coroutine_last_cid'] ?? PHP_INT_MAX), 'since' => hrtime(true), 'warned' => false];
+        if ($this->settings->broadcastThrottleMs($scope) > 0) {
+            $this->throttledAt[$scope] = hrtime(true);
+        }
 
         // Wrap fan-out in a "broadcast {scope}" root trace. Inside an action (the
         // synchronous path, or flushBroadcasts()) this is a no-op: the action trace is
@@ -2452,8 +2465,9 @@ class Via {
     /**
      * Whether a broadcast from the current code is marked for the next flush instead of run now.
      */
-    private function shouldCoalesce(): bool {
-        return $this->settings->broadcastCoalescingEnabled && !$this->shuttingDown && Coroutine::getCid() > 0;
+    private function shouldCoalesce(?string $scope = null): bool {
+        return ($this->settings->broadcastCoalescingEnabled || ($scope !== null && $this->settings->broadcastThrottleMs($scope) > 0))
+            && !$this->shuttingDown && Coroutine::getCid() > 0;
     }
 
     /**
@@ -2461,7 +2475,8 @@ class Via {
      */
     private function receiveBroadcast(string $scope): void {
         // pipeMessage runs in a coroutine on OpenSwoole 26, but a started worker can schedule without one.
-        if ($this->settings->broadcastCoalescingEnabled && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
+        $coalesce = $this->settings->broadcastCoalescingEnabled || $this->settings->broadcastThrottleMs($scope) > 0;
+        if ($coalesce && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
             $this->markDirty($scope, publish: false);
             $this->scheduleFlush();
 
@@ -2570,7 +2585,12 @@ class Via {
      */
     private function scheduleFlush(): void {
         // A scope whose fan-out is running is scheduled when it ends; shutdown drops what is left.
-        if ($this->shuttingDown || !$this->hasFlushWork()) {
+        if ($this->shuttingDown) {
+            return;
+        }
+        if (!$this->hasFlushWork()) {
+            $this->scheduleThrottledFlush();
+
             return;
         }
 
@@ -2602,7 +2622,83 @@ class Via {
     }
 
     private function hasFlushWork(): bool {
-        return ($this->unpublishedScopes !== [] && !$this->publishing) || array_diff_key($this->dirtyScopes, $this->syncInFlight) !== [];
+        return ($this->unpublishedScopes !== [] && !$this->publishing) || $this->withoutThrottled(array_diff_key($this->dirtyScopes, $this->syncInFlight)) !== [];
+    }
+
+    /**
+     * $scopes without those a Config::withBroadcastThrottle() holds back, whose last render began less than their
+     * interval ago.
+     *
+     * @template T
+     *
+     * @param array<string, T> $scopes
+     *
+     * @return array<string, T>
+     */
+    private function withoutThrottled(array $scopes): array {
+        if ($this->throttledAt === []) {
+            return $scopes;
+        }
+
+        $now = hrtime(true);
+        foreach ($scopes as $scope => $_) {
+            if ($this->throttleWaitNs($scope, $now) > 0) {
+                unset($scopes[$scope]);
+            }
+        }
+
+        return $scopes;
+    }
+
+    /**
+     * How long a throttle still holds $scope back, in ns; 0 when it may render. Forgets a render whose interval is over.
+     */
+    private function throttleWaitNs(string $scope, int $now): int {
+        $renderedAt = $this->throttledAt[$scope] ?? null;
+        if ($renderedAt === null) {
+            return 0;
+        }
+
+        $waitNs = $this->settings->broadcastThrottleMs($scope) * 1_000_000 - ($now - $renderedAt);
+        if ($waitNs <= 0) {
+            unset($this->throttledAt[$scope]);
+
+            return 0;
+        }
+
+        return $waitNs;
+    }
+
+    /**
+     * Arm a timer for the first scope a throttle holds back, which schedules the flush that renders it.
+     */
+    private function scheduleThrottledFlush(): void {
+        $now = hrtime(true);
+        $waitNs = null;
+        foreach (array_diff_key($this->dirtyScopes, $this->syncInFlight) as $scope => $_) {
+            $scopeWaitNs = $this->throttleWaitNs($scope, $now);
+            if ($scopeWaitNs > 0 && ($waitNs === null || $scopeWaitNs < $waitNs)) {
+                $waitNs = $scopeWaitNs;
+            }
+        }
+        if ($waitNs === null) {
+            return;
+        }
+
+        // Timer::clearAll() (workerExit, test fixtures) drops the timer without telling anyone.
+        if ($this->throttleTimerId !== null && Timer::exists($this->throttleTimerId)) {
+            if ($this->throttleDueNs <= $now + $waitNs) {
+                return;
+            }
+            Timer::clear($this->throttleTimerId);
+        }
+
+        $id = Timer::after(max(1, (int) ceil($waitNs / 1_000_000)), function (): void {
+            $this->throttleTimerId = null;
+            $this->scheduleFlush();
+        });
+        $this->throttleTimerId = \is_int($id) ? $id : null;
+        $this->throttleDueNs = $now + $waitNs;
     }
 
     /**
@@ -2664,10 +2760,15 @@ class Via {
 
     /**
      * Run one flush on the dirty scopes no other flush is rendering, and record it in the stats.
+     *
+     * @param bool $throttle leave out the scopes a Config::withBroadcastThrottle() holds back
      */
-    private function runTickFlush(bool $inlinePublish = false): void {
+    private function runTickFlush(bool $inlinePublish = false, bool $throttle = true): void {
         $cid = Coroutine::getCid();
         $batch = array_diff_key($this->dirtyScopes, $this->syncInFlight);
+        if ($throttle) {
+            $batch = $this->withoutThrottled($batch);
+        }
         if (isset($this->runningFlushes[$cid]) || ($batch === [] && ($this->unpublishedScopes === [] || $this->publishing))) {
             return;
         }
@@ -2685,6 +2786,10 @@ class Via {
             unset($this->runningFlushes[$cid]);
             $this->lastFlushEndNs = hrtime(true);
             $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->settings->broadcastTickMs);
+            // Forget the renders whose interval is over, so scopes that stop broadcasting leave no entry.
+            foreach ($this->throttledAt as $scope => $_) {
+                $this->throttleWaitNs($scope, $this->lastFlushEndNs);
+            }
             $this->scheduleFlush();
         }
     }
@@ -2778,10 +2883,14 @@ class Via {
      */
     private function drainBroadcasts(bool $renderPending, ?int $publisherDeadlineNs = null): void {
         $this->cancelScheduledFlush();
+        if ($this->throttleTimerId !== null) {
+            Timer::clear($this->throttleTimerId);
+            $this->throttleTimerId = null;
+        }
 
         if ($renderPending && Coroutine::getCid() > 0) {
             // Views that do not yield are done when this returns, before the channels close.
-            Coroutine::create(fn () => $this->runTickFlush());
+            Coroutine::create(fn () => $this->runTickFlush(throttle: false));
         }
 
         // Left over, such as a scope another flush is still rendering: clients reconnect for fresh state.

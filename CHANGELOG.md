@@ -253,6 +253,9 @@ message that names the new one.
 - **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
   what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
   only and goes with its context, so exports no longer travel through the SSE stream.
+- **`Config::withBroadcastThrottle($scope, $minIntervalMs)`** renders a scope's broadcasts at most
+  once per interval, wildcards allowed, and always delivers the last one of a burst.
+  `$app->flushBroadcasts()` renders a held broadcast at once.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
   actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.

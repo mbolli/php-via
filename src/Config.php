@@ -65,6 +65,9 @@ final class Config {
     /** Minimum gap between the start or end of one broadcast flush and the start of the next, in ms. */
     private int $broadcastTickMs = 25;
 
+    /** @var array<string, int> Scope or wildcard pattern => minimum ms between two renders of a matching scope */
+    private array $broadcastThrottles = [];
+
     /**
      * Whether to set the Secure flag on the session cookie (required for HTTPS).
      * Defaults to false so local HTTP dev works out of the box.
@@ -600,6 +603,39 @@ final class Config {
     public function withBroadcastTickMs(int $ms): self {
         $this->assertMutable(__FUNCTION__);
         $this->broadcastTickMs = max(0, $ms);
+
+        return $this;
+    }
+
+    /**
+     * Render the broadcasts of a scope at most once every $minIntervalMs, for a scope that broadcasts more often than
+     * its tabs need to see, such as the progress of an import.
+     *
+     * A broadcast of a matching scope less than the interval after its last render waits until the interval is over,
+     * and the broadcasts meanwhile join it, so the last state always arrives. That holds for Via::broadcast(),
+     * Context::broadcast(), scoped signal writes and broadcasts from other workers or nodes, and a wildcard such as
+     * 'import:*' gives each scope it matches an interval of its own. Via::flushBroadcasts() renders the waiting
+     * broadcasts at once, for a step that has to show now, such as the start or the end of the import. Each worker
+     * throttles the renders of its own tabs, and with several throttles on one scope the longest interval applies.
+     * Broadcasts of a throttled scope coalesce even under withBroadcastCoalescing(false).
+     *
+     * @param string $scope         a scope or wildcard pattern as Via::broadcast() takes it: Scope::routeScope('/path'), not Scope::ROUTE
+     * @param int    $minIntervalMs milliseconds; 0 removes the throttle of $scope
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION, or a negative interval
+     */
+    public function withBroadcastThrottle(string $scope, int $minIntervalMs): self {
+        $this->assertMutable(__FUNCTION__);
+        $scope = Scope::resolve($scope, null, 'Config::withBroadcastThrottle()');
+        if ($minIntervalMs < 0) {
+            throw new \InvalidArgumentException("withBroadcastThrottle('{$scope}') takes an interval of 0 ms or more, got {$minIntervalMs}.");
+        }
+
+        if ($minIntervalMs === 0) {
+            unset($this->broadcastThrottles[$scope]);
+        } else {
+            $this->broadcastThrottles[$scope] = $minIntervalMs;
+        }
 
         return $this;
     }
@@ -1512,6 +1548,7 @@ final class Config {
             sseMaxQueuedBytes: $this->sseMaxQueuedBytes,
             broadcastCoalescingEnabled: $this->broadcastCoalescing,
             broadcastTickMs: $this->broadcastTickMs,
+            broadcastThrottles: $this->broadcastThrottles,
             swooleSettings: $this->openSwooleSettings,
             secureCookie: $this->secureCookie,
             sessionCookieSameSite: $this->sessionCookieSameSite,
