@@ -45,8 +45,7 @@ final class Injector {
         }
 
         $attr = htmlspecialchars($config, ENT_QUOTES, 'UTF-8');
-        $nonce = $context->getRequestAttribute('via.csp_nonce');
-        $nonce = Bootstrap::nonceAttribute(\is_string($nonce) ? $nonce : null);
+        $nonce = Bootstrap::nonceAttribute($context->cspNonce());
 
         // A stable id lets idiomorph match the overlay across full-page morphs
         // and preserve the element (and its live component) in place.

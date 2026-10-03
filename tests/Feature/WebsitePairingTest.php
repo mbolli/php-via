@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use Nyholm\Psr7\ServerRequest;
@@ -91,8 +92,14 @@ function pairingCode(Context $page): string {
 
 /** Click a swatch: what ActionHandler does for POST /_action/<id>?colour=<colour> */
 function pairingPick(Context $page, string $actionId, string $colour): void {
-    $page->setRequestInput(['colour' => $colour], []);
-    $page->executeAction($actionId);
+    $request = new RequestScope($page, ['colour' => $colour], [], [], []);
+    $request->bind();
+
+    try {
+        $page->executeAction($actionId);
+    } finally {
+        $request->unbind();
+    }
 }
 
 /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
@@ -42,8 +43,10 @@ class ActionHandler {
 
     /**
      * Handle action triggers from the client.
+     *
+     * @param array<string, mixed> $attributes PSR-7 request attributes from the middleware that ran on the request
      */
-    public function handleAction(Request $request, Response $response, string $actionId): void {
+    public function handleAction(Request $request, Response $response, string $actionId, array $attributes = []): void {
         $actionStart = hrtime(true);
 
         // CSRF: Datastar posts with fetch(), so browsers always send Origin (see OriginPolicy).
@@ -118,11 +121,18 @@ class ActionHandler {
             $tracer->setAttribute('context.route', $context->getRoute());
         }
 
-        try {
-            // Inject HTTP request params so action callbacks can use $c->input() / $c->file() / $c->cookie()
-            $context->setRequestInput($request->get ?? [], $request->post ?? [], $request->files ?? []);
-            $context->setRequestCookies($request->cookie ?? []);
+        // input(), file(), cookie(), getRequestAttribute() and setCookie() reach this request from this coroutine
+        // and those it starts, so a second action of the tab that runs meanwhile keeps its own.
+        $scope = new RequestScope(
+            $context,
+            array_merge($request->get ?? [], $request->post ?? []),
+            $request->files ?? [],
+            $request->cookie ?? [],
+            $attributes,
+        );
+        $scope->bind();
 
+        try {
             // Inject signals into context
             $context->injectSignals($signals);
 
@@ -134,20 +144,7 @@ class ActionHandler {
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, true);
 
-            // Apply any cookies queued by the action callback
-            foreach ($context->flushPendingCookies() as $cookie) {
-                $response->cookie(
-                    $cookie['name'],
-                    $cookie['value'],
-                    $cookie['expires'],
-                    $cookie['path'],
-                    $cookie['domain'],
-                    $cookie['secure'],
-                    $cookie['httpOnly'],
-                    $cookie['sameSite'],
-                );
-            }
-
+            self::sendCookies($response, $context, $scope);
             $response->status(200);
             $response->end();
         } catch (\Throwable $e) {
@@ -161,12 +158,32 @@ class ActionHandler {
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, false);
 
+            self::sendCookies($response, $context, $scope);
             $response->status(500);
             $response->end('Action failed');
         } finally {
+            $scope->unbind();
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+        }
+    }
+
+    /**
+     * Set the cookies queued outside an action (a timer's, say) and then those of this action, which win a tie.
+     */
+    private static function sendCookies(Response $response, Context $context, RequestScope $scope): void {
+        foreach ([...$context->flushPendingCookies(), ...$scope->answer()] as $cookie) {
+            $response->cookie(
+                $cookie['name'],
+                $cookie['value'],
+                $cookie['expires'],
+                $cookie['path'],
+                $cookie['domain'],
+                $cookie['secure'],
+                $cookie['httpOnly'],
+                $cookie['sameSite'],
+            );
         }
     }
 

@@ -170,6 +170,14 @@ An action that throws answers 500 `Action failed`; the worker keeps running and 
 is logged. Registering a second TAB action under the same name replaces the first with a
 warning.
 
+Each action reads its own request: `input()`, `file()`, `cookie()` and
+`getRequestAttribute()` return the values of the request that posted it, and a cookie from
+`setCookie()` goes out with that action's response, also when two actions of one tab run at
+once. A `spawn()` task keeps the request of its action, but `file()` is null once the action
+has answered (OpenSwoole deletes the temporary file). Code outside an action, such as a
+timer, reads the page request, and a cookie it sets goes out with the tab's next action
+response. Signals are tab state: an action that waits sees values a later action posted.
+
 Datastar cancels an in-flight request when the page sends another one with the same method
 and URL, from any element. A request cancelled before it reaches the server never runs its
 action. Where every request counts, or two elements post the same action for different
@@ -559,6 +567,10 @@ $app->group('/admin', function (Via $app) use ($handler): void {
     $app->page('/users',     $handler);
 })->middleware(new AuthMiddleware());
 ```
+
+`$c->getRequestAttribute()` reads what middleware set with `$request->withAttribute()`. In an
+action it is the action request's, and only global middleware runs on actions: read an
+attribute from per-route middleware in the page handler and pass it to the action's closure.
 
 ---
 

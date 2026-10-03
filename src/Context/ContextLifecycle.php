@@ -71,6 +71,7 @@ class ContextLifecycle {
     /**
      * Run $task in a coroutine of its own and count it in Via::$runningTasks while it runs.
      * A throw is logged and reported with ErrorPhase::Task, unless an onError() callback started the task.
+     * The task keeps the request of the action that starts it, also once that action has answered.
      *
      * @param callable(Context): void $task
      *
@@ -80,8 +81,10 @@ class ContextLifecycle {
         $context = $this->context->get() ?? throw new \LogicException('spawn() on a freed context');
         // Reported, the throw of a task that reports an error would start the callbacks, and the task, again.
         $fromErrorCallback = $this->via->inErrorCallbacks();
+        $request = RequestScope::current($context);
 
-        $cid = Coroutine::create(function () use ($task, $context, $fromErrorCallback): void {
+        $cid = Coroutine::create(function () use ($task, $context, $fromErrorCallback, $request): void {
+            $request?->bind();
             ++$this->via->runningTasks;
 
             try {

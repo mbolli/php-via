@@ -136,6 +136,9 @@ All notable changes to php-via will be documented in this file.
   `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`, `getDatastarIntegrity()`,
   `getImportMap()` and `getContextRevivalWindowMs()`. php-via reads its settings from a snapshot
   that `new Via()` takes. `$app->activeSseCount[$id]` becomes `$c->isConnected()`.
+- **`getRequestAttribute()` in an action** returns what global middleware set on the action's
+  request, not the page request's attributes. Outside an action, such as in a timer, `input()` and
+  `cookie()` read the page request instead of the tab's last action.
 
 ### Upgrading from 0.13
 
@@ -412,6 +415,10 @@ message that names the new one.
   `via_head` it goes right after `via_head`'s first tag now.
 - Components on a route with parameters, such as `/blog/{slug}`, never updated: their wrapper id
   kept the pattern's braces, so the selector of their updates was invalid.
+- Two actions of one tab that ran at once shared one request: after a wait, an action read the
+  other's `input()`, `file()` and `cookie()`, and its cookies could go out with the other's
+  response. Each action has its own request now; see
+  [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
 
 ### Tests
 
