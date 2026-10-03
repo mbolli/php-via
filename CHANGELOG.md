@@ -99,9 +99,6 @@ All notable changes to php-via will be documented in this file.
   - **`data-bind` on checkboxes and radios** updates the signal on `input` instead of `change`. A
     script that dispatches `change` has to dispatch `input`, or bind with `__event.change`.
   - **Deleting a signal,** by a patch or by assigning `null`, fires `data-on-signal-patch`.
-- **`Signal::bind()` and `Config::getStaticCacheControl()` take a new optional parameter,** and
-  `Config::withBrotli()`'s `$staticLevel` is now `?int $staticLevel = null`. A subclass that
-  overrides one of them has to match.
 - **Static files get Brotli without `withBrotli()`.** Whenever ext-brotli is loaded, compressible
   static files go out at level 11 to clients that accept it, with `Vary: Accept-Encoding`, and the
   server opens its port only after compressing the files present at start (2.3 s at most,
@@ -130,11 +127,78 @@ All notable changes to php-via will be documented in this file.
     changes only what it names.
   - `Config::getDevMode()` is `isDevMode()`, and `withGcInterval()` is `withGcIntervalMs()`.
 - **`Config`, `Signal`, `Action` and `Scope` are final.**
-- **Removed:** `Via::parseSignals()`, and `Config::getTraceMaxBytes()`, whose limit was never
-  enforced.
-- **Internal API is tagged `@internal`:** Via's public properties, most `Config` getters, the
-  constructors of `Context`, `Signal` and `Action`, and `Signal`'s and `Scope`'s sync helpers.
-  `$app->activeSseCount[$id]` becomes `$c->isConnected()`.
+- **Removed:** `Via::parseSignals()`, `Context::interval()` (use `setInterval()`), and
+  `Config::getTraceMaxBytes()`, whose limit was never enforced.
+- **`Config` keeps only the getters apps read:** `getBasePath()`, `isDevMode()`, `isHttps()`,
+  `getDatastarUrl()`, `getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`.
+  php-via reads everything else from a snapshot that `new Via()` takes, so keep a value you need
+  in a variable of your own.
+- **Internal API is tagged `@internal`:** Via's public properties, the constructors of `Context`,
+  `Signal` and `Action`, and `Signal`'s and `Scope`'s sync helpers. `$app->activeSseCount[$id]`
+  becomes `$c->isConnected()`.
+
+### Upgrading from 0.13
+
+One line per renamed, merged or removed name, old to new. Most old names throw until 0.15 with a
+message that names the new one.
+
+- `twig/twig` came with php-via → `composer require twig/twig` for `withTemplateDir()`,
+  template views, `render()` and `getTwig()`
+- `{{ datastar_url }}`, `{{ import_map }}` and the copied bootstrap tags in a custom shell →
+  `{{ via_head }}` after `<meta charset>`, `{{ via_foot }}` before `</body>`
+- `{{ datastarUrl }}`, `{{ importMap }}` and the copied bootstrap tags in a Twig layout →
+  `{{ via_head() }}` and `{{ via_foot() }}`
+- `$c->renderString($src, $data)` → `$app->getTwig()->createTemplate($src)->render($data)`
+- `$app->onStart($fn)` → `$app->onWorkerStart($fn)`, which passes `int $workerId`
+- `$app->onShutdown($fn)` → `$app->onWorkerStop($fn)`
+- `$app->getContextsByScope($scope)` → `$app->getLocalContexts($scope)`
+- `$app->config()` → `$app->getConfig()`
+- `$app->getRenderStats()` → `$app->getStats()->getStats()`
+- `$app->activeSseCount[$id]` → `$c->isConnected()`
+- `$app->broadcast(Scope::ROUTE)` → `$app->broadcast(Scope::routeScope('/path'))`
+- `$app->broadcast(Scope::SESSION)` → `$app->broadcast(Scope::sessionScope($id))`
+- `$c->onDisconnect($fn)` → `$c->onCleanup($fn)`
+- `#[OnDisconnect]` → `#[OnCleanup]`
+- `$c->interval($ms, $fn)` → `$c->setInterval($fn, $ms)`
+- `$c->view($fn, cacheUpdates: true)` → `$c->view($fn, shareRender: true)`; for
+  `cacheUpdates: false`, leave it out
+- `$c->view('<div>...</div>')` → `$c->view(fn () => '<div>...</div>')`
+- `$c->action($fn, 'name', $scope)` → `$c->action($fn, 'name')`, or `#[Action(scope: ...)]`
+- `$c->signal($value)` → `$c->signal($value, 'name')`
+- `$c->component($fn)` → `$c->component($fn, 'namespace')`
+- `$signal->text()` → `<span data-text="{$signal->ref()}">{$signal->string()}</span>`
+- `setValue($v, broadcast: false)`, and the same flag on `increment()` and `mutate()` →
+  declare the signal with `signal(..., autoBroadcast: false)`
+- `setValue($v, markChanged: false)` → `setValue($v)` and then `markSynced()`
+- `Config::withContextCleanupDelay($ms)` → `withContextTimeouts(cleanupDelayMs: $ms)`
+- `Config::withContextConnectTimeout($ms)` → `withContextTimeouts(connectMs: $ms)`
+- `Config::withContextReconnectTimeout($ms)` → `withContextTimeouts(reconnectMs: $ms)`
+- `Config::withContextRevivalWindow($ms)` → `withContextTimeouts(revivalWindowMs: $ms)`
+- `Config::withTracing($on)` → `withDevBar($on)`
+- `Config::withTracingWrites($on)` → `withDevBarOptions(writes: $on)`
+- `Config::withTraceBufferSize($n)` → `withDevBarOptions(traces: $n)`
+- `Config::withSsePollIntervalMs($ms)` → `withDevBarOptions(pollMs: $ms)`
+- `Config::getDevMode()` → `isDevMode()`
+- `Config::withGcInterval($ms)` → `withGcIntervalMs($ms)`
+- `Config::withSwooleSettings(['worker_num' => $n])` → `withWorkerNum($n)`
+- `Config::withBroadcastCoalescing(false)` → `$app->flushBroadcasts()` where a broadcast has to
+  land first (deprecated, still works)
+- `Config::getTraceMaxBytes()` → removed
+- `Config::getActionRateLimit()`, `getActionRateWindow()`, `getAllowMissingOrigin()`,
+  `getBroadcastTickMs()`, `getBroker()`, `getBrokerErrorHandler()`, `getBrotli()`,
+  `getBrotliDynamicLevel()`, `getBrotliStaticLevel()`, `getContextCleanupDelayMs()`,
+  `getContextConnectTimeoutMs()`, `getContextDirectoryRecordBytes()`, `getContextDirectoryRows()`,
+  `getContextDirectoryTtlSeconds()`, `getContextReconnectTimeoutMs()`, `getFrameAncestors()`,
+  `getGcIntervalMs()`, `getGlobalStateFlushMs()`, `getGlobalStatePath()`, `getGlobalStateTableRows()`,
+  `getGlobalStateTableValueBytes()`, `getHost()`, `getLogLevel()`, `getPort()`,
+  `getScopedSignalTableRows()`, `getScopedSignalTableValueBytes()`, `getSecureCookie()`,
+  `getSessionCookieSameSite()`, `getSessionTableRows()`, `getSessionTableValueBytes()`,
+  `getShellTemplate()`, `getSseKeepAliveMs()`, `getSseMaxQueuedBytes()`, `getSsePollIntervalMs()`,
+  `getSslCertFile()`, `getSslKeyFile()`, `getStaticCacheControl()`, `getStaticDir()`,
+  `getStrictTabSignals()`, `getSwooleSettings()`, `getTemplateDir()`, `getTraceBufferSize()`,
+  `getTrustedOrigins()`, `getTwigCacheDir()`, `getWorkerNum()`, `isBroadcastCoalescingEnabled()`,
+  `isH2c()`, `isSessionCookiePartitioned()`, `isTracingEnabled()` and `isTracingWritesEnabled()` →
+  removed; keep the value you passed to the setter
 
 ### New Features
 
@@ -196,7 +260,6 @@ All notable changes to php-via will be documented in this file.
 - **`Config::withBroadcastCoalescing()`** goes in 0.15, and `new Via()` logs a warning when
   coalescing is off. Call `$app->flushBroadcasts()` where a broadcast has to land before the next
   step.
-- **`Via::HOOK_FLAGS_NO_FILE_IO`** goes in 0.15. Use `Via::noFileIoHookFlags()`.
 
 ### Performance
 
