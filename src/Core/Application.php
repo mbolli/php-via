@@ -14,7 +14,6 @@ use Mbolli\PhpVia\State\SharedSessionStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
-use Mbolli\PhpVia\Support\Stats;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
 
@@ -115,7 +114,6 @@ class Application {
     public function __construct(
         private Config $config,
         private Logger $logger,
-        private Stats $stats,
         private ScopeRegistry $scopeRegistry,
         private SignalManager $signalManager,
         private ActionRegistry $actionRegistry,
@@ -242,22 +240,6 @@ class Application {
      */
     public function getClients(int $readEpoch = 0): array {
         return $this->clientRegistry?->all($readEpoch) ?? $this->clients;
-    }
-
-    /**
-     * Track view render time.
-     */
-    public function trackRender(float $duration): void {
-        $this->stats->trackRender($duration);
-    }
-
-    /**
-     * Get render statistics.
-     *
-     * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
-     */
-    public function getRenderStats(): array {
-        return $this->stats->getStats();
     }
 
     /**

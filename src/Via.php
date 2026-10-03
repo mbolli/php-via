@@ -311,7 +311,6 @@ class Via {
         $this->app = new Application(
             $this->config,
             $this->logger,
-            $this->stats,
             $this->scopeRegistry,
             $this->signalManager,
             $this->actionRegistry

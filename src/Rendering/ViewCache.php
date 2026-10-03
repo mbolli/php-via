@@ -19,9 +19,6 @@ class ViewCache {
     /** @var array<string, array<string, string>> Cached HTML by scope, then by view and render kind */
     private array $cache = [];
 
-    /** @var array<string, bool> Tracks if scope is currently rendering (prevents race condition) */
-    private array $rendering = [];
-
     /** @var array<string, int> Bumped by invalidate(), so a render that started before it is not stored */
     private array $generations = [];
 
@@ -101,29 +98,6 @@ class ViewCache {
     public function setIfCurrent(string $scope, string $html, bool $isUpdate, string $generation, string $view = ''): void {
         if ($this->generation($scope) === $generation) {
             $this->set($scope, $html, $isUpdate, $view);
-        }
-    }
-
-    /**
-     * Check if a scope is currently rendering.
-     *
-     * @param string $scope Scope identifier
-     */
-    public function isRendering(string $scope): bool {
-        return $this->rendering[$scope] ?? false;
-    }
-
-    /**
-     * Set rendering status for a scope.
-     *
-     * @param string $scope  Scope identifier
-     * @param bool   $status Rendering status
-     */
-    public function setRendering(string $scope, bool $status): void {
-        if ($status) {
-            $this->rendering[$scope] = true;
-        } else {
-            unset($this->rendering[$scope]);
         }
     }
 
