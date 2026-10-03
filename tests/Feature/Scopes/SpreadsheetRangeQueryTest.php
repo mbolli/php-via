@@ -76,7 +76,6 @@ beforeEach(function (): void {
     ssReset('extentCache', null);
     ssReset('cursors', []);
     ssReset('selections', []);
-    ssReset('positions', []);
 });
 
 afterEach(function (): void {

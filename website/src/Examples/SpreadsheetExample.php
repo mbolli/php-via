@@ -16,9 +16,6 @@ final class SpreadsheetExample {
 
     private const string SCOPE = 'example:spreadsheet';
 
-    /** Matches the framework's cap on revival records. */
-    private const int MAX_POSITIONS = 10_000;
-
     /** @var array<string, array{row: int, col: int, hue: int}> contextId => cursor */
     private static array $cursors = [];
 
@@ -27,15 +24,6 @@ final class SpreadsheetExample {
 
     /** @var array<string, true> contextId => an edit startEdit opened that no commit, Escape or move has ended yet */
     private static array $openEdits = [];
-
-    /**
-     * Position of a destroyed context, for a revival. Focus and viewport are server-owned, so the
-     * revival snapshot the browser sends cannot restore them. Kept for the revival window. Without
-     * an entry (another worker, or past the window) a revived tab starts at A1 with no open edit.
-     *
-     * @var array<string, array{row: int, col: int, viewRow: int, viewCol: int, sel: array{r1: int, c1: int, r2: int, c2: int}, edit: bool, expiresAt: int}>
-     */
-    private static array $positions = [];
 
     private static ?\SQLite3 $db = null;
 
@@ -67,8 +55,10 @@ final class SpreadsheetExample {
             $contextId = $c->getId();
             $hue = self::hueForSession($sessionId);
 
-            $pos = self::$positions[$contextId] ?? ['row' => 0, 'col' => 0, 'viewRow' => 0, 'viewCol' => 0, 'sel' => ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1], 'edit' => false];
-            unset(self::$positions[$contextId]);
+            // Focus and viewport are server-owned, so the values the browser sends on a revival cannot
+            // restore them: the onCleanup() below keeps them in the tab's state for that.
+            /** @var array{row: int, col: int, viewRow: int, viewCol: int, sel: array{r1: int, c1: int, r2: int, c2: int}, edit: bool} $pos */
+            $pos = $c->tabState('position', ['row' => 0, 'col' => 0, 'viewRow' => 0, 'viewCol' => 0, 'sel' => ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1], 'edit' => false]);
             if ($pos['edit']) {
                 self::$openEdits[$contextId] = true;
             } else {
@@ -107,29 +97,20 @@ final class SpreadsheetExample {
             // Jump-to-coordinate input value
             $c->signal('', 'jump', Scope::TAB);
 
-            // Scope-level version counter: bumped on every cursor/edit change
-            // so that broadcast() has a changed signal to deliver, triggering re-renders
-            $c->signal(0, 'v', self::SCOPE, autoBroadcast: false);
-
             // Selection range stored server-side per context (not as signals)
             if (!isset(self::$selections[$contextId])) {
                 self::$selections[$contextId] = $pos['sel'];
             }
 
-            $c->onCleanup(function () use ($contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
-                $windowMs = $app->getConfig()->getContextRevivalWindowMs();
-                if ($windowMs > 0) {
-                    self::$positions[$contextId] = [
-                        'row' => $focusRowSignal->int(),
-                        'col' => $focusColSignal->int(),
-                        'viewRow' => $viewRowSignal->int(),
-                        'viewCol' => $viewColSignal->int(),
-                        'sel' => self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1],
-                        'edit' => isset(self::$openEdits[$contextId]),
-                        'expiresAt' => time() + (int) ceil($windowMs / 1000),
-                    ];
-                }
-                self::prunePositions();
+            $c->onCleanup(function () use ($c, $contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
+                $c->setTabState('position', [
+                    'row' => $focusRowSignal->int(),
+                    'col' => $focusColSignal->int(),
+                    'viewRow' => $viewRowSignal->int(),
+                    'viewCol' => $viewColSignal->int(),
+                    'sel' => self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1],
+                    'edit' => isset(self::$openEdits[$contextId]),
+                ]);
 
                 unset(self::$cursors[$contextId], self::$selections[$contextId], self::$openEdits[$contextId]);
 
@@ -154,8 +135,6 @@ final class SpreadsheetExample {
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
 
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $row = $targetRow->int();
                 $col = $targetCol->int();
                 $isShift = $shift->bool();
@@ -178,7 +157,6 @@ final class SpreadsheetExample {
                 }
 
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
-                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'focusCell');
 
@@ -194,8 +172,6 @@ final class SpreadsheetExample {
                 /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
 
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
 
                 /** @var Signal $key */ $key = $ctx->getSignal('key');
 
@@ -261,7 +237,6 @@ final class SpreadsheetExample {
                 $viewCol->setValue($vc);
 
                 self::$cursors[$contextId] = ['row' => $fr, 'col' => $fc, 'hue' => self::hueForSession($sessionId)];
-                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'navigate');
 
@@ -292,13 +267,10 @@ final class SpreadsheetExample {
                 /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
 
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 if (!$editing->bool()) {
                     return;
                 }
                 self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
-                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'commitEdit');
 
@@ -347,8 +319,6 @@ final class SpreadsheetExample {
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
 
                 /** @var Signal $pasted */ $pasted = $ctx->getSignal('pasted');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $data = $pasted->string();
                 $pasted->setValue('');
                 if ($data === '') {
@@ -371,7 +341,6 @@ final class SpreadsheetExample {
                 }
                 self::setCells($cells);
                 self::endEdit($contextId, $editing, $editValue, $startRow, $startCol, commit: false);
-                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'paste');
 
@@ -392,8 +361,8 @@ final class SpreadsheetExample {
                     $tsv .= implode("\t", $row) . "\n";
                 }
 
-                $tsvJson = json_encode(rtrim($tsv, "\n"));
-                $ctx->execScript("navigator.clipboard.writeText({$tsvJson})");
+                // The template's data-on:ss-copy__window listener writes it to the clipboard.
+                $ctx->dispatch('ss-copy', rtrim($tsv, "\n"));
             }, 'getCopyData');
 
             $c->action(function (Context $ctx): void {
@@ -415,8 +384,6 @@ final class SpreadsheetExample {
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
 
                 /** @var Signal $jumpTarget */ $jumpTarget = $ctx->getSignal('jump');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
 
                 /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
 
@@ -442,7 +409,6 @@ final class SpreadsheetExample {
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
                 self::$selections[$contextId] = ['r1' => $row, 'c1' => $col, 'r2' => $row, 'c2' => $col];
 
-                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'jumpTo');
 
@@ -452,8 +418,6 @@ final class SpreadsheetExample {
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
 
                 /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 if ($editing->bool()) {
                     return;
                 }
@@ -476,7 +440,6 @@ final class SpreadsheetExample {
                     self::setCells($cells);
                 }
 
-                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'clearCells');
 
@@ -624,9 +587,9 @@ final class SpreadsheetExample {
                         '<strong>Dynamic resize</strong>: drag the bottom-right handle to make the grid any size. A <code>ResizeObserver</code> dispatches a throttled event; the browser computes how many rows and columns fit, writes them into signals, and posts to a <code>resize</code> action that re-renders exactly the right number of cells.',
                         '<strong>Jump to coordinate</strong>: type a cell reference like <code>AB2000</code> into the toolbar input and press Enter. The server parses column letters and row number, centers the viewport, and moves the cursor in one round-trip.',
                         '<strong>Collaborative cursors</strong>: each user gets a hue derived from their session ID. Other users\' focused cells show a colored border in real time, broadcast via a custom <code>example:spreadsheet</code> scope.',
-                        '<strong>Copy & paste</strong>: Ctrl+C copies the selected range as tab-separated values to the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
+                        '<strong>Copy & paste</strong>: Ctrl+C asks the server for the selected range, which <code>$ctx->dispatch()</code> sends back as tab-separated values for the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
                         '<strong>Keyboard-first UX</strong>: a single <code>data-on:keydown__window</code> handler covers arrows, Tab, Enter, Escape, F2, Delete, Ctrl+C, and printable-character-to-edit, with an explicit guard so the jump input is never intercepted.',
-                        '<strong>Scope design</strong>: viewport position and editing state are TAB-scoped (private per tab). Cell data and cursor positions use a custom <code>example:spreadsheet</code> scope, so every connected user sees live updates without leaking private state.',
+                        '<strong>Scope design</strong>: viewport position and editing state are TAB signals (private per tab). Every tab joins a custom <code>example:spreadsheet</code> scope, and each edit or cursor move broadcasts it, so every connected user sees live updates without leaking private state. A tab that comes back after it was away gets its position back from <code>$c->tabState()</code>.',
                         '<strong>Raw PHP rendering</strong>: SSE update hot path uses plain PHP string building instead of Twig. Bypassing the template engine on every broadcast yields a 3 to 4× throughput increase under concurrent load.',
                     ],
                     'anatomy' => [
@@ -637,7 +600,6 @@ final class SpreadsheetExample {
                             ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '\"\"', 'desc' => 'Current cell editor input value.'],
                             ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted: client-writable action parameters for keyboard and mouse events.'],
                             ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20×10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
-                            ['name' => 'version', 'type' => 'int', 'scope' => 'Custom', 'desc' => 'Shared scope version counter. Bumped on every cursor/edit change to trigger broadcasts.'],
                         ],
                         'actions' => [
                             ['name' => 'focusCell', 'desc' => 'Moves cursor to a cell. Commits pending edits, updates selection, broadcasts cursor position.'],
@@ -879,17 +841,6 @@ final class SpreadsheetExample {
         }
         $editing->setValue(false);
         $editValue->setValue('');
-    }
-
-    /** Drop expired entries, then the oldest past the cap. Entries are appended in expiry order. */
-    private static function prunePositions(): void {
-        $now = time();
-        foreach (self::$positions as $id => $entry) {
-            if ($entry['expiresAt'] > $now && \count(self::$positions) <= self::MAX_POSITIONS) {
-                break;
-            }
-            unset(self::$positions[$id]);
-        }
     }
 
     /**
