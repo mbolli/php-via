@@ -174,13 +174,13 @@ final class StockTickerExample {
             $prices = array_map(fn (array $h) => $h['price'], $history);
 
             $priceSignal = $app->getScopedSignalByName($scope, 'price');
-            $priceSignal?->setValue(number_format($newPrice, 2), markChanged: true, broadcast: false);
+            $priceSignal?->setValue(number_format($newPrice, 2));
 
             $timesSignal = $app->getScopedSignalByName($scope, 'times');
-            $timesSignal?->setValue($times, markChanged: true, broadcast: false);
+            $timesSignal?->setValue($times);
 
             $pricesSignal = $app->getScopedSignalByName($scope, 'prices');
-            $pricesSignal?->setValue($prices, markChanged: true, broadcast: false);
+            $pricesSignal?->setValue($prices);
 
             $app->broadcast(Scope::build('example:stock', $symbol));
         }

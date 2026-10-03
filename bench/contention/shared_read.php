@@ -226,7 +226,7 @@ function defineRoute(Via $app, string $mode, array $kinds, array $p, RenderCount
         /** @var array<int, Signal> $signals */
         $signals = [];
         foreach ($kinds as $slot => $kind) {
-            $signals[$slot] = $c->signal(valueFor($kind, $slot, 0, $arrayItems), 's' . $slot, Scope::ROUTE);
+            $signals[$slot] = $c->signal(valueFor($kind, $slot, 0, $arrayItems), 's' . $slot, Scope::ROUTE, autoBroadcast: false);
         }
         // A per-viewer TAB signal is what makes a TAB-primary view legitimately per context.
         $me = $mode === 'tab' ? $c->signal('viewer ' . $c->getId(), 'me') : null;
@@ -304,7 +304,7 @@ function drain(array $contexts): array {
  */
 function writeTick(Context $writer, array $kinds, int $tick, int $arrayItems): void {
     foreach ($kinds as $slot => $kind) {
-        $writer->getSignal('s' . $slot)?->setValue(valueFor($kind, $slot, $tick, $arrayItems), true, false);
+        $writer->getSignal('s' . $slot)?->setValue(valueFor($kind, $slot, $tick, $arrayItems));
     }
 }
 

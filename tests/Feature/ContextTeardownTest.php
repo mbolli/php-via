@@ -225,7 +225,7 @@ describe('Scope state after a component is released', function (): void {
             $c->view(fn (): string => 'page');
         };
         $first = teardownMintPage($app, '/a', $handler);
-        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7, broadcast: false);
+        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7);
 
         $app->getApp()->destroyContext($first->getId());
         teardownMintPage($app, '/a', $handler);

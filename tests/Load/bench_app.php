@@ -267,8 +267,8 @@ $app->page('/bench/spreadsheet', function (Context $c) use ($useRouteScope, $ben
         $sig->setValue($sig->int() + 1);
 
         $newVr = ($vr + 1) % 100; // slowly scroll through first 100 rows
-        $ctx->getSignal('viewRow')->setValue($newVr, broadcast: false);
-        $ctx->getSignal('focusRow')->setValue($newVr, broadcast: false);
+        $ctx->getSignal('viewRow')->setValue($newVr);
+        $ctx->getSignal('focusRow')->setValue($newVr);
         $ctx->syncSignals();
     }, 'increment');
 

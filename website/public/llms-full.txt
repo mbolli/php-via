@@ -117,7 +117,6 @@ $count->getValue(); // mixed, raw
 
 // Write a value; a scoped signal (not TAB) broadcasts its scope
 $count->setValue(42);
-$count->setValue(42, broadcast: false);  // write without broadcasting
 
 // Shared counters and lists: update without losing writes from other workers
 $count->increment();                                   // atomic, returns the new value

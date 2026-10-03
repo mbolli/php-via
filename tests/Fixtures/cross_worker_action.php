@@ -44,9 +44,9 @@ $app->page('/probe', function (Context $c) use ($mode): void {
     $bump = $c->action(function (Context $ctx) use ($mode): void {
         $signal = $ctx->getSignal('count');
         if ($mode === 'increment') {
-            $signal->increment(broadcast: false);
+            $signal->increment();
         } else {
-            $signal->setValue($signal->int() + 1, broadcast: false);
+            $signal->setValue($signal->int() + 1);
         }
     }, 'bump');
 

@@ -244,10 +244,10 @@ class SignalFactory {
             if (isset($this->signals[$signalId])) {
                 $signal = $this->signals[$signalId];
                 if ($signal->isClientWritable()) {
-                    $signal->setValue($value, false);
+                    $signal->injectValue($value);
                 } elseif (!self::sameClientValue($signal->getValue(), $value)) {
                     // Re-send the server value so the browser drops its stale copy.
-                    $signal->setValue($signal->getValue(), true, false);
+                    $signal->setValue($signal->getValue());
                 }
                 unset($flat[$signalId]);
 
@@ -258,7 +258,7 @@ class SignalFactory {
                 $signal = $this->app->getScopedSignal($scope, $signalId);
                 if ($signal !== null) {
                     if ($signal->isClientWritable()) {
-                        $signal->setValue($value, false);
+                        $signal->injectValue($value);
                     }
                     unset($flat[$signalId]);
 

@@ -92,7 +92,7 @@ function mountSignalWorker(SharedSignalStore $store, string $contextId, mixed $i
     $app->setSharedSignalStore($store);
     $app->page('/bench', function (Context $c) use ($initial): void {
         $c->scope(Scope::ROUTE);
-        $v = $c->signal($initial, SIGNAL_NAME);
+        $v = $c->signal($initial, SIGNAL_NAME, autoBroadcast: false);
         $c->view(fn (): string => 'v=' . json_encode($v->getValue()));
     });
 
@@ -278,7 +278,7 @@ function runWorker(int $w, string $mode, int $coroutines, int $opsPerWorker, boo
         $op = static fn (callable $m): mixed => $via->mutateGlobalState(HOT_KEY, $m);
     } else {
         $signal = mountSignalWorker($store, '/bench_/w' . $w, $initial)->getSignal(SIGNAL_NAME);
-        $op = static fn (callable $m): mixed => $signal->mutate($m, broadcast: false);
+        $op = static fn (callable $m): mixed => $signal->mutate($m);
     }
 
     $ctl->incr('ready', 'v', 1);

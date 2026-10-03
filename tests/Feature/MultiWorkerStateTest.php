@@ -137,7 +137,7 @@ test('scopes that differ only by punctuation get their own id and value across w
 
     expect($draftA->id())->not->toBe($draftB->id());
 
-    $draftA->setValue('private to a-b', false);
+    $draftA->setValue('private to a-b');
 
     expect($draftB->string())->toBe('');
     expect($draftA->string())->toBe('private to a-b');
@@ -153,7 +153,7 @@ test('the shared row is per scope even for two signals with the same id', functi
     $workerA->registerScopedSignal('user:a', $draftA);
     $workerB->registerScopedSignal('user:b', $draftB);
 
-    $draftA->setValue('private to a', false);
+    $draftA->setValue('private to a');
 
     expect($draftB->string())->toBe('');
     expect($draftA->string())->toBe('private to a');
@@ -176,7 +176,8 @@ function fanWorker(SharedSignalStore $store, Closure $afterRead): Via {
 
     $app->page('/fan', function (Context $c) use ($afterRead): void {
         $c->addScope(Scope::routeScope('/fan'));
-        $count = $c->signal(1, 'count', Scope::ROUTE);
+        // No auto-broadcast: a write in a view must not start another fan-out of its own.
+        $count = $c->signal(1, 'count', Scope::ROUTE, autoBroadcast: false);
         $c->view(function () use ($c, $count, $afterRead): string {
             $html = 'count=' . $count->int();
             $afterRead($c, $count);
@@ -257,9 +258,9 @@ test('a write in a view is read back by the rest of the fan-out', function (Clos
 
     expect(fanFrames($contexts))->toBe([['count=1'], ['count=5'], ['count=5']]);
 })->with([
-    'setValue' => [static fn (Signal $s) => $s->setValue(5, true, false)],
-    'increment' => [static fn (Signal $s) => $s->increment(4, false)],
-    'mutate' => [static fn (Signal $s) => $s->mutate(static fn (mixed $v): int => (int) $v + 4, false)],
+    'setValue' => [static fn (Signal $s) => $s->setValue(5)],
+    'increment' => [static fn (Signal $s) => $s->increment(4)],
+    'mutate' => [static fn (Signal $s) => $s->mutate(static fn (mixed $v): int => (int) $v + 4)],
 ]);
 
 test('a view that broadcasts its own scope gets a re-run that reads shared memory again', function (): void {

@@ -111,7 +111,7 @@ $counterComponent = function (Context $c) use ($app): void {
     $count = $c->signal(0, 'count');
 
     $c->action(function () use ($app, $count): void {
-        $count->increment(broadcast: false);
+        $count->increment();
         $app->broadcast('home:counter');
     }, 'increment', Scope::TAB);
 

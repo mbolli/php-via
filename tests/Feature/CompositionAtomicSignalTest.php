@@ -94,12 +94,12 @@ final class PlainCounterPage {
 
     #[Action]
     public function viaSignal(Context $ctx): void {
-        $ctx->getSignal('votes')->increment(broadcast: false);
+        $ctx->getSignal('votes')->increment();
     }
 
     #[Action]
     public function mirrored(Context $ctx): void {
-        $this->votes = $ctx->getSignal('votes')->increment(broadcast: false);
+        $this->votes = $ctx->getSignal('votes')->increment();
     }
 
     #[Action]
@@ -146,7 +146,7 @@ test('an atomic property increments the signal by the difference', function (): 
 test('an atomic action that changes nothing writes nothing', function (): void {
     $ctx = mountPage(AtomicCounterPage::class);
     $signal = $ctx->getSignal('votes');
-    $signal->setValue(9, broadcast: false);
+    $signal->setValue(9);
 
     $ctx->executeAction('untouched');
 

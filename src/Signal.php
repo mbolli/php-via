@@ -56,8 +56,7 @@ class Signal {
         $this->autoBroadcast = $autoBroadcast;
         $this->clientWritable = $clientWritable;
         $this->app = $app;
-        $this->setValue($initialValue, false); // Don't trigger broadcast on init
-        $this->changed = true; // But mark as changed for initial sync
+        $this->value = $initialValue;
     }
 
     /**
@@ -130,11 +129,16 @@ class Signal {
      *
      * @template T
      *
-     * @param callable(mixed): T $mutator Receives the current value, returns the new one
+     * @param callable(mixed): T $mutator    Receives the current value, returns the new one
+     * @param mixed              ...$removed The broadcast flag removed in 0.14: any argument here throws
      *
      * @return T the value written
      */
-    public function mutate(callable $mutator, bool $broadcast = true): mixed {
+    public function mutate(callable $mutator, mixed ...$removed): mixed {
+        if ($removed !== []) {
+            self::rejectRemovedFlags('mutate', 'the mutator', $removed);
+        }
+
         $next = $this->store !== null
             ? $this->store->mutate($this->sharedKey(), $mutator)
             : $mutator($this->value);
@@ -144,7 +148,7 @@ class Signal {
         $this->changed = true;
         ++$this->writes;
 
-        if ($broadcast && $this->isScoped() && $this->autoBroadcast && $this->app !== null) {
+        if ($this->isScoped() && $this->autoBroadcast && $this->app !== null) {
             $this->app->broadcast($this->scope);
         }
 
@@ -161,11 +165,15 @@ class Signal {
      *
      * Single-worker behaviour is identical to the equivalent setValue().
      *
-     * @param bool $broadcast Whether to auto-broadcast (scoped signals with autoBroadcast only)
+     * @param mixed ...$removed The broadcast flag removed in 0.14: any argument here throws
      *
      * @throws \LogicException if the signal does not hold an integer
      */
-    public function increment(int $by = 1, bool $broadcast = true): int {
+    public function increment(int $by = 1, mixed ...$removed): int {
+        if ($removed !== []) {
+            self::rejectRemovedFlags('increment', '$by', $removed);
+        }
+
         if ($this->store !== null) {
             $next = $this->store->increment($this->sharedKey(), $by);
         } else {
@@ -183,7 +191,7 @@ class Signal {
         $this->changed = true;
         ++$this->writes;
 
-        if ($broadcast && $this->isScoped() && $this->autoBroadcast && $this->app !== null && $by !== 0) {
+        if ($this->isScoped() && $this->autoBroadcast && $this->app !== null && $by !== 0) {
             $this->app->broadcast($this->scope);
         }
 
@@ -191,35 +199,43 @@ class Signal {
     }
 
     /**
-     * Set the signal value.
+     * Set the signal value and queue it for the next sync.
      *
-     * @param mixed $value       The new value to set
-     * @param bool  $markChanged Whether to mark signal as changed for sync
-     * @param bool  $broadcast   Whether to auto-broadcast (only applies if markChanged=true)
+     * A scoped signal also broadcasts its scope when the value changed, unless it was declared
+     * with autoBroadcast: false; several writes in one action still render once per scope.
+     *
+     * @param mixed $value      The new value to set
+     * @param mixed ...$removed The markChanged and broadcast flags removed in 0.14: any argument here throws
      */
-    public function setValue(mixed $value, bool $markChanged = true, bool $broadcast = true): void {
-        // Check if value actually changed. With a shared backing the comparison has to be
-        // against what is actually stored, not against this worker's last-seen copy or a
-        // flush's read snapshot, so it bypasses getValue().
+    public function setValue(mixed $value, mixed ...$removed): void {
+        if ($removed !== []) {
+            self::rejectRemovedFlags('setValue', 'the value', $removed);
+        }
+
+        // With a shared backing the comparison has to be against what is actually stored, not
+        // against this worker's last-seen copy or a flush's read snapshot, so it bypasses getValue().
         $oldValue = $this->store !== null ? $this->store->get($this->sharedKey(), $this->value) : $this->value;
 
         $this->value = $value;
         $this->readEpoch = 0;
         $this->store?->set($this->sharedKey(), $value);
+        $this->changed = true;
+        ++$this->writes;
 
-        if ($markChanged) {
-            $this->changed = true;
-            ++$this->writes;
-
-            // Auto-broadcast for scoped signals (if enabled, broadcast=true, and value changed)
-            if ($broadcast
-                && $this->isScoped()
-                && $this->autoBroadcast
-                && $this->app !== null
-                && $oldValue !== $this->value) {
-                $this->app->broadcast($this->scope);
-            }
+        if ($this->isScoped() && $this->autoBroadcast && $this->app !== null && $oldValue !== $this->value) {
+            $this->app->broadcast($this->scope);
         }
+    }
+
+    /**
+     * Store a value the browser already holds: it is not queued for a sync, counted as a write or broadcast.
+     *
+     * @internal client values posted with an action or carried by the SSE seed
+     */
+    public function injectValue(mixed $value): void {
+        $this->value = $value;
+        $this->readEpoch = 0;
+        $this->store?->set($this->sharedKey(), $value);
     }
 
     /**
@@ -327,6 +343,27 @@ class Signal {
         $value = $this->store === null ? $this->value : $this->getValue();
 
         return \is_array($value) ? $value : (array) $value;
+    }
+
+    /**
+     * PHP silently drops extra positional arguments to a userland method, so the flags removed in
+     * 0.14 are caught here rather than left to mean nothing.
+     *
+     * @param array<int|string, mixed> $removed
+     */
+    private static function rejectRemovedFlags(string $method, string $kept, array $removed): never {
+        $named = array_filter(array_keys($removed), \is_string(...));
+        $positional = \count($removed) - \count($named);
+        $passed = array_map(static fn (string $name): string => $name . ':', $named);
+        if ($positional > 0) {
+            $passed[] = $positional . ' more positional argument' . ($positional > 1 ? 's' : '');
+        }
+
+        throw new \ArgumentCountError(
+            "Signal::{$method}() takes only {$kept} since php-via 0.14, but got " . implode(' and ', $passed) . '. '
+            . 'Delete the broadcast: and markChanged: arguments: a scoped signal broadcasts on write unless declared '
+            . "with autoBroadcast: false, and markSynced() drops a TAB signal's pending patch."
+        );
     }
 
     /**
