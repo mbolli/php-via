@@ -355,38 +355,6 @@ class PatchManager {
         $this->syncSignalsOf($context);
     }
 
-    private function syncSignalsOf(Context $context): void {
-        /** @var list<Signal> $pending */
-        $pending = [];
-        $updatedSignals = $this->prepareSignalsForPatch($pending);
-
-        if (!empty($updatedSignals)) {
-            $this->noteQueuedInAction($pending);
-
-            // Acknowledgement is deferred to delivery. Marking these synced here,
-            // at queue time, meant that any patch destroyed before transmission
-            // (evicted when the queue filled, or discarded wholesale by
-            // recreatePatchChannel() on an SSE reconnect) was never resent, leaving
-            // the client permanently stale on a delta it never received.
-            //
-            // Because the confirm callback only runs after a successful write, a
-            // patch that dies in the queue leaves its signals dirty and the next
-            // syncSignals() re-includes them. Loss becomes self-healing.
-            $this->queuePatch([
-                'type' => 'signals',
-                'content' => $updatedSignals,
-                'confirm' => static function () use ($pending): void {
-                    foreach ($pending as $signal) {
-                        $signal->markSynced();
-                    }
-                },
-            ]);
-        }
-
-        // Also sync scoped signals for all scopes this context belongs to
-        $this->syncScopedSignals($context);
-    }
-
     /**
      * Start tracking which TAB signals the action running in this coroutine syncs itself.
      *
@@ -522,6 +490,38 @@ class PatchManager {
         }
 
         return isset($patch['mode']);
+    }
+
+    private function syncSignalsOf(Context $context): void {
+        /** @var list<Signal> $pending */
+        $pending = [];
+        $updatedSignals = $this->prepareSignalsForPatch($pending);
+
+        if (!empty($updatedSignals)) {
+            $this->noteQueuedInAction($pending);
+
+            // Acknowledgement is deferred to delivery. Marking these synced here,
+            // at queue time, meant that any patch destroyed before transmission
+            // (evicted when the queue filled, or discarded wholesale by
+            // recreatePatchChannel() on an SSE reconnect) was never resent, leaving
+            // the client permanently stale on a delta it never received.
+            //
+            // Because the confirm callback only runs after a successful write, a
+            // patch that dies in the queue leaves its signals dirty and the next
+            // syncSignals() re-includes them. Loss becomes self-healing.
+            $this->queuePatch([
+                'type' => 'signals',
+                'content' => $updatedSignals,
+                'confirm' => static function () use ($pending): void {
+                    foreach ($pending as $signal) {
+                        $signal->markSynced();
+                    }
+                },
+            ]);
+        }
+
+        // Also sync scoped signals for all scopes this context belongs to
+        $this->syncScopedSignals($context);
     }
 
     /**
