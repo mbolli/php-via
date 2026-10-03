@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\State\SharedSignalStore;
+use Mbolli\PhpVia\Support\ClientValue;
 use Mbolli\PhpVia\Support\Removed;
 
 /**
@@ -20,6 +21,9 @@ final class Signal {
     private bool $autoBroadcast = true;
     private ?bool $clientWritable = null;
     private ?Via $app = null;
+
+    /** @var null|list<string> The types a client write may have (see ClientValue), null for any */
+    private ?array $clientTypes;
 
     /**
      * Monotonic count of value-changing writes made through this Signal object.
@@ -60,6 +64,7 @@ final class Signal {
         $this->clientWritable = $clientWritable;
         $this->app = $app;
         $this->value = $initialValue;
+        $this->clientTypes = ClientValue::typesOf($initialValue);
     }
 
     /**
@@ -269,6 +274,28 @@ final class Signal {
      */
     public function isClientWritable(): bool {
         return $this->clientWritable ?? !$this->isScoped();
+    }
+
+    /**
+     * Set the types a client write may have, in place of the initial value's.
+     *
+     * @internal PageMount passes a #[Signal] property's declared type
+     *
+     * @param null|list<string> $types see ClientValue, null for any
+     */
+    public function acceptClientTypes(?array $types): void {
+        $this->clientTypes = $types;
+    }
+
+    /**
+     * A value the browser sent, as this signal's type, wrapped in a list; null when it has another type.
+     *
+     * @internal used by SignalFactory before it stores a client write
+     *
+     * @return null|array{mixed}
+     */
+    public function acceptClientValue(mixed $value): ?array {
+        return $this->clientTypes === null ? [$value] : ClientValue::coerce($value, $this->clientTypes);
     }
 
     /**

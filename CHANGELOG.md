@@ -248,6 +248,11 @@ message that names the new one.
   to 64 MiB of them. With more than one worker every worker reads the same values from the context
   directory, up to 1024 serialized bytes per tab: raise it with
   `withContextDirectorySize(maxTabStateBytes:)`. Values must be serializable.
+- **Typed client writes.** A value the browser sends for a signal must have the type of the
+  signal's initial value or `#[Signal]` property. A lossless form, such as `'5'` from a textarea for
+  a number or `'false'` from a radio group for a bool, is stored as that type; any other value is
+  refused like a write to a signal that is not client-writable, where it was stored as sent. A signal
+  declared with `null` takes any type. Dev mode warns once per signal.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
 

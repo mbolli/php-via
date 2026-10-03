@@ -67,10 +67,16 @@ final class PageMount {
 
             // 4. Register signals, each with the scope it declares. A scoped signal joins its scope.
             foreach ($meta->signals as $prop) {
-                $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB, clientWritable: $meta->clientWritable[$prop] ?? null);
+                $signal = $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB, clientWritable: $meta->clientWritable[$prop] ?? null);
+                if (\array_key_exists($prop, $meta->clientTypes)) {
+                    $signal->acceptClientTypes($meta->clientTypes[$prop]);
+                }
             }
             foreach ($meta->scopedSignals as ['prop' => $prop, 'scope' => $scope]) {
-                $ctx->signal($meta->defaults[$prop], $prop, $scope, clientWritable: $meta->clientWritable[$prop] ?? null);
+                $signal = $ctx->signal($meta->defaults[$prop], $prop, $scope, clientWritable: $meta->clientWritable[$prop] ?? null);
+                if (\array_key_exists($prop, $meta->clientTypes)) {
+                    $signal->acceptClientTypes($meta->clientTypes[$prop]);
+                }
             }
             // #[Persist] → no signal, pure instance property
 

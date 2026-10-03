@@ -29,6 +29,9 @@ class SignalFactory {
     /** @var array<string, true> Re-declaration warnings already logged, keyed by kind and name */
     private array $redeclarationWarned = [];
 
+    /** @var array<string, true> Signal ids whose refused client write dev mode already logged */
+    private array $typeWarned = [];
+
     /**
      * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
      */
@@ -220,8 +223,10 @@ class SignalFactory {
      *
      * Only signals whose isClientWritable() is true take the client's value: by default TAB
      * signals do and scoped signals (ROUTE, SESSION, GLOBAL, custom) do not, and an explicit
-     * clientWritable or Config::withStrictTabSignals() changes that. Ids this context does not
-     * own are passed on to its component contexts.
+     * clientWritable or Config::withStrictTabSignals() changes that. A value of another type than
+     * the signal's initial value (or #[Signal] property) is refused like a write to a signal that
+     * is not client-writable, unless it is a lossless form of it, such as '5' for a number. Ids
+     * this context does not own are passed on to its component contexts.
      *
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
      */
@@ -241,8 +246,9 @@ class SignalFactory {
         foreach ($flat as $signalId => $value) {
             if (isset($this->signals[$signalId])) {
                 $signal = $this->signals[$signalId];
-                if ($signal->isClientWritable()) {
-                    $signal->injectValue($value);
+                $accepted = $signal->isClientWritable() ? $this->acceptClientValue($signal, $value) : null;
+                if ($accepted !== null) {
+                    $signal->injectValue($accepted[0]);
                 } elseif (!self::sameClientValue($signal->getValue(), $value)) {
                     // Re-send the server value so the browser drops its stale copy.
                     $signal->setValue($signal->getValue());
@@ -255,8 +261,9 @@ class SignalFactory {
             foreach ($context->getScopes() as $scope) {
                 $signal = $this->app->getScopedSignal($scope, $signalId);
                 if ($signal !== null) {
-                    if ($signal->isClientWritable()) {
-                        $signal->injectValue($value);
+                    $accepted = $signal->isClientWritable() ? $this->acceptClientValue($signal, $value) : null;
+                    if ($accepted !== null) {
+                        $signal->injectValue($accepted[0]);
                     }
                     unset($flat[$signalId]);
 
@@ -283,6 +290,34 @@ class SignalFactory {
 
     private function context(): Context {
         return $this->context->get() ?? throw new \LogicException('Signal factory of a freed context');
+    }
+
+    /**
+     * The client's value as the signal's type, or null after logging why it was refused.
+     *
+     * @return null|array{mixed}
+     */
+    private function acceptClientValue(Signal $signal, mixed $value): ?array {
+        $accepted = $signal->acceptClientValue($value);
+        if ($accepted !== null) {
+            return $accepted;
+        }
+
+        $id = $signal->id();
+        $devMode = $this->app->getSettings()->devMode;
+        if (!$devMode || !isset($this->typeWarned[$id])) {
+            $this->typeWarned[$id] = true;
+            $this->app->log($devMode ? 'warn' : 'debug', \sprintf(
+                "Signal '%s' holds a value of type %s, and the browser sent one of type %s that is no form of it: the write "
+                . 'was refused and the server value kept. Declare the signal with a value of the type the element sends, or '
+                . 'with null to take any type.',
+                $id,
+                get_debug_type($signal->getValue()),
+                get_debug_type($value),
+            ), $this->context());
+        }
+
+        return null;
     }
 
     /**
