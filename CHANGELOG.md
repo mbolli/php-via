@@ -244,6 +244,9 @@ message that names the new one.
 - **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, shell or
   template, for JSON, webhooks and MCP, behind the global and route middleware as a page is. A
   response body of unknown size goes out as it is read.
+- **`$c->dispatch($event, $detail)`** fires a CustomEvent on the browser's window with a
+  JSON-encoded detail, for toasts and the like, in place of a script built by hand for
+  `execScript()`. Listen with `data-on:toast__window`.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
   actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.

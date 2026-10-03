@@ -1166,6 +1166,38 @@ class Context {
     }
 
     /**
+     * Fire a CustomEvent named $event on the browser's window, with $detail as its detail.
+     *
+     * Listen with data-on:toast__window="show(evt.detail)" or window.addEventListener('toast', ...). The name
+     * and the detail are JSON-encoded into the script, so no value breaks out of it, which a script built by
+     * hand for execScript() has to see to itself. The event is queued and delivered like execScript(): never
+     * dropped, and a component's goes to its page.
+     *
+     * ```php
+     * $c->dispatch('toast', ['level' => 'error', 'text' => 'Save failed: ' . $e->getMessage()]);
+     * ```
+     *
+     * @param mixed $detail any value json_encode() takes, invalid UTF-8 replaced; null for none
+     *
+     * @throws \InvalidArgumentException for an empty name, or a detail json_encode() cannot encode, such as NAN or a resource
+     */
+    public function dispatch(string $event, mixed $detail = null): void {
+        if ($event === '') {
+            throw new \InvalidArgumentException('dispatch() needs an event name.');
+        }
+
+        $flags = JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+
+        try {
+            $script = 'window.dispatchEvent(new CustomEvent(' . json_encode($event, $flags) . ', {detail: ' . json_encode($detail, $flags) . '}))';
+        } catch (\JsonException $e) {
+            throw new \InvalidArgumentException("dispatch('{$event}') takes a detail that json_encode() can encode: " . $e->getMessage(), 0, $e);
+        }
+
+        $this->patchManager->execScript($script);
+    }
+
+    /**
      * Patch HTML into this tab outside the view, such as a modal, a toast or a chunk of streamed output.
      *
      * Without $selector, Outer and Replace match the top-level elements of $html by id; the other modes
