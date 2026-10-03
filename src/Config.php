@@ -7,6 +7,7 @@ namespace Mbolli\PhpVia;
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Support\DatastarBundle;
+use Mbolli\PhpVia\Support\Logger;
 
 /**
  * Configuration class with fluent API.
@@ -249,8 +250,19 @@ class Config {
         return $this;
     }
 
+    /**
+     * Lowest level that is logged: debug, info, warn or error.
+     *
+     * Case does not matter, and the PSR-3 names (warning, notice, critical, alert, emergency) and
+     * the syslog short names (err, crit, emerg) are accepted: notice means info, and everything
+     * above error means error.
+     *
+     * @throws \InvalidArgumentException for any other level
+     */
     public function withLogLevel(string $level): self {
-        $this->logLevel = $level;
+        $this->logLevel = Logger::canonicalLevel($level) ?? throw new \InvalidArgumentException(
+            "Unknown log level '{$level}': use debug, info, warn or error (PSR-3 and syslog names such as warning or err work too)."
+        );
 
         return $this;
     }

@@ -20,7 +20,8 @@ class Logger {
     ];
 
     /**
-     * Accepted spellings that are not the canonical level name.
+     * Accepted spellings that are not the canonical level name: the PSR-3 names and the syslog
+     * short names, the levels above error folded into error.
      *
      * 'warning' is used at eight call sites. Without this it fell through to the info default,
      * so those messages printed a "[WARNING]" label while being filtered as info, and
@@ -28,6 +29,13 @@ class Logger {
      */
     private const array LEVEL_ALIASES = [
         'warning' => 'warn',
+        'notice' => 'info',
+        'err' => 'error',
+        'crit' => 'error',
+        'critical' => 'error',
+        'alert' => 'error',
+        'emerg' => 'error',
+        'emergency' => 'error',
     ];
 
     private int $minLevel;
@@ -128,6 +136,17 @@ class Logger {
         $peak = round(memory_get_peak_usage(true) / 1024 / 1024, 1);
         $this->buffer?->push('fatal', "[mem {$mem}MB peak {$peak}MB] {$message}");
         echo "[FATAL] [{$ts}] [mem {$mem}MB peak {$peak}MB] {$message}\n";
+    }
+
+    /**
+     * The canonical level for any accepted spelling, in any case, or null for an unknown level.
+     *
+     * @internal Config::withLogLevel() validates with it
+     */
+    public static function canonicalLevel(string $level): ?string {
+        $level = self::normalizeLevel(strtolower($level));
+
+        return isset(self::LEVELS[$level]) ? $level : null;
     }
 
     /** Resolve an accepted spelling to its canonical level name. */
