@@ -822,7 +822,8 @@ final class Config {
      * - $revivalWindowMs (default 10 min): for this long after a context is destroyed, a returning tab gets an
      *   equivalent one (same id, handler run again, signals seeded from the browser) instead of a full reload.
      *   Context::tabState() values come back; other server-only state such as #[Persist] starts over, as on a
-     *   reload. 0 turns revival off.
+     *   reload. 0 turns revival off: with more than one worker, a tab's actions still reach the worker that holds
+     *   it, but a stream that reaches another worker reloads the tab.
      * - $forwardMs (default 60 s): with more than one worker, an action or a download that reaches a worker other
      *   than the one holding its tab is passed there, and the worker that got it answers 504 when no answer comes
      *   this long after the request, or after the last chunk of a download. The action may still finish. Minimum 1 s.

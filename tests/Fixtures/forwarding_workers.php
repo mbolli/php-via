@@ -13,6 +13,8 @@ declare(strict_types=1);
  * - crash: the worker holding the tab dies during an action
  * - handover: the stream moves to another worker after an action ran on the old one, while one runs there, and after
  *   the old one sent a server-owned value
+ * - norevival: withContextTimeouts(revivalWindowMs: 0), actions from another worker before and after the stream
+ *   opened on the page's worker
  *
  * Prints key=value lines.
  */
@@ -40,6 +42,9 @@ $port = FixturePort::pick(5600, 100);
 $config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')->withWorkerNum($workers);
 if ($mode === 'timeout') {
     $config->withContextTimeouts(forwardMs: 1000);
+}
+if ($mode === 'norevival') {
+    $config->withContextTimeouts(revivalWindowMs: 0);
 }
 $app = new Via($config);
 
@@ -387,6 +392,23 @@ function fwdHandover(int $port): void {
     fclose($second);
 }
 
+function fwdNoRevival(int $port): void {
+    [$onA, $pidA] = fwdSocketOn($port, 0, false);
+    [$contextId, $cookie] = fwdPage($onA);
+    [$onB] = fwdSocketOn($port, $pidA, true);
+    echo 'norevival_early=', fwdAction($onB, $port, 'bump', $contextId, $cookie)[0], "\n";
+    [$stream] = fwdSocketOn($port, $pidA, false);
+    $seen = fwdStream($stream, $contextId, $cookie);
+    echo 'norevival_bump=', fwdAction($onB, $port, 'bump', $contextId, $cookie)[0], "\n";
+    fwdAction($onB, $port, 'script', $contextId, $cookie);
+    $seen .= fwdDrain($stream, 0.4);
+    echo 'norevival_stream_n=', fwdLast($seen, 'N'), "\n";
+    echo 'norevival_stream_script=', (int) str_contains($seen, 'window.__forwarded = 1'), "\n";
+    [, $heldOnB] = fwdWhoami($onB, $contextId);
+    echo 'norevival_held_receiver=', (int) $heldOnB, "\n";
+    fclose($stream);
+}
+
 $app->setInterval(static function () use ($app, $port, $mode): void {
     static $fired = false;
     // The marker keeps a restarted leader from driving the run again.
@@ -403,6 +425,7 @@ $app->setInterval(static function () use ($app, $port, $mode): void {
                 'timeout' => fwdTimeout($port),
                 'crash' => fwdCrash($port),
                 'handover' => fwdHandover($port),
+                'norevival' => fwdNoRevival($port),
                 default => fwdLayouts($port),
             };
         } catch (Throwable $e) {

@@ -71,6 +71,18 @@ describe('over HTTP/1.1', function (): void {
         ], $r['out']);
     });
 
+    test('with revival off a tab\'s actions from another worker still reach it', function (): void {
+        $r = forwardingFixture('forwarding_workers.php', '2', 'norevival');
+
+        expect($r)->toMatchArray([
+            'norevival_early' => '200',
+            'norevival_bump' => '200',
+            'norevival_stream_n' => '2',
+            'norevival_stream_script' => '1',
+            'norevival_held_receiver' => '0',
+        ], $r['out']);
+    });
+
     test('when the worker holding the tab dies mid-action the receiver answers 503 without running it, and takes the tab', function (): void {
         $r = forwardingFixture('forwarding_workers.php', '2', 'crash');
 
@@ -135,6 +147,27 @@ describe('the home record', function (): void {
         $this->directory->claimHome('/p_/a', [0, 999], true, null, $this->live);
 
         expect($this->directory->claimHome('/p_/a', [1, 200], false, null, $this->live))->toBe([true, [0, 999]]);
+    });
+
+    test('with revival off a row holds the home only, and goes when that home releases it', function (): void {
+        $this->directory->putHome('/p_/b', time() + 60, [0, 100]);
+        $stateWritten = $this->directory->changeState('/p_/b', static fn (array $state): array => ['' => ['k' => 's:1:"v";']], 'k');
+        $this->directory->putHome('/p_/b', time() + 60);
+
+        expect($this->directory->home('/p_/b'))->toBe([0, 100])
+            ->and($this->directory->get('/p_/b'))->toBeNull()
+            ->and($this->directory->getState('/p_/b'))->toBeNull()
+            ->and($stateWritten)->toBeFalse()
+        ;
+
+        $this->directory->releaseHome('/p_/b', [1, 200]);
+        expect($this->directory->home('/p_/b'))->toBe([0, 100]);
+
+        $this->directory->releaseHome('/p_/b', [0, 100]);
+        $this->directory->releaseHome('/p_/a', [0, 100]);
+        expect($this->directory->home('/p_/b'))->toBeNull()
+            ->and($this->directory->home('/p_/a'))->toBe([0, 100])
+        ;
     });
 
     test('a context without a row has no home to claim', function (): void {

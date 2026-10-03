@@ -991,8 +991,18 @@ class Application {
      * @param null|array{int, int} $home see SharedContextDirectory::put()
      */
     private function publishContextRecord(Context $context, int $ttlSeconds, ?array $home = null): void {
-        // With revival off no worker rebuilds a context, so nothing would ever read the record.
-        if ($this->contextDirectory === null || $this->settings->contextRevivalWindowMs <= 0) {
+        if ($this->contextDirectory === null) {
+            return;
+        }
+
+        // With revival off no worker rebuilds a context, but its requests still have to find its worker.
+        if ($this->settings->contextRevivalWindowMs <= 0) {
+            try {
+                $this->contextDirectory->putHome($context->getId(), time() + $ttlSeconds, $home);
+            } catch (\OverflowException $e) {
+                $this->warnDirectoryWriteFailed($e);
+            }
+
             return;
         }
 
@@ -1086,11 +1096,17 @@ class Application {
     /**
      * Store a revival record for a context about to be destroyed.
      *
-     * No-op when the revival window is 0 (feature disabled). Called from the cleanup timer.
+     * When the revival window is 0 (revival off) it only drops the context's home row. Called from the cleanup timer.
      */
     private function recordRevivable(Context $context): void {
         $windowMs = $this->settings->contextRevivalWindowMs;
         if ($windowMs <= 0) {
+            try {
+                $this->contextDirectory?->releaseHome($context->getId(), $this->workerIdentity());
+            } catch (\RuntimeException $e) {
+                $this->logger->log('warn', "The home row of {$context->getId()} stays until it expires: " . $e->getMessage());
+            }
+
             return;
         }
 

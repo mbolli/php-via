@@ -470,6 +470,10 @@ message that names the new one.
   cannot send and what its running actions send.
 - A stopping worker, on a deploy or a reload, ended its streams and the tabs waited up to 15 s to
   reconnect. It now asks them to reconnect at once.
+- With several workers and `withContextTimeouts(revivalWindowMs: 0)`, a tab's actions on other
+  workers answered 400: no worker knew where the tab lived. The context directory now keeps the
+  tab's worker with revival off too, until the context is destroyed. A stream that reaches another
+  worker still reloads the tab.
 - `getStats()->getAll()` read 0 for `requests`, `avg_request_time`, `actions`, `sse_connections`,
   `active_sse` and `active_contexts`. Page, static file and `route()` requests, actions and SSE
   connections now count for the whole server, and the active counts are read from the answering
