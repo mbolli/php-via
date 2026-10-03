@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
 
@@ -639,6 +640,11 @@ class Config {
     }
 
     /**
+     * Raw OpenSwoole server settings, merged over the ones php-via sets: open_http2_protocol, http_compression,
+     * socket_buffer_size, max_coroutine, send_yield, max_wait_time, reload_async, enable_reuse_port, hook_flags,
+     * log_level, max_conn and backlog. Set the worker count with withWorkerNum(): start() throws for a
+     * worker_num here that differs from it.
+     *
      * @param array<string, mixed> $settings
      */
     public function withSwooleSettings(array $settings): self {
@@ -1047,8 +1053,9 @@ class Config {
      * Set the message broker for multi-node broadcasting.
      *
      * A broker enables broadcast() to reach contexts on other nodes (workers,
-     * servers, containers). The default InMemoryBroker is a no-op suitable for
-     * single-node deployments.
+     * servers, containers). Without one, a single worker uses the no-op InMemoryBroker
+     * and more than one worker (withWorkerNum()) SwooleBroker, which reaches the
+     * workers of this server only.
      *
      * Example:
      * ```php
@@ -1097,28 +1104,26 @@ class Config {
     }
 
     /**
-     * Return the configured broker, or a no-op InMemoryBroker if none was set.
+     * Return the configured broker. Without one, SwooleBroker for more than one worker, else a no-op InMemoryBroker.
      */
     public function getBroker(): MessageBroker {
-        return $this->broker ?? new InMemoryBroker();
+        return $this->broker ?? ($this->workerNum > 1 ? new SwooleBroker() : new InMemoryBroker());
     }
 
     /**
      * Set the number of OpenSwoole worker processes.
      *
      * Using more than one worker distributes CPU-bound actions across cores.
-     * Requires a multi-worker-capable broker: SwooleBroker (same machine),
-     * RedisBroker or NatsBroker (multi-server). A RuntimeException is thrown at
-     * start() if worker_num > 1 and InMemoryBroker is still in use.
+     * Broadcasts then cross workers through SwooleBroker, unless withBroker() sets
+     * RedisBroker or NatsBroker for several servers. Passing InMemoryBroker to
+     * withBroker() makes start() throw.
      *
      * Session data, GlobalState and scoped signal values move to shared-memory tables sized
      * at start-up; see withSessionTableSize() and the other with*TableSize() methods.
      *
      * Example:
      * ```php
-     * (new Config())
-     *     ->withWorkerNum(swoole_cpu_num())
-     *     ->withBroker(new SwooleBroker())
+     * (new Config())->withWorkerNum(swoole_cpu_num())
      * ```
      */
     public function withWorkerNum(int $n): self {

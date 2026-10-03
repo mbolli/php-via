@@ -141,6 +141,8 @@ All notable changes to php-via will be documented in this file.
   view render. `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace`
   needs a selector. A component's patches go to its page, and a client that falls behind gets
   every one of them.
+- **More than one worker without `withBroker()` uses `SwooleBroker`,** where `start()` threw.
+  Passing `InMemoryBroker` explicitly still throws.
 - **`$c->isConnected()`** says whether the tab has an open stream. A component answers for its page.
 - **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
 - **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.

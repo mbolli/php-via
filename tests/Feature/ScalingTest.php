@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
+use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
@@ -150,12 +151,18 @@ describe('Multi-node broadcast via TestBroker', function (): void {
 
 describe('Multi-worker startup guard', function (): void {
     test('start() throws RuntimeException when worker_num > 1 with InMemoryBroker', function (): void {
-        $via = createVia((new Config())->withWorkerNum(2));
-        // Confirm InMemoryBroker is the implicit default
+        $via = createVia((new Config())->withWorkerNum(2)->withBroker(new InMemoryBroker()));
         expect(fn () => $via->start())->toThrow(
             RuntimeException::class,
             'worker_num > 1 requires a multi-worker broker'
         );
+    });
+
+    test('more than one worker without withBroker() broadcasts through SwooleBroker', function (): void {
+        expect((new Config())->withWorkerNum(2)->getBroker())->toBeInstanceOf(SwooleBroker::class)
+            ->and(createVia((new Config())->withWorkerNum(2))->getBroker())->toBeInstanceOf(SwooleBroker::class)
+            ->and((new Config())->getBroker())->toBeInstanceOf(InMemoryBroker::class)
+        ;
     });
 
     test('start() does not throw when worker_num = 1 with InMemoryBroker', function (): void {
@@ -185,7 +192,7 @@ describe('Multi-worker startup guard', function (): void {
 
     test('a worker_num in withSwooleSettings() that matches withWorkerNum() passes', function (): void {
         // Each start() gets past the worker_num check and throws at a later one.
-        $matching = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 3]));
+        $matching = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 3])->withBroker(new InMemoryBroker()));
         $default = createVia((new Config())->withSwooleSettings(['worker_num' => 1, 'hook_flags' => SWOOLE_HOOK_STDIO]));
         $differing = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 2]));
 

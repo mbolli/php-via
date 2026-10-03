@@ -881,9 +881,9 @@ class Via {
             // will be silently lost. Fail loudly so operators don't run with broken config.
             if ($this->config->getWorkerNum() > 1 && $this->broker instanceof InMemoryBroker) {
                 throw new \RuntimeException(
-                    'worker_num > 1 requires a multi-worker broker. '
-                    . 'Use SwooleBroker (same machine), RedisBroker, or NatsBroker. '
-                    . 'Example: (new Config())->withWorkerNum(4)->withBroker(new SwooleBroker())'
+                    'worker_num > 1 requires a multi-worker broker, and this server has InMemoryBroker. '
+                    . 'Leave withBroker() out to get SwooleBroker (same machine), calling withWorkerNum() before new Via(), '
+                    . 'or pass RedisBroker or NatsBroker.'
                 );
             }
 
@@ -2127,8 +2127,7 @@ class Via {
         throw new \RuntimeException(
             "withSwooleSettings(['worker_num' => {$n}]) would start {$n} workers that php-via sets up as "
             . "{$config->getWorkerNum()}: sessions, scoped signals and contexts would not be shared between them. "
-            . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(); with more than one "
-            . 'worker also pass a multi-worker broker, such as ->withBroker(new SwooleBroker()). '
+            . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(). "
             . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
         );
     }
