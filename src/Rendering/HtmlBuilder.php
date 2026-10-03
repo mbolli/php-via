@@ -13,6 +13,9 @@ use Mbolli\PhpVia\Context;
  * and signal injection for initial page loads.
  */
 class HtmlBuilder {
+    /** A data-signals attribute that declares via_ctx, keyed (data-signals:via_ctx) or in its value */
+    private const string VIA_CTX_SIGNAL = '/<[a-z][^>]*\sdata-signals(?:[:-]via_ctx\b|[^\s=>]*\s*=\s*(?:"[^"]*via_ctx[^"]*"|\'[^\']*via_ctx[^\']*\'))/i';
+
     /** @var array<string, array{0: string, 1: string}> Shell contents by path, with the mtime and size read in dev mode */
     private array $shells = [];
 
@@ -145,8 +148,8 @@ class HtmlBuilder {
      * Complete a view that renders its own `<html>` document.
      *
      * Head and foot includes the document does not already contain go before the first `</head>`
-     * and the last `</body>`. On the initial render a `via_ctx` meta (only when the document has
-     * none) and a `data-signals__ifmissing` seed with the values the first sync sends go right after
+     * and the last `</body>`. On the initial render a `via_ctx` meta (only when no data-signals
+     * attribute of the document declares via_ctx) and a `data-signals__ifmissing` seed with the values the first sync sends go right after
      * the opening `<head>` tag, ahead of the document's SSE bootstrap. The bootstrap and
      * `datastar.js` are left to the document.
      *
@@ -157,7 +160,7 @@ class HtmlBuilder {
 
         $signals = [];
         if ($initial) {
-            if (stripos($html, 'via_ctx') === false) {
+            if (preg_match(self::VIA_CTX_SIGNAL, $html) !== 1) {
                 $signals[] = '<meta data-signals="' . htmlspecialchars(
                     (string) json_encode(['via_ctx' => $context->getId(), '_disconnected' => false], JSON_UNESCAPED_SLASHES),
                     ENT_QUOTES,

@@ -193,6 +193,33 @@ describe('full-document views: initial render', function (): void {
         expect(substr_count($html, 'via_ctx'))->toBe(1);
     });
 
+    test('a layout that seeds via_ctx another way is not given a second one', function (string $own): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc5', '/doc', $via);
+        $ctx->view(fn () => fullDocument($own));
+
+        $html = $via->buildHtmlDocument($ctx);
+
+        expect(substr_count($html, 'via_ctx'))->toBe(1);
+    })->with([
+        'entity-encoded' => ['<meta data-signals="{&quot;via_ctx&quot;:&quot;/_/doc5&quot;}">'],
+        'keyed attribute' => ['<meta data-signals:via_ctx="\'/_/doc5\'">'],
+        'if missing' => ['<meta data-signals__ifmissing=\'{"via_ctx":"/_/doc5"}\'>'],
+    ]);
+
+    test('a page that only mentions via_ctx still gets the via_ctx meta', function (): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc5', '/doc', $via);
+        // nfsen-ng's list requests post only via_ctx; the text is not a via_ctx signal.
+        $body = '<button data-on:click="@post(\'/_action/x\', {filterSignals: {include: /^via_ctx$/}})">x</button>'
+            . '<p>Send via_ctx in every action body.</p>';
+        $ctx->view(fn () => fullDocument('', $body));
+
+        $html = $via->buildHtmlDocument($ctx);
+
+        expect(metaSignals($html, 'data-signals'))->toBe(['via_ctx' => '/_/doc5', '_disconnected' => false]);
+    });
+
     test('an include the layout already contains is not duplicated', function (): void {
         $via = createVia();
         $tag = '<link rel="stylesheet" href="/global.css">';
