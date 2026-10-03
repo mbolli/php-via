@@ -52,6 +52,8 @@ final class Scope {
      * - "user:123:notifications" => ["user", "123", "notifications"]
      *
      * @return array<string>
+     *
+     * @internal
      */
     public static function parse(string $scope): array {
         return explode(':', $scope);
@@ -68,6 +70,8 @@ final class Scope {
 
     /**
      * Check if a scope is a built-in scope.
+     *
+     * @internal
      */
     public static function isBuiltIn(string $scope): bool {
         return \in_array($scope, [self::TAB, self::ROUTE, self::SESSION, self::GLOBAL], true);
@@ -75,6 +79,8 @@ final class Scope {
 
     /**
      * Check if a scope is route-based (either ROUTE or includes route).
+     *
+     * @internal
      */
     public static function isRouteBased(string $scope, ?string $route = null): bool {
         if ($scope === self::ROUTE) {
@@ -159,6 +165,8 @@ final class Scope {
      *
      * @param string $scope   The scope to check
      * @param string $pattern The pattern to match against
+     *
+     * @internal
      */
     public static function matches(string $scope, string $pattern): bool {
         // Exact match
@@ -187,6 +195,8 @@ final class Scope {
      * Rejects NUL bytes, shell metacharacters, overly long strings, or strings that
      * don't match the expected scope grammar. This prevents a compromised or
      * misconfigured broker from injecting arbitrary strings into syncLocally().
+     *
+     * @internal
      */
     public static function isValidWireScope(string $scope): bool {
         if ($scope === '' || \strlen($scope) > 256) {

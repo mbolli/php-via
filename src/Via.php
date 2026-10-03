@@ -60,6 +60,7 @@ use Twig\Environment;
  * Via - Real-time engine for building reactive web applications in PHP.
  *
  * Main application class that manages routing, contexts, and SSE connections.
+ * Not designed for extension.
  */
 class Via {
     public const string VERSION = '0.13.1';
@@ -100,23 +101,45 @@ class Via {
      */
     private const int FLUSH_WAIT_MS = 1000;
 
-    // Legacy public properties for HTTP handlers (will be phased out)
-    /** @var array<string, Context> */
+    // Public for the HTTP handlers only; they move into Application later.
+    /**
+     * @internal
+     *
+     * @var array<string, Context>
+     */
     public array $contexts = [];
 
-    /** @var array<string, int> Cleanup timer IDs for contexts */
+    /**
+     * @internal
+     *
+     * @var array<string, int> Cleanup timer IDs for contexts
+     */
     public array $cleanupTimers = [];
 
-    /** @var array<string, int> Number of active SSE coroutines per context ID */
+    /**
+     * @internal use Context::isConnected()
+     *
+     * @var array<string, int> Number of active SSE coroutines per context ID
+     */
     public array $activeSseCount = [];
 
-    /** SSE handlers still running, including their exit path and onClientDisconnect hooks */
+    /**
+     * @internal SSE handlers still running, including their exit path and onClientDisconnect hooks
+     */
     public int $runningSseStreams = 0;
 
-    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
+    /**
+     * @internal use getClients()
+     *
+     * @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID
+     */
     public array $clients = [];
 
-    /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
+    /**
+     * @internal
+     *
+     * @var array<string, string> Session ID by context ID (contextId => sessionId)
+     */
     public array $contextSessions = [];
 
     /**
@@ -773,7 +796,7 @@ class Via {
     /**
      * Get a scoped signal by scope and browser id ($signal->id()).
      *
-     * To find one by the name it was declared with, use getScopedSignalByName().
+     * @internal use getScopedSignalByName()
      */
     public function getScopedSignal(string $scope, string $signalId): ?Signal {
         return $this->signalManager->getSignal($scope, $signalId);
@@ -1354,6 +1377,8 @@ class Via {
 
     /**
      * @return null|callable(Request, Response): void
+     *
+     * @internal
      */
     public function getNotFoundHandler(): ?callable {
         return $this->notFoundHandler;
@@ -1478,8 +1503,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * Called by the GC timer (configurable via Config::withGcIntervalMs()) and
-     * exposed publicly so it can be invoked directly in tests or from user code.
+     * @internal run by the GC timer, see Config::withGcIntervalMs()
      */
     public function runGcCycle(): void {
         $cycles = gc_collect_cycles();

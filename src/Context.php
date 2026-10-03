@@ -20,6 +20,7 @@ use Twig\Markup;
  * Context represents a living bridge between PHP and the browser.
  *
  * It holds runtime state, defines actions, manages reactive signals, and defines UI through View.
+ * Not designed for extension.
  */
 class Context {
     private string $id;
@@ -104,6 +105,9 @@ class Context {
     private ComponentManager $componentManager;
     private PatchManager $patchManager;
 
+    /**
+     * @internal pages, mount() and component() create contexts
+     */
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null, ?string $sessionId = null) {
         $this->id = $id;
         $this->route = $route;
@@ -502,6 +506,8 @@ class Context {
 
     /**
      * Get the shell template override for this context, if any.
+     *
+     * @internal
      */
     public function getShellTemplate(): ?string {
         return $this->shellTemplate;
@@ -755,6 +761,8 @@ class Context {
 
     /**
      * Check if a view has been defined for this context.
+     *
+     * @internal
      */
     public function hasView(): bool {
         return $this->viewFn !== null;
@@ -873,6 +881,8 @@ class Context {
      * Covers all scopes: TAB, ROUTE, SESSION, GLOBAL, and custom.
      *
      * @return array<string, Signal>
+     *
+     * @internal
      */
     public function getNamedSignals(): array {
         return $this->signalFactory->getNamedSignals();
@@ -911,6 +921,8 @@ class Context {
      * Only actions registered with an explicit $name are included.
      *
      * @return array<string, Action>
+     *
+     * @internal
      */
     public function getNamedActions(): array {
         return $this->namedActions;

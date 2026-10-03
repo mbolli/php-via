@@ -307,6 +307,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getStaticDir(): ?string {
         return $this->staticDir;
     }
@@ -356,6 +359,8 @@ final class Config {
      * @param string $filePath  absolute path of the file being served
      * @param string $mimeType  resolved MIME type without a charset suffix, e.g. 'text/css'
      * @param bool   $versioned the URL carries the file's current content version, such as getDatastarUrl()
+     *
+     * @internal
      */
     public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
         if ($this->staticCacheControl instanceof \Closure) {
@@ -394,6 +399,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function isDatastarRocketEnabled(): bool {
         return $this->datastarRocket;
     }
@@ -567,6 +575,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSseKeepAliveMs(): int {
         return $this->sseKeepAliveMs;
     }
@@ -588,6 +599,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSseMaxQueuedBytes(): int {
         return $this->sseMaxQueuedBytes;
     }
@@ -618,6 +632,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function isBroadcastCoalescingEnabled(): bool {
         return $this->broadcastCoalescing;
     }
@@ -649,6 +666,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getBroadcastTickMs(): int {
         return $this->broadcastTickMs;
     }
@@ -668,10 +688,16 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getHost(): string {
         return $this->host;
     }
 
+    /**
+     * @internal
+     */
     public function getPort(): int {
         return $this->port;
     }
@@ -680,6 +706,9 @@ final class Config {
         return $this->devMode;
     }
 
+    /**
+     * @internal
+     */
     public function getLogLevel(): string {
         return $this->logLevel;
     }
@@ -688,6 +717,9 @@ final class Config {
         return $this->templateDir;
     }
 
+    /**
+     * @internal
+     */
     public function getShellTemplate(): ?string {
         return $this->shellTemplate;
     }
@@ -698,6 +730,8 @@ final class Config {
 
     /**
      * @return array<string, mixed>
+     *
+     * @internal
      */
     public function getSwooleSettings(): array {
         return $this->openSwooleSettings;
@@ -714,6 +748,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSecureCookie(): bool {
         return $this->secureCookie;
     }
@@ -747,16 +784,24 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSessionCookieSameSite(): string {
         return $this->sessionCookieSameSite;
     }
 
+    /**
+     * @internal
+     */
     public function isSessionCookiePartitioned(): bool {
         return $this->sessionCookiePartitioned;
     }
 
     /**
      * @return null|list<string>
+     *
+     * @internal
      */
     public function getFrameAncestors(): ?array {
         return $this->frameAncestors;
@@ -780,6 +825,8 @@ final class Config {
 
     /**
      * @return null|list<string>
+     *
+     * @internal
      */
     public function getTrustedOrigins(): ?array {
         return $this->trustedOrigins;
@@ -800,6 +847,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getAllowMissingOrigin(): bool {
         return $this->allowMissingOrigin;
     }
@@ -822,6 +872,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getStrictTabSignals(): bool {
         return $this->strictTabSignals;
     }
@@ -840,10 +893,16 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getActionRateLimit(): int {
         return $this->actionRateLimit;
     }
 
+    /**
+     * @internal
+     */
     public function getActionRateWindow(): int {
         return $this->actionRateWindow;
     }
@@ -865,6 +924,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getGcIntervalMs(): int {
         return $this->gcIntervalMs;
     }
@@ -950,10 +1012,16 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSslCertFile(): ?string {
         return $this->sslCertFile;
     }
 
+    /**
+     * @internal
+     */
     public function getSslKeyFile(): ?string {
         return $this->sslKeyFile;
     }
@@ -1020,14 +1088,23 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getBrotli(): bool {
         return $this->brotli;
     }
 
+    /**
+     * @internal
+     */
     public function getBrotliDynamicLevel(): int {
         return $this->brotliDynamicLevel;
     }
 
+    /**
+     * @internal
+     */
     public function getBrotliStaticLevel(): int {
         return $this->brotliStaticLevel;
     }
@@ -1048,6 +1125,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function isH2c(): bool {
         return $this->h2c;
     }
@@ -1103,6 +1183,8 @@ final class Config {
      * Return the configured broker error handler, or null if none was set.
      *
      * @return null|callable(\Throwable): void
+     *
+     * @internal
      */
     public function getBrokerErrorHandler(): ?callable {
         return $this->brokerErrorHandler;
@@ -1110,6 +1192,8 @@ final class Config {
 
     /**
      * Return the configured broker. Without one, SwooleBroker for more than one worker, else a no-op InMemoryBroker.
+     *
+     * @internal
      */
     public function getBroker(): MessageBroker {
         return $this->broker ?? ($this->workerNum > 1 ? new SwooleBroker() : new InMemoryBroker());
@@ -1139,6 +1223,9 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getWorkerNum(): int {
         return $this->workerNum;
     }
@@ -1257,30 +1344,51 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSessionTableRows(): int {
         return $this->sessionTableRows;
     }
 
+    /**
+     * @internal
+     */
     public function getSessionTableValueBytes(): int {
         return $this->sessionTableValueBytes;
     }
 
+    /**
+     * @internal
+     */
     public function getContextDirectoryRows(): int {
         return $this->contextDirectoryRows;
     }
 
+    /**
+     * @internal
+     */
     public function getContextDirectoryRecordBytes(): int {
         return $this->contextDirectoryRecordBytes;
     }
 
+    /**
+     * @internal
+     */
     public function getContextDirectoryTtlSeconds(): int {
         return $this->contextDirectoryTtlSeconds;
     }
 
+    /**
+     * @internal
+     */
     public function getScopedSignalTableRows(): int {
         return $this->scopedSignalTableRows;
     }
 
+    /**
+     * @internal
+     */
     public function getScopedSignalTableValueBytes(): int {
         return $this->scopedSignalTableValueBytes;
     }
@@ -1312,18 +1420,30 @@ final class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStatePath(): ?string {
         return $this->globalStatePath;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStateFlushMs(): int {
         return $this->globalStateFlushMs;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStateTableRows(): int {
         return $this->globalStateTableRows;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStateTableValueBytes(): int {
         return $this->globalStateTableValueBytes;
     }
