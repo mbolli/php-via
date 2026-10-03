@@ -144,6 +144,45 @@ describe('Scoped signals join their scope', function (): void {
             ->and(semanticsDrain($tabs['B'][0]))->toBeGreaterThan(0)
         ;
     })->with(['session' => Scope::SESSION, 'custom' => 'room:x', 'global' => Scope::GLOBAL]);
+
+    test('scope() called after the signal keeps the scope it joined', function (): void {
+        $app = createVia((new Config())->withBroadcastCoalescing(false));
+        $tabs = [];
+        foreach (['A', 'B'] as $id) {
+            $ctx = semanticsTab($app, $id);
+            $signal = $ctx->signal('', 'name', Scope::SESSION);
+            $ctx->addScope('room:x');
+            $ctx->scope(Scope::ROUTE);
+            $ctx->view(fn () => "<div id='v'>{$signal->string()}</div>");
+            semanticsDrain($ctx);
+            $tabs[$id] = [$ctx, $signal];
+        }
+        $signalSent = static function (Context $ctx, string $signalId): bool {
+            $sent = false;
+            while (($patch = $ctx->getPatch()) !== null) {
+                $sent = $sent || ($patch['type'] === 'signals' && is_array($patch['content']) && array_key_exists($signalId, $patch['content']));
+            }
+
+            return $sent;
+        };
+
+        $tabs['A'][1]->setValue('bob');
+
+        expect($tabs['A'][0]->getScopes())->toBe([Scope::routeScope('/p'), Scope::sessionScope(SEMANTICS_SID), 'room:x'])
+            ->and($signalSent($tabs['A'][0], $tabs['A'][1]->id()))->toBeTrue()
+            ->and($signalSent($tabs['B'][0], $tabs['A'][1]->id()))->toBeTrue()
+        ;
+    });
+
+    test('scope() still replaces the primary scope it set before', function (): void {
+        $ctx = new Context('A', '/p', createVia(), null, SEMANTICS_SID);
+        $ctx->scope('room:a');
+        $ctx->scope(Scope::ROUTE);
+        $ctx->addScope('room:b');
+        $ctx->scope('room:b');
+
+        expect($ctx->getScopes())->toBe(['room:b']);
+    });
 });
 
 describe('Composition actions', function (): void {

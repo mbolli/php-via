@@ -59,8 +59,7 @@ final class PageMount {
                 }
             }
 
-            // 3. #[Broadcast] only sets the target of $ctx->broadcast(). It comes before the joins
-            //    below because scope() replaces the context's scope list.
+            // 3. #[Broadcast] only sets the target of $ctx->broadcast().
             if ($meta->broadcastScope !== null) {
                 $ctx->scope($meta->broadcastScope);
             }

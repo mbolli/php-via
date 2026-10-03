@@ -43,7 +43,8 @@ All notable changes to php-via will be documented in this file.
 - **A scoped signal joins its context to its scope,** so its writes reach the tab without
   `addScope()`. A worker clears a scope's signals when the last context in it is destroyed, so a
   SESSION, custom or GLOBAL signal declared on pages without `scope()` no longer lives for the life
-  of the worker.
+  of the worker. `scope()` replaces only the primary scope and keeps the scopes joined this way or
+  with `addScope()`, where it replaced the whole list.
 - **`Scope::ROUTE` and `Scope::SESSION` resolve in every method that takes a scope:** `scope()`,
   `addScope()`, `removeScope()`, `signal()` and `#[Action(scope: ...)]` turn them into this route's
   and this session's scope. `$app->broadcast()` and `getScopedSignalByName()` throw for a bare

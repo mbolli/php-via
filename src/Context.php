@@ -52,6 +52,9 @@ class Context {
     /** @var array<string> Explicit scopes for this context (can have multiple) */
     private array $scopes = [];
 
+    /** @var array<string, true> the scopes addScope() joined, which scope() keeps */
+    private array $joinedScopes = [];
+
     /** @var array<string, string> Path parameters extracted from route */
     private array $routeParams = [];
 
@@ -567,9 +570,9 @@ class Context {
     }
 
     /**
-     * Set the scope(s) for this context.
+     * Set the primary scope of this context.
      *
-     * Replaces any previously set scopes. To add additional scopes, use addScope().
+     * Replaces the primary scope set before. The scopes joined through addScope() or a scoped signal stay.
      *
      * The primary scope is the target of broadcast() and the key of the shared update render. It is no
      * default for later declarations: actions stay per tab, and signal() needs the scope to share a signal.
@@ -580,7 +583,8 @@ class Context {
     public function scope(string $scope): void {
         $scope = Scope::resolve($scope, $this, 'Context::scope()');
 
-        $this->scopes = [$scope];
+        $joined = array_filter($this->scopes, fn (string $s): bool => $s !== $scope && isset($this->joinedScopes[$s]));
+        $this->scopes = [$scope, ...array_values($joined)];
         $this->app->registerContextInScope($this, $scope);
         $this->app->log('debug', "Scope set to: {$scope}", $this);
     }
@@ -596,6 +600,9 @@ class Context {
      */
     public function addScope(string $scope): void {
         $scope = Scope::resolve($scope, $this, 'Context::addScope()');
+        if ($scope !== Scope::TAB) {
+            $this->joinedScopes[$scope] = true;
+        }
         if (!\in_array($scope, $this->scopes, true)) {
             $this->scopes[] = $scope;
             $this->app->registerContextInScope($this, $scope);
@@ -616,6 +623,7 @@ class Context {
         if ($scope === Scope::TAB) {
             return; // TAB scope is permanent: it's the per-context identity scope
         }
+        unset($this->joinedScopes[$scope]);
         $key = array_search($scope, $this->scopes, true);
         if ($key !== false) {
             array_splice($this->scopes, (int) $key, 1);
