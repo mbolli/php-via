@@ -1199,6 +1199,283 @@ final class Config {
         Removed::method('Config::withContextRevivalWindow()', 'Use ->withContextTimeouts(revivalWindowMs: $ms).');
     }
 
+    /** @internal */
+    public function getTwigCacheDir(): false|string {
+        return $this->twigCacheDir;
+    }
+
+    /** @internal */
+    public function getStaticDir(): ?string {
+        return $this->staticDir;
+    }
+
+    /**
+     * @internal
+     *
+     * @param string $filePath  absolute path of the file being served
+     * @param string $mimeType  resolved MIME type without a charset suffix, e.g. 'text/css'
+     * @param bool   $versioned the URL carries the file's current content version, such as the Datastar URL
+     */
+    public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
+        return Settings::cacheControl($this->staticCacheControl, $this->devMode, $filePath, $mimeType, $versioned);
+    }
+
+    /** @internal */
+    public function getSsePollIntervalMs(): int {
+        return $this->ssePollIntervalMs;
+    }
+
+    /** @internal */
+    public function getSseKeepAliveMs(): int {
+        return $this->sseKeepAliveMs;
+    }
+
+    /** @internal */
+    public function getSseMaxQueuedBytes(): int {
+        return $this->sseMaxQueuedBytes;
+    }
+
+    /** @internal */
+    public function isBroadcastCoalescingEnabled(): bool {
+        return $this->broadcastCoalescing;
+    }
+
+    /** @internal */
+    public function getBroadcastTickMs(): int {
+        return $this->broadcastTickMs;
+    }
+
+    /** @internal */
+    public function getHost(): string {
+        return $this->host;
+    }
+
+    /** @internal */
+    public function getPort(): int {
+        return $this->port;
+    }
+
+    /** @internal */
+    public function getLogLevel(): string {
+        return $this->logLevel;
+    }
+
+    /** @internal */
+    public function getTemplateDir(): ?string {
+        return $this->templateDir;
+    }
+
+    /** @internal */
+    public function getShellTemplate(): ?string {
+        return $this->shellTemplate;
+    }
+
+    /**
+     * @internal
+     *
+     * @return array<string, mixed>
+     */
+    public function getSwooleSettings(): array {
+        return $this->openSwooleSettings;
+    }
+
+    /** @internal */
+    public function getSecureCookie(): bool {
+        return $this->secureCookie;
+    }
+
+    /** @internal */
+    public function getSessionCookieSameSite(): string {
+        return $this->sessionCookieSameSite;
+    }
+
+    /** @internal */
+    public function isSessionCookiePartitioned(): bool {
+        return $this->sessionCookiePartitioned;
+    }
+
+    /**
+     * @internal
+     *
+     * @return null|list<string>
+     */
+    public function getFrameAncestors(): ?array {
+        return $this->frameAncestors;
+    }
+
+    /**
+     * @internal
+     *
+     * @return null|list<string>
+     */
+    public function getTrustedOrigins(): ?array {
+        return $this->trustedOrigins;
+    }
+
+    /** @internal */
+    public function getAllowMissingOrigin(): bool {
+        return $this->allowMissingOrigin;
+    }
+
+    /** @internal */
+    public function getStrictTabSignals(): bool {
+        return $this->strictTabSignals;
+    }
+
+    /** @internal */
+    public function getActionRateLimit(): int {
+        return $this->actionRateLimit;
+    }
+
+    /** @internal */
+    public function getActionRateWindow(): int {
+        return $this->actionRateWindow;
+    }
+
+    /** @internal */
+    public function getGcIntervalMs(): int {
+        return $this->gcIntervalMs;
+    }
+
+    /** @internal */
+    public function getContextCleanupDelayMs(): int {
+        return $this->contextCleanupDelayMs;
+    }
+
+    /** @internal */
+    public function getContextConnectTimeoutMs(): int {
+        return $this->contextConnectTimeoutMs;
+    }
+
+    /** @internal */
+    public function getContextReconnectTimeoutMs(): int {
+        return $this->contextReconnectTimeoutMs;
+    }
+
+    /** @internal */
+    public function getSslCertFile(): ?string {
+        return $this->sslCertFile;
+    }
+
+    /** @internal */
+    public function getSslKeyFile(): ?string {
+        return $this->sslKeyFile;
+    }
+
+    /** @internal */
+    public function getBrotli(): bool {
+        return $this->brotli;
+    }
+
+    /** @internal */
+    public function getBrotliDynamicLevel(): int {
+        return $this->brotliDynamicLevel;
+    }
+
+    /** @internal */
+    public function getBrotliStaticLevel(): int {
+        return $this->brotliStaticLevel;
+    }
+
+    /** @internal */
+    public function isH2c(): bool {
+        return $this->h2c;
+    }
+
+    /**
+     * @internal
+     *
+     * @return null|callable(\Throwable): void
+     */
+    public function getBrokerErrorHandler(): ?callable {
+        return $this->brokerErrorHandler;
+    }
+
+    /** @internal */
+    public function getBroker(): MessageBroker {
+        return $this->broker ?? Settings::defaultBroker($this->workerNum);
+    }
+
+    /** @internal */
+    public function getWorkerNum(): int {
+        return $this->workerNum;
+    }
+
+    /** @internal */
+    public function getSessionTableRows(): int {
+        return $this->sessionTableRows;
+    }
+
+    /** @internal */
+    public function getSessionTableValueBytes(): int {
+        return $this->sessionTableValueBytes;
+    }
+
+    /** @internal */
+    public function getContextDirectoryRows(): int {
+        return $this->contextDirectoryRows;
+    }
+
+    /** @internal */
+    public function getContextDirectoryRecordBytes(): int {
+        return $this->contextDirectoryRecordBytes;
+    }
+
+    /** @internal */
+    public function getContextDirectoryTtlSeconds(): int {
+        return $this->contextDirectoryTtlSeconds;
+    }
+
+    /** @internal */
+    public function getScopedSignalTableRows(): int {
+        return $this->scopedSignalTableRows;
+    }
+
+    /** @internal */
+    public function getScopedSignalTableValueBytes(): int {
+        return $this->scopedSignalTableValueBytes;
+    }
+
+    /** @internal */
+    public function getGlobalStatePath(): ?string {
+        return $this->globalStatePath;
+    }
+
+    /** @internal */
+    public function getGlobalStateFlushMs(): int {
+        return $this->globalStateFlushMs;
+    }
+
+    /** @internal */
+    public function getGlobalStateTableRows(): int {
+        return $this->globalStateTableRows;
+    }
+
+    /** @internal */
+    public function getGlobalStateTableValueBytes(): int {
+        return $this->globalStateTableValueBytes;
+    }
+
+    /** @internal */
+    public function isTracingEnabled(): bool {
+        return $this->devBar ?? $this->devMode;
+    }
+
+    /** @internal */
+    public function isTracingWritesEnabled(): bool {
+        return Settings::devBarWritesEnabled($this->devMode, $this->isTracingEnabled(), $this->devBarWrites);
+    }
+
+    /** @internal */
+    public function getTraceBufferSize(): int {
+        return $this->traceBufferSize;
+    }
+
+    /** @internal */
+    public function isDatastarRocketEnabled(): bool {
+        return $this->datastarRocket;
+    }
+
     /**
      * Freeze this Config, so every later with* call throws, and return what the framework reads from it.
      * A second call returns the same Settings.

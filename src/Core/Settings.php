@@ -99,16 +99,25 @@ final readonly class Settings {
      * @param bool   $versioned the URL carries the file's current content version, such as the Datastar URL
      */
     public function staticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
-        if ($this->staticCacheControlPolicy instanceof \Closure) {
-            $value = ($this->staticCacheControlPolicy)($filePath, $mimeType);
+        return self::cacheControl($this->staticCacheControlPolicy, $this->devMode, $filePath, $mimeType, $versioned);
+    }
+
+    /**
+     * staticCacheControl() for a policy from Config::withStaticCacheControl().
+     *
+     * @param null|\Closure(string, string): ?string|string $policy
+     */
+    public static function cacheControl(\Closure|string|null $policy, bool $devMode, string $filePath, string $mimeType, bool $versioned = false): string {
+        if ($policy instanceof \Closure) {
+            $value = $policy($filePath, $mimeType);
             if ($value !== null) {
                 return $value;
             }
-        } elseif ($this->staticCacheControlPolicy !== null) {
-            return $this->staticCacheControlPolicy;
+        } elseif ($policy !== null) {
+            return $policy;
         }
 
-        if ($this->devMode) {
+        if ($devMode) {
             return 'no-cache';
         }
 
@@ -119,7 +128,14 @@ final readonly class Settings {
      * The broker from withBroker(); without one a new SwooleBroker for more than one worker, else a no-op InMemoryBroker.
      */
     public function broker(): MessageBroker {
-        return $this->configuredBroker ?? ($this->workerNum > 1 ? new SwooleBroker() : new InMemoryBroker());
+        return $this->configuredBroker ?? self::defaultBroker($this->workerNum);
+    }
+
+    /**
+     * The broker for an app without withBroker(): SwooleBroker for more than one worker, else a no-op InMemoryBroker.
+     */
+    public static function defaultBroker(int $workerNum): MessageBroker {
+        return $workerNum > 1 ? new SwooleBroker() : new InMemoryBroker();
     }
 
     /**
@@ -127,12 +143,19 @@ final readonly class Settings {
      * VIA_DEVBAR_WRITES=1.
      */
     public function tracingWritesEnabled(): bool {
-        if (!$this->devMode || !$this->tracingEnabled) {
+        return self::devBarWritesEnabled($this->devMode, $this->tracingEnabled, $this->devBarWrites);
+    }
+
+    /**
+     * tracingWritesEnabled() for the given dev mode, Dev Bar state and withDevBarOptions(writes:).
+     */
+    public static function devBarWritesEnabled(bool $devMode, bool $devBar, ?bool $writes): bool {
+        if (!$devMode || !$devBar) {
             return false;
         }
 
-        if ($this->devBarWrites !== null) {
-            return $this->devBarWrites;
+        if ($writes !== null) {
+            return $writes;
         }
 
         $env = getenv('VIA_DEVBAR_WRITES');

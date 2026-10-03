@@ -129,13 +129,11 @@ All notable changes to php-via will be documented in this file.
 - **`Config`, `Signal`, `Action` and `Scope` are final.**
 - **Removed:** `Via::parseSignals()`, `Context::interval()` (use `setInterval()`), and
   `Config::getTraceMaxBytes()`, whose limit was never enforced.
-- **`Config` keeps only the getters apps read:** `getBasePath()`, `isDevMode()`, `isHttps()`,
-  `getDatastarUrl()`, `getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`.
-  php-via reads everything else from a snapshot that `new Via()` takes, so keep a value you need
-  in a variable of your own.
 - **Internal API is tagged `@internal`:** Via's public properties, the constructors of `Context`,
-  `Signal` and `Action`, and `Signal`'s and `Scope`'s sync helpers. `$app->activeSseCount[$id]`
-  becomes `$c->isConnected()`.
+  `Signal` and `Action`, `Signal`'s and `Scope`'s sync helpers, and the `Config` getters other than
+  `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`, `getDatastarIntegrity()`,
+  `getImportMap()` and `getContextRevivalWindowMs()`. php-via reads its settings from a snapshot
+  that `new Via()` takes. `$app->activeSseCount[$id]` becomes `$c->isConnected()`.
 
 ### Upgrading from 0.13
 
@@ -184,21 +182,6 @@ message that names the new one.
 - `Config::withBroadcastCoalescing(false)` → `$app->flushBroadcasts()` where a broadcast has to
   land first (deprecated, still works)
 - `Config::getTraceMaxBytes()` → removed
-- `Config::getActionRateLimit()`, `getActionRateWindow()`, `getAllowMissingOrigin()`,
-  `getBroadcastTickMs()`, `getBroker()`, `getBrokerErrorHandler()`, `getBrotli()`,
-  `getBrotliDynamicLevel()`, `getBrotliStaticLevel()`, `getContextCleanupDelayMs()`,
-  `getContextConnectTimeoutMs()`, `getContextDirectoryRecordBytes()`, `getContextDirectoryRows()`,
-  `getContextDirectoryTtlSeconds()`, `getContextReconnectTimeoutMs()`, `getFrameAncestors()`,
-  `getGcIntervalMs()`, `getGlobalStateFlushMs()`, `getGlobalStatePath()`, `getGlobalStateTableRows()`,
-  `getGlobalStateTableValueBytes()`, `getHost()`, `getLogLevel()`, `getPort()`,
-  `getScopedSignalTableRows()`, `getScopedSignalTableValueBytes()`, `getSecureCookie()`,
-  `getSessionCookieSameSite()`, `getSessionTableRows()`, `getSessionTableValueBytes()`,
-  `getShellTemplate()`, `getSseKeepAliveMs()`, `getSseMaxQueuedBytes()`, `getSsePollIntervalMs()`,
-  `getSslCertFile()`, `getSslKeyFile()`, `getStaticCacheControl()`, `getStaticDir()`,
-  `getStrictTabSignals()`, `getSwooleSettings()`, `getTemplateDir()`, `getTraceBufferSize()`,
-  `getTrustedOrigins()`, `getTwigCacheDir()`, `getWorkerNum()`, `isBroadcastCoalescingEnabled()`,
-  `isH2c()`, `isSessionCookiePartitioned()`, `isTracingEnabled()` and `isTracingWritesEnabled()` →
-  removed; keep the value you passed to the setter
 
 ### New Features
 
