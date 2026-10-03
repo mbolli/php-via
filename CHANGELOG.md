@@ -187,6 +187,77 @@ message that names the new one.
 
 ### New Features
 
+- **`via_head` and `via_foot`** replace the SSE bootstrap, import map and Datastar script that
+  custom shells and full-document layouts copied from the default shell. Put `via_head` right after
+  `<meta charset>` and `via_foot` before `</body>`. Every tag carries the nonce from the page
+  request's `via.csp_nonce` attribute, and so do the Dev Bar's tags. php-via warns once per shell
+  or route without `via_head`, or with `via_head` and a second Datastar script, and dev mode also
+  about `via_head` without a Datastar script, and about a second import map. A copied bootstrap
+  keeps working. In a Twig template rendered outside a context, such as a `notFound()` page,
+  `via_head()` and `via_foot()` write the import map and the Datastar script, so the page can use
+  the site's layout.
+- **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
+  `Twig\TwigEngine` is php-via's, and `withTemplateDir()` sets one up. `view(..., block:)` with an
+  engine that renders no blocks throws. `via_head` and `via_foot` reach the engine as
+  `Rendering\Html`, which an autoescaping engine marks safe.
+- **`$c->patchElements($html, $selector, $mode)`** sends HTML to the page outside a view render.
+  `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace` needs a
+  selector. A component's patches go to its page, and a client that falls behind gets every one.
+- **`$c->dispatch($event, $detail)`** fires a CustomEvent on the browser's window with a
+  JSON-encoded detail, for toasts and the like, in place of a script built by hand for
+  `execScript()`. Listen with `data-on:toast__window`.
+- **`$c->isConnected()`** says whether the tab has an open stream. A component answers for its page.
+- **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
+- **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
+- **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
+  on web components. The Twig `bind()` function takes the property as a second argument.
+- **`$c->signal($fallback, 'name', clientSeeded: true)`** declares a TAB signal whose initial value
+  the browser holds, such as one the page's own script reads from the URL. The page seed and the
+  first sync leave it out, a second declaration keeps the live value, and every SSE connect gives it
+  the browser's value before the view renders, until the server writes it. It replaces calling
+  `markSynced()` right after `signal()`, which keeps working.
+- **Typed client writes.** A value the browser sends for a signal must have the type of the
+  signal's initial value or `#[Signal]` property. A lossless form, such as `'5'` from a textarea for
+  a number or `'false'` from a radio group for a bool, is stored as that type; any other value is
+  refused like a write to a signal that is not client-writable, where it was stored as sent. A
+  signal declared with `null` takes any type. Dev mode warns once per signal.
+- **`$c->input()` on a page load** reads the page's query string, where it returned the default.
+  The context record keeps up to 512 bytes of it, so a context rebuilt after its tab was away or on
+  another worker reads the same input. A longer query is left out of the record with a warning.
+- **`$c->tabState($key)` and `$c->setTabState($key, $value)`** keep server-side values of a tab,
+  such as a query result the page shows, across a revival, where apps copied them into
+  `globalState`. Values must be serializable. One worker keeps them in memory, and the revival
+  records of destroyed tabs hold up to 64 MiB of them. With more than one worker every worker reads
+  the same values from the context directory, up to 1024 serialized bytes per tab: raise it with
+  `withContextDirectorySize(maxTabStateBytes:)`.
+- **Several `#[OnCleanup]` methods** per class, run in declaration order.
+- **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
+  logs a hint when every tab of a view rendered the same HTML in one broadcast.
+- **`$app->onError($callback)`** sees each throw php-via catches from app code, with its
+  `ErrorPhase`: an action, a render or a `download()` source, a timer, a `spawn()` task or a
+  `route()` handler. It only observes: a failing action still answers 500 and sends the signals it
+  changed, the ones the callback writes included.
+- **`$c->spawn($task)`** runs per-tab work in a coroutine: its throw goes to `onError()`, and a
+  stopping worker waits for it. Once the tab is gone for good, `$c->isDestroyed()` is true and the
+  task's syncs, patches and downloads do nothing.
+- **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, shell or
+  template, for JSON, webhooks and MCP, behind the global and route middleware as a page is. A
+  response body of unknown size goes out as it is read.
+- **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
+  what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
+  only and goes with its context, so exports no longer travel through the SSE stream.
+- **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
+  actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
+  `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
+- **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on
+  every worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples
+  use it to tell whether anyone is watching.
+- **`Config::withBroadcastThrottle($scope, $minIntervalMs)`** renders a scope's broadcasts at most
+  once per interval, wildcards allowed, and always delivers the last one of a burst.
+  `$app->flushBroadcasts()` renders a held broadcast at once.
+- **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
+- **`SwooleBroker` by default.** More than one worker without `withBroker()` uses `SwooleBroker`,
+  where `start()` threw. Passing `InMemoryBroker` explicitly still throws.
 - **`Config::withDatastarRocket()`** serves Starbase's build of Datastar 1.0.4 with Rocket at
   `/datastar.js` (22 KB with Brotli, against 12 KB), and the default shell adds the import map Rocket
   components need. Unlike the official Rocket bundle, the build survives morphs that reorder keyed
@@ -198,10 +269,11 @@ message that names the new one.
 - **Versioned Datastar URL.** `Config::getDatastarUrl()` returns `/datastar.js?v=<content hash>`,
   cached for a year by default. `via_foot` loads Datastar from it: an unversioned `datastar.js` stays
   cached for up to an hour after an upgrade. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
-- **A `withStaticCacheControl()` closure can return `null`** to keep the default policy for a file,
+- **Stale Datastar pins.** `new Via()` warns about an import map integrity entry for
+  `/datastar.js` at another URL than `getDatastarUrl()`, such as one built before `withBasePath()`
+  or `withDatastarRocket()` or copied from an earlier build, under which the browser checks no hash.
+- **`withStaticCacheControl()` closures can return `null`** to keep the default policy for a file,
   so per-file rules no longer lose the year-long cache of `/datastar.js?v=`.
-- **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
-  on web components. The Twig `bind()` function takes the property as a second argument.
 - **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
   as `application/json`. `.webmanifest`, `.wasm`, `.ttf`, `.otf`, `.md`, `.csv`, `.rss` and `.atom`
   get their content types too, and Brotli. So do `.htm`, `.gif`, `.avif`, `.pdf`, `.mp4`, `.webm`
@@ -218,82 +290,12 @@ message that names the new one.
   found", and for a `RedisBroker` without the socket hook its connection needs.
 - **The dev-mode `/_stats`** reports the hook flags, the AIO thread pool and the worker's event loop
   lag under `runtime`.
-- **`via_head` and `via_foot`** replace the SSE bootstrap, import map and Datastar script that
-  custom shells and full-document layouts copied from the default shell. Put `via_head` right after
-  `<meta charset>` and `via_foot` before `</body>`. Every tag carries the nonce from the page
-  request's `via.csp_nonce` attribute, and so do the Dev Bar's tags. php-via warns once per shell
-  or route without `via_head`, or with `via_head` and a second Datastar script, and dev mode also
-  about `via_head` without a Datastar script, and about a second import map. A copied bootstrap
-  keeps working. In a Twig template rendered outside a context, such as a `notFound()` page,
-  `via_head()` and `via_foot()` write the import map and the Datastar script, so the page can use
-  the site's layout.
-- **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
-  `Twig\TwigEngine` is php-via's, and `withTemplateDir()` sets one up. `view(..., block:)` with an
-  engine that renders no blocks throws. `via_head` and `via_foot` reach the engine as
-  `Rendering\Html`, which an autoescaping engine marks safe.
-- **`$c->patchElements($html, $selector, PatchMode::Append)`** sends HTML to the page outside a
-  view render. `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace`
-  needs a selector. A component's patches go to its page, and a client that falls behind gets
-  every one of them.
-- **More than one worker without `withBroker()` uses `SwooleBroker`,** where `start()` threw.
-  Passing `InMemoryBroker` explicitly still throws.
-- **`$c->isConnected()`** says whether the tab has an open stream. A component answers for its page.
-- **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
-- **`$app->onError(fn ($e, $c, $phase, $action) => ...)`** sees each throw php-via catches from an
-  action, a render, a timer or a task, with its `ErrorPhase`. It only observes: a failing action
-  still answers 500 and sends the signals it changed, the ones the callback writes included.
-- **`$c->spawn($task)`** runs per-tab work in a coroutine: its throw goes to `onError()`, and a
-  stopping worker waits for it. Once the tab is gone for good, `$c->isDestroyed()` is true and the
-  task's syncs and patches do nothing.
-- **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
-- **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
 - **`Testing\TestApp`** runs an app's pages in a test, with no server and no `VIA_TEST_MODE`, through
   php-via's own request, action and SSE handlers: `$tab = $app->open('/')`, then `action()`,
-  `patches()`, `signal()`, `html()`, `connect()`, and `disconnect(expire: true)` for a revival. It
-  replaces tests' calls to `executeAction()`, `getPatch()`, `injectSignals()` and other internals.
-- **Several `#[OnCleanup]` methods** per class, run in declaration order.
-- **`$c->input()` on a page load** reads the page's query string, where it returned the default.
-  The context record keeps up to 512 bytes of it, so a context rebuilt after its tab was away or on
-  another worker reads the same input. A longer query is left out of the record with a warning.
-- **`$c->tabState($key)` and `$c->setTabState($key, $value)`** keep server-side values of a tab,
-  such as a query result the page shows, across a revival, where apps copied them into
-  `globalState`. One worker keeps them in memory, and the revival records of destroyed tabs hold up
-  to 64 MiB of them. With more than one worker every worker reads the same values from the context
-  directory, up to 1024 serialized bytes per tab: raise it with
-  `withContextDirectorySize(maxTabStateBytes:)`. Values must be serializable.
-- **Typed client writes.** A value the browser sends for a signal must have the type of the
-  signal's initial value or `#[Signal]` property. A lossless form, such as `'5'` from a textarea for
-  a number or `'false'` from a radio group for a bool, is stored as that type; any other value is
-  refused like a write to a signal that is not client-writable, where it was stored as sent. A signal
-  declared with `null` takes any type. Dev mode warns once per signal.
-- **`signal($fallback, 'name', clientSeeded: true)`** declares a TAB signal whose initial value the
-  browser holds, such as one the page's own script reads from the URL. The page seed and the first
-  sync leave it out, a second declaration keeps the live value, and every SSE connect gives it the
-  browser's value before the view renders, until the server writes it. It replaces calling
-  `markSynced()` right after `signal()`, which keeps working.
-- **`new Via()` warns about a stale Datastar pin:** an import map integrity entry for
-  `/datastar.js` at another URL than `getDatastarUrl()`, such as one built before `withBasePath()`
-  or `withDatastarRocket()` or copied from an earlier build, under which the browser checks no hash.
-- **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
-  logs a hint when every tab of a view rendered the same HTML in one broadcast.
-- **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, shell or
-  template, for JSON, webhooks and MCP, behind the global and route middleware as a page is. A
-  response body of unknown size goes out as it is read.
-- **`$c->dispatch($event, $detail)`** fires a CustomEvent on the browser's window with a
-  JSON-encoded detail, for toasts and the like, in place of a script built by hand for
-  `execScript()`. Listen with `data-on:toast__window`.
-- **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on every
-  worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples use it
-  to tell whether anyone is watching.
-- **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
-  what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
-  only and goes with its context, so exports no longer travel through the SSE stream.
-- **`Config::withBroadcastThrottle($scope, $minIntervalMs)`** renders a scope's broadcasts at most
-  once per interval, wildcards allowed, and always delivers the last one of a burst.
-  `$app->flushBroadcasts()` renders a held broadcast at once.
-- **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
-  actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
-  `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
+  `patches()`, `signal()`, `html()`, `connect()`, and `disconnect(expire: true)` for a revival.
+  `request()` sends a plain request, to a `route()` or a `download()` URL, and `runTasks()` runs
+  `spawn()` tasks past their first wait. It replaces tests' calls to `executeAction()`, `getPatch()`,
+  `injectSignals()` and other internals.
 
 ### Deprecated
 
