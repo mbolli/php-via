@@ -133,11 +133,12 @@ describe('the Datastar bundle at /datastar.js', function (): void {
             return $response->headers['Cache-Control'];
         };
         $current = fn (Config $config): string => substr($config->getDatastarUrl(), -10);
-        $rocket = (new Config())->withDatastarRocket();
+        // new Via() freezes its Config, so each request gets a new one.
+        $rocket = fn (): Config => (new Config())->withDatastarRocket();
 
         expect($cacheControl(new Config(), $current(new Config())))->toBe('public, max-age=31536000, immutable')
-            ->and($cacheControl($rocket, $current($rocket)))->toBe('public, max-age=31536000, immutable')
-            ->and($cacheControl($rocket, $current(new Config())))->toBe('public, max-age=3600, must-revalidate')
+            ->and($cacheControl($rocket(), $current($rocket())))->toBe('public, max-age=31536000, immutable')
+            ->and($cacheControl($rocket(), $current(new Config())))->toBe('public, max-age=3600, must-revalidate')
             ->and($cacheControl(new Config(), null))->toBe('public, max-age=3600, must-revalidate')
             ->and($cacheControl((new Config())->withDevMode(true), $current(new Config())))->toBe('no-cache')
             ->and($cacheControl((new Config())->withStaticCacheControl('no-store'), $current(new Config())))->toBe('no-store')

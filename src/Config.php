@@ -12,8 +12,10 @@ use Mbolli\PhpVia\Support\Logger;
 
 /**
  * Configuration class with fluent API.
+ *
+ * new Via($config) freezes it: a with* call after that throws, so make every call before.
  */
-class Config {
+final class Config {
     private string $host = '0.0.0.0';
     private int $port = 3000;
     private bool $devMode = false;
@@ -233,19 +235,25 @@ class Config {
     /** Soft cap on a single serialized trace's byte size (display guard). */
     private int $traceMaxBytes = 16_384;
 
+    /** Set by new Via(): from then on every with* call throws. */
+    private bool $frozen = false;
+
     public function withHost(string $host): self {
+        $this->assertMutable(__FUNCTION__);
         $this->host = $host;
 
         return $this;
     }
 
     public function withPort(int $port): self {
+        $this->assertMutable(__FUNCTION__);
         $this->port = $port;
 
         return $this;
     }
 
     public function withDevMode(bool $devMode = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->devMode = $devMode;
 
         return $this;
@@ -261,6 +269,7 @@ class Config {
      * @throws \InvalidArgumentException for any other level
      */
     public function withLogLevel(string $level): self {
+        $this->assertMutable(__FUNCTION__);
         $this->logLevel = Logger::canonicalLevel($level) ?? throw new \InvalidArgumentException(
             "Unknown log level '{$level}': use debug, info, warn or error (PSR-3 and syslog names such as warning or err work too)."
         );
@@ -269,12 +278,14 @@ class Config {
     }
 
     public function withTemplateDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->templateDir = $dir;
 
         return $this;
     }
 
     public function withTwigCacheDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->twigCacheDir = $dir;
 
         return $this;
@@ -292,6 +303,7 @@ class Config {
      * the dir to such a file answers 404 too. Compressible files get Brotli, see withBrotli().
      */
     public function withStaticDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->staticDir = rtrim($dir, '/');
 
         return $this;
@@ -336,6 +348,7 @@ class Config {
      * @param null|\Closure(string, string): ?string|string $value
      */
     public function withStaticCacheControl(\Closure|string|null $value): self {
+        $this->assertMutable(__FUNCTION__);
         $this->staticCacheControl = $value;
 
         return $this;
@@ -377,6 +390,7 @@ class Config {
      * {{ datastar_url }} placeholders, a Twig layout the importMap and datastarUrl variables.
      */
     public function withDatastarRocket(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->datastarRocket = $enabled;
 
         return $this;
@@ -436,6 +450,7 @@ class Config {
      *                                   which would resolve differently on every route, or an entry for 'datastar'
      */
     public function withImportMap(array $imports, array $integrity = []): self {
+        $this->assertMutable(__FUNCTION__);
         $newImports = [];
         foreach ($imports as $specifier => $url) {
             $specifier = self::importMapString($specifier, 'specifier');
@@ -501,6 +516,7 @@ class Config {
     }
 
     public function withShellTemplate(string $path): self {
+        $this->assertMutable(__FUNCTION__);
         $this->shellTemplate = $path;
 
         return $this;
@@ -513,6 +529,7 @@ class Config {
      * @throws \InvalidArgumentException if the value is not a valid relative path
      */
     public function withBasePath(string $basePath): self {
+        $this->assertMutable(__FUNCTION__);
         // Accept only safe relative paths: zero or more /segment components
         // (each starting with [a-zA-Z0-9]) followed by an optional trailing slash.
         // Rejects protocol-relative paths (//evil.com), absolute URLs (https://…),
@@ -535,6 +552,7 @@ class Config {
      * connection closes and when the worker stops. See withSseKeepAliveMs().
      */
     public function withSsePollIntervalMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->ssePollIntervalMs = max(1, $ms);
 
         return $this;
@@ -555,6 +573,7 @@ class Config {
      * @param int $ms interval in milliseconds; 0 sends no comment, and idle streams then wake once a minute
      */
     public function withSseKeepAliveMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sseKeepAliveMs = max(0, $ms);
 
         return $this;
@@ -575,6 +594,7 @@ class Config {
      * @param int $bytes threshold in bytes; 0 or less disables dropping entirely
      */
     public function withSseMaxQueuedBytes(int $bytes): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sseMaxQueuedBytes = $bytes;
 
         return $this;
@@ -600,6 +620,7 @@ class Config {
      *                      flush paced by the tick (see withBroadcastTickMs())
      */
     public function withBroadcastCoalescing(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broadcastCoalescing = $enabled;
 
         return $this;
@@ -630,6 +651,7 @@ class Config {
      * @param int $ms gap in milliseconds; 0 flushes at the end of every event-loop turn with no gap
      */
     public function withBroadcastTickMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broadcastTickMs = max(0, $ms);
 
         return $this;
@@ -648,6 +670,7 @@ class Config {
      * @param array<string, mixed> $settings
      */
     public function withSwooleSettings(array $settings): self {
+        $this->assertMutable(__FUNCTION__);
         $this->openSwooleSettings = array_merge($this->openSwooleSettings, $settings);
 
         return $this;
@@ -693,6 +716,7 @@ class Config {
      * Enable this for any deployment served over HTTPS.
      */
     public function withSecureCookie(bool $secure = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->secureCookie = $secure;
 
         return $this;
@@ -720,6 +744,7 @@ class Config {
      * @param bool                      $partitioned    partition the cookie per top-level site (CHIPS). Recommended true.
      */
     public function withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sessionCookieSameSite = 'None';
         $this->secureCookie = true;              // SameSite=None requires Secure
         $this->sessionCookiePartitioned = $partitioned;
@@ -755,6 +780,7 @@ class Config {
      * @param null|list<string> $origins
      */
     public function withTrustedOrigins(?array $origins): self {
+        $this->assertMutable(__FUNCTION__);
         $this->trustedOrigins = $origins;
 
         return $this;
@@ -776,6 +802,7 @@ class Config {
      * Dev Bar's /_via/signal and /_via/reset.
      */
     public function withAllowMissingOrigin(bool $allow = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->allowMissingOrigin = $allow;
 
         return $this;
@@ -797,6 +824,7 @@ class Config {
      * server-owned TAB signals are per-worker state: use worker_num = 1 or a scoped signal.
      */
     public function withStrictTabSignals(bool $strict = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->strictTabSignals = $strict;
 
         return $this;
@@ -813,6 +841,7 @@ class Config {
      * @param int $windowSeconds Window size in seconds (default 60)
      */
     public function withActionRateLimit(int $maxRequests, int $windowSeconds = 60): self {
+        $this->assertMutable(__FUNCTION__);
         $this->actionRateLimit = max(0, $maxRequests);
         $this->actionRateWindow = max(1, $windowSeconds);
 
@@ -838,6 +867,7 @@ class Config {
      * @param int $ms Timer interval in milliseconds. Pass 0 to disable.
      */
     public function withGcInterval(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->gcIntervalMs = max(0, $ms);
 
         return $this;
@@ -858,6 +888,7 @@ class Config {
      * @param int $ms Grace period in milliseconds. Pass 0 to disable (cleanup is immediate).
      */
     public function withContextCleanupDelay(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextCleanupDelayMs = max(0, $ms);
 
         return $this;
@@ -881,6 +912,7 @@ class Config {
      * @param int $ms Lifetime in milliseconds. Pass 0 to keep such contexts until the worker stops.
      */
     public function withContextConnectTimeout(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextConnectTimeoutMs = max(0, $ms);
 
         return $this;
@@ -903,6 +935,7 @@ class Config {
      * @param int $ms Wait in milliseconds. Pass 0 to use withContextConnectTimeout().
      */
     public function withContextReconnectTimeout(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextReconnectTimeoutMs = max(0, $ms);
 
         return $this;
@@ -926,6 +959,7 @@ class Config {
      * @param int $ms Window in milliseconds. Pass 0 to disable (reconnect falls back to a reload).
      */
     public function withContextRevivalWindow(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextRevivalWindowMs = max(0, $ms);
 
         return $this;
@@ -943,6 +977,7 @@ class Config {
      * @param string $keyFile  Path to PEM private key file
      */
     public function withCertificate(string $certFile, string $keyFile): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sslCertFile = $certFile;
         $this->sslKeyFile = $keyFile;
 
@@ -1011,6 +1046,7 @@ class Config {
      * @param null|int $staticLevel  level for static files (1 to 11), 0 for none; null: 11, or 0 if $enabled is false
      */
     public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, ?int $staticLevel = null): self {
+        $this->assertMutable(__FUNCTION__);
         $this->brotli = $enabled;
         $this->brotliDynamicLevel = max(0, min(11, $dynamicLevel));
         $this->brotliStaticLevel = max(0, min(11, $staticLevel ?? ($enabled ? 11 : 0)));
@@ -1040,6 +1076,7 @@ class Config {
      * Do NOT enable on a server exposed directly to untrusted traffic.
      */
     public function withH2c(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->h2c = $enabled;
 
         return $this;
@@ -1063,6 +1100,7 @@ class Config {
      * ```
      */
     public function withBroker(MessageBroker $broker): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broker = $broker;
 
         return $this;
@@ -1089,6 +1127,7 @@ class Config {
      * @param callable(\Throwable): void $handler
      */
     public function onBrokerError(callable $handler): self {
+        $this->assertMutable(__FUNCTION__);
         $this->brokerErrorHandler = $handler;
 
         return $this;
@@ -1127,6 +1166,7 @@ class Config {
      * ```
      */
     public function withWorkerNum(int $n): self {
+        $this->assertMutable(__FUNCTION__);
         $this->workerNum = max(1, $n);
 
         return $this;
@@ -1160,6 +1200,7 @@ class Config {
      * @param int $maxValueBytes Maximum serialized byte size per value (default 32768)
      */
     public function withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->assertMutable(__FUNCTION__);
         $this->globalStateTableRows = max(1, $maxRows);
         $this->globalStateTableValueBytes = max(64, $maxValueBytes);
 
@@ -1187,6 +1228,7 @@ class Config {
      * @param int $maxValueBytes Maximum serialized byte size per non-integer value (default 32768)
      */
     public function withScopedSignalTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->assertMutable(__FUNCTION__);
         $this->scopedSignalTableRows = max(1, $maxRows);
         $this->scopedSignalTableValueBytes = max(64, $maxValueBytes);
 
@@ -1210,6 +1252,7 @@ class Config {
      * @param int $ttlSeconds     Expiry for a record with no heartbeat (default 3600)
      */
     public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextDirectoryRows = max(1, $maxRows);
         $this->contextDirectoryRecordBytes = max(128, $maxRecordBytes);
         $this->contextDirectoryTtlSeconds = max(60, $ttlSeconds);
@@ -1240,6 +1283,7 @@ class Config {
      * @param int $maxBytesPerSession Serialized byte cap for all of one session's data (default 16384)
      */
     public function withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 16384): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sessionTableRows = max(1, $maxSessions);
         $this->sessionTableValueBytes = max(64, $maxBytesPerSession);
 
@@ -1294,6 +1338,7 @@ class Config {
      * @param int    $flushMs How often the leader worker drains the dirty set (default 1000)
      */
     public function withPersistentGlobalState(string $path, int $flushMs = 1000): self {
+        $this->assertMutable(__FUNCTION__);
         $this->globalStatePath = $path;
         $this->globalStateFlushMs = max(50, $flushMs);
 
@@ -1330,6 +1375,7 @@ class Config {
      * @param null|bool $enabled true/false to force, null to follow devMode
      */
     public function withTracing(?bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->tracing = $enabled;
 
         return $this;
@@ -1355,6 +1401,7 @@ class Config {
      * @param null|bool $enabled true/false to force, null to follow VIA_DEVBAR_WRITES
      */
     public function withTracingWrites(?bool $enabled = null): self {
+        $this->assertMutable(__FUNCTION__);
         $this->tracingWrites = $enabled;
 
         return $this;
@@ -1381,6 +1428,7 @@ class Config {
      * @param int $maxTraceBytes Soft cap on a serialized trace's size (default 16384)
      */
     public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): self {
+        $this->assertMutable(__FUNCTION__);
         $this->traceBufferSize = max(1, $traces);
         $this->traceMaxBytes = max(1024, $maxTraceBytes);
 
@@ -1393,6 +1441,24 @@ class Config {
 
     public function getTraceMaxBytes(): int {
         return $this->traceMaxBytes;
+    }
+
+    /**
+     * Freeze this Config: every later with* call throws.
+     *
+     * @internal called by new Via()
+     */
+    public function freeze(): void {
+        $this->frozen = true;
+    }
+
+    private function assertMutable(string $method): void {
+        if ($this->frozen) {
+            throw new \LogicException(
+                "Config::{$method}() was called after new Via(\$config), which freezes the Config: a later change would be "
+                . 'ignored or only half applied. Make every with* call before new Via().'
+            );
+        }
     }
 
     /**

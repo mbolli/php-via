@@ -7,7 +7,7 @@ namespace Mbolli\PhpVia;
 /**
  * Action represents a server-side action that can be triggered from the browser.
  */
-class Action {
+final class Action {
     public function __construct(private string $id, private string $basePath) {}
 
     /**

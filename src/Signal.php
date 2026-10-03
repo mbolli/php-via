@@ -12,7 +12,7 @@ use Mbolli\PhpVia\Support\Removed;
  *
  * Signals can be TAB-scoped (per-context) or shared across a scope.
  */
-class Signal {
+final class Signal {
     private string $id;
     private mixed $value = null;
     private bool $changed = true;

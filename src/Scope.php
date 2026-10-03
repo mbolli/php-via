@@ -16,7 +16,7 @@ namespace Mbolli\PhpVia;
  * - Built-in constants (TAB, ROUTE, SESSION, GLOBAL)
  * - Custom strings (e.g., "room:123", "user:456", "topic:stock:AAPL")
  */
-class Scope {
+final class Scope {
     /**
      * Built-in scope: Tab-scoped (default).
      * Each browser tab/context has isolated state.

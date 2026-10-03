@@ -237,7 +237,11 @@ class Via {
     /** Active URL prefix set by the currently executing group() closure */
     private string $groupPrefix = '';
 
+    /**
+     * Freezes $config: a with* call on it afterwards throws.
+     */
     public function __construct(private Config $config) {
+        $this->config->freeze();
         $this->viaUnsetCallbackRegistered = new \WeakMap();
 
         // Initialize support classes
