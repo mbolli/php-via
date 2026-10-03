@@ -14,7 +14,7 @@ use Mbolli\PhpVia\Via;
 $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
-    $count = $c->signal(0);
+    $count = $c->signal(0, 'count');
 
     $increment = $c->action(function () use ($c, $count): void {
         $count->setValue($count->int() + 1);

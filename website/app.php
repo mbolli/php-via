@@ -186,13 +186,13 @@ $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
         // Atomic: $counter is shared in COUNTER_SCOPE, so with more than one worker
         // setValue($counter->int() + 1) would let two workers read the same value and each
         // write back the same result, dropping a click.
-        $counter->increment(broadcast: false);
+        $counter->increment();
 
         // $c is this component; the visitor is the page it sits on.
-        $page = $c->getComponentManager()->getParentPageContext() ?? $c;
+        $page = $c->getPageContext();
         $visitorNum = substr($page->getId(), -4);
-        $lastClick->setValue('Visitor #' . strtoupper($visitorNum), broadcast: false);
-        $lastClickHue->setValue(hexdec($visitorNum) % 360, broadcast: false);
+        $lastClick->setValue('Visitor #' . strtoupper($visitorNum));
+        $lastClickHue->setValue(hexdec($visitorNum) % 360);
         $app->broadcast(COUNTER_SCOPE);
     }, 'increment');
 

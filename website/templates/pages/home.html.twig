@@ -116,7 +116,7 @@ $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
     // TAB scope (default): each visitor has their own counter
-    $count = $c->signal(0);
+    $count = $c->signal(0, 'count');
 
     $increment = $c->action(function () use ($c, $count): void {
         $count->setValue($count->int() + 1);
@@ -150,7 +150,7 @@ $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
 {-    // TAB scope (default): each visitor has their own counter
-    $count = $c->signal(0);-}
+    $count = $c->signal(0, 'count');-}
 {+    // GLOBAL scope: one shared counter for every visitor
     $count = $c->signal(0, 'count', Scope::GLOBAL);+}
 

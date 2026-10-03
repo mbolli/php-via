@@ -154,9 +154,9 @@ describe('Signal reads under a snapshot', function (): void {
         $store->set("room:snap\0room_snap_w", 10); // another worker writes after the snapshot loaded 1
 
         match ($how) {
-            'setValue' => $signal->setValue(5, true, false),
-            'increment' => $signal->increment(4, false),
-            'mutate' => $signal->mutate(static fn (mixed $v): int => (int) $v + 100, false),
+            'setValue' => $signal->setValue(5),
+            'increment' => $signal->increment(4),
+            'mutate' => $signal->mutate(static fn (mixed $v): int => (int) $v + 100),
             default => throw new LogicException($how),
         };
 
@@ -176,9 +176,9 @@ describe('Signal reads under a snapshot', function (): void {
         expect($signal->getValue())->toBe(1);
 
         match ($how) {
-            'setValue' => $signal->setValue(5, true, false),
-            'increment' => $signal->increment(4, false),
-            'mutate' => $signal->mutate(static fn (mixed $v): int => (int) $v + 100, false),
+            'setValue' => $signal->setValue(5),
+            'increment' => $signal->increment(4),
+            'mutate' => $signal->mutate(static fn (mixed $v): int => (int) $v + 100),
             default => throw new LogicException($how),
         };
         $store->set("room:snap\0room_snap_d", 10); // another worker writes after this one
@@ -194,7 +194,7 @@ describe('Signal reads under a snapshot', function (): void {
         $store->readEpochs()->begin();
         expect($signal->array())->toBe(['a']);
 
-        expect(static fn () => $signal->setValue([str_repeat('x', 200)], true, false))->toThrow(OverflowException::class);
+        expect(static fn () => $signal->setValue([str_repeat('x', 200)]))->toThrow(OverflowException::class);
         expect($signal->array())->toBe(['a'], 'what is stored, not the value that failed to store');
         $store->readEpochs()->end(false);
     });

@@ -13,6 +13,7 @@ use Mbolli\PhpVia\Context\SignalFactory;
 use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
+use starfederation\datastar\enums\ElementPatchMode;
 use Twig\Markup;
 
 /**
@@ -830,7 +831,8 @@ class Context {
      * Create a signal.
      *
      * @param mixed       $initialValue   The initial value of the signal
-     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param string      $name           The signal's name in this context, used by getSignal(), templates
+     *                                    and the browser id
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write this signal. null (default):
@@ -850,7 +852,7 @@ class Context {
      *
      * @throws \LogicException without a scope, after scope() set a primary scope other than TAB
      */
-    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
+    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
     }
 
@@ -1130,6 +1132,51 @@ class Context {
     }
 
     /**
+     * Patch HTML into this tab outside the view, such as a modal, a toast or a chunk of streamed output.
+     *
+     * Without $selector, Outer and Replace match the top-level elements of $html by id; the other modes
+     * need a selector. Remove needs no HTML: patchElements(selector: '#toast', mode: PatchMode::Remove).
+     * Patches queue until the tab's stream is open, like sync(). Append, Prepend, Before and After each
+     * count, so a full queue drops them last and a client that falls behind gets them all.
+     *
+     * @throws \InvalidArgumentException when there is neither HTML nor a selector, or the mode needs a selector
+     */
+    public function patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void {
+        if ($html === '' && ($selector ?? '') === '') {
+            throw new \InvalidArgumentException('patchElements() needs HTML, a selector, or both.');
+        }
+        if (($selector ?? '') === '' && $mode !== PatchMode::Outer && $mode !== PatchMode::Replace) {
+            throw new \InvalidArgumentException("PatchMode::{$mode->name} needs a selector: only Outer and Replace find their target by the element's id.");
+        }
+
+        $patch = ['type' => 'elements', 'content' => $html, 'mode' => $mode];
+        if ($selector !== null && $selector !== '') {
+            $patch['selector'] = $selector;
+        }
+
+        $this->patchManager->queuePatch($patch);
+    }
+
+    /**
+     * Whether this tab's SSE stream is open on this worker.
+     *
+     * sync() and patches sent while it is not are queued and delivered when the tab connects or
+     * reconnects, so checking it first only saves the render.
+     */
+    public function isConnected(): bool {
+        return ($this->app->activeSseCount[$this->getPageContext()->id] ?? 0) > 0;
+    }
+
+    /**
+     * The page this context belongs to: the page itself, or for a component the page it sits on.
+     *
+     * Use it to tell which visitor an action inside a component came from.
+     */
+    public function getPageContext(): self {
+        return $this->componentManager->getParentPageContext() ?? $this;
+    }
+
+    /**
      * Inject signals from the client.
      *
      * @internal Called by Via when processing requests
@@ -1204,15 +1251,12 @@ class Context {
     }
 
     /**
-     * Get next patch from the queue.
+     * Get next patch from the queue, or null if none is available. Its `confirm` must be invoked
+     * only after the patch has actually been written.
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array{type: string, content: mixed, selector?: string, confirm?: callable(): void} Next patch data
-     *                                                                                                 or null if none available.
-     *                                                                                                 `confirm` must be invoked
-     *                                                                                                 only after the patch has
-     *                                                                                                 actually been written.
+     * @return null|array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void}
      */
     public function getPatch(): ?array {
         return $this->patchManager->getPatch();

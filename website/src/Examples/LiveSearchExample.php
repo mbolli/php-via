@@ -155,7 +155,7 @@ final class LiveSearchExample {
                 $category = $ctx->getSignal('category');
 
                 if ($cat !== null && \in_array($cat, self::CATEGORIES, strict: true)) {
-                    $category->setValue($cat, broadcast: false);
+                    $category->setValue($cat);
                 }
 
                 $ctx->sync();

@@ -162,8 +162,8 @@ final class SpreadsheetExample {
 
                 self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
 
-                $focusRow->setValue($row, broadcast: false);
-                $focusCol->setValue($col, broadcast: false);
+                $focusRow->setValue($row);
+                $focusCol->setValue($col);
 
                 $sel = &self::$selections[$contextId];
                 if ($isShift) {
@@ -178,7 +178,7 @@ final class SpreadsheetExample {
                 }
 
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
-                $version->increment(broadcast: false);
+                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'focusCell');
 
@@ -229,8 +229,8 @@ final class SpreadsheetExample {
                     default => null,
                 };
 
-                $focusRow->setValue($fr, broadcast: false);
-                $focusCol->setValue($fc, broadcast: false);
+                $focusRow->setValue($fr);
+                $focusCol->setValue($fc);
 
                 $sel = &self::$selections[$contextId];
                 if ($isShift) {
@@ -257,11 +257,11 @@ final class SpreadsheetExample {
                 } elseif ($fc >= $vc + $viewportCols->int()) {
                     $vc = $fc - $viewportCols->int() + 1;
                 }
-                $viewRow->setValue($vr, broadcast: false);
-                $viewCol->setValue($vc, broadcast: false);
+                $viewRow->setValue($vr);
+                $viewCol->setValue($vc);
 
                 self::$cursors[$contextId] = ['row' => $fr, 'col' => $fc, 'hue' => self::hueForSession($sessionId)];
-                $version->increment(broadcast: false);
+                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'navigate');
 
@@ -278,8 +278,8 @@ final class SpreadsheetExample {
                 $keyVal = $key->string();
                 $prefill = mb_strlen($keyVal) === 1 ? $keyVal : '';
                 $currentValue = self::getCell($focusRow->int(), $focusCol->int());
-                $editing->setValue(true, broadcast: false);
-                $editValue->setValue($prefill !== '' ? $prefill : $currentValue, broadcast: false);
+                $editing->setValue(true);
+                $editValue->setValue($prefill !== '' ? $prefill : $currentValue);
                 self::$openEdits[$contextId] = true;
                 $ctx->sync();
             }, 'startEdit');
@@ -298,7 +298,7 @@ final class SpreadsheetExample {
                     return;
                 }
                 self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
-                $version->increment(broadcast: false);
+                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'commitEdit');
 
@@ -310,8 +310,8 @@ final class SpreadsheetExample {
                 /** @var Signal $scrollDr */ $scrollDr = $ctx->getSignal('dr');
 
                 /** @var Signal $scrollDc */ $scrollDc = $ctx->getSignal('dc');
-                $viewRow->setValue(max(0, $viewRow->int() + $scrollDr->int()), broadcast: false);
-                $viewCol->setValue(max(0, $viewCol->int() + $scrollDc->int()), broadcast: false);
+                $viewRow->setValue(max(0, $viewRow->int() + $scrollDr->int()));
+                $viewCol->setValue(max(0, $viewCol->int() + $scrollDc->int()));
                 $ctx->sync();
             }, 'scroll');
 
@@ -329,10 +329,10 @@ final class SpreadsheetExample {
                 /** @var Signal $scrollToCol */ $scrollToCol = $ctx->getSignal('stc');
                 // Each scrollbar sends -1 for the other axis, so it cannot undo a scroll there.
                 if ($scrollToRow->int() >= 0) {
-                    $viewRow->setValue($scrollToRow->int(), broadcast: false);
+                    $viewRow->setValue($scrollToRow->int());
                 }
                 if ($scrollToCol->int() >= 0) {
-                    $viewCol->setValue($scrollToCol->int(), broadcast: false);
+                    $viewCol->setValue($scrollToCol->int());
                 }
                 $ctx->sync();
             }, 'scrollTo');
@@ -350,7 +350,7 @@ final class SpreadsheetExample {
 
                 /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $data = $pasted->string();
-                $pasted->setValue('', broadcast: false);
+                $pasted->setValue('');
                 if ($data === '') {
                     return;
                 }
@@ -371,7 +371,7 @@ final class SpreadsheetExample {
                 }
                 self::setCells($cells);
                 self::endEdit($contextId, $editing, $editValue, $startRow, $startCol, commit: false);
-                $version->increment(broadcast: false);
+                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'paste');
 
@@ -400,8 +400,8 @@ final class SpreadsheetExample {
                 /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
 
                 /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
-                $viewportRows->setValue(max(3, min(100, $viewportRows->int())), broadcast: false);
-                $viewportCols->setValue(max(3, min(52, $viewportCols->int())), broadcast: false);
+                $viewportRows->setValue(max(3, min(100, $viewportRows->int())));
+                $viewportCols->setValue(max(3, min(52, $viewportCols->int())));
                 $ctx->sync();
             }, 'resize');
 
@@ -422,7 +422,7 @@ final class SpreadsheetExample {
 
                 /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
                 $target = trim($jumpTarget->string());
-                $jumpTarget->setValue('', broadcast: false);
+                $jumpTarget->setValue('');
                 if (!preg_match('/^([A-Za-z]+)(\d+)$/i', $target, $matches)) {
                     $ctx->sync();
 
@@ -431,18 +431,18 @@ final class SpreadsheetExample {
                 $col = self::colNameToIndex($matches[1]);
                 $row = max(0, (int) $matches[2] - 1);
 
-                $focusRow->setValue($row, broadcast: false);
-                $focusCol->setValue($col, broadcast: false);
+                $focusRow->setValue($row);
+                $focusCol->setValue($col);
 
                 $vr = max(0, $row - intdiv($viewportRows->int(), 2));
                 $vc = max(0, $col - intdiv($viewportCols->int(), 2));
-                $viewRow->setValue($vr, broadcast: false);
-                $viewCol->setValue($vc, broadcast: false);
+                $viewRow->setValue($vr);
+                $viewCol->setValue($vc);
 
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
                 self::$selections[$contextId] = ['r1' => $row, 'c1' => $col, 'r2' => $row, 'c2' => $col];
 
-                $version->increment(broadcast: false);
+                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'jumpTo');
 
@@ -476,7 +476,7 @@ final class SpreadsheetExample {
                     self::setCells($cells);
                 }
 
-                $version->increment(broadcast: false);
+                $version->increment();
                 $app->broadcast(self::SCOPE);
             }, 'clearCells');
 
@@ -877,8 +877,8 @@ final class SpreadsheetExample {
         if ($commit && $open) {
             self::setCell($row, $col, $editValue->string());
         }
-        $editing->setValue(false, broadcast: false);
-        $editValue->setValue('', broadcast: false);
+        $editing->setValue(false);
+        $editValue->setValue('');
     }
 
     /** Drop expired entries, then the oldest past the cap. Entries are appended in expiry order. */

@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\PatchMode;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
+use starfederation\datastar\enums\ElementPatchMode;
 
 /**
  * PatchManager - Manages patch queue and signal syncing.
@@ -21,7 +23,7 @@ use OpenSwoole\Coroutine\Channel;
  * - Script execution
  * - Signal nesting/flattening
  *
- * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, confirm?: callable(): void}
+ * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, mode?: PatchMode|ElementPatchMode, confirm?: callable(): void}
  */
 class PatchManager {
     private const int CHANNEL_CAPACITY = 50;
@@ -451,6 +453,27 @@ class PatchManager {
     }
 
     /**
+     * Whether a patch takes effect once, so that dropping it or sending it twice changes the page: a
+     * script, or an element patch that inserts (Append, Prepend, Before, After).
+     *
+     * Other element patches morph, replace or remove a target, and a later sync renders it again.
+     *
+     * @internal read by the queue's eviction and by the SSE loop's backlog drop
+     *
+     * @param QueuedPatch $patch
+     */
+    public static function isOneShot(array $patch): bool {
+        if ($patch['type'] !== 'elements') {
+            return $patch['type'] === 'script';
+        }
+
+        $mode = $patch['mode'] ?? null;
+        $mode = $mode instanceof \BackedEnum ? $mode->value : $mode;
+
+        return \in_array($mode, ['append', 'prepend', 'before', 'after'], true);
+    }
+
+    /**
      * Whether the page this manager feeds waits for its SSE connect to seed it. Its signals still
      * hold the defaults a revival declared, and anything queued now reaches the tab before the seed.
      */
@@ -540,16 +563,12 @@ class PatchManager {
     /**
      * Choose and remove one victim from a full queue.
      *
-     * Drop-oldest used to be type-blind. 'elements' patches are idempotent
-     * full-fragment morphs where the latest supersedes the rest, so evicting one is
-     * harmless. 'script' patches are one-shot side effects with no re-send path: a
-     * dropped redirect is a broken login flow (LoginExample uses execScript for
-     * post-login navigation), so they are evicted only as a last resort, when the
-     * queue holds nothing else.
-     *
-     * 'signals' patches are safe to drop since acknowledgement moved to delivery
-     * (see syncSignals()): an undelivered signal stays dirty and is resent. They are
-     * still preferred over scripts, which cannot self-heal.
+     * Element patches that morph, replace or remove go first: a later sync renders the
+     * same target again. Signal patches are next, since an undelivered signal stays dirty
+     * and is resent (acknowledgement happens at delivery, see syncSignals()). One-shot
+     * patches (isOneShot()) have no re-send path: a dropped redirect is a broken login
+     * flow, a dropped Append chunk a gap in the output. The oldest of them goes only when
+     * the queue holds nothing else.
      *
      * @param list<QueuedPatch> $patches
      *
@@ -558,7 +577,7 @@ class PatchManager {
     private function evictOne(array $patches): array {
         foreach (['elements', 'signals'] as $preferredType) {
             foreach ($patches as $i => $patch) {
-                if ($patch['type'] === $preferredType) {
+                if ($patch['type'] === $preferredType && !self::isOneShot($patch)) {
                     unset($patches[$i]);
                     $this->app->log(
                         'debug',
@@ -570,11 +589,10 @@ class PatchManager {
             }
         }
 
-        // Nothing idempotent left to sacrifice: the queue is entirely scripts.
-        array_shift($patches);
+        $dropped = array_shift($patches)['type'] ?? 'none';
         $this->app->log(
             'warning',
-            "Queue full of script patches for context {$this->contextId} - dropped the oldest side effect"
+            "Queue full of one-shot patches for context {$this->contextId} - dropped the oldest ({$dropped})"
         );
 
         return $patches;

@@ -41,7 +41,7 @@ class SignalFactory {
      * Create a signal.
      *
      * @param mixed       $initialValue   The initial value of the signal
-     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param string      $name           Signal name, unique per context and scope
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write it; null picks the scope's default
@@ -54,8 +54,11 @@ class SignalFactory {
      *
      * @throws \LogicException without a scope, on a context whose primary scope is not TAB
      */
-    public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
-        $baseName = $name ?? 'signal';
+    public function createSignal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
+        if (trim($name) === '') {
+            throw new \InvalidArgumentException('A signal needs a non-empty name, for example $c->signal(0, \'count\').');
+        }
+        $baseName = $name;
         $context = $this->context();
 
         if ($scope === null) {
@@ -239,10 +242,10 @@ class SignalFactory {
             if (isset($this->signals[$signalId])) {
                 $signal = $this->signals[$signalId];
                 if ($signal->isClientWritable()) {
-                    $signal->setValue($value, false);
+                    $signal->injectValue($value);
                 } elseif (!self::sameClientValue($signal->getValue(), $value)) {
                     // Re-send the server value so the browser drops its stale copy.
-                    $signal->setValue($signal->getValue(), true, false);
+                    $signal->setValue($signal->getValue());
                 }
                 unset($flat[$signalId]);
 
@@ -253,7 +256,7 @@ class SignalFactory {
                 $signal = $this->app->getScopedSignal($scope, $signalId);
                 if ($signal !== null) {
                     if ($signal->isClientWritable()) {
-                        $signal->setValue($value, false);
+                        $signal->injectValue($value);
                     }
                     unset($flat[$signalId]);
 

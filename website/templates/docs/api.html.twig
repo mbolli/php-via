@@ -269,10 +269,9 @@ $config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
     <h2 id="context">Context</h2>
     <p>One context per connected browser tab. Holds signals, actions, and view definition for that client.</p>
 
-    <h3 id="context-signal"><code>signal(mixed $initial, ?string $name, ?string $scope, bool $autoBroadcast, ?bool $clientWritable)</code></h3>
+    <h3 id="context-signal"><code>signal(mixed $initial, string $name, ?string $scope, bool $autoBroadcast, ?bool $clientWritable)</code></h3>
     {% code 'php' %}{% verbatim %}
-$count  = $c->signal(0);                            // TAB scope, auto-named
-$count  = $c->signal(0, 'count');                   // named
+$count  = $c->signal(0, 'count');                   // TAB scope
 $shared = $c->signal(0, 'count', Scope::ROUTE);     // shared across route
 $pref   = $c->signal('light', 'theme', Scope::SESSION);
 $room   = $c->signal('', 'note', 'room:lobby');     // custom scope
@@ -522,7 +521,7 @@ $s->mutate(fn (array $items) => [...$items, $item]); // read-modify-write under 
 $s->id();     // browser id, not the name: 'global_count' for a GLOBAL signal 'count'
 $s->bind();   // 'data-bind="global_count"'
 $s->bind('value');  // 'data-bind__prop.value="global_count"': binds a property, for web components
-$s->text();   // '<span data-text="$global_count"></span>'
+$s->ref();    // '$global_count', for Datastar expressions: data-text="{$s->ref()}"
     {% endverbatim %}{% endcode %}
     <p>
         <code>bind(?string $prop = null)</code> with a property name binds that element property
