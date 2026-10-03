@@ -207,3 +207,59 @@ describe('Component actions and the request', function (): void {
         ;
     });
 });
+
+describe('Actions of components', function (): void {
+    test('an action of a component in a custom scope runs, with the component', function (): void {
+        $app = createVia();
+        $page = new Context(testContextId(), '/test', $app);
+        $ran = null;
+        $component = null;
+        $page->component(function (Context $w) use (&$ran, &$component): void {
+            $component = $w;
+            $w->scope('widgets');
+            $w->action(function (Context $c) use (&$ran): void {
+                $ran = $c;
+            }, 'hit');
+            $w->view(fn (): string => 'widget');
+        }, 'w');
+
+        $page->executeAction('hit');
+
+        expect($ran)->toBe($component);
+    });
+
+    test('an action of a component inside a component runs, with the inner component', function (): void {
+        $app = createVia();
+        $page = new Context(testContextId(), '/test', $app);
+        $ran = null;
+        $inner = null;
+        $actionId = null;
+        $page->component(function (Context $outer) use (&$ran, &$inner, &$actionId): void {
+            $outer->component(function (Context $c) use (&$ran, &$inner, &$actionId): void {
+                $inner = $c;
+                $actionId = $c->action(function (Context $c) use (&$ran): void {
+                    $ran = $c;
+                }, 'bumpInner')->id();
+                $c->view(fn (): string => 'inner');
+            }, 'inner');
+            $outer->view(fn (): string => 'outer');
+        }, 'outer');
+
+        $page->executeAction((string) $actionId);
+
+        expect($ran)->toBe($inner);
+    });
+
+    test('a page without a component in that scope does not run its actions', function (): void {
+        $app = createVia();
+        $withWidget = new Context(testContextId(), '/test', $app);
+        $withWidget->component(function (Context $w): void {
+            $w->scope('widgets');
+            $w->action(function (): void {}, 'hit');
+            $w->view(fn (): string => 'widget');
+        }, 'w');
+        $other = new Context(testContextId(), '/test', $app);
+
+        expect(fn () => $other->executeAction('hit'))->toThrow(RuntimeException::class, 'Action not found: hit');
+    });
+});

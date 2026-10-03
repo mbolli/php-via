@@ -147,6 +147,8 @@ All notable changes to php-via will be documented in this file.
 - HEAD on a static file, `/datastar.js`, `/via.css`, a Dev Bar asset or `/_health` answered 404. It
   now gets the headers GET would, with the `Content-Length` of the body GET would send, and no body,
   which OpenSwoole 26.2 would otherwise send on HEAD too.
+- Actions of a component that joined a custom scope, or of a component inside another component,
+  answered 500 "Action not found".
 
 ### Tests
 

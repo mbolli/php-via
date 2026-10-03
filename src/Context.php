@@ -1027,13 +1027,11 @@ class Context {
             }
         }
 
-        // Check component contexts
-        foreach ($this->componentManager->getComponents() as $component) {
-            if ($component->hasAction($actionId)) {
-                $component->executeAction($actionId);
+        $component = $this->componentWithAction($actionId);
+        if ($component !== null) {
+            $component->executeAction($actionId);
 
-                return;
-            }
+            return;
         }
 
         throw new \RuntimeException("Action not found: {$actionId}");
@@ -1191,6 +1189,28 @@ class Context {
      */
     public function syncSignals(): void {
         $this->patchManager->syncSignals();
+    }
+
+    /**
+     * The component, at any depth, that registered $actionId for its tab or in a scope it joined.
+     */
+    private function componentWithAction(string $actionId): ?self {
+        foreach ($this->componentManager->getComponents() as $component) {
+            if ($component->hasAction($actionId)) {
+                return $component;
+            }
+            foreach ($component->getScopes() as $scope) {
+                if ($this->app->getScopedAction($scope, $actionId) !== null) {
+                    return $component;
+                }
+            }
+            $nested = $component->componentWithAction($actionId);
+            if ($nested !== null) {
+                return $nested;
+            }
+        }
+
+        return null;
     }
 
     /**
