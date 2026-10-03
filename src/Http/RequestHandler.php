@@ -508,6 +508,13 @@ class RequestHandler {
             . '</pre><p>Shown because dev mode is on.</p>');
     }
 
+    /**
+     * The PSR-7 request middleware gets, with the session id in 'via.session'.
+     */
+    private function psrRequest(Request $request, string $requestType): ServerRequestInterface {
+        return $this->psrRequestFactory->create($request, $requestType)->withAttribute('via.session', $this->via->getSessionId($request));
+    }
+
     private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {
         $durationUs = (hrtime(true) - $hrtimeStart) / 1000;
         $this->requestLogger?->logRequest($method, $path, $statusCode, $durationUs);
@@ -582,7 +589,7 @@ class RequestHandler {
         }
 
         // Build PSR-7 request and wrap the page handler as the core handler
-        $psrRequest = $this->psrRequestFactory->create($request, 'page');
+        $psrRequest = $this->psrRequest($request, 'page');
 
         // Capture variables needed by the core handler closure
         $via = $this->via;
@@ -653,7 +660,7 @@ class RequestHandler {
             return;
         }
 
-        $psrRequest = $this->psrRequestFactory->create($request, 'action');
+        $psrRequest = $this->psrRequest($request, 'action');
 
         $actionHandler = $this->actionHandler;
         $coreHandler = new class($actionHandler, $request, $response, $actionId) implements RequestHandlerInterface {
@@ -703,7 +710,7 @@ class RequestHandler {
             return;
         }
 
-        $psrRequest = $this->psrRequestFactory->create($request, 'sse');
+        $psrRequest = $this->psrRequest($request, 'sse');
 
         $sseHandler = $this->sseHandler;
         $coreHandler = new class($sseHandler, $request, $response) implements RequestHandlerInterface {

@@ -509,6 +509,10 @@ class Via {
      * Middleware implementing SseAwareMiddleware will additionally run on SSE
      * handshake requests.
      *
+     * The request carries the visitor's session id in the 'via.session' attribute, for
+     * getSessionData() and the like. A request without the session cookie gets a new id,
+     * which a page then sets as the cookie.
+     *
      * WARNING: Middleware instances are long-lived in Swoole: they persist across
      * all requests in the worker process. Do NOT store per-request state on
      * middleware properties. Use $request->withAttribute() to pass data downstream.

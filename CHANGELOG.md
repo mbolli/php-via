@@ -241,6 +241,9 @@ message that names the new one.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
+- **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
+  actions and SSE, so middleware no longer reads the session cookie, whose name
+  `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
 
 ### Deprecated
 

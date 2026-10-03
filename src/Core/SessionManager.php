@@ -20,9 +20,14 @@ class SessionManager {
     public const string SESSION_COOKIE_NAME = 'via_session_id';
     public const string SESSION_COOKIE_NAME_SECURE = '__Host-via_session_id';
 
+    /** @var \WeakMap<Request, string> The id issued to each request without a valid cookie */
+    private \WeakMap $issued;
+
     public function __construct(
         private Logger $logger,
-    ) {}
+    ) {
+        $this->issued = new \WeakMap();
+    }
 
     /**
      * Determine which worker should handle a request based on session cookie.
@@ -78,16 +83,18 @@ class SessionManager {
      *
      * Only an id in the form this class issues is taken; anything else starts a new session. With secure
      * cookies only the __Host- cookie counts: a sibling subdomain or a plain-HTTP response can set the plain one.
+     * A request without a valid cookie gets the same new id on every call, so the 'via.session' attribute
+     * middleware reads is the id the page then sets.
      */
     public function getOrCreateSessionId(Request $request, bool $secure = false): string {
         $cookies = $request->cookie ?? [];
         $sessionId = $cookies[$secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME] ?? null;
 
-        if (!\is_string($sessionId) || !self::isValidSessionId($sessionId)) {
-            $sessionId = bin2hex(random_bytes(16));
+        if (\is_string($sessionId) && self::isValidSessionId($sessionId)) {
+            return $sessionId;
         }
 
-        return $sessionId;
+        return $this->issued[$request] ??= bin2hex(random_bytes(16));
     }
 
     /**
