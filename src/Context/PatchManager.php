@@ -260,24 +260,29 @@ class PatchManager {
      * Sync current view and signals to the browser.
      */
     public function sync(): void {
-        if ($this->isHeldForSeed()) {
+        $context = $this->context();
+        $page = $this->componentManager->getParentPageContext() ?? $context;
+        if ($this->isHeldForSeed($page)) {
             return;
         }
-
-        $context = $this->context();
 
         // Skip sync if view is not defined (e.g., during broadcast before client connects)
         if (!$context->hasView()) {
             // Still sync signals even without a view
             $this->app->log('debug', "Context {$this->contextId} has no view, syncing signals only");
-            $this->syncSignals();
+            $this->syncSignalsOf($context);
 
             return;
         }
 
         $isPage = !$this->componentManager->isComponent();
-        $render = static fn (): string => $context->renderView(isUpdate: true);
-        [$viewHtml, $renderedWithPage] = $isPage ? $this->componentManager->renderCollecting($render) : [$render(), []];
+        // Only a page with components has to know which of them its view rendered.
+        if ($isPage && $this->componentManager->getComponents() !== []) {
+            [$viewHtml, $renderedWithPage] = $this->componentManager->renderCollecting(static fn (): string => $context->renderView(isUpdate: true));
+        } else {
+            $viewHtml = $context->renderView(isUpdate: true);
+            $renderedWithPage = [];
+        }
 
         // A full document morphs <head> too: re-add the includes and the Dev Bar.
         $viewHtml = $this->app->decorateUpdate($viewHtml, $context);
@@ -303,7 +308,9 @@ class PatchManager {
         }
 
         // Sync signals
-        $this->syncSignals();
+        if (!$this->isHeldForSeed($page)) {
+            $this->syncSignalsOf($context);
+        }
 
         // For page (non-component) contexts, also sync all registered component sub-contexts.
         // Component patches are automatically forwarded to this page's channel via queuePatch().
@@ -338,10 +345,15 @@ class PatchManager {
      * Sync only signals to the browser.
      */
     public function syncSignals(): void {
-        if ($this->isHeldForSeed()) {
+        $context = $this->context();
+        if ($this->isHeldForSeed($this->componentManager->getParentPageContext() ?? $context)) {
             return;
         }
 
+        $this->syncSignalsOf($context);
+    }
+
+    private function syncSignalsOf(Context $context): void {
         /** @var list<Signal> $pending */
         $pending = [];
         $updatedSignals = $this->prepareSignalsForPatch($pending);
@@ -370,7 +382,7 @@ class PatchManager {
         }
 
         // Also sync scoped signals for all scopes this context belongs to
-        $this->syncScopedSignals();
+        $this->syncScopedSignals($context);
     }
 
     /**
@@ -393,7 +405,7 @@ class PatchManager {
         $queued = $this->queuedInAction[$cid] ?? null;
         unset($this->queuedInAction[$cid]);
 
-        if ($this->isHeldForSeed()) {
+        if ($this->isHeldForSeed($this->componentManager->getParentPageContext() ?? $this->context())) {
             return;
         }
 
@@ -514,8 +526,7 @@ class PatchManager {
      * Whether the page this manager feeds waits for its SSE connect to seed it. Its signals still
      * hold the defaults a revival declared, and anything queued now reaches the tab before the seed.
      */
-    private function isHeldForSeed(): bool {
-        $page = $this->componentManager->getParentPageContext() ?? $this->context();
+    private function isHeldForSeed(Context $page): bool {
         if (!$page->isAwaitingSeed()) {
             return false;
         }
@@ -696,10 +707,10 @@ class PatchManager {
     /**
      * Sync scoped signals for all scopes this context belongs to.
      */
-    private function syncScopedSignals(): void {
+    private function syncScopedSignals(Context $context): void {
         $flat = [];
 
-        foreach ($this->context()->getScopes() as $scope) {
+        foreach ($context->getScopes() as $scope) {
             // Skip TAB scope - already handled by prepareSignalsForPatch
             if ($scope === Scope::TAB) {
                 continue;
