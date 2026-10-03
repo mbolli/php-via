@@ -113,12 +113,9 @@ All notable changes to php-via will be documented in this file.
 - **Dev Bar assets** are served from memory with an ETag, and with Brotli level 11. A page view
   revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
   download is 6.8 KB with Brotli.
-- **A destroyed context leaves nothing for PHP's cycle collector.** Its helper objects referred back
-  to it, so each destroyed context left about 10 objects in reference cycles, and while the contexts
-  of a 220,000-view burst expired the collector ran 20 times, each run walking every live context.
-  Contexts are freed by their last reference now: the collector runs once while such a burst expires,
-  and the longest pause is about half as long. The pauses left come from collector runs during the
-  burst, which free nothing but also walk every live context.
+- **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once or
+  twice instead of 18 to 20 times while the contexts of a 220,000-view burst expire. See
+  [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
 
 ### Fixed
 
