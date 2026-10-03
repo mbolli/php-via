@@ -653,15 +653,6 @@ class Context {
     }
 
     /**
-     * Check if this context has a specific scope.
-     *
-     * @internal
-     */
-    public function hasScope(string $scope): bool {
-        return \in_array($scope, $this->scopes, true);
-    }
-
-    /**
      * Broadcast updates to all contexts with the same primary scope.
      *
      * Inside a coroutine this only marks the scope for the worker's next broadcast flush; see Via::broadcast().
@@ -997,22 +988,6 @@ class Context {
         $this->app->registerScopedAction($actionScope, $actionId, static fn (Context $caller) => $fn($caller, $actionId));
 
         return $action;
-    }
-
-    /**
-     * Execute a function periodically.
-     *
-     *     * @deprecated Use setInterval() instead
-     *
-     * @internal
-     *
-     *     * @param int      $milliseconds Interval in milliseconds
-     * @param callable $fn The function to execute
-     *
-     * @return int Timer ID that can be used to clear the timer
-     */
-    public function interval(int $milliseconds, callable $fn): int {
-        return $this->lifecycle->registerTimer($fn, $milliseconds);
     }
 
     /**

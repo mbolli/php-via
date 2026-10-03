@@ -20,6 +20,7 @@ use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\RouteGroup;
+use Mbolli\PhpVia\Http\SignalParser;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
@@ -459,29 +460,6 @@ class Via {
      */
     public function clearSessionData(string $sessionId, ?string $key = null): void {
         $this->app->clearSessionData($sessionId, $key);
-    }
-
-    /**
-     * Get the global view cache.
-     *
-     * @internal Used by Context for global scope caching
-     */
-    /**
-     * Get cached view for a scope.
-     *
-     * @internal Used by Context to get cached view
-     */
-    public function getViewCache(string $scope): ?string {
-        return $this->viewCache->get($scope);
-    }
-
-    /**
-     * Set cached view for a scope.
-     *
-     * @internal Used by Context to cache view
-     */
-    public function setViewCache(string $scope, string $html): void {
-        $this->viewCache->set($scope, $html);
     }
 
     /**
@@ -1466,33 +1444,6 @@ class Via {
     }
 
     /**
-     * Track view render time.
-     *
-     * @internal Called by Context during rendering
-     */
-    public function trackRender(float $duration): void {
-        $this->app->trackRender($duration);
-    }
-
-    /**
-     * Get cached view HTML for a route if available and fresh.
-     *
-     * @internal Used by Context for scope-based caching
-     */
-    public function getCachedView(string $route): ?string {
-        return $this->viewCache->get($route);
-    }
-
-    /**
-     * Cache rendered view HTML for a route.
-     *
-     * @internal Used by Context for scope-based caching
-     */
-    public function cacheView(string $route, string $html): void {
-        $this->viewCache->set($route, $html);
-    }
-
-    /**
      * Get Twig environment.
      *
      * @internal Used by Context for template rendering
@@ -1508,24 +1459,6 @@ class Via {
      */
     public function getViewRenderer(): ViewRenderer {
         return $this->viewRenderer;
-    }
-
-    /**
-     * Check if a route is currently rendering.
-     *
-     * @internal Used by Context for render locking
-     */
-    public function isRendering(string $route): bool {
-        return $this->viewCache->isRendering($route);
-    }
-
-    /**
-     * Set rendering status for a route.
-     *
-     * @internal Used by Context for render locking
-     */
-    public function setRendering(string $route, bool $status): void {
-        $this->viewCache->setRendering($route, $status);
     }
 
     /**
@@ -1551,67 +1484,6 @@ class Via {
             $config->getSessionCookieSameSite(),
             $config->isSessionCookiePartitioned(),
         );
-    }
-
-    /**
-     * Read Datastar signals from an OpenSwoole HTTP request.
-     *
-     * Delegates to parseSignals() with the request's raw parts.
-     *
-     * @internal Used by HTTP handlers
-     *
-     * @return array<string, mixed> The decoded signals array
-     */
-    public static function readSignals(Request $request): array {
-        return self::parseSignals(
-            $request->get ?? [],
-            $request->post ?? [],
-            $request->getContent(),
-        );
-    }
-
-    /**
-     * Parse Datastar signals from raw request parts.
-     *
-     * Signal source priority:
-     *  1. GET  ?datastar=<json>:           Datastar GET actions
-     *  2. Raw JSON body:                   Datastar POST/PATCH actions (application/json)
-     *  3. POST datastar=<json> field:      Datastar POST via multipart/form-data or
-     *                                      application/x-www-form-urlencoded
-     *
-     * Exposed as a public static method so it can be tested without an OpenSwoole
-     * Request instance (which is a final extension class).
-     *
-     * @param array<string, mixed> $get  Parsed GET parameters
-     * @param array<string, mixed> $post Parsed POST parameters
-     * @param false|string         $body Raw request body
-     *
-     * @return array<string, mixed> The decoded signals array
-     */
-    public static function parseSignals(array $get, array $post, false|string $body): array {
-        // 1. GET ?datastar=<json>
-        if (isset($get['datastar'])) {
-            $signals = json_decode((string) $get['datastar'], true);
-
-            return \is_array($signals) ? $signals : [];
-        }
-
-        // 2. Raw JSON body (standard Datastar POST/PATCH action)
-        if ($body) {
-            $signals = json_decode($body, true);
-            if (\is_array($signals)) {
-                return $signals;
-            }
-        }
-
-        // 3. POST field datastar=<json> (multipart/form-data or urlencoded form submission)
-        if (isset($post['datastar'])) {
-            $signals = json_decode((string) $post['datastar'], true);
-
-            return \is_array($signals) ? $signals : [];
-        }
-
-        return [];
     }
 
     /**
@@ -1709,15 +1581,15 @@ class Via {
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
-            self::readSignals($request),
+            SignalParser::read($request),
             $request->cookie ?? [],
             $byConnect,
         );
     }
 
     /**
-     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types (mirrors the
-     * readSignals/parseSignals split so it can be exercised without a live server).
+     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types, so it can be exercised
+     * without a live server.
      *
      * @param string                $requesterSession Session ID of the reconnecting client
      * @param array<string, mixed>  $clientSignals    Signal values the client still holds

@@ -78,7 +78,7 @@ class SseHandler {
      */
     public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null): void {
         // Get context ID from signals
-        $signals = Via::readSignals($request);
+        $signals = SignalParser::read($request);
         $contextId = $signals['via_ctx'] ?? null;
 
         if (!$contextId) {
