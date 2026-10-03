@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\RequestSession;
 use Mbolli\PhpVia\Core\SessionManager;
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Via;
 use Nyholm\Psr7\Response;
 use OpenSwoole\Http\Request;
@@ -120,6 +123,26 @@ describe("the 'via.session' attribute", function (): void {
         $response = sessionAttributeGet($via, '/_sse', [SessionManager::SESSION_COOKIE_NAME => SESSION_ATTRIBUTE_ID]);
 
         expect($response->statusCode)->toBe(204)->and($recorder->seen)->toBe([SessionTokens::key(SESSION_ATTRIBUTE_ID)]);
+    });
+
+    test('reaches getRequestAttributes() in a page and an action, without the session object that holds the cookie', function (): void {
+        $seen = [];
+        $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$seen): void {
+            $via->middleware(new SessionRecorder());
+            $via->page('/p', static function (Context $c) use (&$seen): void {
+                $seen['page'] = $c->getRequestAttributes();
+                $c->action(static function (Context $c) use (&$seen): void {
+                    $seen['action'] = $c->getRequestAttributes();
+                }, 'read');
+                $c->view(static fn (): string => '<p id="p">p</p>');
+            });
+        });
+
+        $app->open('/p')->action('read');
+
+        expect($seen['page'] ?? [])->toHaveKey('via.session')->not->toHaveKey(RequestSession::class)
+            ->and($seen['action'] ?? [])->toHaveKey('via.session')->not->toHaveKey(RequestSession::class)
+        ;
     });
 });
 
