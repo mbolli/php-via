@@ -6,6 +6,13 @@ All notable changes to php-via will be documented in this file.
 
 ### Highlights
 
+- **Scopes share only what you declare.** `signal()` and `action()` no longer take the primary
+  scope from `scope()`, `Scope::ROUTE` and `Scope::SESSION` resolve the same way everywhere, and a
+  view shares its update render only with `shareRender: true`. Breaking Changes lists every change;
+  most of them throw with a message that names the fix.
+- **Session ids stay on the server.** SESSION scopes and signal ids carried the raw session id, the
+  value of the HttpOnly session cookie, into the page HTML, the Dev Bar, traces and broker messages.
+  They use a hash of it now, and php-via accepts only session ids in the form it issues.
 - **Datastar 1.0.4.** php-via serves Datastar 1.0.4 instead of 1.0.1. The SSE format is the same,
   but Datastar now cancels an in-flight request when any element sends another one to the same URL,
   so check pages where two elements post the same action. Breaking Changes lists the rest.
@@ -29,6 +36,45 @@ All notable changes to php-via will be documented in this file.
 
 ### Breaking Changes
 
+- **`signal()` and `action()` no longer take the primary scope.** A signal without a scope is
+  private to the tab, and after `scope()` set a shared scope, `signal()` without one throws: pass
+  the scope as the third argument. An action runs for the tab that posts it, and a third argument to
+  `action()` throws. `#[Action(scope: ...)]` keeps working. See [Scopes](https://via.zweiundeins.gmbh/docs/scopes).
+- **A scoped signal joins its context to its scope,** so its writes reach the tab without
+  `addScope()`. A worker clears a scope's signals when the last context in it is destroyed, so a
+  SESSION, custom or GLOBAL signal declared on pages without `scope()` no longer lives for the life
+  of the worker.
+- **`Scope::ROUTE` and `Scope::SESSION` resolve in every method that takes a scope:** `scope()`,
+  `addScope()`, `removeScope()`, `signal()` and `#[Action(scope: ...)]` turn them into this route's
+  and this session's scope. `$app->broadcast()` and `getScopedSignalByName()` throw for a bare
+  `Scope::TAB`, `Scope::ROUTE` or `Scope::SESSION`; pass `Scope::routeScope('/path')` or
+  `Scope::sessionScope($id)`.
+- **`$c->broadcast()` on a context whose primary scope is TAB updates that tab only.** It
+  re-rendered every tab on the worker. Reach the scopes the tab joined with `$app->broadcast()`;
+  dev mode warns once for a tab that joined other scopes.
+- **Session scopes and SESSION signal ids changed** to `session:` plus a hash of the session id.
+  Nodes that share a broker have to be upgraded together.
+- **The update render is shared only with `view(..., shareRender: true)`.** Every view whose
+  primary scope was not TAB shared it by default, and `cacheUpdates: false` opted out.
+  `shareRender: true` on a TAB-primary context throws, and a full HTML document is never shared.
+  The shared render is keyed by scope, route pattern and component, so two routes in one GLOBAL
+  scope no longer share it. See [Views](https://via.zweiundeins.gmbh/docs/views).
+- **`view()` is `view($view, $data = [], ?string $block = null, bool $shareRender = false)`.**
+  `$data` and `block:` go with a template name, and `$data` may be a callable that runs on every
+  render. A callable view with `$data` or `block:` throws, and so does a string of HTML: write
+  `view('page.html.twig', fn () => [...], block: 'name')`.
+- **The signals an action changed go to its tab after the action,** also when it throws, for the
+  page and its components. A trailing `syncSignals()` is no longer needed and sends nothing twice.
+  Scoped signals declared with `autoBroadcast: false` still need it.
+- **`Signal::setValue()`, `increment()` and `mutate()` take no flags.** `broadcast:` and
+  `markChanged:`, by name or by position, throw an `ArgumentCountError`. Declare the signal with
+  `autoBroadcast: false`, or call `markSynced()` after the write.
+- **`signal()` needs a name.** Unnamed signals all shared one object, so two of them on one page
+  were the same signal. An empty name throws.
+- **`Signal::text()` is removed** and throws; use `ref()`.
+- **`component()` needs a namespace:** `$c->component($fn, 'cart')`.
+- **`#[OnDisconnect]` is removed.** A class that uses it throws at `Via::mount()` and
+  `component()`. Use `#[OnCleanup]`, which runs at the same moment, when the context is destroyed.
 - **Datastar 1.0.1 to 1.0.4.** PHP code needs no changes, and `starfederation/datastar-php` 1.0.1
   keeps working. In the browser:
   - **Requests cancel per method and URL,** from any element, where 1.0.1 cancelled per element. Give
@@ -89,6 +135,16 @@ All notable changes to php-via will be documented in this file.
   found", and for a `RedisBroker` without the socket hook its connection needs.
 - **The dev-mode `/_stats`** reports the hook flags, the AIO thread pool and the worker's event loop
   lag under `runtime`.
+- **`$c->patchElements($html, $selector, PatchMode::Append)`** sends HTML to the page outside a
+  view render. `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace`
+  needs a selector. A component's patches go to its page.
+- **`$c->isConnected()`** says whether the tab has an open stream. A component answers for its page.
+- **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
+- **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
+- **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
+- **Several `#[OnCleanup]` methods** per class, run in declaration order.
+- **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
+  logs a hint when every tab of a view rendered the same HTML in one broadcast.
 
 ### Performance
 
@@ -117,6 +173,19 @@ All notable changes to php-via will be documented in this file.
   instead of 20 times while the contexts of a 250,000-view burst expire, and the longest pause in
   such a burst falls from 0.6 to 0.33 s. See
   [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
+
+### Security
+
+- SESSION scopes and SESSION signal ids used the raw session id, so the HttpOnly session cookie's
+  value was in the page HTML, the Dev Bar's scope list, traces and broker messages. They use
+  `Scope::sessionScope()`, a SHA-256 hash of the id. The debug log no longer prints the id, and
+  traces redact attributes whose name contains `session`.
+- `$c->scope(Scope::SESSION)` put every user's tabs into one `session` scope, so its broadcasts and
+  shared render reached other users. Each session has its own scope now.
+- Any cookie value was accepted as a session id, and under `withSecureCookie(true)` so was the plain
+  `via_session_id` cookie. Only 32 lowercase hex characters, the form php-via issues, are accepted
+  now; any other value starts a new session. Under secure cookies the plain cookie is ignored, so
+  users who carry only the plain cookie get a new session once, which logs them out.
 
 ### Fixed
 
@@ -147,6 +216,33 @@ All notable changes to php-via will be documented in this file.
   which OpenSwoole 26.2 would otherwise send on HEAD too.
 - Actions of a component that joined a custom scope, or of a component inside another component,
   answered 500 "Action not found".
+- Composition actions ran on the first tab's instance under `#[Broadcast]` or
+  `#[Action(scope: ...)]`, so one tab's click changed another tab's properties. Each tab's own
+  instance runs now, and a scoped action no longer keeps the first tab's instance alive.
+- `#[Broadcast]` dropped the scopes of the class's scoped `#[Signal]` properties, so their writes
+  never reached the page.
+- Property changes an `#[Action]` method made before it threw were lost. They reach their signals
+  now, as a closure action's writes do.
+- `addScope(Scope::ROUTE)` and `addScope(Scope::SESSION)` joined the literal scopes `route` and
+  `session`.
+- SESSION-scoped actions were never found.
+- SESSION and custom-scope signals declared in a page closure reached no tab unless the page also
+  called `addScope()`.
+- Components had no session: `getSessionId()` returned null, session data went nowhere, and a class
+  component with `#[Signal(Scope::SESSION)]` did not mount.
+- Views of different routes or components with one primary scope got each other's shared update
+  render.
+- `getScopedSignalByName()` returned null on a worker where no context had declared the signal,
+  such as the leader. It returns a handle on the shared value now, and null only for a signal no
+  worker declared.
+- A full-document view that contained the text `via_ctx` anywhere, such as a `filterSignals`
+  pattern, got no `via_ctx` signal injected.
+- For a client that fell behind, element patches were dropped as if each replaced the one before,
+  so appended and prepended chunks went missing. Only morphs, replacements and removals are dropped.
+- `Signal::bool()` returned false for integers such as 2. Values that are not strings follow PHP
+  truthiness.
+- `Config::withLogLevel()` treated unknown names as `info`. It accepts `warning` and the other
+  PSR-3 and syslog names now, and throws for anything else.
 
 ### Tests
 
