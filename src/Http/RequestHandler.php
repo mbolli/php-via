@@ -23,6 +23,7 @@ use Nyholm\Psr7\Response as Psr7Response;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
+use OpenSwoole\Http\Server;
 use OpenSwoole\Runtime;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -271,6 +272,25 @@ class RequestHandler {
      */
     public static function contextAttributes(array $attributes): array {
         return array_diff_key($attributes, ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
+    }
+
+    /**
+     * The hook flags this worker runs under, its AIO thread pool and, on a running server, its event loop lag: a call
+     * that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
+     *
+     * @internal read by /_stats and the Dev Bar
+     *
+     * @return array<string, float|int>
+     */
+    public static function runtimeStats(?Server $server): array {
+        return [
+            'hook_flags' => Runtime::getHookFlags(),
+            ...array_intersect_key(Coroutine::stats(), array_flip(['aio_worker_num', 'aio_task_num'])),
+            ...array_intersect_key(
+                $server?->stats() ?: [],
+                array_flip(['event_loop_lag_ms', 'event_loop_lag_max_ms', 'event_loop_lag_avg_ms']),
+            ),
+        ];
     }
 
     private function dispatch(Request $request, Response $response, bool $forwarded = false): void {
@@ -935,15 +955,7 @@ class RequestHandler {
                 'tick_ms' => $this->via->getSettings()->broadcastTickMs,
                 ...$this->via->getStats()->getBroadcastStats(),
             ],
-            // Per worker: a call that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
-            'runtime' => [
-                'hook_flags' => Runtime::getHookFlags(),
-                ...array_intersect_key(Coroutine::stats(), array_flip(['aio_worker_num', 'aio_task_num'])),
-                ...array_intersect_key(
-                    $this->via->getServer()?->stats() ?: [],
-                    array_flip(['event_loop_lag_ms', 'event_loop_lag_max_ms', 'event_loop_lag_avg_ms']),
-                ),
-            ],
+            'runtime' => self::runtimeStats($this->via->getServer()),
             'memory' => [
                 'current' => memory_get_usage(true),
                 'peak' => memory_get_peak_usage(true),

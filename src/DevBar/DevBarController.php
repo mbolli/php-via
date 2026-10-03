@@ -24,14 +24,34 @@ use OpenSwoole\Http\Response;
  *   GET  /_via/devbar.js   overlay web component (HEAD too)
  *   GET  /_via/stream      SSE stream of new traces (EventSource)
  *   GET  /_via/scopes      JSON snapshot for the Scopes/Contexts panel
+ *   GET  /_via/stats       JSON snapshot for the Stats panel
  *   POST /_via/signal      signal write (devMode + writes-enabled only)
  *
- * The pure data methods ({@see buildScopesSnapshot()}, {@see writeSignal()})
+ * The pure data methods ({@see buildScopesSnapshot()}, {@see buildStatsSnapshot()}, {@see writeSignal()})
  * are split from their HTTP wrappers so they can be unit-tested without
  * OpenSwoole request/response objects.
  */
 final class DevBarController {
     private const string ASSET_DIR = __DIR__ . '/../../public';
+
+    /** The hook flags the Stats panel names. */
+    private const array HOOK_FLAGS = [
+        'TCP' => SWOOLE_HOOK_TCP,
+        'UDP' => SWOOLE_HOOK_UDP,
+        'UNIX' => SWOOLE_HOOK_UNIX,
+        'UDG' => SWOOLE_HOOK_UDG,
+        'SSL' => SWOOLE_HOOK_SSL,
+        'TLS' => SWOOLE_HOOK_TLS,
+        'STREAM_FUNCTION' => SWOOLE_HOOK_STREAM_FUNCTION,
+        'FILE' => SWOOLE_HOOK_FILE,
+        'STDIO' => SWOOLE_HOOK_STDIO,
+        'SLEEP' => SWOOLE_HOOK_SLEEP,
+        'PROC' => SWOOLE_HOOK_PROC,
+        'CURL' => SWOOLE_HOOK_CURL,
+        'NATIVE_CURL' => SWOOLE_HOOK_NATIVE_CURL,
+        'BLOCKING_FUNCTION' => SWOOLE_HOOK_BLOCKING_FUNCTION,
+        'SOCKETS' => SWOOLE_HOOK_SOCKETS,
+    ];
 
     /** @var array<string, array{mtime: int, body: string, etag: string}> by file name */
     private array $assets = [];
@@ -85,6 +105,13 @@ final class DevBarController {
 
                 return;
 
+            case '/_via/stats':
+                $response->header('Content-Type', 'application/json');
+                $response->header('Cache-Control', 'no-store');
+                $response->end((string) json_encode($this->buildStatsSnapshot()));
+
+                return;
+
             case '/_via/signal':
                 $this->handleSignalWrite($request, $response);
 
@@ -124,6 +151,25 @@ final class DevBarController {
             'totalContexts' => \count($this->via->contexts),
             'activeSse' => array_sum($this->via->activeSseCount),
             'clients' => \count($this->via->clients),
+        ];
+    }
+
+    /**
+     * Snapshot for the Stats panel, from the worker that answers: every Via::getStats()->getAll() figure, the broadcast
+     * tick, and the runtime figures of the dev-mode /_stats with the hook flags named.
+     *
+     * @return array{worker: int, stats: array<string, float|int>, broadcast_tick_ms: int, runtime: array<string, float|int>, hook_flag_names: list<string>}
+     */
+    public function buildStatsSnapshot(): array {
+        $runtime = RequestHandler::runtimeStats($this->via->getServer());
+        $flags = (int) $runtime['hook_flags'];
+
+        return [
+            'worker' => $this->via->getApp()->workerIdentity()[0],
+            'stats' => $this->via->getStats()->getAll(),
+            'broadcast_tick_ms' => $this->via->getSettings()->broadcastTickMs,
+            'runtime' => $runtime,
+            'hook_flag_names' => array_keys(array_filter(self::HOOK_FLAGS, static fn (int $flag): bool => ($flags & $flag) === $flag)),
         ];
     }
 

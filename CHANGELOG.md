@@ -327,6 +327,9 @@ message that names the new one.
   found", and for a `RedisBroker` without the socket hook its connection needs.
 - **The dev-mode `/_stats`** reports the hook flags, the AIO thread pool and the worker's event loop
   lag under `runtime`.
+- **A Stats panel in the Dev Bar** shows every `getStats()->getAll()` figure, the broadcast tick, and
+  the hook flags, AIO threads and event loop lag of the worker that answers. It reads `/_via/stats`,
+  which answers wherever the Dev Bar does, also outside dev mode.
 - **`Testing\TestApp`** runs an app's pages in a test, with no server and no `VIA_TEST_MODE`, through
   php-via's own request, action and SSE handlers: `$tab = $app->open('/')`, then `action()`,
   `patches()`, `signal()`, `html()`, `connect()`, and `disconnect(expire: true)` for a revival.
@@ -361,8 +364,8 @@ message that names the new one.
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
   `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.
 - **Dev Bar assets** are served from memory with an ETag, and with Brotli level 11. A page view
-  revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
-  download is 6.8 KB with Brotli.
+  revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 29 KB again, and a full
+  download is 7.6 KB with Brotli.
 - **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once
   instead of 20 times while the contexts of a 250,000-view burst expire. See
   [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
