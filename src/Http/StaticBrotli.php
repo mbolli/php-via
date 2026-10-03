@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Config;
+use OpenSwoole\Atomic;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Socket;
 use OpenSwoole\Process;
@@ -12,8 +13,9 @@ use OpenSwoole\Server;
 
 /**
  * Brotli for static files at the static level (Config::withBrotli()'s $staticLevel), never compressed at that level
- * in a worker: prepare() compresses the files present at start in the master process, a fresh foo.css.br is sent as
- * it is, and any other file goes to a helper process while workers send it at INTERIM_LEVEL or uncompressed.
+ * in a worker: prepare() compresses the files present at start in the master process, the first worker to start has
+ * the helper process compress the ones it left out, a fresh foo.css.br is sent as it is, and any other file goes to
+ * the helper on its first request while workers send it at INTERIM_LEVEL or uncompressed.
  * Outside a server (CLI scripts, tests) a file is compressed when first asked for.
  *
  * @internal
@@ -26,10 +28,13 @@ final class StaticBrotli {
     public const int BOOT_BUDGET_MS = 2000;
 
     /**
-     * Largest file prepare() compresses; a bigger one is left to the helper. Level 11 takes 1.3 to 2.1 us per byte,
-     * so start-up compression ends at most one such file, about 0.3 s, after BOOT_BUDGET_MS.
+     * Largest file prepare() compresses; a bigger one is left to the helper. A file is started only while its
+     * estimated time fits, so start-up compression ends at most about 0.3 s after BOOT_BUDGET_MS.
      */
     public const int BOOT_FILE_BYTES = 128 << 10;
+
+    /** Bytes of the files left out at start that the helper compresses right after start; the rest wait for a request. */
+    public const int WARM_BYTES = 32 << 20;
 
     /** Brotli bodies compressed at start, shared by all workers. */
     public const int BOOT_CACHE_BYTES = 32 << 20;
@@ -79,7 +84,16 @@ final class StaticBrotli {
     /** @var array<string, array{0: int, 1: int}> files waiting for the helper: [mtime, size] by path */
     private array $queue = [];
 
-    /** @var null|array{path: string, mtime: int, size: int, sentAt: int} */
+    /** @var array<string, array{0: int, 1: int}> files present at start that precompress() left out: [mtime, size] by path */
+    private array $left = [];
+
+    /** @var array<string, array{0: int, 1: int}> left-out files waiting for the helper while no request waits: [mtime, size] by path */
+    private array $warm = [];
+
+    /** Taken by the first worker to start, which has the helper compress the left-out files. */
+    private ?Atomic $warmClaim = null;
+
+    /** @var null|array{path: string, mtime: int, size: int, sentAt: int, warm: bool} */
     private ?array $inFlight = null;
 
     /** @var null|\Closure(string): void sends a job to the helper */
@@ -193,12 +207,15 @@ final class StaticBrotli {
         }
 
         $result = $this->precompress($assets, $staticDir);
-        if ($result['files'] === 0 && !$result['stopped'] && $result['deferred'] === 0) {
+        if ($result['left'] > 0 && $this->sendJob !== null) {
+            $this->warmClaim = new Atomic(0);
+        }
+        if ($result['files'] === 0 && $result['left'] === 0 && !$result['rest']) {
             return;
         }
-        $left = array_filter([
-            $result['deferred'] > 0 ? \sprintf('%d over %d KB', $result['deferred'], self::BOOT_FILE_BYTES >> 10) : '',
-            $result['stopped'] ? \sprintf('the rest past the %d ms budget', self::BOOT_BUDGET_MS) : '',
+        $later = array_filter([
+            $result['left'] > 0 ? \sprintf('%d more go to the helper process after start', $result['left']) : '',
+            $result['rest'] ? 'the rest is compressed on first request' : '',
         ]);
         ($this->log)('info', \sprintf(
             'Brotli level %d: compressed %d static files (%d KB to %d KB) in %d ms before start%s',
@@ -207,18 +224,32 @@ final class StaticBrotli {
             intdiv($result['bytes'], 1024),
             intdiv($result['compressed'], 1024),
             $result['ms'],
-            $left !== [] ? '; ' . implode(' and ', $left) . ' are compressed in the background on first request. '
+            $later !== [] ? '; ' . implode(', ', $later) . '. '
                 . 'Ship .br sidecars to skip this, see https://via.zweiundeins.gmbh/docs/deployment#static-compression' : '',
         ));
     }
 
     /**
+     * In the first worker to start, have the helper compress the files precompress() left out, behind any file a
+     * request asks for. The results join the files compressed before start.
+     */
+    public function warmUp(): void {
+        if ($this->left === [] || $this->sendJob === null || ($this->warmClaim !== null && !$this->warmClaim->cmpset(0, 1))) {
+            return;
+        }
+        $this->warm = $this->left;
+        $this->pump();
+    }
+
+    /**
      * Compress files of up to BOOT_FILE_BYTES into the boot cache, the framework's own first, until $budgetMs is used
-     * up. Files are only started while their estimated time fits, so the budget is passed by at most one file.
+     * up. Files are only started while their estimated time fits, so the budget is passed by at most one file. Bigger
+     * files and those that did not fit are left for warmUp(), up to WARM_BYTES. 'deferred' counts the bigger files,
+     * 'left' the files left for warmUp(), and 'rest' tells whether other files wait for their first request.
      *
      * @param list<string> $assets
      *
-     * @return array{files: int, bytes: int, compressed: int, ms: int, stopped: bool, deferred: int}
+     * @return array{files: int, bytes: int, compressed: int, ms: int, stopped: bool, deferred: int, left: int, rest: bool}
      */
     public function precompress(array $assets, ?string $staticDir, int $budgetMs = self::BOOT_BUDGET_MS): array {
         $level = $this->config->getBrotliStaticLevel();
@@ -228,14 +259,16 @@ final class StaticBrotli {
         // drops below this floor, or one very compressible file would let the next file run past the deadline.
         $floorNsPerByte = $level >= 10 ? 1_700.0 : 50.0;
         $nsPerByte = $floorNsPerByte;
-        $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'ms' => 0, 'stopped' => false, 'deferred' => 0];
+        $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'ms' => 0, 'stopped' => false, 'deferred' => 0, 'left' => 0, 'rest' => false];
         $spentNs = 0;
+        $this->left = [];
+        $leftBytes = 0;
 
         $walkCut = false;
         foreach ($this->bootFiles($assets, $staticDir, $deadline, $walkCut) as $path) {
             $now = hrtime(true);
             if ($now >= $deadline) {
-                $result['stopped'] = true;
+                $result['stopped'] = $result['rest'] = true;
 
                 break;
             }
@@ -245,13 +278,18 @@ final class StaticBrotli {
                 continue;
             }
             [$mtime, $size] = $stat;
-            if ($size > self::BOOT_FILE_BYTES) {
-                ++$result['deferred'];
-
-                continue;
-            }
-            if ($now + $size * $nsPerByte > $deadline) {
-                $result['stopped'] = true;
+            if ($size > self::BOOT_FILE_BYTES || $now + $size * $nsPerByte > $deadline) {
+                if ($size > self::BOOT_FILE_BYTES) {
+                    ++$result['deferred'];
+                } else {
+                    $result['stopped'] = true;
+                }
+                if ($leftBytes + $size <= self::WARM_BYTES) {
+                    $this->left[$path] = [$mtime, $size];
+                    $leftBytes += $size;
+                } else {
+                    $result['rest'] = true;
+                }
 
                 continue;
             }
@@ -272,6 +310,8 @@ final class StaticBrotli {
             $result['compressed'] += \strlen($body);
         }
         $result['stopped'] = $result['stopped'] || $walkCut;
+        $result['rest'] = $result['rest'] || $walkCut;
+        $result['left'] = \count($this->left);
         $result['ms'] = intdiv(hrtime(true) - $start, 1_000_000);
 
         return $result;
@@ -316,7 +356,14 @@ final class StaticBrotli {
 
         if ($head['status'] === self::OK) {
             $body = substr($message, $offset + self::REPLY_HEAD_BYTES + $head['length']);
-            if (!$this->cache->put($path, $job['mtime'], $job['size'], $body, true, $this->config->getDevMode())) {
+            if ($job['warm']) {
+                // Kept with the files compressed before start, so files that change later keep the worker cache.
+                if ($this->boot->put($path, $job['mtime'], $job['size'], $body)) {
+                    $this->cache->forget($path);
+                } else {
+                    $this->warm = [];
+                }
+            } elseif (!$this->cache->put($path, $job['mtime'], $job['size'], $body, true, $this->config->getDevMode())) {
                 $this->refuse($path, $job['mtime'], $job['size']);
             }
         } elseif ($head['status'] === self::REFUSED) {
@@ -430,6 +477,7 @@ final class StaticBrotli {
         if ($this->sendJob === null || $this->isRefused($path, $mtime, $size)) {
             return;
         }
+        unset($this->warm[$path]);
         if (!$this->isInFlight($path, $mtime, $size) && (isset($this->queue[$path]) || \count($this->queue) < self::QUEUE_LIMIT)) {
             $this->queue[$path] = [$mtime, $size];
         }
@@ -449,18 +497,28 @@ final class StaticBrotli {
             if (time() - $this->inFlight['sentAt'] < self::JOB_TIMEOUT_S) {
                 return;
             }
-            ($this->log)('warning', "No Brotli result for {$this->inFlight['path']} after " . self::JOB_TIMEOUT_S . ' s, sending it without');
-            $this->refuse($this->inFlight['path'], $this->inFlight['mtime'], $this->inFlight['size']);
+            if ($this->inFlight['warm']) {
+                $this->warm = [];
+            } else {
+                ($this->log)('warning', "No Brotli result for {$this->inFlight['path']} after " . self::JOB_TIMEOUT_S . ' s, sending it without');
+                $this->refuse($this->inFlight['path'], $this->inFlight['mtime'], $this->inFlight['size']);
+            }
             $this->inFlight = null;
         }
 
-        $path = array_key_first($this->queue);
+        $warm = $this->queue === [];
+        $path = array_key_first($warm ? $this->warm : $this->queue);
         if ($path === null) {
             return;
         }
-        [$mtime, $size] = $this->queue[$path];
-        unset($this->queue[$path]);
-        $this->inFlight = ['path' => $path, 'mtime' => $mtime, 'size' => $size, 'sentAt' => time()];
+        if ($warm) {
+            [$mtime, $size] = $this->warm[$path];
+            unset($this->warm[$path]);
+        } else {
+            [$mtime, $size] = $this->queue[$path];
+            unset($this->queue[$path]);
+        }
+        $this->inFlight = ['path' => $path, 'mtime' => $mtime, 'size' => $size, 'sentAt' => time(), 'warm' => $warm];
         ($this->sendJob)(pack('NJJ', $this->workerId, $mtime, $size) . $path);
     }
 

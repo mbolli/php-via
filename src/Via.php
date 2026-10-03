@@ -1035,6 +1035,7 @@ class Via {
                 $this->workerStarted = true;
                 $this->app->claimWorker($workerId);
                 $this->staticBrotli->setWorkerId($workerId);
+                $this->staticBrotli->warmUp();
 
                 // Register signal handlers in worker process (where timers run)
                 $this->registerSignalHandlers();

@@ -33,7 +33,7 @@ beforeEach(function (): void {
     }
 });
 
-test('files present at start go out at level 11 from the first request, without withBrotli()', function (): void {
+test('files present at start go out at level 11 from the first request, without withBrotli(), big ones once the helper compressed them after start', function (): void {
     $r = staticBrotliServer('boot');
 
     expect($r['boot_form'])->toBe('l11', $r['out'])
@@ -42,6 +42,8 @@ test('files present at start go out at level 11 from the first request, without 
         ->and($r['datastar_form'])->toBe('l11', $r['out'])
         ->and($r['plain_form'])->toBe('identity')
         ->and($r['out'])->toContain('Brotli level 11: compressed 3 static files')
+        ->and($r['out'])->toContain('1 more go to the helper process after start')
+        ->and([$r['large_form'], $r['large_cc']])->toBe(['l11', 'public, max-age=3600, must-revalidate'], $r['out'])
     ;
 });
 

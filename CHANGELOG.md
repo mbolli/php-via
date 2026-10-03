@@ -102,10 +102,11 @@ All notable changes to php-via will be documented in this file.
   with `sendfile()`. See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
 - **Level 11 never runs in a worker.** The first Brotli request for a 91 KB stylesheet held its
   worker for 79 ms, and for a 1.7 MB library for 2.1 s; now for about 2 ms. Files of up to 128 KiB
-  present at start are compressed in the master process and shared by all workers. A bigger file, or
-  one that changes later, goes to a low-priority helper process, and until it is done workers send it
-  at level 4, or uncompressed above 256 KB, with `Cache-Control: no-store`. Files up to 8 MiB get
-  level 11, where 2 MiB was the limit: a 2.3 MB bundle goes out as 500 KB.
+  present at start are compressed in the master process and shared by all workers, bigger ones by a
+  low-priority helper process right after start. A file that changes later goes to the helper on its
+  first request, and until it is done workers send it at level 4, or uncompressed above 256 KB, with
+  `Cache-Control: no-store`. Files up to 8 MiB get level 11, where 2 MiB was the limit: a 2.3 MB
+  bundle goes out as 500 KB.
 - **Only paths with a file extension are looked up in `withStaticDir()` before routing,** and the
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
   `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.

@@ -8,7 +8,8 @@ declare(strict_types=1);
  *
  * argv[1] = mode:
  *   boot     without withBrotli(): the files in the static dir at start, and /datastar.js, are sent at level 11
- *            from the first request, with nothing compressed in the request
+ *            from the first request, with nothing compressed in the request, and one over 128 KiB once the helper
+ *            compressed it after start, without a request asking for it
  *   later    with withBrotli(): files written after start are answered at once (level 4 when small, uncompressed
  *            when big, not cacheable) while a helper compresses them at level 11, and /_health keeps answering
  *            meanwhile
@@ -172,7 +173,11 @@ function form(array $response, string $contents): string {
 $boot = generatedJs(60 << 10, 1);
 $small = generatedJs(40 << 10, 2);
 $big = generatedJs(700 << 10, 3);
+$large = generatedJs(200 << 10, 5);
 file_put_contents("{$dir}/boot.js", $boot);
+if ($mode === 'boot') {
+    file_put_contents("{$dir}/large.js", $large);
+}
 
 if ($mode === 'head') {
     // Over 2 MiB, so GET sends both with sendfile(): the image as it is, the stylesheet's sidecar to Brotli clients.
@@ -210,6 +215,11 @@ if ($pid === 0) {
         report('boot_vary', $first['headers']['vary'] ?? '');
         report('datastar_form', form(probeRequest($port, '/datastar.js', ['Accept-Encoding' => 'br']), (string) file_get_contents(dirname(__DIR__, 2) . '/public/datastar.js')));
         report('plain_form', form(probeRequest($port, '/boot.js'), $boot));
+        // About 0.4 s at level 11. A request any earlier would have the helper compress it anyway.
+        usleep(2_000_000);
+        $first = probeRequest($port, '/large.js', ['Accept-Encoding' => 'br']);
+        report('large_form', form($first, $large));
+        report('large_cc', $first['headers']['cache-control'] ?? '');
     } elseif ($mode === 'head') {
         $mismatches = [];
         $cases = 0;

@@ -735,15 +735,22 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
         <li>
             <strong>At start</strong>, php-via compresses the files of up to 128&nbsp;KiB that exist, in the master
             process, so every worker inherits them without a copy of its own. It starts a file only while its expected
-            time fits a 2&nbsp;s budget, and leaves bigger files and the rest for later. Level 11 takes 1.3 to
-            2.1&nbsp;&micro;s per byte, and a file can take longer than expected, so the step ends at most one
-            128&nbsp;KiB file, about 0.3&nbsp;s, past the budget: by 2.3&nbsp;s. The port opens after this step, so a restart takes
+            time fits a 2&nbsp;s budget. Level 11 takes 1.3 to 2.1&nbsp;&micro;s per byte of JavaScript or CSS, and a
+            file can take longer than expected, so the step ends at most one 128&nbsp;KiB file, about 0.3&nbsp;s, past
+            the budget: by 2.3&nbsp;s. The port opens after this step, so a restart takes
             that much longer, and readiness checks and rolling restarts have to allow for it: the website (11 files,
             300&nbsp;KB compressed to 64&nbsp;KB) takes 0.3&nbsp;s. Dev mode skips it.
         </li>
         <li>
-            <strong>Later</strong>, a file that changed or was left out at start goes to a helper process on its
-            first Brotli request. php-via starts the helper with <code>withStaticDir()</code> or in dev mode. Until
+            <strong>Right after start</strong>, the first worker has a helper process compress the files left out,
+            bigger files and those past the budget, up to 32&nbsp;MiB of them, and keeps the results with the files
+            compressed at start. Another worker asks the helper on its first request for such a file, and the helper
+            answers from the results it keeps. php-via starts the helper with <code>withStaticDir()</code> or in dev
+            mode.
+        </li>
+        <li>
+            <strong>Later</strong>, a file that changed, or one left out that the helper has not compressed yet, goes
+            to the helper on its first Brotli request. Until
             its result arrives, a worker sends the file at level 4 when it is up to 256&nbsp;KB and uncompressed when it is bigger, with
             <code>Cache-Control: no-store</code>, so neither a browser nor a CDN keeps that stand-in. The helper
             compresses one file at a time at the lowest CPU priority, so on a core a worker needs, the worker goes
@@ -766,8 +773,9 @@ brotli --best public/js/app.js    # writes public/js/app.js.br; rerun after each
         and Brotli clients get the old content.
     </p>
     <p>
-        Memory stays bounded: up to 32&nbsp;MiB of Brotli forms compressed at start, shared by all workers; per
-        worker up to 16&nbsp;MiB of Brotli forms of files compressed later, 2&nbsp;MiB each; the helper keeps
+        Memory stays bounded: up to 32&nbsp;MiB of Brotli forms compressed at start, shared by all workers, which
+        the first worker tops up for itself with those the helper compressed right after start; per worker up to
+        16&nbsp;MiB of Brotli forms of files compressed later, 2&nbsp;MiB each; the helper keeps
         16&nbsp;MiB of results for the other workers and needs about 50&nbsp;MB more while it compresses. A file
         over 8&nbsp;MiB, or one whose Brotli form exceeds 2&nbsp;MiB, goes out uncompressed unless it has a sidecar,
         and a sidecar over 2&nbsp;MiB goes out with <code>sendfile()</code>. With the website's own files a server

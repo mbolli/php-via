@@ -316,7 +316,25 @@ describe('compressing at start', function (): void {
 
         expect(array_keys($brotli->bootCache()->entries()))->toBe([$limit])
             ->and($result['deferred'])->toBe(1)
+            ->and($result['left'])->toBe(1)
             ->and($result['stopped'])->toBeFalse()
+            ->and($result['rest'])->toBeFalse()
+        ;
+    });
+
+    test('leaves files to the helper up to WARM_BYTES, and the rest to their first request', function (): void {
+        $count = intdiv(StaticBrotli::WARM_BYTES, StaticBrotli::SOURCE_BYTES - 1) + 1;
+        for ($i = 0; $i < $count; ++$i) {
+            $fp = fopen("{$this->dir}/bundle{$i}.js", 'w');
+            ftruncate($fp, StaticBrotli::SOURCE_BYTES - 1);
+            fclose($fp);
+        }
+
+        $result = staticBrotli()->precompress([], $this->dir);
+
+        expect($result['deferred'])->toBe($count)
+            ->and($result['left'])->toBe($count - 1)
+            ->and($result['rest'])->toBeTrue()
         ;
     });
 
@@ -339,6 +357,50 @@ describe('compressing at start', function (): void {
         $brotli->precompress([], $this->dir . '/public');
 
         expect(array_keys($brotli->bootCache()->entries()))->toBe([realpath($css)]);
+    });
+
+    test('the helper compresses the files left out at start after start, behind files a request asks for', function (): void {
+        $a = writeStatic($this->dir . '/a.js', compressibleText(StaticBrotli::BOOT_FILE_BYTES + 1, 1));
+        $b = writeStatic($this->dir . '/b.js', compressibleText(StaticBrotli::BOOT_FILE_BYTES + 1, 2));
+        [$worker, $jobs] = workerWithHelper();
+        $worker->precompress([], $this->dir);
+        $later = writeStatic($this->dir . '/later.css', compressibleText(2000, 3));
+
+        $before = count($jobs);
+        $worker->warmUp();
+        // In the order the static dir was walked
+        [$first, $second] = $jobs[0]['path'] === $a[0] ? [$a, $b] : [$b, $a];
+        $worker->lookup(...$later);
+        $worker->receive(staticBrotli()->compressForWorker(...$first));
+        $worker->receive(staticBrotli()->compressForWorker(...$later));
+        $worker->receive(staticBrotli()->compressForWorker(...$second));
+
+        expect($before)->toBe(0)
+            ->and(array_column($jobs->getArrayCopy(), 'path'))->toBe([$first[0], $later[0], $second[0]])
+            ->and(array_keys($worker->bootCache()->entries()))->toEqualCanonicalizing([$a[0], $b[0]])
+            ->and(array_keys($worker->workerCache()->entries()))->toBe([$later[0]])
+            ->and(brotli_uncompress($worker->lookup(...$a)['body'] ?? ''))->toBe(compressibleText(StaticBrotli::BOOT_FILE_BYTES + 1, 1))
+            ->and($worker->pending(...$a))->toBeFalse()
+            ->and($jobs)->toHaveCount(3)
+        ;
+    });
+
+    test('a file asked for while the helper compresses it after start gets level 11 once it arrives', function (): void {
+        $js = compressibleText(StaticBrotli::BOOT_FILE_BYTES + 1);
+        $file = writeStatic($this->dir . '/app.js', $js);
+        [$worker, $jobs] = workerWithHelper();
+        $worker->precompress([], $this->dir);
+        $worker->warmUp();
+
+        $standIn = $worker->lookup(...$file);
+        $pending = $worker->pending(...$file);
+        $worker->receive(staticBrotli()->compressForWorker(...$file));
+
+        expect($standIn)->toBe(['body' => brotli_compress($js, 4, BROTLI_TEXT)])
+            ->and($pending)->toBeTrue()
+            ->and($worker->lookup(...$file))->toBe(['body' => brotli_compress($js, 11, BROTLI_TEXT)])
+            ->and($jobs)->toHaveCount(1)
+        ;
     });
 
     test('a worker sends what start compressed, without compressing it again', function (): void {
