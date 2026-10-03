@@ -16,6 +16,9 @@ class HtmlBuilder {
     /** A data-signals attribute that declares via_ctx, keyed (data-signals:via_ctx) or in its value */
     private const string VIA_CTX_SIGNAL = '/<[a-z][^>]*\sdata-signals(?:[:-]via_ctx\b|[^\s=>]*\s*=\s*(?:"[^"]*via_ctx[^"]*"|\'[^\']*via_ctx[^\']*\'))/i';
 
+    /** A script whose URL names Datastar, such as via_foot's or a bundle of the page's own */
+    private const string DATASTAR_SCRIPT = '/<script\b[^>]*\ssrc\s*=\s*["\']?[^"\'\s>]*datastar/i';
+
     /** @var array<string, array{0: string, 1: string}> Shell contents by path, with the mtime and size read in dev mode */
     private array $shells = [];
 
@@ -25,10 +28,10 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
-    /** @var array<string, true> Shell paths already checked for via_head, in dev mode */
+    /** @var array<string, true> Shell paths warned about, and outside dev mode the ones found sound */
     private array $checkedShells = [];
 
-    /** @var array<string, true> Routes whose page was already checked for via_head and a second import map, in dev mode */
+    /** @var array<string, true> Routes whose full document or import maps were warned about, or found sound outside dev mode */
     private array $checkedDocuments = [];
 
     /**
@@ -66,8 +69,9 @@ class HtmlBuilder {
      * Build complete HTML document from rendered content.
      *
      * A view that renders its own `<html>` document is completed by injectIntoDocument(); any other
-     * view is placed into the shell template. In dev mode, warns once per shell and once per
-     * full-document route without via_head, and once per route with more than one import map.
+     * view is placed into the shell template. Warns once per shell and once per full-document route
+     * without via_head, or with via_head and no Datastar or a second Datastar, and in dev mode once
+     * per route with more than one import map.
      *
      * @param string  $content   Rendered HTML content
      * @param Context $context   Context for signal injection
@@ -79,8 +83,12 @@ class HtmlBuilder {
     public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
         if (stripos($content, '<html') !== false) {
             $route = $context->getRoute();
-            if ($this->devMode && !isset($this->checkedDocuments[$route . "\0head"]) && !$this->hasViaHead($content)) {
-                $this->warnOnce($this->checkedDocuments, $route . "\0head", "The document rendered for {$route} has no via_head: write {{ via_head() }} (Twig) or \$c->viaHead() right after <meta charset>, and via_foot before </body>, or the page never opens its SSE stream.", $context);
+            if (!isset($this->checkedDocuments[$route . "\0head"])) {
+                $this->checkBootstrap($this->checkedDocuments, $route . "\0head", $content, $this->hasViaHead($content), $context, [
+                    "The document rendered for {$route} has no via_head: write {{ via_head() }} (Twig) or \$c->viaHead() right after <meta charset>, and via_foot before </body>, or the page never opens its SSE stream.",
+                    "The document rendered for {$route} has via_head but loads no Datastar: write {{ via_foot() }} (Twig) or \$c->viaFoot() before </body>.",
+                    "The document rendered for {$route} loads a Datastar script of its own next to via_head's import map, which maps 'datastar' to Config::getDatastarUrl(), so modules that import 'datastar' start a second Datastar engine: write {{ via_foot() }} (Twig) or \$c->viaFoot() in place of the script.",
+                ]);
             }
 
             return $this->checkImportMaps($this->injectIntoDocument($content, $context, initial: true), $context);
@@ -124,12 +132,17 @@ class HtmlBuilder {
             '{{ styles }}' => '',
         ] + $replacements;
 
-        if ($this->devMode && !str_contains($shell, '{{ via_head }}')) {
-            $this->warnOnce($this->checkedShells, $shellPath, "Shell {$shellPath} has no {{ via_head }}: write it right after <meta charset>, and {{ via_foot }} before </body>, in place of a copied SSE bootstrap, Datastar script and import map.", $context);
+        // strtr() replaces in one pass, so placeholder text inside the content or a value stays as is
+        $html = strtr($shell, $replacements);
+        if (!isset($this->checkedShells[$shellPath])) {
+            $this->checkBootstrap($this->checkedShells, $shellPath, $html, str_contains($shell, '{{ via_head }}'), $context, [
+                "Shell {$shellPath} has no {{ via_head }}: write it right after <meta charset>, and {{ via_foot }} before </body>, in place of a copied SSE bootstrap, Datastar script and import map.",
+                "Shell {$shellPath} has {{ via_head }} but loads no Datastar: write {{ via_foot }} before </body>.",
+                "Shell {$shellPath} loads a Datastar script of its own next to via_head's import map, which maps 'datastar' to Config::getDatastarUrl(), so modules that import 'datastar' start a second Datastar engine: write {{ via_foot }} in place of the script.",
+            ]);
         }
 
-        // strtr() replaces in one pass, so placeholder text inside the content or a value stays as is
-        return $this->checkImportMaps(strtr($shell, $replacements), $context);
+        return $this->checkImportMaps($html, $context);
     }
 
     /**
@@ -191,6 +204,33 @@ class HtmlBuilder {
         }
 
         return $html;
+    }
+
+    /**
+     * Warn once per key about a page without via_head, or with via_head and no Datastar script, or
+     * with a Datastar script other than via_foot's next to via_head's import map. Outside dev mode a
+     * sound page is not checked again; in dev mode the next render checks the edited template.
+     *
+     * @param array<string, true>                    $checked  keys warned about or found sound
+     * @param array{0: string, 1: string, 2: string} $messages for no via_head, no Datastar and a second Datastar
+     */
+    private function checkBootstrap(array &$checked, string $key, string $html, bool $hasViaHead, Context $context, array $messages): void {
+        $problem = null;
+        if (!$hasViaHead) {
+            $problem = $messages[0];
+        } elseif (!str_contains($html, $context->viaFoot())) {
+            if (preg_match(self::DATASTAR_SCRIPT, $html) !== 1) {
+                $problem = $messages[1];
+            } elseif (str_contains($context->viaHead(), '<script type="importmap"')) {
+                $problem = $messages[2];
+            }
+        }
+
+        if ($problem !== null) {
+            $this->warnOnce($checked, $key, $problem, $context);
+        } elseif (!$this->devMode) {
+            $checked[$key] = true;
+        }
     }
 
     /**

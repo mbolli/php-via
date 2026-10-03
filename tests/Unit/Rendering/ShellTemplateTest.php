@@ -158,8 +158,8 @@ describe('a custom shell', function (): void {
         ;
     });
 
-    test('warns once in dev mode when it has no {{ via_head }}', function (): void {
-        $builder = ($this->builder)('<head>{{ head_content }}</head><body>{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script></body>');
+    test('warns once when it has no {{ via_head }}, in production too', function (bool $devMode): void {
+        $builder = ($this->builder)('<head>{{ head_content }}</head><body>{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script></body>', $devMode);
         $ctx = new Context(testContextId(), '/', createVia());
 
         $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
@@ -169,6 +169,42 @@ describe('a custom shell', function (): void {
             ->and($this->logs[0][0])->toBe('warning')
             ->and($this->logs[0][1])->toContain('has no {{ via_head }}')
         ;
+    })->with(['dev mode' => true, 'production' => false]);
+
+    test('warns once when it has {{ via_head }} but loads no Datastar, in production too', function (string $foot, bool $devMode): void {
+        $builder = ($this->builder)("<head>{{ via_head }}</head><body>{{ content }}{$foot}</body>", $devMode);
+        $ctx = new Context(testContextId(), '/', createVia());
+
+        $page = $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
+        $builder->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/');
+
+        expect($this->logs)->toHaveCount(1)
+            ->and($this->logs[0][1])->toContain('has {{ via_head }} but loads no Datastar: write {{ via_foot }} before </body>')
+            ->and($page)->not->toContain($ctx->viaFoot())
+        ;
+    })->with([
+        'no script' => '',
+        'the unreleased {{ datastar_url }}' => '<script type="module" src="{{ datastar_url }}"></script>',
+    ])->with(['dev mode' => true, 'production' => false]);
+
+    test('warns when it loads a Datastar of its own next to via_head\'s import map', function (): void {
+        $builder = ($this->builder)('<head>{{ via_head }}</head><body>{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script></body>', false);
+        $ctx = new Context(testContextId(), '/', createVia((new Config())->withDatastarRocket()));
+
+        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
+
+        expect($this->logs)->toHaveCount(1)
+            ->and($this->logs[0][1])->toContain('loads a Datastar script of its own next to via_head\'s import map')
+        ;
+    });
+
+    test('may load a Datastar of its own when via_head writes no import map', function (): void {
+        $builder = ($this->builder)('<head>{{ via_head }}</head><body>{{ content }}<script type="module" src="/js/datastar-custom.js"></script></body>');
+        $ctx = new Context(testContextId(), '/', createVia());
+
+        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
+
+        expect($this->logs)->toBe([]);
     });
 
     test('written before 0.14, still gets {{ signals_json }} for its own bootstrap', function (): void {
@@ -178,14 +214,14 @@ describe('a custom shell', function (): void {
         expect($builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/'))->toBe('<meta data-signals=\'{"via_ctx":"\/_\/old","_disconnected":false}\'><p>a</p>');
     });
 
-    test('does not warn outside dev mode', function (): void {
-        $builder = ($this->builder)('{{ content }}', false);
-        $ctx = new Context(testContextId(), '/', createVia());
+    test('with via_head and via_foot gets no warning, in production too', function (bool $devMode): void {
+        $builder = ($this->builder)('<head><meta charset="UTF-8">{{ via_head }}</head><body>{{ content }}{{ via_foot }}</body>', $devMode);
+        $ctx = new Context(testContextId(), '/', createVia((new Config())->withDatastarRocket()));
 
-        expect($builder->buildDocument('<p>b</p>', $ctx, $ctx->getId(), '/'))->toBe('<p>b</p>')
-            ->and($this->logs)->toBe([])
-        ;
-    });
+        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
+
+        expect($this->logs)->toBe([]);
+    })->with(['dev mode' => true, 'production' => false]);
 
     test('warns once in dev mode when the page has a second import map', function (): void {
         $builder = ($this->builder)('<head>{{ via_head }}<script type="importmap">{"imports":{}}</script></head><body>{{ content }}{{ via_foot }}</body>');
@@ -207,7 +243,8 @@ describe('a view that renders its own document', function (): void {
         $this->document = fn (string $head): string => "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">{$head}</head><body></body></html>";
     });
 
-    test('warns once per route in dev mode when it has no via_head', function (): void {
+    test('warns once per route when it has no via_head, in production too', function (bool $devMode): void {
+        $this->builder = new HtmlBuilder(null, function (string $level, string $message): void { $this->logs[] = [$level, $message]; }, $devMode);
         $via = createVia();
         $home = new Context(testContextId(), '/', $via);
         $docs = new Context(testContextId(), '/docs', $via);
@@ -222,13 +259,36 @@ describe('a view that renders its own document', function (): void {
             ->and($this->logs[1][1])->toContain('for /docs has no via_head')
             ->and($html)->toContain('<meta data-signals="')
         ;
+    })->with(['dev mode' => true, 'production' => false]);
+
+    test('warns when it has via_head but loads no Datastar', function (): void {
+        $home = new Context(testContextId(), '/', createVia());
+
+        $this->builder->buildDocument(($this->document)($home->viaHead()), $home, $home->getId(), '/');
+
+        expect($this->logs)->toHaveCount(1)
+            ->and($this->logs[0][1])->toContain('for / has via_head but loads no Datastar')
+        ;
     });
 
-    test('does not warn when it writes via_head, and adds no via_ctx of its own', function (): void {
+    test('may keep a Datastar bundle of its own when via_head writes no import map, and not with one', function (bool $rocket): void {
+        $home = new Context(testContextId(), '/', createVia((new Config())->withDatastarRocket($rocket)));
+        $document = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">{$home->viaHead()}</head><body><script type=\"module\" src=\"/js/datastar-rocket.js?v=1\"></script></body></html>";
+
+        $this->builder->buildDocument($document, $home, $home->getId(), '/');
+
+        expect($this->logs)->toHaveCount($rocket ? 1 : 0);
+        if ($rocket) {
+            expect($this->logs[0][1])->toContain('loads a Datastar script of its own next to via_head\'s import map');
+        }
+    })->with(['no map' => false, 'Rocket' => true]);
+
+    test('does not warn when it writes via_head and via_foot, and adds no via_ctx of its own', function (): void {
         $via = createVia();
         $home = new Context(testContextId(), '/', $via);
+        $document = str_replace('</body>', $home->viaFoot() . '</body>', ($this->document)($home->viaHead()));
 
-        $html = $this->builder->buildDocument(($this->document)($home->viaHead()), $home, $home->getId(), '/');
+        $html = $this->builder->buildDocument($document, $home, $home->getId(), '/');
 
         expect($this->logs)->toBe([])
             ->and(substr_count($html, 'via_ctx'))->toBe(1)

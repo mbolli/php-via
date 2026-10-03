@@ -220,8 +220,9 @@ message that names the new one.
 - **`via_head` and `via_foot`** replace the SSE bootstrap, import map and Datastar script that
   custom shells and full-document layouts copied from the default shell. Put `via_head` right after
   `<meta charset>` and `via_foot` before `</body>`. Every tag carries the nonce from the page
-  request's `via.csp_nonce` attribute. Dev mode warns once per shell or route without `via_head`, and
-  once per route with a second import map. A copied bootstrap keeps working.
+  request's `via.csp_nonce` attribute, and so do the Dev Bar's tags. php-via warns once per shell
+  or route without `via_head`, or with `via_head` and no Datastar script or a second one, and dev
+  mode once per route with a second import map. A copied bootstrap keeps working.
 - **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
   `Twig\TwigEngine` is php-via's, and `withTemplateDir()` sets one up. `view(..., block:)` with an
   engine that renders no blocks throws.
