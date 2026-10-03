@@ -15,7 +15,8 @@ use Tests\Support\FakeStaticResponse;
 
 /*
  * Via::onError() observes the throws php-via catches from actions, renders, timers and tasks.
- * Timers and tasks need a reactor, so they run in tests/Fixtures/tab_interval_throw.php and task_reactor.php.
+ * Timers, tasks and callbacks that start coroutines need a reactor, so they run in tests/Fixtures/tab_interval_throw.php,
+ * task_reactor.php and error_hook_reentry.php.
  */
 
 /**
@@ -366,7 +367,7 @@ describe('renders', function (): void {
         ;
     });
 
-    test('a callback that broadcasts into another broken view is not called for that one', function (): void {
+    test('outside a coroutine, a callback that broadcasts into another broken view is not called for that one', function (): void {
         $via = createVia();
         $calls = 0;
         $via->onError(function () use ($via, &$calls): void {
@@ -478,5 +479,40 @@ describe('timers and tasks', function (): void {
         exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/task_reactor.php') . ' 2>&1', $output);
 
         expect(implode("\n", $output))->toContain("report: task ctx-thrower null task failed after a wait\n");
+    });
+});
+
+/**
+ * @return string one run of error_hook_reentry.php, shared by the tests that read it
+ */
+function errorHookReentryRun(): string {
+    static $out = null;
+    if ($out === null) {
+        $output = [];
+        exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/error_hook_reentry.php') . ' 2>&1', $output);
+        $out = implode("\n", $output) . "\n";
+    }
+
+    return $out;
+}
+
+describe('callbacks that start coroutines', function (): void {
+    test('the throw of a spawn() task a callback starts is logged and reaches no callback', function (): void {
+        expect(errorHookReentryRun())
+            ->toContain("task failing at once: calls=1 logged=1\n")
+            ->toContain("task failing after a wait: calls=1 logged=1\n")
+            ->toContain("reactor done\n")
+        ;
+    });
+
+    test('a coroutine started from a callback reports to no callback while it runs, and does once it returned', function (): void {
+        expect(errorHookReentryRun())->toContain("coroutines of a callback: outer | child, after the callback returned\n");
+    });
+
+    test('a callback that broadcasts into a broken view is called again from the flush until the re-entrancy limit', function (): void {
+        expect(errorHookReentryRun())
+            ->toContain("broadcast from a callback: calls=8\n")
+            ->toContain("limit warning names onError: 1 1\n")
+        ;
     });
 });

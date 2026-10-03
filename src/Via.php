@@ -1541,8 +1541,11 @@ class Via {
      *
      * Callbacks run in the order registered, in the coroutine that caught the throw; for an action
      * before its changed signals are sent, so what they write goes out with them. A throw from a
-     * callback is logged and reaches no callback, and so is a throw caught while a callback runs in
-     * the same coroutine, such as a view failing in a broadcast the callback starts.
+     * callback is logged and reaches no callback, and so is a throw caught while a callback runs, in
+     * its coroutine or in one started from it, and the throw of a Context::spawn() task a callback
+     * starts. A broadcast a callback starts renders later, in another coroutine, so a view that fails
+     * in it calls the callbacks again, and the two repeat until the broadcast re-entrancy limit stops
+     * them after 8 passes.
      * php-via's own failures, such as a broker that cannot publish, and throws from lifecycle
      * callbacks (onClientConnect(), onCleanup(), onWorkerStop() and the like) are only logged.
      *
@@ -1559,6 +1562,15 @@ class Via {
      */
     public function reportError(\Throwable $e, ?Context $context, ErrorPhase $phase, ?string $action = null): void {
         $this->errorHooks->report($e, $context, $phase, $action);
+    }
+
+    /**
+     * Whether the onError() callbacks run in this coroutine or in one it was started from.
+     *
+     * @internal read by Context::spawn(): the throw of a task a callback starts reaches no callback
+     */
+    public function inErrorCallbacks(): bool {
+        return $this->errorHooks->inCallbacks();
     }
 
     /**
@@ -2501,7 +2513,7 @@ class Via {
 
             if ($reenteredPasses === self::MAX_SYNC_PASSES) {
                 // Another pass would broadcast again: stop rather than wedge the worker.
-                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\": a view it renders broadcasts it again on every pass, directly, through another scope or from a coroutine it starts, so its fan-out stopped after " . self::MAX_SYNC_PASSES . ' passes');
+                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\": a view it renders broadcasts it again on every pass, directly, through another scope or from a coroutine it starts, or an onError() callback does for a view that fails, so its fan-out stopped after " . self::MAX_SYNC_PASSES . ' passes');
             } elseif (isset($this->syncReentered[$scope])) {
                 // Not a loop, so owed like a broadcast from outside.
                 $this->syncPending[$scope] = true;

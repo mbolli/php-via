@@ -34,14 +34,14 @@ final class ErrorHooks {
 
     /**
      * Pass a caught throw to every callback. A callback's own throw is logged, and a throw caught while the callbacks
-     * run in this coroutine reaches none of them, since it would start them again.
+     * run in this coroutine or in one it was started from reaches none of them, since it would start them again.
      */
     public function report(\Throwable $e, ?Context $context, ErrorPhase $phase, ?string $action = null): void {
-        $cid = Coroutine::getCid();
-        if ($this->hooks === [] || isset($this->running[$cid])) {
+        if ($this->hooks === [] || $this->inCallbacks()) {
             return;
         }
 
+        $cid = Coroutine::getCid();
         $this->running[$cid] = true;
 
         try {
@@ -55,5 +55,30 @@ final class ErrorHooks {
         } finally {
             unset($this->running[$cid]);
         }
+    }
+
+    /**
+     * Whether the callbacks run in this coroutine or in one it was started from, such as a callback that waits
+     * while a coroutine it created runs.
+     */
+    public function inCallbacks(): bool {
+        $cid = Coroutine::getCid();
+        if (isset($this->running[$cid])) {
+            return true;
+        }
+
+        // getPcid() is -1 for a coroutine started outside one, and false for one that has ended.
+        while ($cid > 0) {
+            $cid = Coroutine::getPcid($cid);
+            // @phpstan-ignore identical.alwaysFalse (the extension declares int, but an ended coroutine gives false)
+            if ($cid === false) {
+                return false;
+            }
+            if (isset($this->running[$cid])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -597,8 +597,8 @@ class Context {
      * Call sync() or syncSignals() to send what it changes: only an action sends its changed signals
      * by itself.
      *
-     * A throw from the task is logged and goes to Via::onError() with ErrorPhase::Task; the worker
-     * and its other tabs keep running.
+     * A throw from the task is logged and goes to Via::onError() with ErrorPhase::Task, unless an
+     * onError() callback started the task; the worker and its other tabs keep running.
      *
      * A task keeps running when its context is destroyed (see onCleanup()), so a read on a shared
      * database or Redis connection is never cut short. From then on isDestroyed() is true and

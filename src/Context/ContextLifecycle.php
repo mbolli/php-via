@@ -70,7 +70,7 @@ class ContextLifecycle {
 
     /**
      * Run $task in a coroutine of its own and count it in Via::$runningTasks while it runs.
-     * A throw is logged and reported with ErrorPhase::Task.
+     * A throw is logged and reported with ErrorPhase::Task, unless an onError() callback started the task.
      *
      * @param callable(Context): void $task
      *
@@ -78,15 +78,19 @@ class ContextLifecycle {
      */
     public function spawn(callable $task): void {
         $context = $this->context->get() ?? throw new \LogicException('spawn() on a freed context');
+        // Reported, the throw of a task that reports an error would start the callbacks, and the task, again.
+        $fromErrorCallback = $this->via->inErrorCallbacks();
 
-        $cid = Coroutine::create(function () use ($task, $context): void {
+        $cid = Coroutine::create(function () use ($task, $context, $fromErrorCallback): void {
             ++$this->via->runningTasks;
 
             try {
                 $task($context);
             } catch (\Throwable $e) {
                 $this->via->log('error', 'Task failed: ' . Logger::describe($e), $context);
-                $this->via->reportError($e, $context, ErrorPhase::Task);
+                if (!$fromErrorCallback) {
+                    $this->via->reportError($e, $context, ErrorPhase::Task);
+                }
             } finally {
                 --$this->via->runningTasks;
             }
