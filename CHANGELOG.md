@@ -130,6 +130,9 @@ All notable changes to php-via will be documented in this file.
 - **A tab rebuilt after it was away runs the route's middleware again,** on a GET of the page's URL,
   so an auth gate applies. When the middleware answers instead, the tab reloads, and an action that
   would rebuild it gets the middleware's response. See [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival).
+- **Workers turn PHP's own cycle collector runs off** and start them between coroutines. A loop that
+  creates cycles without waiting on I/O frees them only once it ends: call `gc_collect_cycles()` in
+  it, or keep PHP's runs with `withGcIntervalMs(0)`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
 - **The default shell shows its Live Signals panel in dev mode only.**
 - **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
   where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied. A clone of a
@@ -362,11 +365,10 @@ message that names the new one.
 - **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once
   instead of 20 times while the contexts of a 250,000-view burst expire. See
   [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
-- **Workers run the cycle collector when their memory has grown by half,** with PHP's own runs off.
-  In a burst of 250,000 page views it runs 10 times instead of 24 and takes 60% less time, and an
-  app whose requests leave cycles no longer spends most of a burst in it. A run still walks every
-  live context. `withGcIntervalMs(0)` leaves the collector to PHP. See
-  [Performance](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
+- **Workers run the cycle collector when their memory has grown by half,** not every 10,000
+  possible roots. In a burst of 250,000 page views it runs 10 times instead of 24 and takes 60% less
+  time, and an app whose requests leave cycles no longer spends most of a burst in it. A run still
+  walks every live context. See [Performance](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
 - **Broadcasts cost less per tab:** 39% less than 0.13.1 for tabs that share a render, and 8% less
   for tabs that render their own view. With more than one worker, `getClients()` rebuilds its list
   faster after a connect. An SSE stream checks its session cookie against the rotation table only
@@ -459,7 +461,7 @@ message that names the new one.
   [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
 - A tab rebuilt after it was away (revival) lost the attributes middleware set on the request that
   rebuilt it, so the login example's dashboard answered 500 on every reconnect.
-- With several workers, an action that reached another worker than the tab's ran on a copy of the
+- With several workers, an action that reached a worker other than the tab's ran on a copy of the
   context that no stream read, so its TAB signals, `sync()`, scripts and `patchElements()` were lost.
   It now runs on the tab's worker, as do uploads and `download()` URLs, and its cookies come back.
 - A stopping worker, on a deploy or a reload, ended its streams and the tabs waited up to 15 s to
