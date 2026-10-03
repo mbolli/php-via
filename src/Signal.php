@@ -303,17 +303,18 @@ class Signal {
 
     /**
      * Get value as boolean.
+     *
+     * A string is true when it reads 'true', '1', 'yes' or 'on' (any case); any other value
+     * follows PHP's truthiness, so int 2 and float 0.5 are true.
      */
     public function bool(): bool {
         $value = $this->store === null ? $this->value : $this->getValue();
 
-        if (\is_array($value) || \is_object($value)) {
-            return !empty($value);
+        if (\is_string($value)) {
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
         }
 
-        $val = mb_strtolower((string) $value);
-
-        return \in_array($val, ['true', '1', 'yes', 'on'], true);
+        return (bool) $value;
     }
 
     /**
