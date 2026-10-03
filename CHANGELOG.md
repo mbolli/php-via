@@ -490,6 +490,8 @@ message that names the new one.
 - `VIA_TEST_PORT_BASE` gives every fixture that starts a real server a port from one window,
   `VIA_TEST_PORT_COUNT` ports long (50 by default), so the suite runs on a machine where other ports
   are taken. Unset, each fixture keeps the window it had.
+- `tests/Fixtures/view_cache_cases.php` sets `VIA_TEST_MODE` itself. Run on its own, it waited out
+  the SSE keep-alive for every context it drained and ran into its 60 s timeout.
 
 ### Docs
 
