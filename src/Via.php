@@ -125,6 +125,11 @@ class Via {
     public int $runningSseStreams = 0;
 
     /**
+     * @internal Context::spawn() tasks still running in this worker
+     */
+    public int $runningTasks = 0;
+
+    /**
      * @internal use getClients()
      *
      * @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID
@@ -1309,8 +1314,9 @@ class Via {
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
      * recycle. A callback cannot tell a reload from a stop. They run inside a coroutine, each in its
-     * own try/catch, after waiting up to half the stop budget for open SSE streams to finish
-     * (no wait when `max_wait_time` is below 2). OpenSwoole counts `max_wait_time` in whole seconds,
+     * own try/catch, after waiting up to half the stop budget for open SSE streams and Context::spawn()
+     * tasks to finish (no wait when `max_wait_time` is below 2). Tasks still running after the
+     * callbacks get the rest of the budget. OpenSwoole counts `max_wait_time` in whole seconds,
      * so the budget for the stop is roughly `max_wait_time` minus up to one second.
      *
      * End long-lived coroutines, sockets and `Event::add` fds here (or check isShuttingDown() in
@@ -2839,7 +2845,7 @@ class Via {
             $context->getPatchManager()->closePatchChannel();
         }
         $this->sseHandler->closeStreams();
-        $this->waitForSseStreams();
+        $this->waitForStreamsAndTasks();
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
@@ -2849,8 +2855,11 @@ class Via {
             }
         }
 
-        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $stopBudgetNs = max(0, (int) ($this->server?->setting['max_wait_time'] ?? 3) - 1) * 1_000_000_000;
+        // Tasks the callbacks told to stop, such as by killing the process they wait on.
+        $this->waitWhile(fn (): bool => $this->runningTasks > 0, $stopStartNs + $stopBudgetNs);
+
+        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $this->drainBroadcasts(renderPending: false, publisherDeadlineNs: min(hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000, $stopStartNs + $stopBudgetNs));
 
         try {
@@ -2861,22 +2870,23 @@ class Via {
 
         $others = (int) (Coroutine::stats()['coroutine_num'] ?? 0) - (Coroutine::getCid() > 0 ? 1 : 0);
         if ($others > 0) {
-            $this->log('warning', "{$others} coroutine(s) still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
+            $tasks = $this->runningTasks > 0 ? ", {$this->runningTasks} of them Context::spawn() tasks," : '';
+            $this->log('warning', "{$others} coroutine(s){$tasks} still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
         }
     }
 
     /**
-     * Let the SSE exit paths (onClientDisconnect included) finish before the callbacks and the
-     * broker go away, within half the stop budget so the callbacks keep the rest.
+     * Let the SSE exit paths (onClientDisconnect included) and the Context::spawn() tasks finish before
+     * the callbacks and the broker go away, within half the stop budget so the callbacks keep the rest.
      */
-    private function waitForSseStreams(): void {
+    private function waitForStreamsAndTasks(): void {
         if (Coroutine::getCid() <= 0) {
             return;
         }
 
         $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
         $deadline = microtime(true) + max(0, $maxWait - 1) / 2;
-        while ($this->runningSseStreams > 0 && microtime(true) < $deadline) {
+        while (($this->runningSseStreams > 0 || $this->runningTasks > 0) && microtime(true) < $deadline) {
             Coroutine::usleep(10_000);
         }
     }

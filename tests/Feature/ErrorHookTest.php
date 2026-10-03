@@ -15,7 +15,7 @@ use Tests\Support\FakeStaticResponse;
 
 /*
  * Via::onError() observes the throws php-via catches from actions, renders, timers and tasks.
- * Timers need a reactor, so they run in tests/Fixtures/tab_interval_throw.php.
+ * Timers and tasks need a reactor, so they run in tests/Fixtures/tab_interval_throw.php and task_reactor.php.
  */
 
 /**
@@ -309,6 +309,7 @@ describe('renders', function (): void {
             ->and($seen)->toHaveCount(1)
             ->and($seen[0][2])->toBe(ErrorPhase::Render)
             ->and($seen[0][1]?->getRoute())->toBe('/handler-throws')
+            ->and($seen[0][1]?->isDestroyed())->toBeTrue()
             ->and($seen[0][3])->toBeNull()
         ;
     });
@@ -470,5 +471,12 @@ describe('timers and tasks', function (): void {
         exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/tab_interval_throw.php') . ' 2>&1', $output);
 
         expect(implode("\n", $output))->toContain("ticks=3\n", 'reports=3 timer ctx-interval null tab interval failed');
+    });
+
+    test('a task that throws after a wait reaches onError with ErrorPhase::Task and its context', function (): void {
+        $output = [];
+        exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/task_reactor.php') . ' 2>&1', $output);
+
+        expect(implode("\n", $output))->toContain("report: task ctx-thrower null task failed after a wait\n");
     });
 });

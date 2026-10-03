@@ -102,6 +102,9 @@ class Context {
      */
     private ?array $seedWait = null;
 
+    /** Set by cleanup(): from then on sync(), syncSignals(), patchElements(), execScript() and spawn() do nothing */
+    private bool $destroyed = false;
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
@@ -466,11 +469,53 @@ class Context {
     }
 
     /**
+     * Run $task in a coroutine of its own, for work that outlives the action or page handler that
+     * starts it, such as a long query that reports its progress. The task receives this context.
+     * Call sync() or syncSignals() to send what it changes: only an action sends its changed signals
+     * by itself.
+     *
+     * A throw from the task is logged and goes to Via::onError() with ErrorPhase::Task; the worker
+     * and its other tabs keep running.
+     *
+     * A task keeps running when its context is destroyed (see onCleanup()), so a read on a shared
+     * database or Redis connection is never cut short. From then on isDestroyed() is true and
+     * sync(), syncSignals(), patchElements() and execScript() do nothing, so a task finishes without
+     * guards. A long task checks isDestroyed() to stop early, and an onCleanup() callback stops work
+     * it started outside PHP, such as a process.
+     *
+     * A stopping worker waits for its running tasks: with its open streams before the onWorkerStop()
+     * callbacks, and after them for the rest of the stop budget (max_wait_time less a second). A task
+     * that loops checks Via::isShuttingDown(). spawn() on a destroyed context does nothing.
+     *
+     * @param callable(Context): void $task
+     *
+     * @throws \RuntimeException when no coroutine can be created, at OpenSwoole's max_coroutine
+     */
+    public function spawn(callable $task): void {
+        if ($this->destroyed) {
+            return;
+        }
+
+        $this->lifecycle->spawn($task);
+    }
+
+    /**
+     * Whether this context was destroyed: its tab is gone for good and its onCleanup() callbacks ran.
+     *
+     * A revival builds a new context under the same id, so this one stays destroyed. A spawn() task
+     * that holds it checks this to stop early.
+     */
+    public function isDestroyed(): bool {
+        return $this->destroyed;
+    }
+
+    /**
      * Execute cleanup callbacks and release resources.
      *
      * @internal Called by Via when context is destroyed
      */
     public function cleanup(): void {
+        $this->destroyed = true;
         $this->lifecycle->cleanup();
 
         // Close patch channel
@@ -1133,9 +1178,13 @@ class Context {
     }
 
     /**
-     * Sync current view and signals to the browser.
+     * Sync current view and signals to the browser. Does nothing once the context is destroyed.
      */
     public function sync(): void {
+        if ($this->destroyed) {
+            return;
+        }
+
         $this->patchManager->sync();
     }
 
@@ -1159,9 +1208,13 @@ class Context {
     }
 
     /**
-     * Execute JavaScript on the client.
+     * Execute JavaScript on the client. Does nothing once the context is destroyed.
      */
     public function execScript(string $script): void {
+        if ($this->destroyed) {
+            return;
+        }
+
         $this->patchManager->execScript($script);
     }
 
@@ -1171,7 +1224,8 @@ class Context {
      * Without $selector, Outer and Replace match the top-level elements of $html by id; the other modes
      * need a selector. Remove needs no HTML: patchElements(selector: '#toast', mode: PatchMode::Remove).
      * Patches queue until the tab's stream is open, like sync(). Each one counts, since no render sends it
-     * again: a full queue drops them last, and a client that falls behind gets them all.
+     * again: a full queue drops them last, and a client that falls behind gets them all. Does nothing once
+     * the context is destroyed.
      *
      * @throws \InvalidArgumentException when there is neither HTML nor a selector, or the mode needs a selector
      */
@@ -1181,6 +1235,10 @@ class Context {
         }
         if (($selector ?? '') === '' && $mode !== PatchMode::Outer && $mode !== PatchMode::Replace) {
             throw new \InvalidArgumentException("PatchMode::{$mode->name} needs a selector: only Outer and Replace find their target by the element's id.");
+        }
+
+        if ($this->destroyed) {
+            return;
         }
 
         $patch = ['type' => 'elements', 'content' => $html, 'mode' => $mode];
@@ -1303,8 +1361,13 @@ class Context {
     /**
      * Sync only signals to the browser.
      * Useful when you only need to update signal values without re-rendering.
+     * Does nothing once the context is destroyed.
      */
     public function syncSignals(): void {
+        if ($this->destroyed) {
+            return;
+        }
+
         $this->patchManager->syncSignals();
     }
 
