@@ -640,15 +640,17 @@ class Via {
      * fan-out is already running in another coroutine, that fan-out runs once more for it instead,
      * and after 8 passes in a row the next flush renders it, except during shutdown, which drops it.
      *
-     * @param string $scope Scope to broadcast to
+     * @param string $scope Scope to broadcast to: a resolved one, so Scope::routeScope('/path') or
+     *                      Scope::sessionScope($id) rather than the bare ROUTE or SESSION
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
      */
     public function broadcast(string $scope): void {
-        // TAB scope is per-connection: no cross-node recipients exist.
-        $publish = $scope !== Scope::TAB;
+        $scope = Scope::resolve($scope, null, 'Via::broadcast()');
 
         if ($this->shouldCoalesce()) {
             $this->tracer?->span('broadcast.schedule', static fn () => null, ['scope' => $scope], 'sse');
-            $this->markDirty($scope, $publish);
+            $this->markDirty($scope, publish: true);
             $this->rememberCallerMark($scope);
             $this->scheduleFlush();
 
@@ -656,10 +658,6 @@ class Via {
         }
 
         $this->syncLocally($scope);
-
-        if (!$publish) {
-            return;
-        }
 
         if ($this->publishing) {
             // Another coroutine owns the broker connection; it sends this before it stops.
@@ -781,8 +779,12 @@ class Via {
      *
      * @param string      $scope     a resolved scope: Scope::routeScope('/path'), not Scope::ROUTE
      * @param null|string $namespace the component namespace, for a signal declared inside a component
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
      */
     public function getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal {
+        $scope = Scope::resolve($scope, null, 'Via::getScopedSignalByName()');
+
         return $this->signalManager->getSignal($scope, SignalId::scoped($scope, $namespace, $name));
     }
 

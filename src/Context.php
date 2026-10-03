@@ -87,6 +87,9 @@ class Context {
     /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued to be sent with the next response */
     private array $pendingCookies = [];
 
+    /** Whether broadcast() has warned that it no longer reaches the scopes this TAB-primary context joined */
+    private bool $tabBroadcastWarned = false;
+
     /** Read epoch of the newest broadcast frame queued for this context; see syncFanOut() */
     private int $fanOutEpoch = 0;
 
@@ -654,9 +657,28 @@ class Context {
      * Broadcast updates to all contexts with the same primary scope.
      *
      * Inside a coroutine this only marks the scope for the worker's next broadcast flush; see Via::broadcast().
+     * With the default primary scope, TAB, it syncs this tab only: scopes joined through addScope() are reached
+     * with Via::broadcast().
      */
     public function broadcast(): void {
-        $this->app->broadcast($this->getPrimaryScope());
+        $scope = $this->getPrimaryScope();
+        if ($scope !== Scope::TAB) {
+            $this->app->broadcast($scope);
+
+            return;
+        }
+
+        $joined = array_values(array_diff($this->scopes, [Scope::TAB]));
+        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->getDevMode()) {
+            $this->tabBroadcastWarned = true;
+            $this->app->log('warn', \sprintf(
+                'Context::broadcast() syncs only this tab, since its primary scope is TAB; before php-via 0.14 it re-rendered '
+                . 'every tab on the worker. To reach the scopes it joined (%s), call $app->broadcast() with one of them.',
+                implode(', ', $joined),
+            ), $this);
+        }
+
+        $this->sync();
     }
 
     /**
