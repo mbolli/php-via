@@ -48,6 +48,7 @@ class SignalFactory {
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write it; null picks the scope's default
+     * @param bool        $clientSeeded   Whether the browser holds the initial value; see Context::signal()
      *
      * TAB scope (scope=null): Signal is private to this context, not shared
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
@@ -55,9 +56,10 @@ class SignalFactory {
      *
      * A scoped signal joins the context to its scope, which its value reaches the tab through.
      *
-     * @throws \LogicException without a scope, on a context whose primary scope is not TAB
+     * @throws \LogicException           without a scope, on a context whose primary scope is not TAB
+     * @throws \InvalidArgumentException for clientSeeded with a shared scope or with clientWritable: false
      */
-    public function createSignal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
+    public function createSignal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null, bool $clientSeeded = false): Signal {
         if (trim($name) === '') {
             throw new \InvalidArgumentException('A signal needs a non-empty name, for example $c->signal(0, \'count\').');
         }
@@ -80,6 +82,15 @@ class SignalFactory {
         }
 
         $scope = Scope::resolve($scope, $context, 'Context::signal()');
+        if ($clientSeeded) {
+            if ($scope !== Scope::TAB) {
+                throw new \InvalidArgumentException("Signal '{$baseName}' cannot be clientSeeded with scope '{$scope}': a shared signal has one value for every tab, and only a tab's own signal can take its browser's.");
+            }
+            if ($clientWritable === false) {
+                throw new \InvalidArgumentException("Signal '{$baseName}' is clientSeeded, so it takes its value from the browser, and clientWritable: false refuses it. Drop one of the two.");
+            }
+            $clientWritable = true;
+        }
 
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
         // For TAB signals, use context ID to make them unique per context
@@ -120,6 +131,12 @@ class SignalFactory {
 
         if (isset($this->signals[$signalId])) {
             $existing = $this->signals[$signalId];
+            // The browser's value is the live one; the initial value is only the fallback.
+            if ($existing->isClientSeeded()) {
+                $this->signalNameMap[$baseName] = $existing;
+
+                return $existing;
+            }
             $this->warnOnRedeclaration($existing, $baseName, $initialValue, $clientWritable);
             $existing->setValue($initialValue);
             $this->signalNameMap[$baseName] = $existing;
@@ -131,7 +148,7 @@ class SignalFactory {
             $clientWritable = false;
         }
 
-        $signal = new Signal($signalId, $initialValue, null, true, $clientWritable);
+        $signal = new Signal($signalId, $initialValue, null, true, $clientWritable, null, $clientSeeded);
         $this->signals[$signalId] = $signal;
         $this->signalNameMap[$baseName] = $signal;
 

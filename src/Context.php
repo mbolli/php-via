@@ -1013,10 +1013,17 @@ class Context {
      * Declaring a TAB signal again with the same name returns the existing signal and sets it to
      * the new initial value; a warning is logged when that changes the live value.
      *
-     * @throws \LogicException without a scope, after scope() set a primary scope other than TAB
+     * $clientSeeded declares a TAB signal whose initial value the browser holds, such as one the page's
+     * own script reads from the URL or from localStorage: $initialValue is only the server's fallback.
+     * The page seed and the first sync leave the signal out, declaring it again keeps the live value, and
+     * until the server writes it, every SSE connect gives it the browser's value before the view renders.
+     * Such a signal is client-writable.
+     *
+     * @throws \LogicException           without a scope, after scope() set a primary scope other than TAB
+     * @throws \InvalidArgumentException for $clientSeeded with a shared scope or with clientWritable: false
      */
-    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
-        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
+    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null, bool $clientSeeded = false): Signal {
+        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable, $clientSeeded);
     }
 
     /**
@@ -1404,6 +1411,27 @@ class Context {
         // Ids are injective, so $seed holds no written id; the diff keeps a write winning should
         // two seeded signals ever share an id again.
         $this->signalFactory->injectSignals(array_diff_key($seed, $written));
+    }
+
+    /**
+     * Give the clientSeeded TAB signals of this page and its components the browser's values, for those the
+     * server has not written. The usual clientWritable and type rules apply.
+     *
+     * @internal called through Via::seedFromConnect()
+     *
+     * @param array<int|string, mixed> $clientSignals Signal values the SSE connect carries
+     */
+    public function takeClientSeeded(array $clientSignals): void {
+        $seed = [];
+        foreach ($this->collectTabSignals() as $signal) {
+            if ($signal->isClientSeeded() && $signal->writeCount() === 0 && \array_key_exists($signal->id(), $clientSignals)) {
+                $seed[$signal->id()] = $clientSignals[$signal->id()];
+            }
+        }
+
+        if ($seed !== []) {
+            $this->signalFactory->injectFlat($seed);
+        }
     }
 
     /**

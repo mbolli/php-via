@@ -253,6 +253,11 @@ message that names the new one.
   a number or `'false'` from a radio group for a bool, is stored as that type; any other value is
   refused like a write to a signal that is not client-writable, where it was stored as sent. A signal
   declared with `null` takes any type. Dev mode warns once per signal.
+- **`signal($fallback, 'name', clientSeeded: true)`** declares a TAB signal whose initial value the
+  browser holds, such as one the page's own script reads from the URL. The page seed and the first
+  sync leave it out, a second declaration keeps the live value, and every SSE connect gives it the
+  browser's value before the view renders, until the server writes it. It replaces calling
+  `markSynced()` right after `signal()`, which keeps working.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
 

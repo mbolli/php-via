@@ -1771,7 +1771,8 @@ class Via {
     }
 
     /**
-     * Seed a context that an action revived without client signals from its SSE connect; others ignore the call.
+     * Seed a context that an action revived without client signals from its SSE connect, and give the
+     * clientSeeded signals of any other the browser's values.
      *
      * @param array<string, mixed> $clientSignals Signal values the SSE connect carries
      *
@@ -1779,6 +1780,8 @@ class Via {
      */
     public function seedFromConnect(Context $context, array $clientSignals): void {
         if (!$context->isAwaitingSeed()) {
+            $context->takeClientSeeded($clientSignals);
+
             return;
         }
 
