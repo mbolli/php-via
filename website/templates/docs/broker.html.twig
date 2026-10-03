@@ -62,11 +62,11 @@ $config = (new Config())->withBroker(new InMemoryBroker());
 use Mbolli\PhpVia\Broker\SwooleBroker;
 
 $config = (new Config())
-    ->withWorkerNum(swoole_cpu_num());  // SwooleBroker by default
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum());  // SwooleBroker by default
 
 // The same, spelled out:
 $config = (new Config())
-    ->withWorkerNum(swoole_cpu_num())
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum())
     ->withBroker(new SwooleBroker());
 {% endverbatim %}{% endcode %}
     <p>

@@ -556,8 +556,8 @@ final class Config {
      *
      * A slow client otherwise parks its SSE coroutine inside write() until it drains
      * or disconnects (measured at 20s), during which that connection stops observing
-     * shutdown and disconnect. Element patches are idempotent, so a backed-up client
-     * catches up on the next broadcast. Signals and scripts are never dropped.
+     * shutdown and disconnect. View updates are idempotent, so a backed-up client
+     * catches up on the next render. Signals, scripts and patchElements() patches are never dropped.
      *
      * Once a connection is past the threshold, its element frames are dropped until its
      * backlog is empty, since OpenSwoole wakes a parked write only then. A threshold above
@@ -1017,7 +1017,7 @@ final class Config {
      *
      * Example:
      * ```php
-     * (new Config())->withWorkerNum(swoole_cpu_num())
+     * (new Config())->withWorkerNum(\OpenSwoole\Util::getCPUNum())
      * ```
      */
     public function withWorkerNum(int $n): self {

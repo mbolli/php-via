@@ -29,7 +29,8 @@ $config = (new Config())
     <div class="callout callout--warn">
         <strong>Read-only does not mean private.</strong> With the Dev Bar on, every visitor sees the traces,
         logs, scopes, context ids and signal values of every tab on the worker, also other visitors' tabs, as
-        <code>/_via/scopes</code> and the console list them. Session scopes show a hash, never the session
+        <code>/_via/scopes</code> and the console list them, and the server's request counts and runtime
+        figures in the Stats panel. Session scopes show a hash, never the session
         cookie, and traces show <code>[redacted]</code> for attributes named like a password, token, cookie or
         session. Outside development,
         turn it on only for a demo or for a deployment that only trusted people reach, such as one behind an
@@ -45,7 +46,7 @@ $config = (new Config())
         signals in a sidebar in dev mode only.
     </p>
 
-    <h2 id="panels">The six panels</h2>
+    <h2 id="panels">The seven panels</h2>
     <table>
         <thead>
             <tr><th>Panel</th><th>Shows</th></tr>
@@ -56,6 +57,7 @@ $config = (new Config())
             <tr><td><strong>SSE</strong></td><td>The wire: every <code>datastar-fetch</code> event, with the patch it carried (elements or signals) expandable inline.</td></tr>
             <tr><td><strong>Request</strong></td><td>Route, context id and the request span's attributes (method, status, byte size).</td></tr>
             <tr><td><strong>Scopes</strong></td><td>The worker's scopes, the contexts in each and the connection counts: who shares what.</td></tr>
+            <tr><td><strong>Stats</strong></td><td>Every figure of <code>getStats()-&gt;getAll()</code>, the broadcast tick, and the hook flags, AIO threads and event loop lag of the worker that answered. See <a href="{{ basePath }}docs/dev-bar#stats">Server statistics</a>.</td></tr>
             <tr><td><strong>Logs</strong></td><td>Server log lines, filtered by level, plus errors from the browser. See <a href="{{ basePath }}docs/dev-bar#logs">Server logs</a>.</td></tr>
         </tbody>
     </table>
@@ -154,6 +156,7 @@ $config
             <tr><td><code>GET /_via</code></td><td>The Dev Console: the Dev Bar full-screen</td></tr>
             <tr><td><code>GET /_via/stream</code></td><td>SSE stream of <code>trace</code> and <code>log</code> events</td></tr>
             <tr><td><code>GET /_via/scopes</code></td><td>JSON snapshot for the Scopes panel</td></tr>
+            <tr><td><code>GET /_via/stats</code></td><td>JSON snapshot for the Stats panel</td></tr>
             <tr><td><code>POST /_via/signal</code></td><td>Signal write, refused unless writes are on</td></tr>
             <tr><td><code>POST /_via/reset</code></td><td>Clears the worker's trace buffer</td></tr>
             <tr><td><code>GET /_via/devbar.js</code>, <code>/_via/devbar.css</code></td><td>The overlay's assets</td></tr>
@@ -170,6 +173,14 @@ $config
     </p>
 
     <h2 id="stats">Server statistics</h2>
+    <p>
+        The Stats panel reads <code>/_via/stats</code> every 2&nbsp;s while it is open, and stops when you
+        switch to another panel. <code>requests</code>, <code>avg_request_time</code>, <code>actions</code> and
+        <code>sse_connections</code> count for the whole server: page, static file and <code>route()</code>
+        requests, actions where they run, and streams that opened. The other figures belong to the worker
+        that answered, which the panel names, so with several workers they change with the worker a poll
+        reaches. Like the other panels, it is there wherever the Dev Bar is, also outside dev mode.
+    </p>
     <p>
         In dev mode, <code>GET /_stats</code> returns JSON for the worker that answers: its contexts, the
         connected clients, render timings (<code>render_stats</code>), broadcast flushes

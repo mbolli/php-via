@@ -456,11 +456,16 @@ $app->log('debug', 'Action fired', $c);
 
     <h4 id="via-get-stats"><code>getStats(): Stats</code></h4>
     <p>
-        This worker's statistics. <code>getStats()-&gt;getStats()</code> returns the render timings
+        The server's statistics. <code>getStats()-&gt;getStats()</code> returns this worker's render timings
         (<code>render_count</code>, <code>total_time</code>, <code>min_time</code>, <code>max_time</code>,
-        <code>avg_time</code>), and <code>getStats()-&gt;getBroadcastStats()</code> the broadcast flushes
+        <code>avg_time</code>), and <code>getStats()-&gt;getBroadcastStats()</code> its broadcast flushes
         (<code>scheduled</code>, <code>coalesced</code>, <code>flushes</code>, <code>flush_overruns</code>
-        and their durations in milliseconds). In dev mode <code>GET /_stats</code> serves them as JSON.
+        and their durations in milliseconds). <code>getStats()-&gt;getAll()</code> returns every figure in one
+        array: <code>requests</code>, <code>avg_request_time</code> (ms), <code>actions</code> and
+        <code>sse_connections</code> count for the whole server, <code>active_sse</code> and
+        <code>active_contexts</code> are this worker's open streams and contexts, and the render, GC and
+        broadcast figures are this worker's. The Dev Bar's <a href="/docs/dev-bar#panels">Stats panel</a>
+        shows them, and in dev mode <code>GET /_stats</code> serves the render and broadcast figures as JSON.
     </p>
 
     <h2 id="context">Context</h2>
@@ -1333,8 +1338,10 @@ $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarInt
     <h4 id="config-with-sse-max-queued-bytes"><code>withSseMaxQueuedBytes(int $bytes): Config</code></h4>
     <p>
         The unsent backlog, 1&nbsp;MiB by default, past which a stream drops view updates for a slow client
-        instead of waiting for it; the next render sends them again. Signals, scripts and
-        <code>patchElements()</code> patches are never dropped. 0 turns dropping off.
+        instead of waiting for it; the next render sends them again. Once past it, the stream drops them
+        until its backlog is empty. Signals, scripts and <code>patchElements()</code> patches are never
+        dropped. 0 turns dropping off. A threshold above half of <code>socket_buffer_size</code> (2&nbsp;MiB
+        by default) acts as half of it.
     </p>
 
     <h4 id="config-with-broadcast-tick-ms"><code>withBroadcastTickMs(int $ms): Config</code></h4>
@@ -1386,14 +1393,15 @@ $config->withBroadcastThrottle('import:*', 250);
     <h4 id="config-get-context-revival-window-ms"><code>getContextRevivalWindowMs(): int</code></h4>
     <p>The revival window in milliseconds, 0 when revival is off.</p>
 
-    <h4 id="config-with-gc-interval-ms"><code>withGcIntervalMs(int $ms): Config</code></h4>
+    <h4 id="config-with-gc-interval-ms"><code>withGcIntervalMs(int $ms, bool $onGrowth = false): Config</code></h4>
     <p>
-        How a worker runs PHP's cycle collector, whose every run walks all live objects. Above 0, php-via runs
-        it when the worker's memory has grown by half since the last run, and at least every <code>$ms</code>
-        while possible roots wait, with PHP's own runs off. 0 leaves the collector to PHP. Under php-via's runs,
-        a loop that creates cycles without ever waiting on I/O frees them only once it ends: call
-        <code>gc_collect_cycles()</code> in such a loop. <a href="/docs/performance#cycle-collector">Performance → Cycle collector</a>
-        gives the default and what each choice costs.
+        How a worker runs PHP's cycle collector, whose every run walks all live objects. By default PHP runs it
+        itself, and each worker also runs it every <code>$ms</code> (30&nbsp;s); 0 turns the timed runs off.
+        <code>onGrowth: true</code> turns PHP's own runs off: the worker then runs the collector when its memory
+        has grown by half since the last run, and every <code>$ms</code> while possible roots wait. With
+        <code>onGrowth</code>, a loop that creates cycles without ever waiting on I/O frees them only once it
+        ends: call <code>gc_collect_cycles()</code> in such a loop. <a href="/docs/performance#cycle-collector">Performance → Cycle collector</a>
+        gives what each choice costs.
     </p>
 
     <h3 id="config-security">Security</h3>

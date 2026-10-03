@@ -1532,8 +1532,8 @@ class Context {
      * A callable that throws is logged and reaches Via::onError() as ErrorPhase::Render, and the browser sees the
      * download fail.
      *
-     * With more than one worker only the worker that holds the context serves the URL, which a request over the
-     * tab's HTTP/2 connection reaches; on another worker it answers 404.
+     * With more than one worker, a request for the URL that reaches another worker is passed to the worker that
+     * holds the context, as an action is (see Config::withContextTimeouts(forwardMs:)).
      *
      * ```php
      * $url = $c->download(function () use ($rows): \Generator {

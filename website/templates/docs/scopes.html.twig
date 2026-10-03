@@ -205,9 +205,11 @@ $app->page('/chat/{room}', function (Context $c, string $room): void {
 
     <h2 id="scope-lifetime">When a scope's signals go</h2>
     <p>
-        A worker drops a scope's signals and actions when its last context in that scope is destroyed. With one
-        worker, the next tab that declares such a signal starts from its initial value again. Keep a value that
-        has to outlive its visitors in GlobalState or your database, and seed the signal from it:
+        A scope's signals and actions outlive the tabs that use them: a worker keeps them after the last tab
+        in the scope has disconnected, and a tab that declares such a signal later gets the value it had. So
+        per-entity scopes such as <code>room:&lt;id&gt;</code> add up for the life of the worker. The values go
+        when the server stops, and with one worker also when the worker restarts. Keep a value that has to
+        outlive them in GlobalState or your database, and seed the signal from it:
     </p>
     {% code 'php' %}{% verbatim %}
 $visits = $c->signal($app->globalState('visits', 0), 'visits', Scope::ROUTE);
