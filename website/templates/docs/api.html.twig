@@ -65,8 +65,8 @@ $app->middleware(new CorsMiddleware([...]));
 
     <h3 id="via-regenerate-session"><code>regenerateSession(ServerRequestInterface $request): void</code></h3>
     <p>
-        <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the response to
-        <code>$request</code> sets a new session cookie. Middleware calls it before
+        <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the session rotates
+        at the call, and the response to <code>$request</code> sets the new cookie. Middleware calls it before
         <code>$handler-&gt;handle()</code>, which sends the page or the action's response; afterwards it throws a
         <code>LogicException</code>. Like the context's, it throws an <code>OverflowException</code> when the record
         of rotated cookies is full, so call it before the login writes anything.
@@ -520,8 +520,9 @@ $c->clearSessionData();                // clear entire session bucket
         rotated cookies is full, and the visitor then stays logged out.
     </p>
     <p>
-        The old cookie keeps working for 10 seconds, for the requests other tabs sent before the browser had the new
-        one, and whoever holds it reaches the session until then. After that it starts a new session, and an SSE
+        The rotation happens at the call, and the old cookie keeps working for 10 seconds from then, for the requests
+        other tabs sent before the browser had the new one; whoever holds it reaches the session until then. A login
+        that does slow work after the call should call it last. After that it starts a new session, and an SSE
         stream opened with it ends: the tab is asked to reconnect, which a browser with the new cookie does at once,
         and one with only the old cookie is refused. In an action, the new cookie goes out with that action's response, also
         when another action of the tab runs at the same time. Called outside an action or a page handler, the

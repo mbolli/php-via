@@ -18,8 +18,11 @@ final class RequestSession {
     /** The cookie a request without a valid one gets. */
     public const string NEW = 'new';
 
-    /** Via::regenerateSession() asked for a new cookie. */
+    /** A rotation asked for the cookie of a new session, which has nothing to retire. */
     public bool $rotate = false;
+
+    /** The cookie a rotation issued for this request's response when it was asked for. */
+    public ?string $issued = null;
 
     /** The response's session cookie is decided. */
     public bool $written = false;

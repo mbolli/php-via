@@ -544,9 +544,9 @@ class Via {
 
     /**
      * Give the visitor of $request a new session cookie with the response, for a login handled in middleware or
-     * a route() handler. The session keeps its id, its data and its tabs; the old cookie keeps working for
-     * 10 seconds, for requests the browser sent before the new one arrived, and then starts a new session.
-     * See Context::regenerateSession() for an action or a page handler.
+     * a route() handler. The session keeps its id, its data and its tabs. The rotation happens at the call: from
+     * then on the old cookie keeps working for 10 seconds, for requests the browser sent before the new one
+     * arrived, and then starts a new session. See Context::regenerateSession() for an action or a page handler.
      *
      * Middleware calls it before $handler->handle(), which sends the page or the action's response, and before
      * the login writes anything, so a throw leaves the visitor logged out.
@@ -565,8 +565,7 @@ class Via {
             throw new \LogicException('regenerateSession() came after the response of this request went out. In middleware, call it before $handler->handle().');
         }
 
-        $this->sessionManager->tokens()->reserve();
-        $session->rotate = true;
+        $this->sessionManager->rotateNow($session);
     }
 
     /**

@@ -268,8 +268,9 @@ message that names the new one.
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
 - **`$c->regenerateSession()`** gives the session a new cookie with the response, for a login or a
   logout, and `$app->regenerateSession($request)` does it in middleware and `route()` handlers. The
-  session keeps its id, data, SESSION signals and tabs on every worker. The old cookie works for 10
-  more seconds, then the streams opened with it end and their tabs reconnect with the new one. See
+  session keeps its id, data, SESSION signals and tabs on every worker. It rotates at the call: the
+  old cookie works for 10 more seconds, then the streams opened with it end and their tabs reconnect
+  with the new one. See
   [the API reference](https://via.zweiundeins.gmbh/docs/api#context-regenerate-session).
 - **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on
   every worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples

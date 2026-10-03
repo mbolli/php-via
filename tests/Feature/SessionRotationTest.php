@@ -332,6 +332,67 @@ describe('Context::regenerateSession()', function (): void {
     });
 });
 
+/**
+ * An app whose action, page handler and route() handler rotate the session and record what the request's cookie
+ * looks up as right after the call, in $states by place.
+ *
+ * @param array<string, string> $states
+ */
+function rotateAtCallApp(array &$states): TestApp {
+    return new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$states): void {
+        $state = static fn (?string $cookie): string => $via->getSessionManager()->tokens()->lookup((string) $cookie)[1];
+        $via->page('/p', static function (Context $c) use (&$states, $state): void {
+            $c->action(static function (Context $c) use (&$states, $state): void {
+                $c->regenerateSession();
+                $states['action'] = $state($c->cookie(SessionManager::SESSION_COOKIE_NAME));
+            }, 'login');
+            $c->view(static fn (): string => '<p id="p">p</p>');
+        });
+        $via->page('/magic', static function (Context $c) use (&$states, $state): void {
+            $c->regenerateSession();
+            $states['page'] = $state($c->cookie(SessionManager::SESSION_COOKIE_NAME));
+            $c->view(static fn (): string => '<p id="g">g</p>');
+        });
+        $via->route('POST', '/api/login', new RotationHandler(static function (ServerRequestInterface $r) use ($via, &$states, $state): ResponseInterface {
+            $via->regenerateSession($r);
+            $states['route'] = $state($r->getCookieParams()[SessionManager::SESSION_COOKIE_NAME] ?? null);
+
+            return new Psr7Response(204);
+        }));
+    });
+}
+
+describe('rotation at the call', function (): void {
+    test('starts the old cookie\'s grace period in an action, a page handler and a route() handler before the response goes out', function (): void {
+        $states = [];
+        $app = rotateAtCallApp($states);
+        $tab = $app->open('/p');
+        $tab->action('login');
+        $tab->open('/magic');
+        $tab->request('POST', '/api/login');
+
+        expect($states)->toBe(['action' => SessionTokens::GRACE, 'page' => SessionTokens::GRACE, 'route' => SessionTokens::GRACE]);
+    });
+
+    test('rotates once per request, however often it is called', function (): void {
+        $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via): void {
+            $via->page('/p', static function (Context $c): void {
+                $c->action(static function (Context $c): void {
+                    $c->regenerateSession();
+                    $c->regenerateSession();
+                }, 'login');
+                $c->view(static fn (): string => '<p id="p">p</p>');
+            });
+        });
+        $tab = $app->open('/p');
+        $rows = $app->via()->getSessionManager()->tokens()->count();
+        $tab->action('login');
+
+        // One row for the new cookie, one for the retired one.
+        expect($app->via()->getSessionManager()->tokens()->count())->toBe($rows + 2);
+    });
+});
+
 describe('the SSE streams of a rotated session', function (): void {
     test('a stream opened with the old cookie gets nothing of the session after the grace period: it asks its tab to reconnect and ends', function (): void {
         $now = 1_000_000;

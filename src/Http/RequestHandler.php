@@ -473,9 +473,13 @@ class RequestHandler {
             $context->setRequestAttributes($contextAttributes);
         }
 
+        // regenerateSession() in the handler rotates this request's session, whose cookie goes out with the page.
+        $context->bindPageSession($this->via->getRequestSession($request));
+
         try {
             $this->via->invokeHandlerWithParams($handler, $context, $params);
         } catch (\Throwable $e) {
+            $context->bindPageSession(null);
             $this->discardContext($context);
             $this->failPage('Page handler exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
             $this->via->reportError($e, $context, ErrorPhase::Render);
@@ -494,6 +498,7 @@ class RequestHandler {
         try {
             $html = $this->via->buildHtmlDocument($context);
         } catch (\Throwable $e) {
+            $context->bindPageSession(null);
             $this->discardContext($context);
             $this->failPage('Page render exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
             $this->via->reportError($e, $context, ErrorPhase::Render);
@@ -505,6 +510,7 @@ class RequestHandler {
         $this->via->armConnectDeadline($contextId);
 
         $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation(), refresh: true);
+        $context->bindPageSession(null);
 
         // Apply any cookies queued by the page handler
         foreach ($context->flushPendingCookies() as $cookie) {

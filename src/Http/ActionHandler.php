@@ -129,6 +129,7 @@ class ActionHandler {
             $request->files ?? [],
             $request->cookie ?? [],
             $attributes,
+            $this->via->getRequestSession($request),
         );
         $scope->bind();
 
@@ -187,7 +188,7 @@ class ActionHandler {
                 $cookie['sameSite'],
             );
         }
-        $this->via->writeSessionCookie($request, $response, rotate: $scope->rotatesSession || $rotateQueued);
+        $this->via->writeSessionCookie($request, $response, rotate: $rotateQueued);
     }
 
     private function syncSignalsAfterAction(Context $context, string $actionId): void {
