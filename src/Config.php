@@ -235,6 +235,13 @@ final class Config {
     /** Set by new Via() through freeze(): from then on every with* call throws. */
     private ?Settings $settings = null;
 
+    /**
+     * A clone is a new Config that new Via() has not frozen, also when the original is frozen.
+     */
+    public function __clone() {
+        $this->settings = null;
+    }
+
     public function withHost(string $host): self {
         $this->assertMutable(__FUNCTION__);
         $this->host = $host;

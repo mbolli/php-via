@@ -111,7 +111,8 @@ All notable changes to php-via will be documented in this file.
   `/about`, that matches both a route and a file in `withStaticDir()` now serves the route. Paths
   with an extension are still served from the static directory first.
 - **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
-  where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied.
+  where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied. A clone of a
+  frozen Config is a new Config that is not frozen.
 - **Renamed and merged methods throw and name their replacement** until 0.15:
   - `Via::onStart()` and `onShutdown()` are `onWorkerStart()` and `onWorkerStop()`. The callback
     gets the worker id: run work meant for one worker where `$workerId === 0`.

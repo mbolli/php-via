@@ -106,6 +106,18 @@ describe('Config freeze', function (): void {
         expect($config->freeze()->port)->toBe(4444);
     });
 
+    test('a clone of a frozen Config is a new Config that new Via() has not frozen', function (): void {
+        $base = (new Config())->withLogLevel('error')->withPort(4444);
+        $via = new Via($base);
+        $copy = clone $base;
+
+        expect($copy->withPort(4555))->toBe($copy)
+            ->and($copy->freeze()->port)->toBe(4555)
+            ->and($via->getSettings()->port)->toBe(4444)
+            ->and(fn () => $base->withPort(4666))->toThrow(LogicException::class, 'freezes the Config')
+        ;
+    });
+
     test('getters keep working, and a second Via takes the frozen Config', function (): void {
         $config = (new Config())->withLogLevel('error')->withDevMode()->withBasePath('/app');
         $first = new Via($config);
