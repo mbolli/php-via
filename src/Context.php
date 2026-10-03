@@ -85,7 +85,7 @@ class Context {
     /**
      * Tab state this page keeps itself: with one worker, and with several until its directory row exists.
      *
-     * @var array<string, array<string, string>> key bucket ('' for the page, the namespace for a component) => key => serialized value
+     * @var array<string, array<string, string>> key bucket ('' for the page, 'component:<namespace>' for a component) => key => serialized value
      */
     private array $tabState = [];
 
@@ -203,7 +203,8 @@ class Context {
      *
      * Tab state is for what the page needs to rebuild the tab but the browser does not hold, such as
      * the last query result or a cursor: it never reaches the browser, and the handler that runs again
-     * on a revival reads it back. It goes when the revival window ends (Config::withContextTimeouts()).
+     * on a revival reads it back. It lives as long as the tab's context and then for the revival window
+     * (Config::withContextTimeouts()).
      * A component has keys of its own. Values are copies: change one and write it again.
      *
      * @param string $key     Key
