@@ -6,8 +6,7 @@
     <p>
         A php-via server keeps a context in memory for every open tab and holds one SSE stream per tab.
         Its capacity depends on what each page view, open tab, action and broadcast costs, and those
-        costs are listed below, measured on the code of this website. The full tables, and the earlier
-        comparison of 0.13.0 with 0.13.1, are in
+        costs are listed below, measured with 0.14.0 on the code of this website. The full tables are in
         <a href="https://github.com/mbolli/php-via/blob/master/bench/capacity/RESULTS.md" target="_blank" rel="noopener">bench/capacity/RESULTS.md</a>.
     </p>
     <p class="note">
@@ -26,13 +25,14 @@
             <tr><td>Open tab, Brotli level 1</td><td>none while idle</td><td>65 to 125&nbsp;KB</td></tr>
             <tr><td>Open tab, no Brotli</td><td>none while idle</td><td>40 to 75&nbsp;KB</td></tr>
             <tr><td>Private action with a <code>sync()</code></td><td>0.16 to 0.20&nbsp;ms</td><td></td></tr>
+            <tr><td>Action passed to the worker that holds its tab</td><td>about twice that of one that reaches it</td><td></td></tr>
             <tr><td>Broadcast, per receiving tab</td><td>about 0.05&nbsp;ms</td><td></td></tr>
             <tr><td>Keep-alive comment every 15&nbsp;s</td><td>under 1% of a core for 1,000 tabs</td><td></td></tr>
         </tbody>
     </table>
     <p>
-        A broadcast renders a cached view once per scope and then writes and compresses one frame per tab,
-        so the per-tab cost is what grows with the audience. Broadcasts coalesce: a worker renders a busy
+        A broadcast to tabs whose views pass <code>shareRender: true</code> renders once per scope and then writes and
+        compresses one frame per tab, so the per-tab cost is what grows with the audience. Broadcasts coalesce: a worker renders a busy
         scope at most once per tick (25&nbsp;ms by default), however many actions marked it.
         <a href="/docs/broadcasting#timing">Broadcasting</a> explains the timing.
     </p>
@@ -61,16 +61,14 @@
     <p>
         A crawler, a link preview or a prefetch loads the page but never connects its stream. php-via keeps
         that context until the connect timeout (<code>withContextTimeouts(connectMs: ...)</code>, 30&nbsp;s by
-        default), so a crawler fetching 50 pages per second holds about 50&nbsp;MB. Before 0.13.1 such
-        contexts, and every page that called <code>$c->scope()</code>, were never freed.
+        default), so a crawler fetching 50 pages per second holds about 50&nbsp;MB.
     </p>
     <p>
         When the contexts of such a burst expire, php-via destroys them in 10&nbsp;ms slices, and each one is
         freed as soon as nothing refers to it. Its internal helpers hold it weakly, so a destroyed context leaves
         no reference cycles for PHP's cycle collector, whose every run walks all live contexts. While the
-        contexts of a 250,000-view burst expire, the collector runs once, where it ran 20 times when each
-        destroyed context left some 10 objects in cycles. The pauses left in such a burst come from collector
-        runs while the views arrive, which the next section covers.
+        contexts of a 250,000-view burst expire, the collector runs once. The pauses left in such a burst come
+        from collector runs while the views arrive, which the next section covers.
     </p>
 
     <h2 id="cycle-collector">Cycle collector</h2>
@@ -78,12 +76,18 @@
         PHP's cycle collector frees objects that refer to each other in a loop, and every run walks all live
         objects of the worker, every live context included. PHP starts a run once 10,000 possible roots have
         piled up, raises that threshold after a run that frees nothing and lowers it again after one that frees
-        something. A php-via worker turns those runs off and starts one itself, checked every 100&nbsp;ms, when:
+        something. A php-via worker keeps those runs and also runs the collector every 30&nbsp;s:
+        <code>Config::withGcIntervalMs($ms)</code> sets that interval, and 0 turns the timed runs off.
+    </p>
+    <p>
+        In a burst of page views, or in an app whose requests leave cycles, PHP's runs come often, and each one
+        walks every live context. <code>withGcIntervalMs(30_000, onGrowth: true)</code> turns PHP's runs off, and the
+        worker starts a run itself, checked every 100&nbsp;ms, when:
     </p>
     <ul>
         <li>its memory has grown by half since the last run, and by 32&nbsp;MiB at least,</li>
         <li>half the room that was left below <code>memory_limit</code> after the last run is used,</li>
-        <li>or 30&nbsp;s have passed since the last run and possible roots wait.</li>
+        <li>or the interval, 30&nbsp;s by default, has passed since the last run and possible roots wait.</li>
     </ul>
     <p>
         The collector's work then grows with the memory a worker allocates, not with how many objects its
@@ -94,15 +98,15 @@
         <thead><tr><th>Burst</th><th>Runs</th><th>In the collector</th><th>Longest pause</th></tr></thead>
         <tbody>
             <tr><td>No cycles, PHP's runs</td><td>25</td><td>2.2 to 2.8&nbsp;s</td><td>0.30 to 0.37&nbsp;s</td></tr>
-            <tr><td>No cycles, php-via's runs</td><td>8 to 9</td><td>0.5 to 0.8&nbsp;s</td><td>0.24 to 0.40&nbsp;s</td></tr>
+            <tr><td>No cycles, <code>onGrowth</code></td><td>8 to 9</td><td>0.5 to 0.8&nbsp;s</td><td>0.24 to 0.40&nbsp;s</td></tr>
             <tr><td>A cycle per view, PHP's runs</td><td>201 to 206</td><td>16.0 to 16.2&nbsp;s</td><td>0.19 to 0.27&nbsp;s</td></tr>
-            <tr><td>A cycle per view, php-via's runs</td><td>10</td><td>1.1&nbsp;s</td><td>0.35 to 0.43&nbsp;s</td></tr>
+            <tr><td>A cycle per view, <code>onGrowth</code></td><td>10</td><td>1.1&nbsp;s</td><td>0.35 to 0.43&nbsp;s</td></tr>
         </tbody>
     </table>
     <p>
-        Without cycles, php-via's runs let the worker serve 29,700 views a second instead of 24,600. With a
+        Without cycles, <code>onGrowth</code> let the worker serve 29,700 views a second instead of 24,600. With a
         cycle per view and PHP's runs, it spent 16 of the 20&nbsp;s in the collector and served 128,000 views;
-        with php-via's runs it served all 250,000 in 9&nbsp;s.
+        with <code>onGrowth</code> it served all 250,000 in 9&nbsp;s.
     </p>
     <p class="note">
         Three runs each, held at full clock as above, without Brotli. The longest pause follows the number of
@@ -110,26 +114,33 @@
     </p>
     <p>
         A run still walks every live context, so the longest pause stays about one such walk, and runs that
-        come less often each handle more possible roots. Between runs, cycles can take as much memory as the
+        come less often each handle more possible roots. Between <code>onGrowth</code> runs, cycles can take as much memory as the
         growth that makes a run due: half of what the worker used after the last run and at least 32&nbsp;MiB,
         or half the room left below <code>memory_limit</code> when that is less. A worker of 5&nbsp;MB can thus
         hold more than six times its live memory in cycles.
     </p>
     <p id="cycle-collector-loops">
-        The check runs between coroutines, so a loop that creates cycles without waiting on I/O, such as a
-        CPU-bound import inside one action, frees them only once it ends. If they outgrow the room below
-        <code>memory_limit</code> first, the worker dies with a fatal error and every tab on it with it, where
-        PHP's own runs would have freed them as the loop went. Call <code>gc_collect_cycles()</code> inside such
-        a loop, once per batch of rows say, or keep PHP's runs with <code>withGcIntervalMs(0)</code>.
-        <code>Config::withGcIntervalMs($ms)</code> otherwise sets the longest time between runs.
+        With <code>onGrowth</code>, the check runs between coroutines, so a loop that creates cycles without waiting
+        on I/O, such as a CPU-bound import inside one action, frees them only once it ends. If they outgrow the room
+        below <code>memory_limit</code> first, the worker dies with a fatal error and every tab on it with it, where
+        PHP's own runs would have freed them as the loop went. Turn <code>onGrowth</code> on only where no request
+        runs such a loop, or call <code>gc_collect_cycles()</code> inside it, once per batch of rows say.
     </p>
 
     <h2 id="broadcasts">Keeping broadcasts narrow</h2>
     <p>
-        A broadcast to a page's scope re-renders the page and every component on it. Three patterns from this
+        A broadcast to a page's scope re-renders the page and every component on it. Four patterns from this
         website keep a busy page cheap:
     </p>
     <ul>
+        <li>
+            Share the render of a view that is the same for every tab: <code>$c->view(..., shareRender: true)</code> after
+            <code>$c->scope(...)</code>. Without it each tab renders its own update. In the
+            <code>shared_read</code> benchmark of <code>bench/contention</code>, which renders without writing frames, a
+            broadcast to 2,000 contexts whose view reads five scoped signals from the shared store took 3.8&nbsp;ms with a
+            shared render and 22&nbsp;ms when each context rendered its own. <a href="/docs/views">Views</a> says when a
+            render must not be shared.
+        </li>
         <li>
             Give a busy widget a scope of its own and broadcast to that scope. The home page counter lives in
             <code>home:counter</code>, so a click re-renders the counters and not the poll next to them.
@@ -155,9 +166,17 @@ $app->page('/docs/install', function (Context $c): void {
     <h2 id="workers">More workers</h2>
     <p>
         With <code>withWorkerNum(2)</code> on two cores, page views per second rose from 797 to 1,390 for
-        <code>/docs/signals</code> and from 238 to 468 for <code>/docs/api</code>. Scoped signals, session data and the client list are shared between
-        workers, and the shared context directory has to be sized for your traffic:
-        <a href="/docs/deployment#same-machine">Deployment</a> gives the rule.
+        <code>/docs/signals</code> and from 238 to 468 for <code>/docs/api</code>, over HTTP/1.1. Scoped signals, session data
+        and the client list are shared between workers, and the shared context directory has to be sized for your
+        traffic: <a href="/docs/deployment#same-machine">Deployment</a> gives the rule.
+    </p>
+    <p>
+        Two things limit what extra workers buy. Behind a proxy that speaks h2c to php-via, every client arrives on one
+        connection and so on one worker until that connection carries 1,280 streams. Over HTTP/1.1 the clients spread,
+        but a tab's actions usually reach another worker than its stream, which passes them on: with N workers about
+        (N&minus;1)/N of the actions, each at about twice the CPU. <a href="/docs/deployment#tab-worker">Deployment</a>
+        explains both. Handlers that spend their time on CPU gain the most; an app whose actions mostly broadcast gains
+        little.
     </p>
 
     <h2 id="small-server">A small server, worked through</h2>

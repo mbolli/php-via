@@ -429,6 +429,11 @@ $app->group('/docs', function (Via $app) use ($codeResultDemo, $tabScopeDemo, $r
         ]);
     });
 
+    $app->page('/upgrading', function (Context $c): void {
+        $c->scope(Scope::routeScope('/docs/upgrading'));
+        StaticPage::view($c, 'docs/upgrading.html.twig');
+    });
+
     $app->page('/actions', function (Context $c): void {
         $c->scope(Scope::routeScope('/docs/actions'));
         StaticPage::view($c, 'docs/actions.html.twig');

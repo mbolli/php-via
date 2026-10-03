@@ -10,14 +10,14 @@
 
 <a href="https://via.zweiundeins.gmbh"><img src="https://raw.githubusercontent.com/mbolli/php-via/master/logo.png" alt="php-via"></a>
 
-Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using [OpenSwoole](https://openswoole.com/) for async PHP, [Datastar](https://data-star.dev) for SSE + DOM morphing, and [Twig](https://twig.symfony.com/) for templating.
+Real-time reactive web framework for PHP. Server-side reactive UIs with zero JavaScript, using [OpenSwoole](https://openswoole.com/) for async PHP, [Datastar](https://data-star.dev) for SSE + DOM morphing, and optionally [Twig](https://twig.symfony.com/) for templates.
 
-**[Documentation & Live Examples](https://via.zweiundeins.gmbh)**
+**[Documentation & Live Examples](https://via.zweiundeins.gmbh)** · Upgrading from 0.13? See **[Upgrading to 0.14](https://via.zweiundeins.gmbh/docs/upgrading)**.
 
 ## Why php-via?
 
 - **No JavaScript to write**: Datastar handles client-side reactivity, SSE, and DOM morphing
-- **Twig templates**: familiar, powerful server-side templating
+- **Closures or Twig**: views are closures that return HTML, or Twig templates once `twig/twig` is installed
 - **No build step**: no transpilation, no bundling, no node_modules
 - **Real-time by default**: every page gets a live SSE connection
 - **Scoped state**: TAB, ROUTE, SESSION, GLOBAL, and custom scopes control who shares what
@@ -50,15 +50,14 @@ use Mbolli\PhpVia\Context;
 
 $config = new Config();
 $config->withTemplateDir(__DIR__ . '/templates');
-$app = new Via($config);
+$app = new Via($config); // every with* call goes before this line
 
 $app->page('/', function (Context $c): void {
     $count = $c->signal(0, 'count');
     $step  = $c->signal(1, 'step');
 
-    $c->action(function () use ($count, $step, $c): void {
-        $count->setValue($count->int() + $step->int());
-        $c->syncSignals();
+    $c->action(function () use ($count, $step): void {
+        $count->setValue($count->int() + $step->int()); // sent to the tab after the action
     }, 'increment');
 
     $c->view('counter.html.twig');
@@ -71,7 +70,7 @@ $app->start();
 
 ```twig
 <div id="counter">
-    <p>Count: <span data-text="${{ count.id }}">{{ count.int }}</span></p>
+    <p>Count: <span data-text="{{ count.ref }}">{{ count.int }}</span></p>
     <label>Step: <input type="number" data-bind="{{ step.id }}"></label>
     <button data-on:click="@post('{{ increment.url }}')">Increment</button>
 </div>
@@ -91,13 +90,15 @@ Full documentation at **[via.zweiundeins.gmbh/docs](https://via.zweiundeins.gmbh
 ```php
 $name = $c->signal('Alice', 'name');
 $name->string();          // read
-$name->setValue('Bob');    // write → auto-pushes to browser
+$name->setValue('Bob');    // write; an action sends it to the tab when it ends
 ```
 
 ```twig
 <input data-bind="{{ name.id }}">
-<span data-text="${{ name.id }}">{{ name.string }}</span>
+<span data-text="{{ name.ref }}">{{ name.string }}</span>
 ```
+
+A signal is private to its tab unless you pass a scope: `$c->signal(0, 'votes', Scope::ROUTE)`.
 
 ### Actions: server-side functions triggered by client events
 
@@ -125,11 +126,19 @@ $save = $c->action(function () use ($c): void {
 | `Scope::GLOBAL` | All users everywhere | Notifications, announcements |
 | Custom (`"room:lobby"`) | All contexts in that scope | Chat rooms, game lobbies |
 
-### Views: Twig template files or inline strings
+`$c->scope()` sets the scope a context's view and `$c->broadcast()` belong to. Signals take their scope as an
+argument, and a view shares its update render only with `shareRender: true`.
+
+### Views: closures or Twig templates
 
 ```php
-$c->view('dashboard.html.twig', ['user' => $user]);
+$c->view(fn (): string => "<main id=\"hello\">Hello {$name->string()}</main>");
+$c->view('dashboard.html.twig', fn (): array => ['user' => $user]);       // needs twig/twig
+$c->view('board.html.twig', fn (): array => ['cells' => $cells->array()], block: 'board', shareRender: true);
 ```
+
+A string is always a template name. Pass the template data as a closure when it changes after the page load, and
+`shareRender: true` only for a view that is the same for every tab in its scope.
 
 ### Path Parameters: auto-injected by name
 
@@ -149,10 +158,15 @@ $b = $c->component($counterWidget, 'b');
 ### Lifecycle Hooks
 
 ```php
-$c->onCleanup(fn() => /* cleanup */);
-$c->setInterval(fn() => $c->sync(), 2000);  // auto-cleaned on disconnect
-$app->onClientConnect(fn(string $id) => /* ... */);
-$app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide timer
+$c->onCleanup(fn () => $app->log('info', 'tab closed'));
+$c->setInterval(fn () => $c->sync(), 2000);   // stops with the context
+$c->spawn(function (Context $c): void {       // work that outlives the action
+    $c->getSignal('report')?->setValue(buildReport());
+    $c->syncSignals();
+});
+$app->onClientConnect(fn (Context $c) => $app->broadcast('presence'));
+$app->onError(fn (\Throwable $e, ?Context $c, ErrorPhase $phase, ?string $action) => error_log("{$phase->value}: {$e->getMessage()}"));
+$app->setInterval(fn () => $app->broadcast(Scope::GLOBAL), 5000); // server-wide timer, on one worker
 ```
 
 > `onCleanup` fires after a grace period (default: 5 seconds) that tolerates page navigation
@@ -164,11 +178,11 @@ $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide
 > (10-minute window); tune or disable with `Config::withContextTimeouts(revivalWindowMs: ...)`. Revival re-runs the
 > page handler, so server-only `#[Persist]` state resets and lifecycle hooks re-fire, just as on a
 > reload. Server-owned TAB signals (`clientWritable: false`, or all of them under
-> `Config::withStrictTabSignals()`) start from the handler's initial value. With `worker_num > 1` a
-> tab lives on the worker of its SSE stream, and actions that reach another worker are passed there;
-> when the stream reconnects to another worker, the context is rebuilt the same way and takes the TAB
-> signal values the old worker still holds. Keep state that has to survive a worker restart in a scoped
-> signal or `tabState()`, or use `worker_num = 1`.
+> `Config::withStrictTabSignals()`) start from the handler's initial value, and values kept with
+> `$c->setTabState()` come back. The route's middleware runs again on a revival, so an auth gate applies.
+> With `withWorkerNum()` above 1 a tab lives on the worker of its SSE stream, and actions that reach
+> another worker are passed there; when the stream reconnects to another worker, the context is rebuilt
+> the same way and takes the TAB signal values the old worker still holds.
 
 ### Route Groups: shared prefix and/or middleware
 
@@ -182,17 +196,18 @@ $app->group('/admin', function (Via $app): void {
 ### Broadcasting: push updates to other connected clients
 
 ```php
-$c->broadcast();                    // same scope
-$app->broadcast(Scope::GLOBAL);     // all contexts
-$app->broadcast('room:lobby');      // custom scope
+$c->broadcast();                                // the context's primary scope; only this tab when it is TAB
+$app->broadcast(Scope::GLOBAL);                 // all contexts
+$app->broadcast(Scope::routeScope('/board'));   // one route
+$app->broadcast('room:lobby');                  // custom scope
+$app->countClients('room:lobby');               // connected tabs it reaches, on every worker
 ```
 
 ### Multi-node broadcasting: Redis and NATS brokers
 
-By default php-via uses an `InMemoryBroker` that is correct for a single worker. For several
-workers on one machine, use `withWorkerNum()` with `SwooleBroker`, which needs no external
-service. To fan out `broadcast()` calls across multiple servers or containers, swap in
-`RedisBroker` or `NatsBroker`:
+One worker needs no broker. Several workers on one machine (`withWorkerNum()`) use `SwooleBroker`
+unless you pass another, with no external service. To fan out `broadcast()` calls across multiple
+servers or containers, swap in `RedisBroker` or `NatsBroker`:
 
 ```php
 use Mbolli\PhpVia\Broker\RedisBroker;
@@ -228,10 +243,28 @@ Both brokers reconnect automatically with exponential backoff (1 s → 30 s cap)
 A `GET /_health` endpoint is available on every php-via server (no configuration needed):
 
 ```json
-{"status":"ok","version":"0.13.1","broker":{"driver":"RedisBroker","connected":true},"connections":{"contexts":42,"sse":38}}
+{"status":"ok","version":"0.14.0","broker":{"driver":"RedisBroker","connected":true},"connections":{"contexts":42,"sse":38}}
 ```
 
 Returns HTTP 503 when the broker is in the reconnect backoff window.
+
+### Testing: TestApp runs your pages without a server
+
+```php
+use Mbolli\PhpVia\Testing\TestApp;
+
+$app = new TestApp(new Config(), function (Via $via): void {
+    $via->page('/', function (Context $c): void {
+        $count = $c->signal(0, 'count');
+        $c->action(fn () => $count->setValue($count->int() + 1), 'increment');
+        $c->view(fn (): string => "<main id=\"counter\">{$count->int()}</main>");
+    });
+});
+$tab = $app->open('/');
+$tab->action('increment');
+assert($tab->signal('count') === 1);
+$app->shutdown();
+```
 
 ## How it Works
 
@@ -266,13 +299,13 @@ composer phpstan
 composer cs-fix
 ```
 
-**Hot PHP reload**: edit a file in `website/src/`, the worker restarts automatically (~1 s) without dropping other connections. Twig templates are always live with no restart. See [docs/development](https://via.zweiundeins.gmbh/docs/development) for the full workflow and how to replicate this pattern in your own project.
+**Hot PHP reload**: edit a file in `website/src/` or a template, and the workers restart (~1 s) without dropping other connections. See [docs/development](https://via.zweiundeins.gmbh/docs/development) for the full workflow and how to replicate this pattern in your own project.
 
 ## Credits
 
 - [Datastar](https://data-star.dev/): SSE + DOM morphing
 - [OpenSwoole](https://openswoole.com/): Async PHP
-- [Twig](https://twig.symfony.com/): Templating
+- [Twig](https://twig.symfony.com/): Templating, optional
 - [go-via/via](https://github.com/go-via/via): Original Go inspiration
 
 ## License

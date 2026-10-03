@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 /*
  * The methods 0.14 removed throw when called, so the docs, the README, llms-full.txt and the website's
- * examples must not tell readers to call them.
+ * examples must not tell readers to call them. The upgrade guide and llms-full.txt's upgrade section
+ * name them as what to replace.
  */
 
 /**
@@ -40,8 +41,12 @@ function readerFacingFiles(): array {
 
     $files = [];
     foreach ($paths as $path) {
+        if ($path === 'website/templates/docs/upgrading.html.twig') {
+            continue;
+        }
         $files[$path] = (string) file_get_contents($root . '/' . $path);
     }
+    $files['website/public/llms-full.txt'] = (string) preg_replace('/^## Upgrading from 0\.13$.*?^---$/ms', '', $files['website/public/llms-full.txt']);
 
     return $files;
 }
