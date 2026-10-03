@@ -60,7 +60,7 @@ class ViewRenderer {
     ): string {
         // Only update renders are shared: an initial page load carries the context's own id.
         if ($isUpdate && $scope !== Scope::TAB && $context->shouldShareRender()) {
-            $view = ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+            $view = $context->viewKey();
             $cached = $this->cache->get($scope, true, $view);
             if ($cached !== null) {
                 if ($this->logger->debugEnabled) {
@@ -128,7 +128,7 @@ class ViewRenderer {
         foreach ($views as $view) {
             $context = $view['context'];
             $tabPrimary = $context->getPrimaryScope() === Scope::TAB;
-            $key = ViewCache::viewKey($context->getRoute(), $context->getNamespace()) . ($tabPrimary ? "\0tab" : '');
+            $key = $context->viewKey() . ($tabPrimary ? "\0tab" : '');
             if ($view['renders'] < 2 || \count($view['hashes']) !== 1 || isset($this->identicalHinted[$key])) {
                 continue;
             }
@@ -230,7 +230,7 @@ class ViewRenderer {
             return;
         }
 
-        $key = $scope . "\0" . ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+        $key = $scope . "\0" . $context->viewKey();
         $view = $this->fanOuts[$cid][$depth][$key] ?? ['hashes' => [], 'renders' => 0, 'context' => $context];
         $view['hashes'][hash('xxh128', $html)] = true;
         ++$view['renders'];
