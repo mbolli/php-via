@@ -10,7 +10,8 @@ declare(strict_types=1);
  *   boot     without withBrotli(): the files in the static dir at start, and /datastar.js, are sent at level 11
  *            from the first request, with nothing compressed in the request
  *   later    with withBrotli(): files written after start are answered at once (level 4 when small, uncompressed
- *            when big) while a helper compresses them at level 11, and /_health keeps answering meanwhile
+ *            when big, not cacheable) while a helper compresses them at level 11, and /_health keeps answering
+ *            meanwhile
  *   workers  as later, with two workers
  *   sidecar  a fresh .br sidecar is sent as it is and a stale one is ignored
  *
@@ -178,9 +179,11 @@ if ($pid === 0) {
         $first = probeRequest($port, '/big.js', ['Accept-Encoding' => 'br']);
         report('big_first', form($first, $big));
         report('big_first_ms', round($first['ms'], 1));
+        report('big_first_cc', $first['headers']['cache-control'] ?? '');
         $first = probeRequest($port, '/small.js', ['Accept-Encoding' => 'br']);
         report('small_first', form($first, $small));
         report('small_first_ms', round($first['ms'], 1));
+        report('small_first_cc', $first['headers']['cache-control'] ?? '');
 
         // Until both files come back at level 11 on several connections in a row (which reach both workers),
         // probe /_health every 20 ms.
@@ -197,14 +200,19 @@ if ($pid === 0) {
                 ++$healthCount;
                 usleep(20_000);
             }
-            $done = form(probeRequest($port, '/big.js', ['Accept-Encoding' => 'br']), $big) === 'l11'
-                && form(probeRequest($port, '/small.js', ['Accept-Encoding' => 'br']), $small) === 'l11';
+            $bigNow = probeRequest($port, '/big.js', ['Accept-Encoding' => 'br']);
+            $smallNow = probeRequest($port, '/small.js', ['Accept-Encoding' => 'br']);
+            $done = form($bigNow, $big) === 'l11' && form($smallNow, $small) === 'l11';
+            if ($done) {
+                $finalCc = ($bigNow['headers']['cache-control'] ?? '') . ' | ' . ($smallNow['headers']['cache-control'] ?? '');
+            }
             $streak = $done ? $streak + 1 : 0;
             if ($done && $readyMs === 0) {
                 $readyMs = (int) ((microtime(true) - $start) * 1000);
             }
         }
         report('level11_everywhere', (int) ($streak >= 6));
+        report('final_cc', $finalCc ?? '');
         report('level11_after_ms', $readyMs);
         report('health_probes', $healthCount);
         report('health_max_ms', round($healthMax, 1));

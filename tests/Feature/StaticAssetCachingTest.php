@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Http\StaticBodyCache;
+use Mbolli\PhpVia\Http\StaticBrotli;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Request;
 use Tests\Support\FakeStaticResponse;
@@ -371,11 +372,18 @@ describe('Brotli for static files', function (): void {
             'feed.atom' => 'application/atom+xml',
             'robots.txt' => 'text/plain; charset=utf-8',
             'page.html' => 'text/html; charset=utf-8',
+            'page.htm' => 'text/html; charset=utf-8',
             'sitemap.xml' => 'application/xml',
             'font.woff2' => 'font/woff2',
             'font.woff' => 'font/woff',
             'photo.png' => 'image/png',
             'photo.webp' => 'image/webp',
+            'anim.gif' => 'image/gif',
+            'photo.avif' => 'image/avif',
+            'doc.pdf' => 'application/pdf',
+            'clip.mp4' => 'video/mp4',
+            'clip.webm' => 'video/webm',
+            'song.mp3' => 'audio/mpeg',
             'archive.zip' => 'application/octet-stream',
         ];
         $handler = requestHandlerFor(createVia((new Config())->withStaticDir($dir)));
@@ -392,7 +400,7 @@ describe('Brotli for static files', function (): void {
 
         expect($seen)->toBe($types)
             ->and(array_keys(array_filter($encodings, fn (string $e): bool => $e === 'identity')))
-            ->toBe(['font.woff2', 'font.woff', 'photo.png', 'photo.webp', 'archive.zip'])
+            ->toBe(['font.woff2', 'font.woff', 'photo.png', 'photo.webp', 'anim.gif', 'photo.avif', 'doc.pdf', 'clip.mp4', 'clip.webm', 'song.mp3', 'archive.zip'])
         ;
     });
 
@@ -408,6 +416,43 @@ describe('Brotli for static files', function (): void {
         expect($response->sentFile)->toBe(realpath($dir . '/app.css.br'))
             ->and($response->headers['Content-Encoding'])->toBe('br')
             ->and($response->headers['Content-Type'])->toBe('text/css; charset=utf-8')
+        ;
+    });
+
+    test('what a worker sends while the helper compresses is not cacheable, the level 11 form is', function () use (&$dir): void {
+        $via = createVia((new Config())->withStaticDir($dir));
+        $quiet = static function (string $level, string $message): void {};
+        $worker = new StaticBrotli($via->getConfig(), $quiet);
+        $worker->attachHelper(static function (string $job): void {});
+        $handler = new RequestHandler($via, new SseHandler($via), new ActionHandler($via), $worker);
+        $bigJs = str_repeat('console.log(1); ', (StaticBrotli::INTERIM_BYTES >> 4) + 1);
+        file_put_contents($dir . '/big.js', $bigJs);
+        $send = function (string $path, array $headers = ['accept-encoding' => 'br']) use ($handler): FakeStaticResponse {
+            $response = new FakeStaticResponse();
+            $handler->handleRequest(fakeStaticRequest($path, $headers), $response);
+
+            return $response;
+        };
+
+        $small = $send('/app.css');
+        $big = $send('/big.js');
+        $plain = $send('/app.css', []);
+        $helper = new StaticBrotli($via->getConfig(), $quiet);
+        foreach (['/app.css', '/big.js'] as $path) {
+            $file = (string) realpath($dir . $path);
+            $worker->receive($helper->compressForWorker($file, (int) filemtime($file), (int) filesize($file)));
+        }
+        $smallFinal = $send('/app.css');
+        $bigFinal = $send('/big.js');
+
+        $default = 'public, max-age=3600, must-revalidate';
+        expect([$small->headers['Content-Encoding'] ?? 'identity', $small->headers['Cache-Control']])->toBe(['br', 'no-store'])
+            ->and([$big->headers['Content-Encoding'] ?? 'identity', $big->headers['Cache-Control']])->toBe(['identity', 'no-store'])
+            ->and($plain->headers['Cache-Control'])->toBe($default)
+            ->and($smallFinal->body)->toBe(brotli_compress(str_repeat('body { color: red; } ', 50), 11, BROTLI_TEXT))
+            ->and($smallFinal->headers['Cache-Control'])->toBe($default)
+            ->and($bigFinal->body)->toBe(brotli_compress($bigJs, 11, BROTLI_TEXT))
+            ->and($bigFinal->headers['Cache-Control'])->toBe($default)
         ;
     });
 });
@@ -486,7 +531,8 @@ describe('the static file cache', function (): void {
 
     test('an edited file replaces its cached copy instead of adding one per mtime', function () use (&$dir): void {
         $via = createVia((new Config())->withStaticDir($dir)->withDevMode());
-        $handler = requestHandlerFor($via);
+        $brotli = new StaticBrotli($via->getConfig(), static function (string $level, string $message): void {});
+        $handler = new RequestHandler($via, new SseHandler($via), new ActionHandler($via), $brotli);
         $etags = [];
         foreach (['red', 'blue', 'green'] as $i => $color) {
             file_put_contents($dir . '/app.css', "body { color: {$color}; }");
@@ -497,7 +543,7 @@ describe('the static file cache', function (): void {
             $etags[] = $response->headers['ETag'];
         }
 
-        $br = $via->getStaticBrotli()->workerCache();
+        $br = $brotli->workerCache();
         expect(array_unique($etags))->toHaveCount(3)
             ->and($br->entries())->toHaveCount(1)
             ->and($br->bytes())->toBe(strlen(array_values($br->entries())[0]['body']))
@@ -661,15 +707,17 @@ describe('the static dir lookup', function (): void {
     test('dot segments, PHP files and NUL bytes answer 404 without a look at the disk, decoded or not', function () use (&$dir, &$outside, $handlerWithRoutes, $get): void {
         mkdir($dir . '/.git');
         mkdir($dir . '/assets/.cache', 0o777, true);
-        foreach (['.env', '.git/config', '.git/HEAD.css', 'assets/.cache/app.js', '.htpasswd', 'index.php', 'shell.PHTML', 'app.phar', 'a.css'] as $file) {
+        $php = ['index.php', 'shell.PHTML', 'app.phar', 'a.php5', 'a.php8', 'a.phps', 'a.pht', 'a.phpt', 'a.inc'];
+        foreach (['.env', '.git/config', '.git/HEAD.css', 'assets/.cache/app.js', '.htpasswd', 'a.css', ...$php] as $file) {
             file_put_contents($dir . '/' . $file, 'SECRET ' . $file);
         }
         $name = basename((string) $outside);
         $handler = $handlerWithRoutes($dir);
 
         $paths = [
+            ...array_map(static fn (string $file): string => '/' . $file, $php),
             '/.env', '/%2eenv', '/%2Eenv', '/.git/config', '/.git/HEAD.css', '/%2egit/HEAD.css', '/assets/.cache/app.js',
-            '/assets/%2Ecache/app.js', '/.htpasswd', '/index.php', '/INDEX.PHP', '/index%2ephp', '/shell.PHTML', '/app.phar',
+            '/assets/%2Ecache/app.js', '/.htpasswd', '/INDEX.PHP', '/index%2ephp',
             "/../{$name}/secret.css", "/%2e%2e/{$name}/secret.css", "/..%2f{$name}/secret.css", "/%2E%2E%2F{$name}%2Fsecret.css",
             '/assets/../a.css', '/./a.css', '/.well-known/../.env', '/.well-known/.hidden', '/a.css%00.txt', '/%00',
             '/sub/.well-known/x.txt',
@@ -684,6 +732,28 @@ describe('the static dir lookup', function (): void {
             // Nothing was looked up, not even the static dir itself.
             ->and((new ReflectionProperty(RequestHandler::class, 'staticBase'))->getValue($handler))->toBeNull()
         ;
+    });
+
+    test('a link inside the dir to a dotfile or a PHP file there answers 404, a link to a servable file works', function () use (&$dir, $handlerWithRoutes, $get): void {
+        foreach (['.env', 'config.php', 'real.css'] as $file) {
+            file_put_contents("{$dir}/{$file}", 'SECRET ' . $file);
+        }
+        symlink("{$dir}/.env", "{$dir}/env.css");
+        symlink("{$dir}/config.php", "{$dir}/config.js");
+        symlink("{$dir}/real.css", "{$dir}/alias.css");
+        $handler = $handlerWithRoutes($dir);
+
+        $responses = array_map(static fn (FakeStaticResponse $r): array => [$r->statusCode, $r->body], [
+            'env' => $get($handler, '/env.css'),
+            'php' => $get($handler, '/config.js'),
+            'alias' => $get($handler, '/alias.css'),
+        ]);
+
+        expect($responses)->toBe([
+            'env' => [404, 'Not Found'],
+            'php' => [404, 'Not Found'],
+            'alias' => [200, 'SECRET real.css'],
+        ]);
     });
 
     test('a percent-encoded path is decoded, so files with spaces are found', function () use (&$dir, $handlerWithRoutes, $get): void {

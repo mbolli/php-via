@@ -141,6 +141,25 @@ describe('a worker with a helper', function (): void {
         expect($worker->lookup($path, $newMtime, $newSize))->toBe(['body' => brotli_compress($edited, 11, BROTLI_TEXT)]);
     });
 
+    test('reports a file as pending from its first lookup until the helper answers', function (): void {
+        [$worker] = workerWithHelper();
+        [$a, $aMtime, $aSize] = writeStatic($this->dir . '/a.css', compressibleText(1000, 1));
+        [$b, $bMtime, $bSize] = writeStatic($this->dir . '/b.css', compressibleText(1000, 2));
+
+        $before = $worker->pending($a, $aMtime, $aSize);
+        $worker->lookup($a, $aMtime, $aSize);
+        $worker->lookup($b, $bMtime, $bSize);
+        // a in flight, b queued behind it
+        $waiting = [$worker->pending($a, $aMtime, $aSize), $worker->pending($b, $bMtime, $bSize), $worker->pending($a, $aMtime + 1, $aSize)];
+        $worker->receive(staticBrotli()->compressForWorker($a, $aMtime, $aSize));
+
+        expect($before)->toBeFalse()
+            ->and($waiting)->toBe([true, true, false])
+            ->and($worker->pending($a, $aMtime, $aSize))->toBeFalse()
+            ->and($worker->pending($b, $bMtime, $bSize))->toBeTrue()
+        ;
+    });
+
     test('never asks the helper for a file over the source limit', function (): void {
         [$worker, $jobs] = workerWithHelper();
         $path = $this->dir . '/huge.js';
@@ -160,6 +179,14 @@ describe('outside a server', function (): void {
         expect(staticBrotli((new Config())->withBrotli(false, staticLevel: 9))->lookup($path, $mtime, $size))
             ->toBe(['body' => brotli_compress($css, 9, BROTLI_TEXT)])
         ;
+    });
+
+    test('nothing is pending: the file is compressed at the static level at once', function (): void {
+        [$path, $mtime, $size] = writeStatic($this->dir . '/app.css', compressibleText(5000));
+        $brotli = staticBrotli();
+        $brotli->lookup($path, $mtime, $size);
+
+        expect($brotli->pending($path, $mtime, $size))->toBeFalse();
     });
 
     test('a static level of 0 sends nothing compressed, sidecars included', function (): void {
@@ -258,6 +285,36 @@ describe('compressing at start', function (): void {
             ->and($brotli->bootCache()->entries())->toHaveKey($small)
             ->and($brotli->bootCache()->entries())->not->toHaveKey($big)
         ;
+    });
+
+    test('a very compressible file does not lower the estimate for the files after it', function (): void {
+        // 384 KB that compress in a few ms, where JavaScript would take about 0.6 s.
+        $data = writeStatic($this->dir . '/data.csv', str_repeat("2026-10-02,flow,10.0.0.1,10.0.0.2,443,TCP,1500\n", 8_000))[0];
+        mkdir($this->dir . '/public');
+        $bundle = writeStatic($this->dir . '/public/bundle.js', compressibleText(StaticBrotli::INTERIM_BYTES * 4))[0];
+        $brotli = staticBrotli();
+
+        $result = $brotli->precompress([$data], $this->dir . '/public', budgetMs: 1000);
+
+        expect($result['stopped'])->toBeTrue()
+            ->and($result['ms'])->toBeLessThan(1000)
+            ->and($brotli->bootCache()->entries())->toHaveKey($data)
+            ->and($brotli->bootCache()->entries())->not->toHaveKey($bundle)
+        ;
+    });
+
+    test('skips a link to a file that is never served', function (): void {
+        mkdir($this->dir . '/public');
+        writeStatic($this->dir . '/public/.env', compressibleText(2000, 1));
+        writeStatic($this->dir . '/public/config.php', compressibleText(2000, 2));
+        symlink($this->dir . '/public/.env', $this->dir . '/public/env.css');
+        symlink($this->dir . '/public/config.php', $this->dir . '/public/config.js');
+        $css = writeStatic($this->dir . '/public/site.css', compressibleText(2000, 3))[0];
+        $brotli = staticBrotli();
+
+        $brotli->precompress([], $this->dir . '/public');
+
+        expect(array_keys($brotli->bootCache()->entries()))->toBe([realpath($css)]);
     });
 
     test('a worker sends what start compressed, without compressing it again', function (): void {

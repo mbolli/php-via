@@ -145,6 +145,14 @@ final class StaticBrotli {
     }
 
     /**
+     * Whether the helper is still to deliver this version of a file, so what lookup() returned stands in for it and
+     * must not be cached.
+     */
+    public function pending(string $path, int $mtime, int $size): bool {
+        return ($this->queue[$path] ?? null) === [$mtime, $size] || $this->isInFlight($path, $mtime, $size);
+    }
+
+    /**
      * Set up for a server, in the master process before the workers fork: start the helper process, and outside dev
      * mode compress the files that exist now. The server starts listening only after this.
      *
@@ -208,8 +216,10 @@ final class StaticBrotli {
         $level = $this->config->getBrotliStaticLevel();
         $start = hrtime(true);
         $deadline = $start + $budgetMs * 1_000_000;
-        // Measured at level 11 on JavaScript and CSS: 140 to 170 ms per 100 KB. Refined by each file compressed.
-        $nsPerByte = $level >= 10 ? 1_700.0 : 50.0;
+        // Level 11 took 90 to 180 ms per 100 KB of JavaScript and CSS. The estimate rises with slower files but never
+        // drops below this floor, or one very compressible file would let a big bundle run far past the deadline.
+        $floorNsPerByte = $level >= 10 ? 1_700.0 : 50.0;
+        $nsPerByte = $floorNsPerByte;
         $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'ms' => 0, 'stopped' => false];
         $spentNs = 0;
 
@@ -241,7 +251,7 @@ final class StaticBrotli {
             $body = brotli_compress($contents, $level, BROTLI_TEXT);
             $spentNs += hrtime(true) - $began;
             $result['bytes'] += $size;
-            $nsPerByte = $spentNs / max(1, $result['bytes']);
+            $nsPerByte = max($floorNsPerByte, $spentNs / max(1, $result['bytes']));
             if (!\is_string($body) || !$this->boot->put($path, $mtime, $size, $body)) {
                 continue;
             }
@@ -362,6 +372,10 @@ final class StaticBrotli {
      * here, no client waits on this process.
      */
     private function serveHelper(Process $process, Server $server): never {
+        // On a core a worker needs, the worker goes first.
+        if (\function_exists('proc_nice')) {
+            @proc_nice(19);
+        }
         while (true) {
             $job = $process->read(65536);
             if (!\is_string($job) || \strlen($job) <= self::JOB_HEAD_BYTES) {
@@ -403,14 +417,10 @@ final class StaticBrotli {
         if ($this->sendJob === null || $this->isRefused($path, $mtime, $size)) {
             return;
         }
-        $job = $this->inFlight;
-        if ($job !== null && $job['path'] === $path && $job['mtime'] === $mtime && $job['size'] === $size) {
-            return;
+        if (!$this->isInFlight($path, $mtime, $size) && (isset($this->queue[$path]) || \count($this->queue) < self::QUEUE_LIMIT)) {
+            $this->queue[$path] = [$mtime, $size];
         }
-        if (!isset($this->queue[$path]) && \count($this->queue) >= self::QUEUE_LIMIT) {
-            return;
-        }
-        $this->queue[$path] = [$mtime, $size];
+        // Also gives up on a job the helper never answered.
         $this->pump();
     }
 
@@ -439,6 +449,12 @@ final class StaticBrotli {
         unset($this->queue[$path]);
         $this->inFlight = ['path' => $path, 'mtime' => $mtime, 'size' => $size, 'sentAt' => time()];
         ($this->sendJob)(pack('NJJ', $this->workerId, $mtime, $size) . $path);
+    }
+
+    private function isInFlight(string $path, int $mtime, int $size): bool {
+        $job = $this->inFlight;
+
+        return $job !== null && $job['path'] === $path && $job['mtime'] === $mtime && $job['size'] === $size;
     }
 
     private function isRefused(string $path, int $mtime, int $size): bool {
@@ -515,8 +531,8 @@ final class StaticBrotli {
     }
 
     /**
-     * The framework's files, then the compressible files in the static dir, skipping dot files and dot directories,
-     * until $deadline (hrtime) passes, which sets $cut.
+     * The framework's files, then the compressible files in the static dir that may be served, until $deadline
+     * (hrtime) passes, which sets $cut.
      *
      * @param list<string> $assets
      *
@@ -549,7 +565,7 @@ final class StaticBrotli {
                     continue;
                 }
                 $real = realpath((string) $file);
-                if ($real !== false && str_starts_with($real, $base . '/')) {
+                if ($real !== false && str_starts_with($real, $base . '/') && RequestHandler::servableStaticPath(substr($real, \strlen($base) + 1))) {
                     yield $real;
                 }
             }

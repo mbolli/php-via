@@ -38,8 +38,8 @@ class RequestHandler {
     private const int STATIC_CACHE_TOTAL_BYTES = 16 << 20;
 
     /**
-     * Content type, and whether Brotli pays off, by static file extension. Fonts other than ttf and otf, and images
-     * other than svg and ico, are compressed already.
+     * Content type, and whether Brotli pays off, by static file extension. Fonts other than ttf and otf, images other
+     * than svg and ico, audio, video and PDF are compressed already.
      *
      * @var array<string, array{0: string, 1: bool}>
      */
@@ -59,6 +59,7 @@ class RequestHandler {
         'md' => ['text/markdown; charset=utf-8', true],
         'csv' => ['text/csv; charset=utf-8', true],
         'html' => ['text/html; charset=utf-8', true],
+        'htm' => ['text/html; charset=utf-8', true],
         'xml' => ['application/xml', true],
         'rss' => ['application/rss+xml', true],
         'atom' => ['application/atom+xml', true],
@@ -66,12 +67,18 @@ class RequestHandler {
         'jpg' => ['image/jpeg', false],
         'jpeg' => ['image/jpeg', false],
         'webp' => ['image/webp', false],
+        'gif' => ['image/gif', false],
+        'avif' => ['image/avif', false],
         'woff2' => ['font/woff2', false],
         'woff' => ['font/woff', false],
+        'pdf' => ['application/pdf', false],
+        'mp4' => ['video/mp4', false],
+        'webm' => ['video/webm', false],
+        'mp3' => ['audio/mpeg', false],
     ];
 
     /** Extensions never served from the static dir, so a PHP file put there by mistake does not leak its source. */
-    private const array REFUSED_EXTENSIONS = ['php', 'phtml', 'phar'];
+    private const string REFUSED_EXTENSIONS = '/^(?:php\d?|phps|phpt|pht|phtml|phar|inc)$/i';
 
     /** @var array<string, callable> */
     private array $routes = [];
@@ -83,6 +90,7 @@ class RequestHandler {
     private PsrRequestFactory $psrRequestFactory;
     private PsrResponseEmitter $psrResponseEmitter;
     private ?DevBarController $devBar = null;
+    private StaticBrotli $staticBrotli;
 
     /** Uncompressed static file bodies, kept while the file's mtime and size match. */
     private StaticBodyCache $staticCache;
@@ -90,10 +98,11 @@ class RequestHandler {
     /** @var null|array{0: string, 1: string} The configured static dir and its realpath, resolved once */
     private ?array $staticBase = null;
 
-    public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler) {
+    public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler, ?StaticBrotli $staticBrotli = null) {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
         $this->actionHandler = $actionHandler;
+        $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getConfig(), $via->log(...));
         $this->psrRequestFactory = new PsrRequestFactory();
         $this->psrResponseEmitter = new PsrResponseEmitter();
         $this->staticCache = new StaticBodyCache(self::STATIC_CACHE_TOTAL_BYTES, self::STATIC_CACHE_FILE_BYTES);
@@ -184,28 +193,22 @@ class RequestHandler {
     }
 
     /**
-     * A request path, percent-decoded and relative to the static dir, or null for one never served from it: with a
-     * NUL byte, a segment that starts with a dot (dotfiles and dot directories, '.' and '..', but /.well-known/), or
-     * a PHP file.
+     * Whether a path relative to the static dir may be served: no NUL byte, no segment that starts with a dot
+     * (dotfiles and dot directories, '.' and '..') but a leading .well-known, and no PHP source.
      *
      * @internal
      */
-    public static function staticRelativePath(string $path): ?string {
-        $query = strpos($path, '?');
-        $decoded = rawurldecode($query === false ? $path : substr($path, 0, $query));
-        if (str_contains($decoded, "\0")) {
-            return null;
+    public static function servableStaticPath(string $relative): bool {
+        if (str_contains($relative, "\0")) {
+            return false;
         }
-        foreach (explode('/', $decoded) as $i => $segment) {
-            if (str_starts_with($segment, '.') && !($i === 1 && $segment === '.well-known')) {
-                return null;
+        foreach (explode('/', $relative) as $i => $segment) {
+            if (str_starts_with($segment, '.') && !($i === 0 && $segment === '.well-known')) {
+                return false;
             }
         }
-        if (\in_array(strtolower(pathinfo($decoded, PATHINFO_EXTENSION)), self::REFUSED_EXTENSIONS, true)) {
-            return null;
-        }
 
-        return ltrim($decoded, '/');
+        return preg_match(self::REFUSED_EXTENSIONS, pathinfo($relative, PATHINFO_EXTENSION)) !== 1;
     }
 
     private function dispatch(Request $request, Response $response): void {
@@ -327,7 +330,7 @@ class RequestHandler {
                 return;
             }
 
-            $this->devBar ??= new DevBarController($this->via);
+            $this->devBar ??= new DevBarController($this->via, staticBrotli: $this->staticBrotli);
             $this->devBar->handle($path, $request, $response);
             // The SSE stream logs its own lifecycle; log the rest here.
             if ($path !== '/_via/stream') {
@@ -830,12 +833,13 @@ class RequestHandler {
     }
 
     /**
-     * The real path of the file a request path names in the static dir, or null when there is
-     * none, the path leads outside the dir, or staticRelativePath() refuses it.
+     * The real path of the file a request path names in the static dir, or null when there is none, the path leads
+     * outside the dir, or servableStaticPath() refuses the percent-decoded path or the file it leads to.
      */
     private function resolveStaticFile(string $staticDir, string $path): ?string {
-        $relative = self::staticRelativePath($path);
-        if ($relative === null) {
+        $query = strpos($path, '?');
+        $relative = ltrim(rawurldecode($query === false ? $path : substr($path, 0, $query)), '/');
+        if (!self::servableStaticPath($relative)) {
             return null;
         }
 
@@ -851,6 +855,10 @@ class RequestHandler {
         // serving the old target until a reload instead of failing the prefix check.
         $realFile = realpath($this->staticBase[1] . '/' . $relative);
         if ($realFile === false || !str_starts_with($realFile, $this->staticBase[1] . '/') || !is_file($realFile)) {
+            return null;
+        }
+        // A link inside the dir to a dotfile or a PHP file there.
+        if (!self::servableStaticPath(substr($realFile, \strlen($this->staticBase[1]) + 1))) {
             return null;
         }
 
@@ -882,10 +890,7 @@ class RequestHandler {
         // Weak, so it holds for the uncompressed body and each Brotli form of it alike.
         $etag = ConditionalGet::etag($mtime, $size);
         $mimeType = explode(';', $contentType, 2)[0];
-        $brotli = $compressible ? $this->via->getStaticBrotli() : null;
-        if ($brotli !== null && !$brotli->enabled()) {
-            $brotli = null;
-        }
+        $brotli = $compressible && $this->staticBrotli->enabled() ? $this->staticBrotli : null;
 
         $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType, $versioned));
         $response->header('ETag', $etag);
@@ -908,6 +913,10 @@ class RequestHandler {
 
         if ($brotli !== null && str_contains($request->header['accept-encoding'] ?? '', 'br')) {
             $compressed = $brotli->lookup($filePath, $mtime, $size);
+            if ($brotli->pending($filePath, $mtime, $size)) {
+                // A stand-in until the helper's level 11 arrives: a cache would keep it under the same ETag.
+                $response->header('Cache-Control', 'no-store');
+            }
             if ($compressed !== null) {
                 $response->header('Content-Encoding', 'br');
                 if (isset($compressed['file'])) {

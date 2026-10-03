@@ -45,13 +45,15 @@ test('files present at start go out at level 11 from the first request, without 
     ;
 });
 
-test('a file written after start is answered at once and gets level 11 from the helper', function (string $mode): void {
+test('a file written after start is answered at once, not to be cached, and gets level 11 from the helper', function (string $mode): void {
     $r = staticBrotliServer($mode);
 
     expect($r['big_first'])->toBe('identity', $r['out'])
         ->and((float) $r['big_first_ms'])->toBeLessThan(500.0, $r['out'])
         ->and($r['small_first'])->toBe('l4', $r['out'])
         ->and((float) $r['small_first_ms'])->toBeLessThan(500.0, $r['out'])
+        ->and([$r['big_first_cc'], $r['small_first_cc']])->toBe(['no-store', 'no-store'], $r['out'])
+        ->and($r['final_cc'])->toBe('public, max-age=3600, must-revalidate | public, max-age=3600, must-revalidate', $r['out'])
         ->and($r['level11_everywhere'])->toBe('1', $r['out'])
         ->and((float) $r['health_max_ms'])->toBeLessThan(100.0, $r['out'])
     ;

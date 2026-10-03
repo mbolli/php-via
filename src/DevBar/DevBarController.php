@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\DevBar;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\OriginPolicy;
+use Mbolli\PhpVia\Http\StaticBrotli;
 use Mbolli\PhpVia\Support\ConditionalGet;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
@@ -33,7 +34,11 @@ final class DevBarController {
     /** @var array<string, array{mtime: int, body: string, etag: string}> by file name */
     private array $assets = [];
 
-    public function __construct(private Via $via, private string $assetDir = self::ASSET_DIR) {}
+    private StaticBrotli $staticBrotli;
+
+    public function __construct(private Via $via, private string $assetDir = self::ASSET_DIR, ?StaticBrotli $staticBrotli = null) {
+        $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getConfig(), $via->log(...));
+    }
 
     /**
      * Where a shipped Dev Bar asset lives.
@@ -174,7 +179,7 @@ final class DevBarController {
             return ['status' => 404, 'headers' => [], 'body' => 'Not Found'];
         }
 
-        $brotli = $this->via->getStaticBrotli();
+        $brotli = $this->staticBrotli;
         $headers = [
             'Cache-Control' => 'no-cache',
             'ETag' => $asset['etag'],
@@ -190,7 +195,11 @@ final class DevBarController {
 
         $headers['Content-Type'] = $contentType;
         if ($brotli->enabled() && str_contains($requestHeaders['accept-encoding'] ?? '', 'br')) {
-            $compressed = $brotli->lookup($this->assetDir . '/' . $file, $asset['mtime'], \strlen($asset['body']), $asset['body']);
+            $path = $this->assetDir . '/' . $file;
+            $compressed = $brotli->lookup($path, $asset['mtime'], \strlen($asset['body']), $asset['body']);
+            if ($brotli->pending($path, $asset['mtime'], \strlen($asset['body']))) {
+                $headers['Cache-Control'] = 'no-store';
+            }
             if (isset($compressed['body'])) {
                 $headers['Content-Encoding'] = 'br';
 

@@ -180,11 +180,14 @@ describe('Multi-worker startup guard', function (): void {
     });
 
     test('a worker_num in withSwooleSettings() that matches withWorkerNum() passes', function (): void {
-        Via::assertWorkerSettings((new Config())->withSwooleSettings(['worker_num' => 1]));
-        Via::assertWorkerSettings((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 3]));
+        // Each start() gets past the worker_num check and throws at a later one.
+        $matching = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 3]));
+        $default = createVia((new Config())->withSwooleSettings(['worker_num' => 1, 'hook_flags' => SWOOLE_HOOK_STDIO]));
+        $differing = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 2]));
 
-        expect(fn () => Via::assertWorkerSettings((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 2])))
-            ->toThrow(RuntimeException::class, 'Call ->withWorkerNum(2)')
+        expect(fn () => $matching->start())->toThrow(RuntimeException::class, 'worker_num > 1 requires a multi-worker broker')
+            ->and(fn () => $default->start())->toThrow(RuntimeException::class, 'SWOOLE_HOOK_STDIO')
+            ->and(fn () => $differing->start())->toThrow(RuntimeException::class, 'Call ->withWorkerNum(2)')
         ;
     });
 

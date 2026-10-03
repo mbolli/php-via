@@ -126,7 +126,7 @@ class Config {
     /** Brotli level for dynamic responses (pages, SSE). 0 to 11; default 4. */
     private int $brotliDynamicLevel = 4;
 
-    /** Brotli level for static files, applied whenever ext-brotli is loaded. 0 turns it off; default 11. */
+    /** Brotli level for static files whenever ext-brotli is loaded, 0 for none; default 11, see withBrotli(). */
     private int $brotliStaticLevel = 11;
 
     /**
@@ -275,8 +275,8 @@ class Config {
      * Serve the files in $dir: a path with a file extension before routing, any other once no route matched.
      *
      * A path with a segment that starts with a dot (dotfiles, dot directories, '..'), except /.well-known/, and
-     * .php, .phtml and .phar files answer 404 without a look at the disk. Compressible files get Brotli, see
-     * withBrotli().
+     * PHP sources (.php, .php5, .phtml, .phar, .inc and the like) answer 404 without a look at the disk. A link in
+     * the dir to such a file answers 404 too. Compressible files get Brotli, see withBrotli().
      */
     public function withStaticDir(string $dir): self {
         $this->staticDir = rtrim($dir, '/');
@@ -953,11 +953,12 @@ class Config {
      * start() throws if one is missing.
      *
      * **Static files** (withStaticDir() files of a compressible type, /datastar.js, /via.css and the Dev Bar
-     * assets) are compressed at $staticLevel whenever ext-brotli is loaded, whatever $enabled says. 0 turns that
-     * off: `withBrotli(false, staticLevel: 0)` sends no Brotli at all. Files are compressed in the master process
-     * before the server listens (up to 2 s, not in dev mode), later ones by a helper process, so a worker never
-     * compresses at this level. A precompressed foo.css.br next to foo.css, at least as new, is sent as it is,
-     * even without ext-brotli. See https://via.zweiundeins.gmbh/docs/deployment#static-compression
+     * assets) get Brotli at level 11 whenever ext-brotli is loaded, also without a call to withBrotli().
+     * `withBrotli(false)` turns that off too, `withBrotli(false, staticLevel: 11)` keeps it for static files only.
+     * Files are compressed in the master process before the server listens (about 2 s at most, not in dev mode),
+     * later ones by a helper process, so a worker never compresses at this level. A precompressed foo.css.br next
+     * to foo.css, at least as new, is sent as it is, even without ext-brotli.
+     * See https://via.zweiundeins.gmbh/docs/deployment#static-compression
      *
      * **The dynamic level is a memory decision, not just a bandwidth one.** A streaming Brotli
      * encoder holds per-connection state that grows toward the window cap as the stream feeds it,
@@ -986,14 +987,14 @@ class Config {
      * be lowered to save memory or raised for the compression Anders Murphy reports from larger
      * windows. Changing that needs an upstream extension change.
      *
-     * @param bool $enabled      Brotli for pages and SSE
-     * @param int  $dynamicLevel level for pages and SSE (0 to 11)
-     * @param int  $staticLevel  level for static files (1 to 11), 0 for none
+     * @param bool     $enabled      Brotli for pages and SSE
+     * @param int      $dynamicLevel level for pages and SSE (0 to 11)
+     * @param null|int $staticLevel  level for static files (1 to 11), 0 for none; null: 11, or 0 if $enabled is false
      */
-    public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, int $staticLevel = 11): self {
+    public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, ?int $staticLevel = null): self {
         $this->brotli = $enabled;
         $this->brotliDynamicLevel = max(0, min(11, $dynamicLevel));
-        $this->brotliStaticLevel = max(0, min(11, $staticLevel));
+        $this->brotliStaticLevel = max(0, min(11, $staticLevel ?? ($enabled ? 11 : 0)));
 
         return $this;
     }

@@ -280,7 +280,7 @@ class Via {
         $this->staticBrotli = new StaticBrotli($this->config, $this->log(...));
         $this->sseHandler = new SseHandler($this);
         $actionHandler = new ActionHandler($this);
-        $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler);
+        $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler, $this->staticBrotli);
 
         // Share request logger with HTTP handlers
         $this->sseHandler->setRequestLogger($this->requestLogger);
@@ -363,13 +363,6 @@ class Via {
      */
     public function getRouter(): Router {
         return $this->router;
-    }
-
-    /**
-     * @internal Used by HTTP handlers and the Dev Bar
-     */
-    public function getStaticBrotli(): StaticBrotli {
-        return $this->staticBrotli;
     }
 
     /**
@@ -1980,31 +1973,6 @@ class Via {
     }
 
     /**
-     * Refuse a worker_num passed through withSwooleSettings() that differs from withWorkerNum(): php-via sets up its
-     * shared tables, cross-worker state and the broker check from withWorkerNum() alone.
-     *
-     * @throws \RuntimeException
-     *
-     * @internal
-     */
-    public static function assertWorkerSettings(Config $config): void {
-        $settings = $config->getSwooleSettings();
-        if (!\array_key_exists('worker_num', $settings) || (int) $settings['worker_num'] === $config->getWorkerNum()) {
-            return;
-        }
-
-        $n = (int) $settings['worker_num'];
-
-        throw new \RuntimeException(
-            "withSwooleSettings(['worker_num' => {$n}]) would start {$n} workers that php-via sets up as "
-            . "{$config->getWorkerNum()}: sessions, scoped signals and contexts would not be shared between them. "
-            . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(); with more than one "
-            . 'worker also pass a multi-worker broker, such as ->withBroker(new SwooleBroker()). '
-            . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
-        );
-    }
-
-    /**
      * Refuse hook_flags that break the server: STDIO without FILE, or a RedisBroker whose socket would not yield.
      *
      * @param array<string, mixed> $settings the effective server settings, see serverSettings()
@@ -2119,6 +2087,29 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Refuse a worker_num passed through withSwooleSettings() that differs from withWorkerNum(): php-via sets up its
+     * shared tables, cross-worker state and the broker check from withWorkerNum() alone.
+     *
+     * @throws \RuntimeException
+     */
+    private static function assertWorkerSettings(Config $config): void {
+        $settings = $config->getSwooleSettings();
+        if (!\array_key_exists('worker_num', $settings) || (int) $settings['worker_num'] === $config->getWorkerNum()) {
+            return;
+        }
+
+        $n = (int) $settings['worker_num'];
+
+        throw new \RuntimeException(
+            "withSwooleSettings(['worker_num' => {$n}]) would start {$n} workers that php-via sets up as "
+            . "{$config->getWorkerNum()}: sessions, scoped signals and contexts would not be shared between them. "
+            . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(); with more than one "
+            . 'worker also pass a multi-worker broker, such as ->withBroker(new SwooleBroker()). '
+            . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
+        );
     }
 
     /**
