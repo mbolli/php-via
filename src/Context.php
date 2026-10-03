@@ -1358,11 +1358,20 @@ class Context {
      *
      * @param callable|class-string $fn        Component setup function, or class name
      * @param string                $namespace Name of the component, unique on its page: it prefixes the component's
-     *                                         signals and actions and keeps its id stable when the page is rebuilt
+     *                                         signals and actions and keeps its id stable when the page is rebuilt.
+     *                                         Letters, digits, '_' and '-' only, as it goes into action URLs and signal names.
      *
      * @return callable Returns a function that renders the component
+     *
+     * @throws \InvalidArgumentException for a namespace with other characters, or one already on the page
      */
     public function component(callable|string $fn, string $namespace): callable {
+        if (preg_match('/^[A-Za-z0-9_-]+$/', $namespace) !== 1) {
+            throw new \InvalidArgumentException(
+                'A component namespace takes letters, digits, \'_\' and \'-\' only, since it goes into action URLs and signal names, got '
+                . var_export($namespace, true) . ". Build it from a key with something like 'item-' . md5(\$key)."
+            );
+        }
         if (\is_string($fn)) {
             $fn = PageMount::buildClosure(ClassMetadata::analyze($fn), $this->app);
         }

@@ -80,6 +80,28 @@ describe('view() shapes', function (): void {
         ;
     });
 
+    test('component() takes letters, digits, underscores and hyphens in a namespace and throws for anything else', function (string $namespace, bool $accepted): void {
+        $c = new Context('ctx1', '/p', viewShapeApp());
+        $leaf = fn (Context $k) => $k->view(fn (): string => 'k');
+
+        if ($accepted) {
+            expect($c->component($leaf, $namespace))->toBeCallable();
+        } else {
+            expect(fn () => $c->component($leaf, $namespace))
+                ->toThrow(InvalidArgumentException::class, "A component namespace takes letters, digits, '_' and '-' only")
+            ;
+        }
+    })->with([
+        ['cart-item_2', true],
+        ['Cart', true],
+        ['', false],
+        ['cart item', false],
+        ['cart.item', false],
+        ['cart/item', false],
+        ['café', false],
+        ['a:b', false],
+    ]);
+
     test('component() refuses a namespace another component on the page has', function (): void {
         $c = new Context('ctx1', '/p', viewShapeApp());
         $leaf = fn (Context $k) => $k->view(fn (): string => 'k');

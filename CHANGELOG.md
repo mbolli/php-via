@@ -120,6 +120,8 @@ All notable changes to php-via will be documented in this file.
   with an extension are still served from the static directory first.
 - **Route parameters arrive percent-decoded,** so `/files/a%20b` gives `a b`. An encoded slash stays
   in its parameter and arrives as `/`: check a parameter you build a file path from.
+- **A component namespace takes letters, digits, `_` and `-` only,** since it goes into action URLs
+  and signal names. Any other character throws.
 - **The default shell shows its Live Signals panel in dev mode only.**
 - **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
   where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied. A clone of a
