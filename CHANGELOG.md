@@ -13,6 +13,7 @@ All notable changes to php-via will be documented in this file.
 - **Session ids stay on the server.** SESSION scopes and signal ids carried the raw session id, the
   value of the HttpOnly session cookie, into the page HTML, the Dev Bar, traces and broker messages.
   They use a hash of it now, and php-via accepts only session ids in the form it issues.
+  `$c->regenerateSession()` gives a session a new cookie at login.
 - **Twig is optional.** `twig/twig` no longer comes with php-via: closure views need nothing more,
   and Twig apps run `composer require twig/twig`. `withTemplateDir()` keeps working, and
   `Config::withTemplateEngine()` takes any `TemplateEngine`.
@@ -61,6 +62,10 @@ All notable changes to php-via will be documented in this file.
   dev mode warns once for a tab that joined other scopes.
 - **Session scopes and SESSION signal ids changed** to `session:` plus a hash of the session id.
   Nodes that share a broker have to be upgraded together.
+- **`getSessionId()` and the `via.session` attribute return a hash of the session cookie,** not
+  the cookie, so that `regenerateSession()` can replace the cookie and keep the id. Middleware that
+  read the cookie reads `via.session`. Data an app keeps elsewhere under a 0.13 session id is not
+  found again.
 - **The update render is shared only with `view(..., shareRender: true)`.** Every view whose
   primary scope was not TAB shared it by default, and `cacheUpdates: false` opted out.
   `shareRender: true` on a TAB-primary context throws, and a full HTML document is never shared.
@@ -157,6 +162,7 @@ message that names the new one.
 - `$app->activeSseCount[$id]` → `$c->isConnected()`
 - `$app->broadcast(Scope::ROUTE)` → `$app->broadcast(Scope::routeScope('/path'))`
 - `$app->broadcast(Scope::SESSION)` → `$app->broadcast(Scope::sessionScope($id))`
+- the `via_session_id` cookie read in middleware → `$request->getAttribute('via.session')`
 - `$c->onDisconnect($fn)` → `$c->onCleanup($fn)`
 - `#[OnDisconnect]` → `#[OnCleanup]`
 - `$c->interval($ms, $fn)` → `$c->setInterval($fn, $ms)`
@@ -253,6 +259,11 @@ message that names the new one.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
   actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
+- **`$c->regenerateSession()`** gives the session a new cookie with the response, for a login or a
+  logout, and `$app->regenerateSession($request)` does it in middleware and `route()` handlers. The
+  session keeps its id, data, SESSION signals and tabs on every worker. The old cookie works for
+  10 more seconds, for requests other tabs sent before the new one arrived, and then starts a new
+  session. See [the API reference](https://via.zweiundeins.gmbh/docs/api#context-regenerate-session).
 - **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on
   every worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples
   use it to tell whether anyone is watching.
@@ -347,6 +358,9 @@ message that names the new one.
   `via_session_id` cookie. Only 32 lowercase hex characters, the form php-via issues, are accepted
   now; any other value starts a new session. Under secure cookies the plain cookie is ignored, so
   users who carry only the plain cookie get a new session once, which logs them out.
+- A login could not replace the session cookie, so a cookie someone planted before it (session
+  fixation) reached the logged-in session. `regenerateSession()` replaces it, and the website's
+  login example calls it at login and logout.
 
 ### Fixed
 

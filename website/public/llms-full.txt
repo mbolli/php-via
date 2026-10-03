@@ -538,6 +538,10 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `withAllowMissingOrigin()`. The Dev Bar endpoints and the tab-close beacon apply the same
   check.
 - A context only accepts actions and streams from the session that created it.
+- `$c->regenerateSession()` at login (and logout) gives the session a new cookie with the
+  response; `$app->regenerateSession($request)` does it in middleware or a `route()` handler.
+  The session id, session data and tabs stay, and the old cookie works for 10 more seconds.
+  Middleware reads the session id from the `via.session` attribute, never from the cookie.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
 
 ---
