@@ -4,23 +4,47 @@
 <article>
     <h1>Lifecycle</h1>
     <p>
-        php-via provides hooks at every stage of a context's life, from server start to client disconnect.
-        Use them to manage timers, presence tracking, and resource cleanup.
+        php-via provides hooks at every stage, from a worker's start to a tab's last cleanup. Use them to
+        manage timers, presence tracking, background work and resource cleanup.
+    </p>
+
+    <h2 id="workers">Worker start and stop</h2>
+    <p>
+        <code>$app-&gt;onWorkerStart()</code> runs in every worker process when it starts, and
+        <code>$app-&gt;onWorkerStop()</code> when it stops. Both callbacks get the worker's id. With
+        <code>withWorkerNum(4)</code> they run four times, and again for a worker that restarts after a reload,
+        a <code>max_request</code> recycle or a crash. Run work meant for one worker where
+        <code>$workerId === 0</code>: worker 0 always exists and restarts under the same id.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->onWorkerStart(function (int $workerId) use ($app): void {
+    if ($workerId === 0) {
+        $app->setGlobalState('started_at', time());
+    }
+});
+
+$app->onWorkerStop(function (int $workerId) use ($db): void {
+    $db->close(); // end connections and long-lived coroutines here
+});
+{% endverbatim %}{% endcode %}
+    <p>
+        A stopping worker first waits up to half its stop budget for open SSE streams and
+        <code>spawn()</code> tasks, then runs the stop callbacks. A callback cannot tell a reload from a stop.
     </p>
 
     <h2 id="connection-lifecycle">Connection lifecycle</h2>
-    <p>Here's what happens for each client:</p>
+    <p>Here's what happens for each tab:</p>
     <ol>
-        <li><strong>Page load (GET)</strong>: page handler runs, initial HTML rendered</li>
-        <li><strong>SSE connect (GET /_sse)</strong>: <code>onClientConnect</code> fires, context syncs</li>
-        <li><strong>Actions</strong>: POST to <code>/_action/{name}</code>, callback runs, patches stream back</li>
-        <li><strong>SSE disconnect</strong>: <code>onClientDisconnect</code> fires immediately</li>
-        <li><strong>Cleanup (after timeout)</strong>: <code>onCleanup</code> callbacks fire, timers cancelled</li>
+        <li><strong>Page load (GET)</strong>: the page handler runs, the initial HTML is rendered</li>
+        <li><strong>SSE connect (GET /_sse)</strong>: the view renders again and <code>onClientConnect</code> fires</li>
+        <li><strong>Actions</strong>: POST to <code>/_action/{name}</code>, the callback runs, patches stream back</li>
+        <li><strong>SSE disconnect</strong>: <code>onClientDisconnect</code> fires at once</li>
+        <li><strong>Cleanup (after a timeout)</strong>: <code>onCleanup</code> callbacks fire, timers are cancelled</li>
     </ol>
     <p>
-        If the browser reconnects within the cleanup timeout (default: 5 seconds), the context is reused
+        If the browser reconnects within the cleanup delay (default: 5 seconds), the context is reused
         and cleanup is cancelled: you won't see a spurious disconnect/reconnect for normal page refreshes.
-        Configure the timeout with <code>Config::withContextTimeouts(cleanupDelayMs: ...)</code>. A longer delay
+        Configure the delay with <code>Config::withContextTimeouts(cleanupDelayMs: ...)</code>. A longer delay
         tolerates flakier clients at the cost of holding idle contexts (and their in-memory view
         payloads) in memory longer under concurrent disconnects; pass <code>0</code> to clean up
         immediately with no reconnect grace period:
@@ -28,6 +52,10 @@
     {% code 'php' %}{% verbatim %}
 $config->withContextTimeouts(cleanupDelayMs: 60_000); // 60 seconds
 {% endverbatim %}{% endcode %}
+    <p>
+        <code>withContextTimeouts()</code> changes only the timers you name and keeps the others as they are.
+    </p>
+
     <h3 id="without-stream">Contexts without a stream</h3>
     <p>
         A context whose SSE stream never connects (a crawler, a prefetch, a tab closed before it
@@ -63,20 +91,26 @@ $config->withContextTimeouts(reconnectMs: 60_000); // default; 0 uses the connec
         <code>execScript()</code> is gone.
     </p>
 
-    <h3 id="reconnect">How the default shell reconnects</h3>
+    <h3 id="reconnect">How a page reconnects</h3>
     <p>
-        The default shell opens the stream with <code>@get('_sse')</code> and Datastar's default retry settings.
-        When the connection fails, Datastar retries after 1, 2, 4, 8 and 16 seconds and then every
-        30 seconds (<code>retryMaxWait</code>), ten times in all (<code>retryMaxCount</code>). Each retry
-        sends the tab's signals as they are at that moment, so a context revived by the retry starts from
-        the current values. Once the retries run out, or when the stream ends, the shell's 15-second
-        interval opens a new stream. That wait outlasts the 5-second cleanup delay, so a tab whose stream
-        the server ended, as a worker that stops does, is revived rather than reconnected to its context.
-        A stream that ends because a login retired its session cookie asks the tab to reconnect at once
-        instead. A request of your own with <code>retry: 'error'</code> or
-        <code>'always'</code> also retries after an HTTP error, on the same schedule and within the same
-        ten attempts. Datastar also closes the stream while the tab is hidden and opens it
-        again when the tab is shown.
+        <code>via_head</code> opens the stream with <code>@get('/_sse')</code> as soon as Datastar starts, and
+        again every 15 seconds while no stream is open. When a connection fails, Datastar 1.0.4 retries after
+        1, 2, 4, 8 and 16 seconds and then every 30 seconds (<code>retryMaxWait</code>), ten times in all
+        (<code>retryMaxCount</code>). Each retry sends the tab's signals as they are at that moment, so a context
+        revived by the retry starts from the current values. A request of your own with
+        <code>retry: 'error'</code> or <code>'always'</code> also retries after an HTTP error, on the same schedule
+        and within the same ten attempts. The <code>retrying</code> fetch event fires only when a retry is
+        scheduled. Datastar also closes the stream while the tab is hidden and opens it again when the tab is
+        shown.
+    </p>
+    <p>
+        Once the retries run out, or when a stream ends, the 15-second interval opens a new stream. That wait
+        can outlast the 5-second cleanup delay, and the tab is then revived rather than reconnected to its
+        context.
+        Two kinds of stream end ask the tab to reconnect at once instead: a worker that stops, on a deploy or a
+        reload, so another worker takes the tab, and a login that retired the session cookie the stream was
+        opened with. A page that writes its own bootstrap instead of <code>via_head</code> waits for its own
+        interval.
     </p>
     <p>
         Each connect renders the view again, and Datastar morphs it into the page. An attribute the browser
@@ -114,7 +148,7 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
     <h3 id="revival">Revival: reconnecting after cleanup, without a reload</h3>
     <p>
         When a tab is backgrounded, Datastar closes the <code>/_sse</code> stream (the right thing for
-        battery and data on mobile). If it stays hidden past the cleanup timeout, the context is
+        battery and data on mobile). If it stays hidden past the cleanup delay, the context is
         destroyed. Rather than hard-reloading the returning tab, which wipes local
         (<code>_</code>-prefixed) signals the server never saw, scroll position, and focus, php-via
         <strong>revives</strong> it: the server rebuilds an equivalent context with the
@@ -122,18 +156,21 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
         and re-seeds the signal values the client still holds and sends on reconnect. Server-owned
         TAB signals (<code>clientWritable: false</code>, or every TAB signal under
         <code>Config::withStrictTabSignals()</code>) do not take the client's copy and start from the
-        handler's initial value. With <code>worker_num &gt; 1</code> the same rebuild happens when a
-        tab's stream reconnects to a worker that does not hold the context, and the worker that held it
-        hands over its TAB signal values while it runs; actions that land on another worker are passed to
-        the one that holds the context. Keep server-owned state that has to survive a worker restart in a
-        scoped signal or in <code>tabState()</code>, or use <code>worker_num = 1</code>.
+        handler's initial value. The tab's <a href="#tab-state">tab state</a> comes back, and
+        <code>$c-&gt;input()</code> reads the page's query string again, up to 512 bytes of it.
+    </p>
+    <p>
+        With <code>withWorkerNum()</code> above 1 the same rebuild happens when a tab's stream reconnects to a
+        worker that does not hold the context, and the worker that held it hands over its TAB signal values
+        while it runs; actions that land on another worker are passed to the one that holds the context. With
+        one worker, the revival records live in the worker's memory, so a tab whose worker restarted reloads.
     </p>
     <p>
         This is on by default (10-minute window) and needs no application code. Because revival re-runs
-        the page handler, it is not lossless: server-only state (<code>#[Persist]</code>) resets and
-        <code>onCleanup</code> and connect hooks re-fire, exactly as they would on a reload. Named
-        components survive; anonymous components (created without an explicit name) reset. Tune the
-        window, or disable revival entirely (falling back to a reload on reconnect), with:
+        the page handler, it is not lossless: server-only state such as <code>#[Persist]</code> properties
+        starts over, the handler's timers start again, and <code>onCleanup</code> and connect hooks re-fire, exactly as
+        they would on a reload. Components keep their ids, since each has a namespace. Tune the window, or
+        disable revival entirely (falling back to a reload on reconnect), with:
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withContextTimeouts(revivalWindowMs: 600_000); // 10 minutes (default); pass 0 to disable
@@ -145,6 +182,39 @@ $config->withContextTimeouts(revivalWindowMs: 600_000); // 10 minutes (default);
         set on that request: on an action, or <code>SseAwareMiddleware</code> on an SSE reconnect. When it
         answers instead of calling the handler, the tab is not revived but reloads, from an SSE reconnect or
         from an action, so the page load gets the middleware's answer, such as its redirect to a login page.
+    </p>
+
+    <h2 id="tab-state">Tab state</h2>
+    <p>
+        <code>$c-&gt;setTabState($key, $value)</code> keeps a server-side value of the tab that the page needs to
+        rebuild itself but the browser does not hold, such as the last query result or a cursor.
+        <code>$c-&gt;tabState($key, $default)</code> reads it back, also in the handler that runs again on a
+        revival:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->page('/search', function (Context $c) use ($search): void {
+    $query = $c->signal('', 'query');
+
+    $c->action(function (Context $c) use ($query, $search): void {
+        $c->setTabState('results', $search->run($query->string())); // a list of strings
+        $c->sync();
+    }, 'search');
+
+    $c->view(function () use ($c): string {
+        $items = array_map(fn (string $r): string => '<li>' . htmlspecialchars($r) . '</li>', $c->tabState('results', []));
+
+        return '<ul id="results">' . implode('', $items) . '</ul>';
+    });
+});
+{% endverbatim %}{% endcode %}
+    <p>
+        Values must be serializable, never reach the browser, and are copies: change one and write it again.
+        A component has keys of its own. Tab state lives as long as the context and then for the revival window.
+        With one worker it stays in memory, and the revival records of destroyed tabs hold up to 64&nbsp;MiB of
+        it. With more than one worker every worker reads it from the shared context directory, which holds up
+        to 1&nbsp;024 serialized bytes per tab; raise that with
+        <code>withContextDirectorySize(maxTabStateBytes: ...)</code>. A write from a <code>spawn()</code> task
+        after the tab's context was destroyed still reaches the revived tab.
     </p>
 
     <h2 id="on-client-connect">onClientConnect (app-level)</h2>
@@ -172,11 +242,11 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
 
     <p>These two hooks together replace a polling timer for presence features. See <a href="/docs/broadcasting">Broadcasting</a>.</p>
 
-    <h2 id="on-disconnect">onCleanup (per-context)</h2>
+    <h2 id="on-cleanup">onCleanup (per-context)</h2>
     <p>
-        Register cleanup logic <em>per context</em>. Fires after the SSE connection has been closed and the
-        cleanup timeout has elapsed (or the browser sent a close beacon). Use this for resource cleanup
-        specific to that user's session:
+        Register cleanup logic <em>per context</em>. It fires when the context is destroyed: after the SSE
+        connection closed and the cleanup delay passed, when the browser sent the close beacon, or when no stream
+        connected within the connect timeout. Use it for resource cleanup specific to that tab:
     </p>
     {% code 'php' %}{% verbatim %}
 $c->onCleanup(function (Context $c) use ($room, $app): void {
@@ -184,31 +254,45 @@ $c->onCleanup(function (Context $c) use ($room, $app): void {
     $app->broadcast('room:' . $room);
 });
 {% endverbatim %}{% endcode %}
+    <p>A throw from a cleanup callback, or from <code>onClientConnect</code> and <code>onClientDisconnect</code>, is logged, and the other callbacks still run.</p>
+
+    <h2 id="spawn">Background tasks</h2>
+    <p>
+        <code>$c-&gt;spawn($task)</code> runs per-tab work in a coroutine of its own, such as a long query that
+        reports its progress; see <a href="/docs/actions#spawn">Work that outlasts the action</a>. A task keeps
+        running when its context is destroyed. From then on <code>$c-&gt;isDestroyed()</code> is true and its
+        syncs, patches and downloads do nothing. A stopping worker waits for running tasks, and a task that loops
+        checks <code>$app-&gt;isShuttingDown()</code> to end in time. A throw from a task reaches
+        <code>onError()</code> as <code>ErrorPhase::Task</code>.
+    </p>
 
     <h2 id="set-interval">Recurring timers</h2>
     <p>
-        <code>$c-&gt;setInterval()</code> creates a OpenSwoole timer scoped to the context.
+        <code>$c-&gt;setInterval()</code> creates an OpenSwoole timer scoped to the context.
         It fires repeatedly at the given interval (ms) and is <em>automatically cancelled</em> when the context is cleaned up:
     </p>
     {% code 'php' %}{% verbatim %}
 $c->setInterval(function () use ($elapsed, $c): void {
-    $elapsed->setValue($elapsed->int() + 1);
-    $c->sync();
+    $elapsed->increment();
+    $c->syncSignals(); // no action runs here, so send the value
 }, 1000); // every 1 second
 {% endverbatim %}{% endcode %}
 
-    <p>No need to store the timer ID or cancel it manually: it cleans up with the context.</p>
+    <p>
+        No need to store the timer ID or cancel it manually: it cleans up with the context. A throw from the
+        callback is logged, reaches <code>onError()</code> as <code>ErrorPhase::Timer</code>, and the timer keeps
+        running.
+    </p>
 
     <h2 id="server-timers">Server-level timers</h2>
     <p>
         For timers that run regardless of who is connected (e.g. a stock price tick), use
-        <code>$app->setInterval()</code>. It runs once for the whole server, on one worker even with
-        <code>worker_num &gt; 1</code>, and is cleared automatically on shutdown:
+        <code>$app-&gt;setInterval()</code>. It runs once for the whole server, on one worker even with
+        <code>withWorkerNum()</code> above 1, and is cleared automatically on shutdown:
     </p>
     {% code 'php' %}{% verbatim %}
-$app->setInterval(function () use ($app): void {
-    $price = fetchStockPrice();
-    $app->setGlobalState('price', $price);
+$app->setInterval(function () use ($app, $prices): void {
+    $app->setGlobalState('price', $prices->latest());
     $app->broadcast(Scope::routeScope('/ticker'));
 }, 5000);
 {% endverbatim %}{% endcode %}
@@ -217,13 +301,15 @@ $app->setInterval(function () use ($app): void {
         and clears it when that worker stops. Pass <code>everyWorker: true</code> to arm it in every worker
         instead, for work that belongs to each process. Call <code>Timer::tick()</code> from <code>onWorkerStart()</code> yourself
         when you need the timer ID for conditional logic; <code>onWorkerStart()</code> runs in every worker, so that
-        timer does too.
+        timer does too. <code>$app-&gt;countClients()</code> tells a timer whether anyone is watching; see
+        <a href="/docs/scopes#counting">Counting the tabs in a scope</a>.
     </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to multiple clients</li>
         <li><a href="/docs/components">Components</a>: component-level lifecycle hooks</li>
+        <li><a href="/docs/deployment#tab-worker">Same machine</a>: which worker holds a tab</li>
         <li><a href="/docs/api#context-on-cleanup">API: onCleanup()</a>: method signature</li>
         <li><a href="/docs/api#via-on-client-connect">API: onClientConnect()</a>: app-level hook signature</li>
     </ul>
