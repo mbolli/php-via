@@ -20,6 +20,8 @@ use Twig\TwigFunction;
  * Templates are autoescaped as HTML and strict about undefined variables. They get the functions
  * bind(signal, prop), dump(), via_head() and via_foot(), and the basePath global, which Via sets to
  * Config::getBasePath() so that renders outside a context, such as a notFound() page, can read it.
+ * There via_head() and via_foot() write what needs no page, the import map and the Datastar script,
+ * without a nonce, so such a page can use the site's layout.
  * environment() is the Twig Environment, for extensions, runtime loaders, globals and templates
  * held as strings.
  */
@@ -45,6 +47,9 @@ final class TwigEngine implements TemplateEngine {
         ]);
 
         $this->twig->addGlobal('basePath', '/');
+        // Via sets these to the parts that need no page; declared now, since Twig takes no new global once it renders.
+        $this->twig->addGlobal('via_head', null);
+        $this->twig->addGlobal('via_foot', null);
         $this->twig->addFunction(new TwigFunction(
             'bind',
             static fn (Signal $signal, ?string $prop = null): Markup => new Markup($signal->bind($prop), 'UTF-8'),

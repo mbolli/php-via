@@ -154,6 +154,23 @@ describe('full-document views: initial render', function (): void {
         ;
     });
 
+    test('the seed goes right after via_head\'s via_ctx meta, behind <meta charset> and ahead of the SSE connect', function (): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc18', '/doc', $via);
+        $ctx->signal(5, 'count');
+        $ctx->view(fn () => "<!DOCTYPE html>\n<html><head><meta charset=\"UTF-8\">" . $ctx->viaHead() . '<title>t</title></head><body></body></html>');
+
+        $html = $via->buildHtmlDocument($ctx);
+        $seed = strpos($html, '__ifmissing');
+
+        expect(metaSignals($html, 'data-signals__ifmissing'))->toBe([$ctx->getSignal('count')?->id() => 5])
+            ->and($html)->toContain('<meta charset="UTF-8"><meta data-via-head ')
+            ->and(strpos($html, 'data-via-head'))->toBeLessThan($seed)
+            ->and($seed)->toBeLessThan(strpos($html, '_sse'))
+            ->and(substr_count($html, 'via_ctx'))->toBe(1)
+        ;
+    });
+
     test('component signals are seeded with the page', function (): void {
         $via = createVia();
         $ctx = new Context('/_/doc12', '/doc', $via);

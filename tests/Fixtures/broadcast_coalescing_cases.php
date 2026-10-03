@@ -1458,6 +1458,152 @@ $cases = [
 
         return ['traces' => $traces];
     },
+
+    'throttle-burst' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(5)->withBroadcastThrottle('import:*', 100));
+        $value = 0;
+        $starts = [];
+        $seen = [];
+        $ctx = new Context('imp', '/imp', $app);
+        $ctx->scope('import:42');
+        $app->contexts['imp'] = $ctx;
+        $ctx->view(static function () use (&$value, &$starts, &$seen): string {
+            if (Coroutine::getCid() > 0) {
+                $starts[] = hrtime(true);
+                $seen[] = $value;
+            }
+
+            return "<div id=\"imp\">{$value}</div>";
+        });
+        $state = new CoalesceState();
+        observer($app, 'free', 'room:free', $state);
+
+        inCoroutine(static function () use ($app, &$value): void {
+            $until = hrtime(true) + 400_000_000;
+            while (hrtime(true) < $until) {
+                ++$value;
+                $app->broadcast('import:42');
+                $app->broadcast('room:free');
+                Coroutine::usleep(5_000);
+            }
+        });
+
+        $gaps = [];
+        for ($i = 1; $i < count($starts); ++$i) {
+            $gaps[] = ($starts[$i] - $starts[$i - 1]) / 1e6;
+        }
+
+        return [
+            'renders' => count($starts),
+            'minGapMs' => $gaps === [] ? null : min($gaps),
+            'lastSeen' => end($seen),
+            'final' => $value,
+            'freeRenders' => $state->renders['free'] ?? 0,
+            'flags' => flags($app),
+            'throttleTimer' => (new ReflectionProperty(Via::class, 'throttleTimerId'))->getValue($app),
+            'throttledAt' => (new ReflectionProperty(Via::class, 'throttledAt'))->getValue($app),
+        ];
+    },
+
+    'throttle-trailing' => static function (): array {
+        $app = app((new Config())->withBroadcastThrottle('import:1', 100));
+        $starts = [];
+        $ctx = new Context('imp', '/imp', $app);
+        $ctx->scope('import:1');
+        $app->contexts['imp'] = $ctx;
+        $ctx->view(static function () use (&$starts): string {
+            $starts[] = hrtime(true);
+
+            return '<div id="imp">x</div>';
+        });
+
+        $sentAt = inCoroutine(static function () use ($app): int {
+            $app->broadcast('import:1');
+            Coroutine::usleep(10_000);
+            $sentAt = hrtime(true);
+            $app->broadcast('import:1');
+
+            return $sentAt;
+        });
+
+        return [
+            'renders' => count($starts),
+            'leadingMs' => isset($starts[0]) ? ($sentAt - $starts[0]) / 1e6 : null,
+            'trailingAfterMs' => isset($starts[1]) ? ($starts[1] - $starts[0]) / 1e6 : null,
+        ];
+    },
+
+    'throttle-flush' => static function (): array {
+        $app = app((new Config())->withBroadcastThrottle('import:*', 1000));
+        $state = new CoalesceState();
+        observer($app, 'imp', 'import:9', $state);
+
+        $renders = inCoroutine(static function () use ($app, $state): array {
+            $app->broadcast('import:9');
+            Coroutine::usleep(5_000);
+            $first = $state->renders['imp'] ?? 0;
+            $app->broadcast('import:9');
+            Coroutine::usleep(20_000);
+            $held = $state->renders['imp'] ?? 0;
+            $app->flushBroadcasts();
+
+            return ['first' => $first, 'held' => $held, 'flushed' => $state->renders['imp'] ?? 0];
+        });
+
+        return [...$renders, 'final' => $state->renders['imp'] ?? 0];
+    },
+
+    'throttle-received' => static function (): array {
+        $broker = new CoalesceBroker();
+        $app = app((new Config())->withBroker($broker)->withBroadcastTickMs(5)->withBroadcastThrottle('import:*', 100));
+        $state = new CoalesceState();
+        observer($app, 'imp', 'import:7', $state);
+
+        inCoroutine(static function () use ($broker): void {
+            $until = hrtime(true) + 250_000_000;
+            while (hrtime(true) < $until) {
+                ($broker->handler)('import:7');
+                Coroutine::usleep(5_000);
+            }
+        });
+
+        return ['renders' => $state->renders['imp'] ?? 0];
+    },
+
+    'throttle-signal-writes' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(5)->withBroadcastThrottle('import:*', 100));
+        $state = new CoalesceState();
+        $actor = new Context('actor', '/actor', $app);
+        $progress = $actor->signal(0, 'progress', 'import:5');
+        observer($app, 'o1', 'import:5', $state);
+
+        inCoroutine(static function () use ($progress): void {
+            for ($i = 1; $i <= 5; ++$i) {
+                $progress->setValue($i);
+                Coroutine::usleep(10_000);
+            }
+        });
+
+        return ['renders' => $state->renders['o1'] ?? 0];
+    },
+
+    'throttle-coalescing-off' => static function (): array {
+        $app = app((new Config())->withBroadcastCoalescing(false)->withBroadcastThrottle('import:*', 100));
+        $state = new CoalesceState();
+        observer($app, 'imp', 'import:3', $state);
+        observer($app, 'free', 'room:free', $state);
+
+        $sync = inCoroutine(static function () use ($app, $state): array {
+            for ($i = 0; $i < 5; ++$i) {
+                $app->broadcast('import:3');
+                $app->broadcast('room:free');
+            }
+
+            return $state->renders;
+        });
+
+        return ['sync' => $sync, 'final' => $state->renders];
+    },
 ];
 
 $case = (string) ($argv[1] ?? '');

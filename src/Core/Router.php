@@ -57,6 +57,15 @@ class Router {
     }
 
     /**
+     * Whether $path matches the route pattern $route, such as '/users/{id}', with its parameters in $params.
+     *
+     * @param array<string, string> $params Output array for extracted parameters
+     */
+    public function matchesRoute(string $route, string $path, array &$params = []): bool {
+        return $this->isRouteMatch($route, $path, $params);
+    }
+
+    /**
      * Invoke a handler with automatic path parameter injection.
      *
      * Inspects the callable's parameters and automatically injects path parameters

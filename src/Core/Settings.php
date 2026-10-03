@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Rendering\Bootstrap;
 use Mbolli\PhpVia\Rendering\TemplateEngine;
+use Mbolli\PhpVia\Scope;
 
 /**
  * What the framework reads from the Config, taken once when new Via() freezes it (Config::freeze()).
@@ -18,6 +19,7 @@ use Mbolli\PhpVia\Rendering\TemplateEngine;
  */
 final readonly class Settings {
     /**
+     * @param array<string, int>                            $broadcastThrottles       scope or wildcard pattern => minimum ms between renders
      * @param array<string, mixed>                          $swooleSettings
      * @param null|list<string>                             $frameAncestors
      * @param null|list<string>                             $trustedOrigins
@@ -42,6 +44,7 @@ final readonly class Settings {
         public int $sseMaxQueuedBytes,
         public bool $broadcastCoalescingEnabled,
         public int $broadcastTickMs,
+        public array $broadcastThrottles,
         public array $swooleSettings,
         public bool $secureCookie,
         public string $sessionCookieSameSite,
@@ -84,6 +87,25 @@ final readonly class Settings {
         private ?MessageBroker $configuredBroker,
         private \Closure|string|null $staticCacheControlPolicy,
     ) {}
+
+    /**
+     * The minimum interval between two renders of $scope from withBroadcastThrottle(), 0 for none: the longest of the
+     * throttles whose scope or pattern matches it.
+     */
+    public function broadcastThrottleMs(string $scope): int {
+        if ($this->broadcastThrottles === []) {
+            return 0;
+        }
+
+        $ms = $this->broadcastThrottles[$scope] ?? 0;
+        foreach ($this->broadcastThrottles as $pattern => $patternMs) {
+            if ($patternMs > $ms && Scope::matches($scope, $pattern)) {
+                $ms = $patternMs;
+            }
+        }
+
+        return $ms;
+    }
 
     /**
      * The import map as a <script type="importmap"> tag, '' when php-via writes no map. via_head writes it.

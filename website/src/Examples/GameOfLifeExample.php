@@ -67,7 +67,7 @@ final class GameOfLifeExample {
                 $tiles = self::renderBoard();
                 $generation = self::$generation;
                 $running = self::$running;
-                $clientCount = \count($app->getLocalContexts(Scope::routeScope('/examples/game-of-life')));
+                $clientCount = $app->countClients(Scope::routeScope('/examples/game-of-life'));
                 $runningText = $running ? 'Pause' : 'Resume';
                 $runningEmoji = $running ? '⏸️' : '▶️';
 
@@ -116,7 +116,7 @@ final class GameOfLifeExample {
     }
 
     private static function tick(Via $app): void {
-        if (!self::$running || $app->getLocalContexts(Scope::routeScope('/examples/game-of-life')) === []) {
+        if (!self::$running || $app->countClients(Scope::routeScope('/examples/game-of-life')) === 0) {
             return;
         }
 

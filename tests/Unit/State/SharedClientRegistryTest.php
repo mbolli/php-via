@@ -321,3 +321,44 @@ test('a full table refuses a client instead of throwing', function (): void {
     expect($registry->count())->toBe($accepted);
     expect($registry->all())->toHaveCount($accepted);
 });
+
+test('a client\'s scopes are indexed for every worker, and only its own worker replaces them', function (): void {
+    $registry = new SharedClientRegistry(64);
+    $registry->claimWorker(0);
+    $registry->register('ctx-a', 'client-a', '10.0.0.1', 1000, ['route:/chat', 'room:lobby']);
+    $other = clone $registry;
+    $other->claimWorker(1);
+    $other->register('ctx-b', 'client-b', '10.0.0.2', 1000, ['route:/chat']);
+
+    expect($other->scopeIndex())->toEqual(['route:/chat' => ['ctx-a' => true, 'ctx-b' => true], 'room:lobby' => ['ctx-a' => true]]);
+
+    $registry->setScopes('ctx-a', ['route:/chat', 'room:games']);
+    $other->setScopes('ctx-a', ['route:/elsewhere']);
+
+    expect($other->scopeIndex())->toEqual(['route:/chat' => ['ctx-a' => true, 'ctx-b' => true], 'room:games' => ['ctx-a' => true]])
+        ->and($other->all())->toHaveKeys(['ctx-a', 'ctx-b'])
+    ;
+
+    $registry->unregister('ctx-a');
+
+    expect($other->scopeIndex())->toEqual(['route:/chat' => ['ctx-b' => true]]);
+});
+
+test('a tab with a row on two workers is in the scopes of its newer connection', function (): void {
+    $registry = new SharedClientRegistry(64);
+    $registry->claimWorker(0);
+    $registry->register('ctx-a', 'client-a', '10.0.0.1', 1000, ['room:old']);
+    $other = clone $registry;
+    $other->claimWorker(1);
+    $other->register('ctx-a', 'client-a2', '10.0.0.1', 1001, ['room:new']);
+
+    expect($registry->scopeIndex())->toBe(['room:new' => ['ctx-a' => true]]);
+});
+
+test('scopes past SCOPES_BYTES are left out whole', function (): void {
+    $registry = new SharedClientRegistry(64);
+    $long = 'room:' . str_repeat('x', SharedClientRegistry::SCOPES_BYTES - 20);
+    $registry->register('ctx-a', 'client-a', '10.0.0.1', 1000, ['route:/a', $long, 'room:too-many', 'r:1']);
+
+    expect(array_keys($registry->scopeIndex()))->toBe(['route:/a', $long, 'r:1']);
+});

@@ -159,7 +159,7 @@ final class LiveAuctionExample {
         }
         self::$timerId = Timer::tick(1000, function () use ($app): void {
             // Stop ticking when nobody is watching
-            if ($app->getLocalContexts(self::SCOPE) === []) {
+            if ($app->countClients(self::SCOPE) === 0) {
                 return;
             }
 

@@ -179,8 +179,8 @@ describe('a custom shell', function (): void {
         ;
     })->with(['dev mode' => true, 'production' => false]);
 
-    test('warns once when it has {{ via_head }} but loads no Datastar, in production too', function (string $foot, bool $devMode): void {
-        $builder = ($this->builder)("<head>{{ via_head }}</head><body>{{ content }}{$foot}</body>", $devMode);
+    test('warns once in dev mode when it has {{ via_head }} but loads no Datastar', function (string $foot): void {
+        $builder = ($this->builder)("<head>{{ via_head }}</head><body>{{ content }}{$foot}</body>");
         $ctx = new Context(testContextId(), '/', createVia());
 
         $page = $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
@@ -193,7 +193,16 @@ describe('a custom shell', function (): void {
     })->with([
         'no script' => '',
         'the unreleased {{ datastar_url }}' => '<script type="module" src="{{ datastar_url }}"></script>',
-    ])->with(['dev mode' => true, 'production' => false]);
+    ]);
+
+    test('does not warn outside dev mode about a page with {{ via_head }} that loads Datastar from a URL that does not name it', function (): void {
+        $builder = ($this->builder)('<head>{{ via_head }}</head><body>{{ content }}<script type="module" src="/js/app.bundle.js"></script></body>', false);
+        $ctx = new Context(testContextId(), '/', createVia());
+
+        $builder->buildDocument('<p>a</p>', $ctx, $ctx->getId(), '/');
+
+        expect($this->logs)->toBe([]);
+    });
 
     test('warns when it loads a Datastar of its own next to via_head\'s import map', function (): void {
         $builder = ($this->builder)('<head>{{ via_head }}</head><body>{{ content }}<script type="module" src="{{ base_path }}datastar.js"></script></body>', false);
@@ -269,15 +278,17 @@ describe('a view that renders its own document', function (): void {
         ;
     })->with(['dev mode' => true, 'production' => false]);
 
-    test('warns when it has via_head but loads no Datastar', function (): void {
+    test('warns in dev mode only when it has via_head but loads no Datastar', function (bool $devMode): void {
+        $this->builder = new HtmlBuilder(null, function (string $level, string $message): void { $this->logs[] = [$level, $message]; }, $devMode);
         $home = new Context(testContextId(), '/', createVia());
 
         $this->builder->buildDocument(($this->document)($home->viaHead()), $home, $home->getId(), '/');
 
-        expect($this->logs)->toHaveCount(1)
-            ->and($this->logs[0][1])->toContain('for / has via_head but loads no Datastar')
-        ;
-    });
+        expect($this->logs)->toHaveCount($devMode ? 1 : 0);
+        if ($devMode) {
+            expect($this->logs[0][1])->toContain('for / has via_head but loads no Datastar');
+        }
+    })->with(['dev mode' => true, 'production' => false]);
 
     test('may keep a Datastar bundle of its own when via_head writes no import map, and not with one', function (bool $rocket): void {
         $home = new Context(testContextId(), '/', createVia((new Config())->withDatastarRocket($rocket)));

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Via;
 
@@ -72,4 +73,34 @@ describe('broadcast flush stats', function (): void {
         $stats->reset();
         expect($stats->getBroadcastStats()['flushes'])->toBe(0);
     });
+});
+
+describe('Config::withBroadcastThrottle()', function (): void {
+    test('sets an interval per scope or pattern, the longest matching one applies, and 0 removes it', function (): void {
+        $settings = (new Config())
+            ->withBroadcastThrottle('import:*', 250)
+            ->withBroadcastThrottle('import:big', 1000)
+            ->withBroadcastThrottle('route:/live', 50)
+            ->withBroadcastThrottle('room:1', 10)
+            ->withBroadcastThrottle('room:1', 0)
+            ->freeze()
+        ;
+
+        expect($settings->broadcastThrottles)->toBe(['import:*' => 250, 'import:big' => 1000, 'route:/live' => 50])
+            ->and($settings->broadcastThrottleMs('import:7'))->toBe(250)
+            ->and($settings->broadcastThrottleMs('import:big'))->toBe(1000)
+            ->and($settings->broadcastThrottleMs('route:/live'))->toBe(50)
+            ->and($settings->broadcastThrottleMs('room:1'))->toBe(0)
+            ->and((new Config())->freeze()->broadcastThrottleMs('import:7'))->toBe(0)
+        ;
+    });
+
+    test('throws for a scope that needs a context to resolve, or a negative interval', function (string $scope, int $ms): void {
+        (new Config())->withBroadcastThrottle($scope, $ms);
+    })->throws(InvalidArgumentException::class)->with([
+        'tab' => [Scope::TAB, 100],
+        'route' => [Scope::ROUTE, 100],
+        'session' => [Scope::SESSION, 100],
+        'negative' => ['import:*', -1],
+    ]);
 });

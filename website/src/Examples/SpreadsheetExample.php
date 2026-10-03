@@ -133,7 +133,7 @@ final class SpreadsheetExample {
 
                 unset(self::$cursors[$contextId], self::$selections[$contextId], self::$openEdits[$contextId]);
 
-                if ($app->getLocalContexts(self::SCOPE) !== []) {
+                if ($app->countClients(self::SCOPE) > 0) {
                     $app->broadcast(self::SCOPE);
                 }
             });
@@ -615,7 +615,7 @@ final class SpreadsheetExample {
                     'clearCellsUrl' => $clearCells->url(),
                     'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
-                    'clientCount' => \count($app->getLocalContexts(self::SCOPE)),
+                    'clientCount' => $app->countClients(self::SCOPE),
                     'title' => '📊 Spreadsheet',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
                     'summary' => [

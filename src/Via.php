@@ -24,6 +24,8 @@ use Mbolli\PhpVia\Http\RouteGroup;
 use Mbolli\PhpVia\Http\SignalParser;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Rendering\ViewRenderer;
@@ -57,6 +59,7 @@ use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
 use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 use Twig\Environment;
 
 /**
@@ -212,6 +215,14 @@ class Via {
     /** Bumped on every (re)schedule and cancel, so a superseded callback does nothing. */
     private int $flushGeneration = 0;
 
+    /** @var array<string, int> Scopes with a Config::withBroadcastThrottle() => hrtime(true) when their last render began */
+    private array $throttledAt = [];
+
+    /** The timer that flushes the scopes a throttle holds back once the first is due, and hrtime(true) when it fires. */
+    private ?int $throttleTimerId = null;
+
+    private int $throttleDueNs = 0;
+
     /**
      * Flushes run side by side, each on scopes no other one is rendering, so a view that waits on
      * I/O holds up only its own scope.
@@ -267,6 +278,12 @@ class Via {
 
     /** @var array<string, RouteDefinition> Route definitions indexed by route pattern */
     private array $routeDefinitions = [];
+
+    /** @var array<string, array<string, array{RequestHandlerInterface, RouteDefinition}>> route()'s routes: pattern => method => handler and definition */
+    private array $plainRoutes = [];
+
+    /** @var list<RouteDefinition> route()'s definitions in registration order, for group() */
+    private array $plainRouteDefinitions = [];
 
     /** Active URL prefix set by the currently executing group() closure */
     private string $groupPrefix = '';
@@ -337,8 +354,10 @@ class Via {
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
         if ($templateEngine instanceof TwigEngine) {
-            // For renders outside a context, such as notFound() pages; a context passes its own basePath.
+            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_head and via_foot.
             $templateEngine->environment()->addGlobal('basePath', $this->settings->basePath);
+            $templateEngine->environment()->addGlobal('via_head', new Html($this->settings->importMapTag()));
+            $templateEngine->environment()->addGlobal('via_foot', new Html(Bootstrap::foot($this->settings->datastarUrl, null)));
         }
         $this->viewRenderer = new ViewRenderer($this->settings, $this->viewCache, $this->stats, $this->logger);
 
@@ -519,6 +538,10 @@ class Via {
      * Middleware implementing SseAwareMiddleware will additionally run on SSE
      * handshake requests.
      *
+     * The request carries the visitor's session id in the 'via.session' attribute, for
+     * getSessionData() and the like. A request without the session cookie gets a new id,
+     * which a page then sets as the cookie.
+     *
      * WARNING: Middleware instances are long-lived in Swoole: they persist across
      * all requests in the worker process. Do NOT store per-request state on
      * middleware properties. Use $request->withAttribute() to pass data downstream.
@@ -602,10 +625,60 @@ class Via {
     }
 
     /**
+     * Register a plain HTTP route, with no context, shell or template: a JSON endpoint, a webhook, an MCP server.
+     *
+     * The PSR-15 handler gets the request after the global middleware and the route's own (->middleware() on
+     * the returned definition), outermost first, and its response goes out as it is, a body of unknown size
+     * as it is read. The request carries the session id in 'via.session' and each path parameter as an
+     * attribute of its name. HEAD is answered as GET without the body; list OPTIONS for a CORS preflight.
+     * php-via checks no Origin header here, as for pages: add CSRF or auth middleware where a route changes
+     * state. The response sets no session cookie. Plain routes go before pages, so a page on the same path
+     * answers the other methods; on a path with no page, the other methods get 405.
+     *
+     * ```php
+     * $app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
+     * ```
+     *
+     * @param list<string>|string $methods an HTTP method, or several: 'POST', ['GET', 'POST', 'OPTIONS']
+     * @param string              $path    route pattern with {params}, as for page(); a group() prefix applies
+     *
+     * @throws \InvalidArgumentException without a method, or for one that is no HTTP method name
+     */
+    public function route(array|string $methods, string $path, RequestHandlerInterface $handler): RouteDefinition {
+        $methods = \is_string($methods) ? [$methods] : $methods;
+        if ($methods === []) {
+            throw new \InvalidArgumentException('route() needs at least one HTTP method, such as \'GET\' or [\'GET\', \'POST\'].');
+        }
+
+        if ($this->groupPrefix !== '') {
+            $base = rtrim($this->groupPrefix, '/');
+            $path = ($path === '' || $path === '/') ? $base : $base . '/' . ltrim($path, '/');
+        }
+
+        $methods = array_map(self::httpMethod(...), $methods);
+        $definition = new RouteDefinition($path, $handler->handle(...));
+        foreach ($methods as $method) {
+            $this->plainRoutes[$path][$method] = [$handler, $definition];
+        }
+        $this->plainRouteDefinitions[] = $definition;
+
+        return $definition;
+    }
+
+    /**
+     * @internal read by the request handler
+     *
+     * @return array<string, array<string, array{RequestHandlerInterface, RouteDefinition}>> pattern => method => handler and definition
+     */
+    public function getPlainRoutes(): array {
+        return $this->plainRoutes;
+    }
+
+    /**
      * Register a group of routes that share a URL prefix and/or middleware.
      *
-     * Optionally pass a URL prefix as the first argument: every `page()` call inside
-     * the closure will have the prefix prepended to its route. Call `->middleware()` on
+     * Optionally pass a URL prefix as the first argument: every `page()` and `route()` call
+     * inside the closure will have the prefix prepended to its route. Call `->middleware()` on
      * the returned RouteGroup to apply shared middleware to all routes in the group.
      *
      * ```php
@@ -634,6 +707,7 @@ class Via {
         }
 
         $before = array_keys($this->routeDefinitions);
+        $plainBefore = \count($this->plainRouteDefinitions);
         $this->groupPrefix = $prefix;
 
         try {
@@ -647,7 +721,7 @@ class Via {
         $newRoutes = array_diff($after, $before);
         $definitions = array_values(array_map(fn (string $r) => $this->routeDefinitions[$r], $newRoutes));
 
-        return new RouteGroup($definitions);
+        return new RouteGroup([...$definitions, ...\array_slice($this->plainRouteDefinitions, $plainBefore)]);
     }
 
     /**
@@ -669,6 +743,7 @@ class Via {
      * sent by this call or, when another coroutine is publishing, by that one. When the scope's
      * fan-out is already running in another coroutine, that fan-out runs once more for it instead,
      * and after 8 passes in a row the next flush renders it, except during shutdown, which drops it.
+     * A scope with a Config::withBroadcastThrottle() renders at most once per its interval.
      *
      * @param string $scope Scope to broadcast to: a resolved one, so Scope::routeScope('/path') or
      *                      Scope::sessionScope($id) rather than the bare ROUTE or SESSION
@@ -678,7 +753,7 @@ class Via {
     public function broadcast(string $scope): void {
         $scope = Scope::resolve($scope, null, 'Via::broadcast()');
 
-        if ($this->shouldCoalesce()) {
+        if ($this->shouldCoalesce($scope)) {
             $this->tracer?->span('broadcast.schedule', static fn () => null, ['scope' => $scope], 'sse');
             $this->markDirty($scope, publish: true);
             $this->rememberCallerMark($scope);
@@ -716,7 +791,8 @@ class Via {
      * such as `broadcast(); flushBroadcasts(); execScript(...)`, or before shared state is
      * changed back. It ignores the broadcast tick. When a scope this coroutine broadcast is
      * being rendered by another flush, it waits for that fan-out first, up to 1 s; past that it
-     * logs a warning, and that scope's frame follows on a later flush. Publishing to other
+     * logs a warning, and that scope's frame follows on a later flush. Broadcasts that a
+     * Config::withBroadcastThrottle() holds back render now too. Publishing to other
      * workers or nodes is done here too, unless a publish is already running, which then sends
      * these as well. A no-op when nothing is pending.
      */
@@ -733,7 +809,7 @@ class Via {
         }
 
         $this->cancelScheduledFlush();
-        $this->runTickFlush(inlinePublish: true);
+        $this->runTickFlush(inlinePublish: true, throttle: false);
         $this->scheduleFlush();
     }
 
@@ -744,6 +820,7 @@ class Via {
      */
     public function registerContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->registerContext($context, $scope);
+        $this->app->refreshClientScopes($context->getPageContext());
     }
 
     /**
@@ -753,6 +830,7 @@ class Via {
      */
     public function unregisterContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->unregisterContext($context, $scope);
+        $this->app->refreshClientScopes($context->getPageContext());
     }
 
     /**
@@ -765,6 +843,24 @@ class Via {
      */
     public function getLocalContexts(string $scope): array {
         return $this->scopeRegistry->getContextsByScope($scope);
+    }
+
+    /**
+     * How many tabs with an open stream a broadcast of $scope reaches, on every worker: whether anyone is watching.
+     *
+     * A tab is in a scope when its page or one of its components joined it, with scope(), addScope() or a scoped
+     * signal, and in Scope::routeScope('/path') when it is on that route. Scope::GLOBAL counts every connected tab,
+     * and a wildcard such as 'room:*' each tab in a matching scope once. A tab counts from its SSE connect until its
+     * stream closes, so unlike getLocalContexts() it leaves out a page that has not connected yet. With one worker
+     * this worker's tabs are all; with more it reads the shared client registry, as getClients() does, which holds
+     * 512 bytes of scopes per tab.
+     *
+     * @param string $scope a resolved scope, as for broadcast(): Scope::routeScope('/path'), not Scope::ROUTE
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
+     */
+    public function countClients(string $scope): int {
+        return $this->app->countClients(Scope::resolve($scope, null, 'Via::countClients()'), $this->readEpochs->current());
     }
 
     /**
@@ -2152,6 +2248,19 @@ class Via {
     }
 
     /**
+     * @param mixed $method an entry of route()'s $methods, whose type PHP does not check
+     *
+     * @throws \InvalidArgumentException for anything but letters
+     */
+    private static function httpMethod(mixed $method): string {
+        if (!\is_string($method) || preg_match('/^[A-Za-z]+$/', $method) !== 1) {
+            throw new \InvalidArgumentException('route() takes HTTP method names such as \'GET\' or \'POST\', got ' . var_export($method, true) . '.');
+        }
+
+        return strtoupper($method);
+    }
+
+    /**
      * Refuse a worker_num passed through withSwooleSettings() that differs from withWorkerNum(): php-via sets up its
      * shared tables, cross-worker state and the broker check from withWorkerNum() alone.
      *
@@ -2280,6 +2389,9 @@ class Via {
         }
 
         $this->syncInFlight[$scope] = ['cid' => Coroutine::getCid(), 'lastCid' => (int) (Coroutine::stats()['coroutine_last_cid'] ?? PHP_INT_MAX), 'since' => hrtime(true), 'warned' => false];
+        if ($this->settings->broadcastThrottleMs($scope) > 0) {
+            $this->throttledAt[$scope] = hrtime(true);
+        }
 
         // Wrap fan-out in a "broadcast {scope}" root trace. Inside an action (the
         // synchronous path, or flushBroadcasts()) this is a no-op: the action trace is
@@ -2437,8 +2549,9 @@ class Via {
     /**
      * Whether a broadcast from the current code is marked for the next flush instead of run now.
      */
-    private function shouldCoalesce(): bool {
-        return $this->settings->broadcastCoalescingEnabled && !$this->shuttingDown && Coroutine::getCid() > 0;
+    private function shouldCoalesce(?string $scope = null): bool {
+        return ($this->settings->broadcastCoalescingEnabled || ($scope !== null && $this->settings->broadcastThrottleMs($scope) > 0))
+            && !$this->shuttingDown && Coroutine::getCid() > 0;
     }
 
     /**
@@ -2446,7 +2559,8 @@ class Via {
      */
     private function receiveBroadcast(string $scope): void {
         // pipeMessage runs in a coroutine on OpenSwoole 26, but a started worker can schedule without one.
-        if ($this->settings->broadcastCoalescingEnabled && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
+        $coalesce = $this->settings->broadcastCoalescingEnabled || $this->settings->broadcastThrottleMs($scope) > 0;
+        if ($coalesce && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
             $this->markDirty($scope, publish: false);
             $this->scheduleFlush();
 
@@ -2555,7 +2669,12 @@ class Via {
      */
     private function scheduleFlush(): void {
         // A scope whose fan-out is running is scheduled when it ends; shutdown drops what is left.
-        if ($this->shuttingDown || !$this->hasFlushWork()) {
+        if ($this->shuttingDown) {
+            return;
+        }
+        if (!$this->hasFlushWork()) {
+            $this->scheduleThrottledFlush();
+
             return;
         }
 
@@ -2587,7 +2706,83 @@ class Via {
     }
 
     private function hasFlushWork(): bool {
-        return ($this->unpublishedScopes !== [] && !$this->publishing) || array_diff_key($this->dirtyScopes, $this->syncInFlight) !== [];
+        return ($this->unpublishedScopes !== [] && !$this->publishing) || $this->withoutThrottled(array_diff_key($this->dirtyScopes, $this->syncInFlight)) !== [];
+    }
+
+    /**
+     * $scopes without those a Config::withBroadcastThrottle() holds back, whose last render began less than their
+     * interval ago.
+     *
+     * @template T
+     *
+     * @param array<string, T> $scopes
+     *
+     * @return array<string, T>
+     */
+    private function withoutThrottled(array $scopes): array {
+        if ($this->throttledAt === []) {
+            return $scopes;
+        }
+
+        $now = hrtime(true);
+        foreach ($scopes as $scope => $_) {
+            if ($this->throttleWaitNs($scope, $now) > 0) {
+                unset($scopes[$scope]);
+            }
+        }
+
+        return $scopes;
+    }
+
+    /**
+     * How long a throttle still holds $scope back, in ns; 0 when it may render. Forgets a render whose interval is over.
+     */
+    private function throttleWaitNs(string $scope, int $now): int {
+        $renderedAt = $this->throttledAt[$scope] ?? null;
+        if ($renderedAt === null) {
+            return 0;
+        }
+
+        $waitNs = $this->settings->broadcastThrottleMs($scope) * 1_000_000 - ($now - $renderedAt);
+        if ($waitNs <= 0) {
+            unset($this->throttledAt[$scope]);
+
+            return 0;
+        }
+
+        return $waitNs;
+    }
+
+    /**
+     * Arm a timer for the first scope a throttle holds back, which schedules the flush that renders it.
+     */
+    private function scheduleThrottledFlush(): void {
+        $now = hrtime(true);
+        $waitNs = null;
+        foreach (array_diff_key($this->dirtyScopes, $this->syncInFlight) as $scope => $_) {
+            $scopeWaitNs = $this->throttleWaitNs($scope, $now);
+            if ($scopeWaitNs > 0 && ($waitNs === null || $scopeWaitNs < $waitNs)) {
+                $waitNs = $scopeWaitNs;
+            }
+        }
+        if ($waitNs === null) {
+            return;
+        }
+
+        // Timer::clearAll() (workerExit, test fixtures) drops the timer without telling anyone.
+        if ($this->throttleTimerId !== null && Timer::exists($this->throttleTimerId)) {
+            if ($this->throttleDueNs <= $now + $waitNs) {
+                return;
+            }
+            Timer::clear($this->throttleTimerId);
+        }
+
+        $id = Timer::after(max(1, (int) ceil($waitNs / 1_000_000)), function (): void {
+            $this->throttleTimerId = null;
+            $this->scheduleFlush();
+        });
+        $this->throttleTimerId = \is_int($id) ? $id : null;
+        $this->throttleDueNs = $now + $waitNs;
     }
 
     /**
@@ -2649,10 +2844,15 @@ class Via {
 
     /**
      * Run one flush on the dirty scopes no other flush is rendering, and record it in the stats.
+     *
+     * @param bool $throttle leave out the scopes a Config::withBroadcastThrottle() holds back
      */
-    private function runTickFlush(bool $inlinePublish = false): void {
+    private function runTickFlush(bool $inlinePublish = false, bool $throttle = true): void {
         $cid = Coroutine::getCid();
         $batch = array_diff_key($this->dirtyScopes, $this->syncInFlight);
+        if ($throttle) {
+            $batch = $this->withoutThrottled($batch);
+        }
         if (isset($this->runningFlushes[$cid]) || ($batch === [] && ($this->unpublishedScopes === [] || $this->publishing))) {
             return;
         }
@@ -2670,6 +2870,10 @@ class Via {
             unset($this->runningFlushes[$cid]);
             $this->lastFlushEndNs = hrtime(true);
             $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->settings->broadcastTickMs);
+            // Forget the renders whose interval is over, so scopes that stop broadcasting leave no entry.
+            foreach ($this->throttledAt as $scope => $_) {
+                $this->throttleWaitNs($scope, $this->lastFlushEndNs);
+            }
             $this->scheduleFlush();
         }
     }
@@ -2763,10 +2967,14 @@ class Via {
      */
     private function drainBroadcasts(bool $renderPending, ?int $publisherDeadlineNs = null): void {
         $this->cancelScheduledFlush();
+        if ($this->throttleTimerId !== null) {
+            Timer::clear($this->throttleTimerId);
+            $this->throttleTimerId = null;
+        }
 
         if ($renderPending && Coroutine::getCid() > 0) {
             // Views that do not yield are done when this returns, before the channels close.
-            Coroutine::create(fn () => $this->runTickFlush());
+            Coroutine::create(fn () => $this->runTickFlush(throttle: false));
         }
 
         // Left over, such as a scope another flush is still rendering: clients reconnect for fresh state.

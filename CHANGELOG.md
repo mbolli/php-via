@@ -222,8 +222,11 @@ message that names the new one.
   custom shells and full-document layouts copied from the default shell. Put `via_head` right after
   `<meta charset>` and `via_foot` before `</body>`. Every tag carries the nonce from the page
   request's `via.csp_nonce` attribute, and so do the Dev Bar's tags. php-via warns once per shell
-  or route without `via_head`, or with `via_head` and no Datastar script or a second one, and dev
-  mode once per route with a second import map. A copied bootstrap keeps working.
+  or route without `via_head`, or with `via_head` and a second Datastar script, and dev mode also
+  about `via_head` without a Datastar script, and about a second import map. A copied bootstrap
+  keeps working. In a Twig template rendered outside a context, such as a `notFound()` page,
+  `via_head()` and `via_foot()` write the import map and the Datastar script, so the page can use
+  the site's layout.
 - **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
   `Twig\TwigEngine` is php-via's, and `withTemplateDir()` sets one up. `view(..., block:)` with an
   engine that renders no blocks throws. `via_head` and `via_foot` reach the engine as
@@ -269,6 +272,24 @@ message that names the new one.
   or `withDatastarRocket()` or copied from an earlier build, under which the browser checks no hash.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
+- **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, shell or
+  template, for JSON, webhooks and MCP, behind the global and route middleware as a page is. A
+  response body of unknown size goes out as it is read.
+- **`$c->dispatch($event, $detail)`** fires a CustomEvent on the browser's window with a
+  JSON-encoded detail, for toasts and the like, in place of a script built by hand for
+  `execScript()`. Listen with `data-on:toast__window`.
+- **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on every
+  worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples use it
+  to tell whether anyone is watching.
+- **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
+  what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
+  only and goes with its context, so exports no longer travel through the SSE stream.
+- **`Config::withBroadcastThrottle($scope, $minIntervalMs)`** renders a scope's broadcasts at most
+  once per interval, wildcards allowed, and always delivers the last one of a burst.
+  `$app->flushBroadcasts()` renders a held broadcast at once.
+- **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
+  actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
+  `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
 
 ### Deprecated
 
@@ -377,6 +398,8 @@ message that names the new one.
   truthiness.
 - `Config::withLogLevel()` treated unknown names as `info`. It accepts `warning` and the other
   PSR-3 and syslog names now, and throws for anything else.
+- A full-document view got its signal seed right after `<head>`, ahead of `<meta charset>`. With
+  `via_head` it goes right after `via_head`'s first tag now.
 
 ### Tests
 

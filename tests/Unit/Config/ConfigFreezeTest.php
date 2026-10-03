@@ -35,6 +35,7 @@ function configSetterCalls(): array {
         'withSseMaxQueuedBytes' => fn (Config $c) => $c->withSseMaxQueuedBytes(1),
         'withBroadcastCoalescing' => fn (Config $c) => $c->withBroadcastCoalescing(),
         'withBroadcastTickMs' => fn (Config $c) => $c->withBroadcastTickMs(10),
+        'withBroadcastThrottle' => fn (Config $c) => $c->withBroadcastThrottle('import:*', 100),
         'withSwooleSettings' => fn (Config $c) => $c->withSwooleSettings(['max_conn' => 10]),
         'withSecureCookie' => fn (Config $c) => $c->withSecureCookie(),
         'withEmbeddable' => fn (Config $c) => $c->withEmbeddable(),

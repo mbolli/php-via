@@ -135,12 +135,26 @@ describe('via_head() and via_foot() in Twig templates', function (): void {
         expect($ctx->render('layout.html.twig'))->toBe($ctx->viaHead())->not->toContain('nonce');
     });
 
-    test('throw in a template rendered outside a context', function (): void {
-        $via = createVia((new Config())->withTemplateEngine(arrayTwig([])));
+    test('write the import map and the Datastar script outside a context, as on a notFound() page', function (): void {
+        $config = (new Config())->withImportMap(['chart' => '/js/chart.js'])->withBasePath('/app');
+        $via = createVia($config->withTemplateEngine(arrayTwig([
+            '404.html.twig' => '<head>{{ via_head() }}</head><body>{{ basePath }}{{ via_foot() }}</body>',
+        ])));
+        $html = $via->getTwig()->render('404.html.twig');
 
-        expect(fn () => $via->getTwig()->createTemplate('{{ via_head() }}')->render([]))
+        expect($html)->toBe('<head>' . $via->getSettings()->importMapTag() . '</head><body>/app/<script type="module" src="'
+            . htmlspecialchars($config->getDatastarUrl()) . '"></script></body>')
+            ->and($html)->toContain('"chart":"/js/chart.js"')->not->toContain('via_ctx')
+            ->and(createVia((new Config())->withTemplateEngine(arrayTwig([])))->getTwig()->createTemplate('[{{ via_head() }}]')->render([]))->toBe('[]')
+        ;
+    });
+
+    test('throw outside a context when php-via did not set them up', function (): void {
+        $twig = arrayTwig([])->environment();
+
+        expect(fn () => $twig->createTemplate('{{ via_head() }}')->render([]))
             ->toThrow(RuntimeError::class, 'via_head() needs the page it renders for')
-            ->and(fn () => $via->getTwig()->createTemplate('{{ via_foot() }}')->render(['via_foot' => '<script>']))
+            ->and(fn () => createVia((new Config())->withTemplateEngine(arrayTwig([])))->getTwig()->createTemplate('{{ via_foot() }}')->render(['via_foot' => '<script>']))
             ->toThrow(RuntimeError::class, 'via_foot() needs the page it renders for')
         ;
     });
