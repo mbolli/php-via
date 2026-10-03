@@ -223,8 +223,8 @@ message that names the new one.
   `<meta charset>` and `via_foot` before `</body>`. Every tag carries the nonce from the page
   request's `via.csp_nonce` attribute, and so do the Dev Bar's tags. php-via warns once per shell
   or route without `via_head`, or with `via_head` and a second Datastar script, and dev mode also
-  about `via_head` with no Datastar script and a second import map. A copied bootstrap keeps
-  working. In a Twig template rendered outside a context, such as a `notFound()` page,
+  about `via_head` without a Datastar script, and about a second import map. A copied bootstrap
+  keeps working. In a Twig template rendered outside a context, such as a `notFound()` page,
   `via_head()` and `via_foot()` write the import map and the Datastar script, so the page can use
   the site's layout.
 - **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
