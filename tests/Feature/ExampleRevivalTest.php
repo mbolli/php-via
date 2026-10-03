@@ -151,8 +151,17 @@ describe('Every example route revives without a reload', function (): void {
             $clientSignals[$id] = $signal->getValue();
         }
         $editedId = $tabIdsBefore[0] ?? null;
+        $editedValue = null;
         if ($editedId !== null) {
-            $clientSignals[$editedId] = 'revived-value';
+            // An edit of the signal's own type: a client write of another type is refused.
+            $editedValue = match (get_debug_type($clientSignals[$editedId])) {
+                'int' => 4242,
+                'float' => 42.5,
+                'bool' => !$clientSignals[$editedId],
+                'array' => ['revived-value'],
+                default => 'revived-value',
+            };
+            $clientSignals[$editedId] = $editedValue;
         }
 
         // 2. Tab backgrounded past the cleanup delay → destroyed (records a revival snapshot).
@@ -177,7 +186,7 @@ describe('Every example route revives without a reload', function (): void {
 
             if ($editedId !== null) {
                 expect($revived->getSignalFactory()->getTabSignals()[$editedId]->getValue())
-                    ->toBe('revived-value') // client edit seeded back
+                    ->toBe($editedValue) // client edit seeded back
                 ;
             }
         } finally {
