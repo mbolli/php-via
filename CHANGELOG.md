@@ -229,7 +229,8 @@ message that names the new one.
   `globalState`. Values must be serializable. One worker keeps them in memory, and the revival
   records of destroyed tabs hold up to 64 MiB of them. With more than one worker every worker reads
   the same values from the context directory, up to 1024 serialized bytes per tab: raise it with
-  `withContextDirectorySize(maxTabStateBytes:)`.
+  `withContextDirectorySize(maxTabStateBytes:)`. A `spawn()` task that writes one after its tab's
+  context was destroyed still reaches the revived tab.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.

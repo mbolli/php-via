@@ -216,7 +216,8 @@ class Context {
      */
     public function tabState(string $key, mixed $default = null): mixed {
         $page = $this->getPageContext();
-        $state = $this->app->getApp()->sharedTabState($page->id) ?? $page->tabState;
+        $app = $this->app->getApp();
+        $state = $app->sharedTabState($page->id) ?? ($page->destroyed ? $app->destroyedTabState($page->id) : $page->tabState);
         $serialized = $state[$this->tabStateBucket()][$key] ?? null;
 
         return $serialized === null ? $default : unserialize($serialized);
@@ -226,15 +227,21 @@ class Context {
      * Set a server-side value of this tab, kept across a revival; null removes the key.
      *
      * With one worker, the values live in its memory, and the revival records of destroyed tabs keep
-     * up to 64 MiB of them, evicting the oldest past that. With more than one worker, every worker reads
-     * the same values from the shared context directory, which caps a tab's serialized values at
-     * Config::withContextDirectorySize(maxTabStateBytes:), 1024 bytes by default.
+     * up to 64 MiB of them: past that, the oldest records that hold tab state are evicted. With more than
+     * one worker, every worker reads the same values from the shared context directory, which caps a tab's
+     * serialized values at Config::withContextDirectorySize(maxTabStateBytes:), 1024 bytes by default.
+     * Once the context is destroyed, a write from a spawn() task or an onCleanup() callback goes to its
+     * revival record, or to the context that revived it, so the tab reads it on its return.
      *
-     * @throws \InvalidArgumentException if the value cannot be serialized, such as a closure
+     * @throws \InvalidArgumentException if the value cannot be serialized, such as a closure, a resource or an array holding one
      * @throws \OverflowException        with worker_num > 1, if the tab's values would exceed maxTabStateBytes
      * @throws \RuntimeException         with worker_num > 1, if the tab's lock is not taken within about 7 s
      */
     public function setTabState(string $key, mixed $value): void {
+        if (self::holdsResource($value)) {
+            throw new \InvalidArgumentException("Tab state \"{$key}\" cannot be serialized: it holds a resource, which would read back as 0.");
+        }
+
         try {
             $serialized = $value === null ? null : serialize($value);
         } catch (\Throwable $e) {
@@ -257,11 +264,18 @@ class Context {
 
         $page = $this->getPageContext();
         $app = $this->app->getApp();
-        if (!$app->changeSharedTabState($page->id, $change, "\"{$key}\"")) {
-            $state = $change($page->tabState);
-            $app->assertTabStateFits($state, "\"{$key}\"");
-            $page->tabState = $state;
+        if ($app->changeSharedTabState($page->id, $change, "\"{$key}\"")) {
+            return;
         }
+        if ($page->destroyed) {
+            $app->changeDestroyedTabState($page->id, $change);
+
+            return;
+        }
+
+        $state = $change($page->tabState);
+        $app->assertTabStateFits($state, "\"{$key}\"");
+        $page->tabState = $state;
     }
 
     /**
@@ -1668,6 +1682,23 @@ class Context {
      */
     private function tabStateBucket(): string {
         return $this->componentManager->isComponent() ? 'component:' . $this->namespace : '';
+    }
+
+    /**
+     * Whether $value is a resource or an array that holds one, which serialize() writes as the integer 0.
+     */
+    private static function holdsResource(mixed $value): bool {
+        $isResource = static fn (mixed $v): bool => \is_resource($v) || \gettype($v) === 'resource (closed)';
+        if (!\is_array($value)) {
+            return $isResource($value);
+        }
+
+        $found = false;
+        array_walk_recursive($value, static function (mixed $v) use ($isResource, &$found): void {
+            $found = $found || $isResource($v);
+        });
+
+        return $found;
     }
 
     /**

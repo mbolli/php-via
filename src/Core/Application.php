@@ -730,6 +730,62 @@ class Application {
     }
 
     /**
+     * The tab state of a destroyed context with no directory row: what the context that revived it holds, else what
+     * its revival record holds.
+     *
+     * @internal read by Context::tabState()
+     *
+     * @return array<string, array<string, string>>
+     */
+    public function destroyedTabState(string $contextId): array {
+        $revived = $this->contexts[$contextId] ?? null;
+        if ($revived !== null && !$revived->isDestroyed()) {
+            return $revived->localTabState();
+        }
+
+        return $this->contextDirectory === null ? ($this->getRevivable($contextId)['tabState'] ?? []) : [];
+    }
+
+    /**
+     * Change the tab state of a destroyed context with no directory row: in the context that revived it, else in
+     * its revival record. Without either, nothing reads it again and the change is dropped.
+     *
+     * @internal called by Context::setTabState()
+     *
+     * @param \Closure(array<string, array<string, string>>): array<string, array<string, string>> $change
+     */
+    public function changeDestroyedTabState(string $contextId, \Closure $change): void {
+        $revived = $this->contexts[$contextId] ?? null;
+        if ($revived !== null && !$revived->isDestroyed()) {
+            $revived->importTabState($change($revived->localTabState()));
+
+            return;
+        }
+
+        if ($this->contextDirectory !== null || $this->getRevivable($contextId) === null) {
+            return;
+        }
+
+        $state = $change($this->revivableContexts[$contextId]['tabState'] ?? []);
+        $bytes = self::tabStateBytes($state);
+        if ($bytes > $this->revivableStateBudget) {
+            $this->dropRevivable($contextId);
+            $this->noteRevivableEvicted(1);
+
+            return;
+        }
+
+        $this->revivableStateTotal += $bytes - ($this->revivableStateBytes[$contextId] ?? 0);
+        if ($state === []) {
+            unset($this->revivableContexts[$contextId]['tabState'], $this->revivableStateBytes[$contextId]);
+        } else {
+            $this->revivableContexts[$contextId]['tabState'] = $state;
+            $this->revivableStateBytes[$contextId] = $bytes;
+        }
+        $this->pruneRevivableIfNeeded();
+    }
+
+    /**
      * Check that tab state a context keeps until its directory row exists fits the row.
      *
      * @internal called by Context::setTabState()
@@ -1008,13 +1064,14 @@ class Application {
         $record = $this->contextRecord($context, time() + (int) ceil($windowMs / 1000));
         $state = $context->localTabState();
         if ($state !== []) {
-            $record['tabState'] = $state;
-            $bytes = 0;
-            foreach ($state as $bucket => $values) {
-                foreach ($values as $name => $value) {
-                    $bytes += \strlen($bucket) + \strlen($name) + \strlen($value);
-                }
+            $bytes = self::tabStateBytes($state);
+            if ($bytes > $this->revivableStateBudget) {
+                // Kept, it would evict the tab state of every other record before its own.
+                $this->noteRevivableEvicted(1);
+
+                return;
             }
+            $record['tabState'] = $state;
             $this->revivableStateBytes[$contextId] = $bytes;
             $this->revivableStateTotal += $bytes;
         }
@@ -1024,7 +1081,8 @@ class Application {
     }
 
     /**
-     * Evict expired revival records, then the soonest-expiring ones while over the count or the tab state cap.
+     * Evict expired revival records, then the soonest-expiring ones while over the count cap, and the
+     * soonest-expiring ones that hold tab state while over the tab state cap.
      *
      * Every record is appended with the same window, so the map is in expiry order and the
      * walk stops at the first record that stays. Called only from recordRevivable().
@@ -1036,15 +1094,19 @@ class Application {
         $drop = [];
         $evicted = 0;
         foreach ($this->revivableContexts as $id => $record) {
+            $bytes = $this->revivableStateBytes[$id] ?? 0;
             if ($record['expiresAt'] > $now) {
                 if ($excess <= 0 && $stateExcess <= 0) {
                     break;
+                }
+                if ($excess <= 0 && $bytes === 0) {
+                    continue;
                 }
                 ++$evicted;
             }
             $drop[] = $id;
             --$excess;
-            $stateExcess -= $this->revivableStateBytes[$id] ?? 0;
+            $stateExcess -= $bytes;
         }
 
         // Unset after the loop: writing to the map while foreach holds it would copy it.
@@ -1052,10 +1114,32 @@ class Application {
             $this->dropRevivable($id);
         }
 
+        $this->noteRevivableEvicted($evicted);
+    }
+
+    /**
+     * @param array<string, array<string, string>> $state
+     */
+    private static function tabStateBytes(array $state): int {
+        $bytes = 0;
+        foreach ($state as $bucket => $values) {
+            foreach ($values as $name => $value) {
+                $bytes += \strlen($bucket) + \strlen($name) + \strlen($value);
+            }
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * Count revival records evicted over a cap, and warn about them at most every 10 seconds.
+     */
+    private function noteRevivableEvicted(int $evicted): void {
         if ($evicted === 0) {
             return;
         }
 
+        $now = time();
         $this->revivableEvicted += $evicted;
         if ($now - $this->revivableWarnedAt >= 10) {
             $this->logger->log('warning', 'Revival records over the cap of ' . self::MAX_REVIVABLE . ' records or '

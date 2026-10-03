@@ -151,6 +151,107 @@ describe('tabState() on one worker', function (): void {
         ;
     });
 
+    test('past the tab state budget, only revival records that hold tab state are evicted', function (): void {
+        $seen = [];
+        $via = tabStateApp($seen);
+        (new ReflectionProperty(Application::class, 'revivableStateBudget'))->setValue($via->getApp(), 300);
+        $plain = [];
+        for ($i = 0; $i < 20; ++$i) {
+            $plain[] = $id = "/report_/plain{$i}";
+            tabStateDestroy($via, tabStateLoad($via, $id)->getId());
+        }
+
+        ob_start();
+        foreach (['/report_/a', '/report_/b', '/report_/c'] as $id) {
+            tabStateLoad($via, $id)->setTabState('blob', str_repeat('x', 120));
+            tabStateDestroy($via, $id);
+        }
+        ob_end_clean();
+
+        $kept = array_filter($plain, fn (string $id): bool => $via->getApp()->getRevivable($id) !== null);
+
+        expect($kept)->toHaveCount(20)
+            ->and($via->getApp()->getRevivable('/report_/a'))->toBeNull()
+            ->and($via->getApp()->getRevivable('/report_/c')['tabState'] ?? null)->not->toBeNull()
+        ;
+    });
+
+    test('a revival record whose tab state alone is over the budget is not kept, and the others stay', function (): void {
+        $seen = [];
+        $via = tabStateApp($seen, (new Config())->withLogLevel('warn'));
+        (new ReflectionProperty(Application::class, 'revivableStateBudget'))->setValue($via->getApp(), 300);
+        tabStateLoad($via, '/report_/small')->setTabState('blob', str_repeat('x', 120));
+        tabStateDestroy($via, '/report_/small');
+        tabStateDestroy($via, tabStateLoad($via, '/report_/plain')->getId());
+
+        ob_start();
+        tabStateLoad($via, '/report_/huge')->setTabState('blob', str_repeat('x', 400));
+        tabStateDestroy($via, '/report_/huge');
+        $log = (string) ob_get_clean();
+
+        expect($via->getApp()->getRevivable('/report_/huge'))->toBeNull()
+            ->and($via->getApp()->getRevivable('/report_/small')['tabState'] ?? null)->not->toBeNull()
+            ->and($via->getApp()->getRevivable('/report_/plain'))->not->toBeNull()
+            ->and($log)->toContain('evicted 1 since the last warning')
+        ;
+    });
+
+    test('a value that holds a resource throws, since it would read back as 0', function (): void {
+        $ctx = new Context('/p_/a', '/p', createVia());
+        $handle = fopen('php://memory', 'r');
+
+        try {
+            expect(fn () => $ctx->setTabState('cursor', ['file' => $handle, 'pos' => 10]))
+                ->toThrow(InvalidArgumentException::class, 'Tab state "cursor" cannot be serialized: it holds a resource')
+                ->and(fn () => $ctx->setTabState('file', $handle))->toThrow(InvalidArgumentException::class)
+                ->and($ctx->tabState('cursor'))->toBeNull()
+            ;
+        } finally {
+            fclose($handle);
+        }
+    });
+
+    test('a write after the context is destroyed reaches its revival record, also from an onCleanup() callback', function (): void {
+        $seen = [];
+        $via = tabStateApp($seen);
+        $ctx = tabStateLoad($via);
+        $ctx->onCleanup(fn (Context $c) => $c->setTabState('fromCleanup', 'cleanup'));
+        $ctx->executeAction('run');
+
+        tabStateDestroy($via, '/report_/t1');
+        $ctx->setTabState('late', 'task result');
+        $ctx->setTabState('result', null);
+
+        expect($ctx->tabState('late'))->toBe('task result');
+        $revived = $via->reviveContextFromClient('/report_/t1', 'sess', []);
+
+        expect($seen)->toBe([null, null])
+            ->and($revived?->tabState('late'))->toBe('task result')
+            ->and($revived?->tabState('fromCleanup'))->toBe('cleanup')
+        ;
+    });
+
+    test('a write on a destroyed context reaches the context that revived it, and with no record is dropped', function (): void {
+        $seen = [];
+        $via = tabStateApp($seen);
+        $old = tabStateLoad($via);
+        tabStateDestroy($via, '/report_/t1');
+        $revived = $via->reviveContextFromClient('/report_/t1', 'sess', []);
+
+        $old->setTabState('late', 'task result');
+
+        $gone = tabStateLoad($via, '/report_/t2');
+        tabStateDestroy($via, '/report_/t2');
+        $via->getApp()->forgetRevivable('/report_/t2');
+        $gone->setTabState('late', 'nobody reads this');
+
+        expect($revived?->tabState('late'))->toBe('task result')
+            ->and($old->tabState('late'))->toBe('task result')
+            ->and($gone->tabState('late'))->toBeNull()
+            ->and($via->getApp()->getRevivable('/report_/t2'))->toBeNull()
+        ;
+    });
+
     test('a value of any size is kept, since only the revival records have a budget', function (): void {
         $ctx = new Context('/p_/a', '/p', createVia());
 
@@ -224,6 +325,18 @@ describe('tabState() with more than one worker', function (): void {
         $b->reviveContextFromClient('/report_/t1', 'sess', []);
 
         expect($seenB)->toBe([['rows' => 3, 'html' => '<table></table>']]);
+    });
+
+    test('a write after the first worker destroyed the context reaches the row, as on one worker', function (): void {
+        $seenB = [];
+        [$a, $b] = tabStateWorkers(seenB: $seenB);
+        $ctx = tabStateLoad($a);
+        tabStateDestroy($a, '/report_/t1');
+
+        $ctx->setTabState('result', 'task result');
+        $b->reviveContextFromClient('/report_/t1', 'sess', []);
+
+        expect($seenB)->toBe(['task result']);
     });
 
     test('a write past maxTabStateBytes throws OverflowException and keeps the earlier values', function (): void {
