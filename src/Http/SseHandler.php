@@ -602,13 +602,11 @@ class SseHandler {
      * Whoever connected with a cookie planted or read before a login then gets nothing more of the session.
      */
     private function cookieRetired(SseStream $stream): bool {
-        if ($stream->cookie === null) {
+        if ($stream->cookie === null || $stream->session === null) {
             return false;
         }
 
-        [$session, $state] = $this->via->getSessionManager()->tokens()->lookupHash($stream->cookie);
-
-        return $state === SessionTokens::RETIRED || $session !== $stream->session;
+        return !$this->via->getSessionManager()->tokens()->stillNames($stream->cookie, $stream->session, $stream->cookieCheck);
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\State;
 
+use OpenSwoole\Atomic\Long;
 use OpenSwoole\Table;
 
 /**
@@ -50,6 +51,11 @@ final class SessionTokens {
     /** @var array<string, array{key: string, until: int, seen: int, claimed: int}> the rows without a table */
     private array $rows = [];
 
+    /** Bumped by every write that can change what a lookup returns; $sharedVersion stands in with a table. */
+    private int $version = 0;
+
+    private ?Long $sharedVersion = null;
+
     private int $pruneBlockedUntil = 0;
 
     /**
@@ -87,6 +93,7 @@ final class SessionTokens {
         $table->column('claimed', Table::TYPE_INT, 8);
         $table->create();
         $this->table = $table;
+        $this->sharedVersion = new Long(0);
     }
 
     /**
@@ -104,22 +111,36 @@ final class SessionTokens {
      * @return array{string, self::CURRENT|self::FRESH|self::GRACE|self::RETIRED}
      */
     public function lookupHash(string $hash): array {
-        $row = $this->get($hash);
-        // A claim creates a row with an empty key, which the rotation fills in right after.
-        if ($row === null || $row['key'] === '') {
-            return [$hash, self::FRESH];
+        [$key, $state] = $this->resolve($hash);
+
+        return [$key, $state];
+    }
+
+    /**
+     * Whether the cookie of key() $hash still names $session, as lookupHash() tells. $memo keeps what the last
+     * call found, so that a call reads no row while no row changed and the answer's deadline has not passed.
+     *
+     * @param array{int, int} $memo the version and the time until which the last answer holds; [-1, 0] at first
+     */
+    public function stillNames(string $hash, string $session, array &$memo): bool {
+        $version = $this->sharedVersion?->get() ?? $this->version;
+        if ($memo[0] === $version && ($memo[1] === PHP_INT_MAX || $this->now() < $memo[1])) {
+            return true;
         }
 
-        $now = $this->now();
-        if ($row['until'] === 0) {
-            if ($now - $row['seen'] >= self::SEEN_EVERY) {
-                $this->set($hash, ['seen' => $now]);
-            }
-
-            return [$row['key'], self::CURRENT];
+        [$key, $state, $until] = $this->resolve($hash);
+        if ($key !== $session || $state === self::RETIRED) {
+            return false;
         }
 
-        return [$row['key'], $row['until'] > $now ? self::GRACE : self::RETIRED];
+        $memo = [$version, match ($state) {
+            self::FRESH => PHP_INT_MAX,
+            // So that a long stream keeps its cookie's last-seen time fresh, as lookupHash() does.
+            self::CURRENT => $this->now() + self::SEEN_EVERY,
+            self::GRACE => $until,
+        }];
+
+        return true;
     }
 
     /**
@@ -249,6 +270,28 @@ final class SessionTokens {
         return $this->maxRows;
     }
 
+    /**
+     * @return array{string, self::CURRENT|self::FRESH|self::GRACE|self::RETIRED, int} as lookupHash(), and the end of a grace period
+     */
+    private function resolve(string $hash): array {
+        $row = $this->get($hash);
+        // A claim creates a row with an empty key, which the rotation fills in right after.
+        if ($row === null || $row['key'] === '') {
+            return [$hash, self::FRESH, 0];
+        }
+
+        $now = $this->now();
+        if ($row['until'] === 0) {
+            if ($now - $row['seen'] >= self::SEEN_EVERY) {
+                $this->set($hash, ['seen' => $now]);
+            }
+
+            return [$row['key'], self::CURRENT, 0];
+        }
+
+        return [$row['key'], $row['until'] > $now ? self::GRACE : self::RETIRED, $row['until']];
+    }
+
     /** @return null|array{key: string, until: int, seen: int, claimed: int} */
     private function get(string $hash): ?array {
         if ($this->table === null) {
@@ -268,21 +311,33 @@ final class SessionTokens {
     private function set(string $hash, array $values): bool {
         if ($this->table === null) {
             $this->rows[$hash] = $values + ($this->rows[$hash] ?? ['key' => '', 'until' => 0, 'seen' => 0, 'claimed' => 0]);
-
-            return true;
+            $written = true;
+        } else {
+            $written = @$this->table->set($hash, $values);
         }
 
-        return @$this->table->set($hash, $values);
+        if (isset($values['key']) || isset($values['until'])) {
+            $this->changed();
+        }
+
+        return $written;
     }
 
     private function del(string $hash): void {
         if ($this->table === null) {
             unset($this->rows[$hash]);
-
-            return;
+        } else {
+            $this->table->del($hash);
         }
+        $this->changed();
+    }
 
-        $this->table->del($hash);
+    private function changed(): void {
+        if ($this->sharedVersion !== null) {
+            $this->sharedVersion->add(1);
+        } else {
+            ++$this->version;
+        }
     }
 
     /**

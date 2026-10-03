@@ -18,6 +18,9 @@ final class SseStream {
 
     public readonly int $fd;
 
+    /** @var array{int, int} what the last check of the cookie found, see SessionTokens::stillNames() */
+    public array $cookieCheck = [-1, 0];
+
     /**
      * @param null|string $cookie  SessionTokens::key() of the session cookie the stream connected with, null for a
      *                             context that belongs to no session
