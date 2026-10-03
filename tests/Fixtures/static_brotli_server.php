@@ -15,7 +15,8 @@ declare(strict_types=1);
  *            meanwhile
  *   workers  as later, with two workers
  *   sidecar  a fresh .br sidecar is sent as it is and a stale one is ignored
- *   head     HEAD on static files, the framework's bundles and the Dev Bar assets answers as GET does, with no body
+ *   head     HEAD on static files, the framework's bundles, the Dev Bar assets and /_health answers as GET does, with
+ *            no body, and never serves a static file named like a framework endpoint
  *
  * Prints key=value lines.
  */
@@ -184,6 +185,12 @@ if ($mode === 'head') {
     file_put_contents("{$dir}/big.png", random_bytes(2_200_000));
     file_put_contents("{$dir}/big.css", generatedJs(300 << 10, 4));
     file_put_contents("{$dir}/big.css.br", random_bytes(2_200_000));
+    file_put_contents("{$dir}/empty.txt", '');
+    // Named like framework endpoints, which GET never looks up in the static dir.
+    @mkdir("{$dir}/_action");
+    foreach (['_health', '_sse', '_stats', '_action/foo'] as $name) {
+        file_put_contents("{$dir}/{$name}", 'a static file');
+    }
 }
 
 if ($mode === 'sidecar') {
@@ -223,7 +230,7 @@ if ($pid === 0) {
     } elseif ($mode === 'head') {
         $mismatches = [];
         $cases = 0;
-        foreach (['/boot.js', '/datastar.js', '/datastar.js?v=1', '/via.css', '/_via/devbar.js', '/_via/devbar.css', '/big.png', '/big.css'] as $path) {
+        foreach (['/boot.js', '/datastar.js', '/datastar.js?v=1', '/via.css', '/_via/devbar.js', '/_via/devbar.css', '/big.png', '/big.css', '/empty.txt', '/_health'] as $path) {
             foreach (['', "\nAccept-Encoding: br"] as $extra) {
                 $get = parseResponse(rawExchange($port, ["GET {$path}{$extra}"]));
                 $head = parseResponse(rawExchange($port, ["HEAD {$path}{$extra}"]));
@@ -260,6 +267,12 @@ if ($pid === 0) {
         report('head_304', $notModified['status'] . ' ' . strlen($notModified['rest']));
         report('head_route', parseResponse(rawExchange($port, ['HEAD /page']))['status']);
         report('head_missing', parseResponse(rawExchange($port, ['HEAD /missing.js']))['status']);
+        $framework = [];
+        foreach (['/_sse', '/_stats', '/_action/foo'] as $path) {
+            $head = parseResponse(rawExchange($port, ["HEAD {$path}"]));
+            $framework[] = trim("{$path} {$head['status']} " . ($head['headers']['allow'] ?? ''));
+        }
+        report('head_framework', implode(' | ', $framework));
     } elseif ($mode === 'sidecar') {
         $fresh = probeRequest($port, '/fresh.js', ['Accept-Encoding' => 'br']);
         report('fresh_sidecar', (int) ($fresh['body'] === file_get_contents("{$dir}/fresh.js.br")));

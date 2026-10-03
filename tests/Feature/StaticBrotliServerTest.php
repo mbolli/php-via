@@ -73,11 +73,12 @@ test('HEAD answers like GET with no body: same headers, and the length of the bo
     // OpenSwoole 26.2 sends end()'s body and sendfile()'s file on HEAD as well, and HEAD on a static file answered 404.
     $r = staticBrotliServer('head');
 
-    expect($r['head_cases'])->toBe('16', $r['out'])
+    expect($r['head_cases'])->toBe('20', $r['out'])
         ->and($r['head_mismatches'])->toBe('none')
         ->and($r['head_then_get'])->toBe('ok')
         ->and($r['head_304'])->toBe('304 0')
         ->and($r['head_route'])->toBe('200')
         ->and($r['head_missing'])->toBe('404')
+        ->and($r['head_framework'])->toBe('/_sse 404 | /_stats 404 | /_action/foo 405 POST')
     ;
 });

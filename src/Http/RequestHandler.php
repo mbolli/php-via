@@ -283,9 +283,7 @@ class RequestHandler {
             // non-GET safe methods all trigger CORS preflight in browsers.
             // Note: HEAD is answered above and never reaches this point.
             if ($method === 'GET') {
-                $response->status(405);
-                $response->header('Allow', 'POST');
-                $response->end('Method Not Allowed');
+                self::methodNotAllowed($request, $response, 'POST');
 
                 return;
             }
@@ -319,7 +317,7 @@ class RequestHandler {
 
         // Health endpoint: always available, no sensitive data
         if ($path === '/_health' && $method === 'GET') {
-            $this->handleHealth($response);
+            $this->handleHealth($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
 
             return;
@@ -507,13 +505,31 @@ class RequestHandler {
     }
 
     /**
-     * Answer a HEAD request that no static file took: a Dev Bar asset as its GET would, a page route with 200 and no
-     * body, an extension-less file in $staticDir as GET would, anything else 404.
+     * Answer a HEAD request that no static file took: /_health, an action URL and a Dev Bar asset as GET would, any
+     * other framework endpoint 404, a page route with 200 and no body, an extension-less file in $staticDir as GET
+     * would, anything else 404.
      */
     private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir): void {
+        if ($path === '/_health') {
+            $this->handleHealth($request, $response);
+
+            return;
+        }
+        if (str_starts_with($path, '/_action/')) {
+            self::methodNotAllowed($request, $response, 'POST');
+
+            return;
+        }
         if (($path === '/_via/devbar.css' || $path === '/_via/devbar.js') && $this->via->getConfig()->isTracingEnabled()) {
             $this->devBar ??= new DevBarController($this->via, staticBrotli: $this->staticBrotli);
             $this->devBar->handle($path, $request, $response);
+
+            return;
+        }
+        // GET answers these before routing and never looks them up in the static dir.
+        if ($path === '/_sse' || $path === '/_stats' || $path === '/_via' || $path === '/_traces' || str_starts_with($path, '/_via/')) {
+            $response->status(404);
+            $response->end();
 
             return;
         }
@@ -804,7 +820,7 @@ class RequestHandler {
      * status "degraded" when the broker has lost its backend connection.
      * No sensitive data (no IPs, no credentials, no per-user information).
      */
-    private function handleHealth(Response $response): void {
+    private function handleHealth(Request $request, Response $response): void {
         $broker = $this->via->getBroker();
         $brokerConnected = $broker->isConnected();
         $brokerDriver = (new \ReflectionClass($broker))->getShortName();
@@ -828,7 +844,7 @@ class RequestHandler {
         $response->status($httpStatus);
         $response->header('Content-Type', 'application/json');
         $response->header('Cache-Control', 'no-store');
-        $response->end(json_encode($payload));
+        self::endWithBody($request, $response, (string) json_encode($payload));
     }
 
     /**
@@ -980,10 +996,14 @@ class RequestHandler {
      * this Content-Length.
      */
     private static function endHead(Response $response, int $length): void {
-        if ($length > 0) {
-            $response->header('Content-Length', (string) $length);
-        }
+        $response->header('Content-Length', (string) $length);
         $response->end();
+    }
+
+    private static function methodNotAllowed(Request $request, Response $response, string $allow): void {
+        $response->status(405);
+        $response->header('Allow', $allow);
+        self::endWithBody($request, $response, 'Method Not Allowed');
     }
 
     /**
