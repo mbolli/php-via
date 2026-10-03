@@ -247,7 +247,8 @@ message that names the new one.
   gets uploaded files.
 - **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
   what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
-  only and goes with its context, so exports no longer travel through the SSE stream.
+  only and goes with its context, so exports no longer travel through the SSE stream. A tab keeps
+  its newest 100 download URLs.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
   actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.

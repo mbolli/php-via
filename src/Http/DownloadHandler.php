@@ -17,6 +17,9 @@ final class DownloadHandler {
     /** Where downloads are served, after the base path. */
     public const string PATH = '_download/';
 
+    /** Downloads one page keeps; a new one past this drops its oldest. */
+    public const int MAX_PER_PAGE = 100;
+
     /** @var array<string, array{page: \WeakReference<Context>, source: callable|string, filename: string, mimeType: string}> Downloads by token */
     private array $downloads = [];
 
@@ -28,7 +31,7 @@ final class DownloadHandler {
     }
 
     /**
-     * Keep a download for $page until it is fetched or the page is destroyed.
+     * Keep a download for $page until it is fetched, the page is destroyed, or the page has MAX_PER_PAGE newer ones.
      *
      * @param callable(): (iterable<string>|string)|string $source a file path, or a callable that returns or yields the content
      *
@@ -59,7 +62,13 @@ final class DownloadHandler {
 
         $token = bin2hex(random_bytes(16));
         $this->downloads[$token] = ['page' => \WeakReference::create($page), 'source' => $source, 'filename' => $filename, 'mimeType' => $mimeType];
-        $this->tokensByPage[$page] = [...$this->tokensByPage[$page], $token => true];
+        $tokens = $this->tokensByPage[$page];
+        $tokens[$token] = true;
+        if (\count($tokens) > self::MAX_PER_PAGE) {
+            $oldest = array_key_first($tokens);
+            unset($tokens[$oldest], $this->downloads[$oldest]);
+        }
+        $this->tokensByPage[$page] = $tokens;
 
         return $token;
     }

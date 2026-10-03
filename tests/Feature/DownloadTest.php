@@ -186,6 +186,27 @@ describe('Context::download()', function (): void {
         ;
     });
 
+    test('keeps the newest downloads of a page, so a view that renders a link on every render holds no more', function (): void {
+        $via = createVia();
+        $page = downloadPage($via);
+        $other = downloadPage($via);
+        $first = $page->download(fn (): string => 'first', 'a.txt', 'text/plain');
+        $second = $page->download(fn (): string => 'second', 'a.txt', 'text/plain');
+        $kept = $other->download(fn (): string => 'other page', 'a.txt', 'text/plain');
+        for ($i = 2; $i < DownloadHandler::MAX_PER_PAGE + 1; ++$i) {
+            $last = $page->download(fn (): string => 'newest', 'a.txt', 'text/plain');
+        }
+
+        $held = (new ReflectionProperty(DownloadHandler::class, 'downloads'))->getValue($via->getApp()->downloads());
+
+        expect($held)->toHaveCount(DownloadHandler::MAX_PER_PAGE + 1)
+            ->and(fetchDownload($via, $first)->statusCode)->toBe(404)
+            ->and(fetchDownload($via, $second)->body())->toBe('second')
+            ->and(fetchDownload($via, $last)->body())->toBe('newest')
+            ->and(fetchDownload($via, $kept)->body())->toBe('other page')
+        ;
+    });
+
     test('keeps nothing for a context destroyed already, and its URL answers 404', function (): void {
         $via = createVia();
         $page = downloadPage($via);
