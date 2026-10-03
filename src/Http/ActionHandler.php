@@ -148,6 +148,7 @@ class ActionHandler {
         );
         $scope->bind();
         $this->via->actionStarted($contextId);
+        $this->via->getStats()->trackAction();
 
         try {
             // Inject signals into context

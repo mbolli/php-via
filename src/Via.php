@@ -334,7 +334,7 @@ class Via {
         $this->logger = new Logger($this->settings->logLevel);
         $this->requestLogger = new RequestLogger($this->settings->devMode);
         $this->logger->setRequestLogger($this->requestLogger);
-        $this->stats = new Stats();
+        $this->stats = new Stats(fn (): array => ['active_sse' => array_sum($this->activeSseCount), 'active_contexts' => \count($this->contexts)]);
         $this->errorHooks = new ErrorHooks($this->log(...));
 
         if (!$this->settings->broadcastCoalescingEnabled) {
@@ -1160,6 +1160,7 @@ class Via {
             $this->server->set($settings);
 
             $this->requestHandler->setRoutes($this->router->getRoutes());
+            $this->stats->share();
 
             // SharedTable: allocate in master process so it is mmap'd into all workers
             // on fork. Only needed when worker_num > 1 (single-worker uses a plain PHP array).
@@ -1340,10 +1341,10 @@ class Via {
                     }
                 }
 
-                // The worker runs the cycle collector itself, see Config::withGcIntervalMs().
+                // See Config::withGcIntervalMs().
                 $gcIntervalMs = $this->settings->gcIntervalMs;
-                if ($gcIntervalMs > 0) {
-                    $collector = new CycleCollector($gcIntervalMs, CycleCollector::memoryLimit((string) \ini_get('memory_limit')));
+                if ($this->settings->gcOnGrowth) {
+                    $collector = new CycleCollector($gcIntervalMs > 0 ? $gcIntervalMs : PHP_INT_MAX, CycleCollector::memoryLimit((string) \ini_get('memory_limit')));
                     gc_disable();
                     $id = Timer::tick(CycleCollector::CHECK_MS, function () use ($collector): void {
                         if ($collector->isDue()) {
@@ -1357,6 +1358,12 @@ class Via {
                         $this->collectsCycles = true;
                     } else {
                         gc_enable();
+                    }
+                } elseif ($gcIntervalMs > 0) {
+                    $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
                     }
                 }
 
@@ -1764,7 +1771,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * @internal run when a worker's CycleCollector finds a run due, see Config::withGcIntervalMs()
+     * @internal run by a worker's collector timer, see Config::withGcIntervalMs()
      */
     public function runGcCycle(): void {
         $cycles = gc_collect_cycles();
@@ -2395,12 +2402,11 @@ class Via {
         $defaults = [
             'open_http2_protocol' => $settings->https || $settings->h2c,
             'http_compression' => false,
-            // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
-            // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
-            // ERRNO 1203 on every send. 2MB is the OpenSwoole default; send_yield=true
-            // handles backpressure without stalling. SSE events are flushed per-chunk by
-            // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
-            'socket_buffer_size' => 1024 * 1024,
+            // Per-connection backlog in the master past which a write parks (send_yield) until the backlog is
+            // empty. Twice the default withSseMaxQueuedBytes(), so frames still in the worker pipe when a
+            // stream checks its backlog do not fill it. In POOL_MODE all sends go through the master reactor
+            // pipe, so 0 would cause ERRNO 1203 on every send.
+            'socket_buffer_size' => 2 * 1024 * 1024,
             'max_coroutine' => 100000,
             'worker_num' => $settings->workerNum,  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,

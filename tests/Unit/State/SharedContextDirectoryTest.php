@@ -80,13 +80,21 @@ describe('SharedContextDirectory', function (): void {
         ;
     });
 
-    test('with revival off, registering a context writes no directory row', function (): void {
+    test('with revival off, a page load writes a row with its home only, and destroying the context drops it', function (): void {
         $app = createVia((new Config())->withContextTimeouts(revivalWindowMs: 0));
         $directory = new SharedContextDirectory(maxRows: 16);
         $app->getApp()->setContextDirectory($directory);
 
-        $app->getApp()->registerContext(new Context('/docs_/a', '/docs', $app, null, 's'));
+        $app->getApp()->registerContext(new Context('/docs_/a', '/docs', $app, null, 's'), asHome: true);
+        $rows = $directory->count();
+        $home = $directory->home('/docs_/a');
+        $record = $directory->get('/docs_/a');
+        $app->getApp()->destroyContext('/docs_/a');
 
-        expect($directory->count())->toBe(0);
+        expect($rows)->toBe(1)
+            ->and($home)->toBe($app->getApp()->workerIdentity())
+            ->and($record)->toBeNull()
+            ->and($directory->count())->toBe(0)
+        ;
     });
 });

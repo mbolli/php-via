@@ -7,9 +7,17 @@ use Mbolli\PhpVia\Support\CycleCollector;
 use Mbolli\PhpVia\Support\Stats;
 
 describe('Config GC interval', function (): void {
-    test('default interval is 30 seconds', function (): void {
-        $config = new Config();
-        expect($config->freeze()->gcIntervalMs)->toBe(30_000);
+    test('default interval is 30 seconds, with PHP\'s own runs on', function (): void {
+        $settings = (new Config())->freeze();
+        expect($settings->gcIntervalMs)->toBe(30_000)
+            ->and($settings->gcOnGrowth)->toBeFalse()
+        ;
+    });
+
+    test('onGrowth turns on the growth-based runs and a second call without it turns them off', function (): void {
+        expect((new Config())->withGcIntervalMs(10_000, onGrowth: true)->freeze()->gcOnGrowth)->toBeTrue()
+            ->and((new Config())->withGcIntervalMs(10_000, onGrowth: true)->withGcIntervalMs(5_000)->freeze()->gcOnGrowth)->toBeFalse()
+        ;
     });
 
     test('withGcIntervalMs() sets a custom interval', function (): void {
@@ -17,7 +25,7 @@ describe('Config GC interval', function (): void {
         expect($config->freeze()->gcIntervalMs)->toBe(60_000);
     });
 
-    test('withGcIntervalMs(0) leaves the collector to PHP', function (): void {
+    test('withGcIntervalMs(0) runs no timed collection', function (): void {
         $config = (new Config())->withGcIntervalMs(0);
         expect($config->freeze()->gcIntervalMs)->toBe(0);
     });

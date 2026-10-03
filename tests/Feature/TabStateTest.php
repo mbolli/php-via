@@ -387,7 +387,7 @@ describe('tabState() with more than one worker', function (): void {
         $ctx->setTabState('large', str_repeat('z', 200));
 
         expect($ctx->tabState('large'))->toBe(str_repeat('z', 200))
-            ->and($directory->count())->toBe(0)
+            ->and($directory->getState('/report_/t1'))->toBeNull()
         ;
     });
 });

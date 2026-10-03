@@ -23,6 +23,7 @@ use Nyholm\Psr7\Response as Psr7Response;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
+use OpenSwoole\Http\Server;
 use OpenSwoole\Runtime;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -201,6 +202,7 @@ class RequestHandler {
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+            $this->countRequest($requestStart);
         }
     }
 
@@ -272,6 +274,25 @@ class RequestHandler {
         return array_diff_key($attributes, ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
     }
 
+    /**
+     * The hook flags this worker runs under, its AIO thread pool and, on a running server, its event loop lag: a call
+     * that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
+     *
+     * @internal read by /_stats and the Dev Bar
+     *
+     * @return array<string, float|int>
+     */
+    public static function runtimeStats(?Server $server): array {
+        return [
+            'hook_flags' => Runtime::getHookFlags(),
+            ...array_intersect_key(Coroutine::stats(), array_flip(['aio_worker_num', 'aio_task_num'])),
+            ...array_intersect_key(
+                $server?->stats() ?: [],
+                array_flip(['event_loop_lag_ms', 'event_loop_lag_max_ms', 'event_loop_lag_avg_ms']),
+            ),
+        ];
+    }
+
     private function dispatch(Request $request, Response $response, bool $forwarded = false): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
@@ -285,6 +306,7 @@ class RequestHandler {
         if ($path === '/datastar.js') {
             $this->serveDatastarJs($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -293,6 +315,7 @@ class RequestHandler {
         if ($path === '/via.css') {
             $this->serveViaCss($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -304,13 +327,14 @@ class RequestHandler {
         if ($staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
 
         // Anything else answers HEAD without rendering
         if ($method === 'HEAD') {
-            $this->handleHeadRequest($path, $request, $response, $staticDir !== null && !$staticFirst ? $staticDir : null);
+            $this->handleHeadRequest($path, $request, $response, $staticDir !== null && !$staticFirst ? $staticDir : null, $requestStart);
 
             return;
         }
@@ -438,6 +462,7 @@ class RequestHandler {
         if ($plain !== null) {
             $status = $this->plainRoutes->serve($request, $response, $plain[0], $plain[1], $params);
             $this->logRequest($method, $path, $status, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -467,6 +492,7 @@ class RequestHandler {
         if ($staticDir !== null && !$staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -626,11 +652,18 @@ class RequestHandler {
     }
 
     /**
+     * Count a page, static file or route() request in Via::getStats().
+     */
+    private function countRequest(int $hrtimeStart): void {
+        $this->via->getStats()->trackRequest((hrtime(true) - $hrtimeStart) / 1e6);
+    }
+
+    /**
      * Answer a HEAD request that no static file took: /_health, an action URL and a Dev Bar asset as GET would, any
      * other framework endpoint 404, a plain route that takes GET or HEAD through its handler, a page route with 200
      * and no body, an extension-less file in $staticDir as GET would, anything else 404.
      */
-    private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir): void {
+    private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir, int $requestStart): void {
         if ($path === '/_health') {
             $this->handleHealth($request, $response);
 
@@ -665,6 +698,7 @@ class RequestHandler {
         $plain = $this->plainRoutes->find('HEAD', $path, $params, $allowed);
         if ($plain !== null) {
             $this->plainRoutes->serve($request, $response, $plain[0], $plain[1], $params);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -674,6 +708,7 @@ class RequestHandler {
             $response->status(200);
             $response->header('Content-Type', 'text/html; charset=utf-8');
             $response->end();
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -686,6 +721,7 @@ class RequestHandler {
 
         if ($staticDir !== null && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -769,6 +805,7 @@ class RequestHandler {
             $this->via->writeSessionCookie($request, $response);
             $this->psrResponseEmitter->emit($psrResponse, $response);
             $this->logRequest($method, $path, $psrResponse->getStatusCode(), $requestStart);
+            $this->countRequest($requestStart);
         }
     }
 
@@ -918,15 +955,7 @@ class RequestHandler {
                 'tick_ms' => $this->via->getSettings()->broadcastTickMs,
                 ...$this->via->getStats()->getBroadcastStats(),
             ],
-            // Per worker: a call that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
-            'runtime' => [
-                'hook_flags' => Runtime::getHookFlags(),
-                ...array_intersect_key(Coroutine::stats(), array_flip(['aio_worker_num', 'aio_task_num'])),
-                ...array_intersect_key(
-                    $this->via->getServer()?->stats() ?: [],
-                    array_flip(['event_loop_lag_ms', 'event_loop_lag_max_ms', 'event_loop_lag_avg_ms']),
-                ),
-            ],
+            'runtime' => self::runtimeStats($this->via->getServer()),
             'memory' => [
                 'current' => memory_get_usage(true),
                 'peak' => memory_get_peak_usage(true),

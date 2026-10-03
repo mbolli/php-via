@@ -4,7 +4,7 @@
 // runtime can interfere. Boot data arrives as data-* attributes from the
 // server-side Injector; live traces stream over EventSource('/_via/stream').
 //
-// Tabs: Traces · Signals · SSE/Patches · Request · Scopes · Errors.
+// Tabs: Traces · Signals · SSE · Request · Scopes · Stats · Logs.
 
 const CATEGORY_COLORS = {
   request: '#8b949e',
@@ -117,6 +117,11 @@ const STYLES = `
   .kv input:focus { outline: none; border-color: var(--accent); }
   .tag { font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--bg3); color: var(--fg-dim); }
   .tag.rw { background: #1f6feb33; color: var(--accent); }
+  .kv tr.group td {
+    color: var(--fg-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    padding-top: 12px; border-bottom-color: var(--bg3);
+  }
+  .kv tr.group td .note { text-transform: none; letter-spacing: 0; padding: 0 0 0 8px; }
 
   /* Server/client log records */
   .log { font-size: 11px; }
@@ -186,9 +191,11 @@ class ViaDevBar extends HTMLElement {
     this.logs = [];
     this.logFilter = 'info';
     this.scopes = null;
+    this.stats = null;
     this.activeTab = 'traces';
     this.expanded = this.mode === 'page';
     this.scopeTimer = null;
+    this.statsTimer = null;
 
     this.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="root"></div>`;
@@ -203,6 +210,7 @@ class ViaDevBar extends HTMLElement {
   disconnectedCallback() {
     this.es?.close();
     if (this.scopeTimer) clearInterval(this.scopeTimer);
+    this.stopStats();
   }
 
   // ── data sources ──────────────────────────────────────────────────────────
@@ -268,6 +276,26 @@ class ViaDevBar extends HTMLElement {
     if (!this.scopeTimer) this.scopeTimer = setInterval(load, 2000);
   }
 
+  // Polled only while the Stats tab is open: each answer comes from one worker.
+  startStats() {
+    if (this.statsTimer) return;
+    const load = async () => {
+      try {
+        const r = await fetch(this.base + '_via/stats', { headers: { Accept: 'application/json' } });
+        if (!r.ok) return;
+        this.stats = await r.json();
+        if (this.expanded && this.activeTab === 'stats') this.renderBody();
+      } catch (_) { /* ignore */ }
+    };
+    load();
+    this.statsTimer = setInterval(load, 2000);
+  }
+
+  stopStats() {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
+  }
+
   // ── rendering ───────────────────────────────────────────────────────────────
 
   render() {
@@ -279,6 +307,7 @@ class ViaDevBar extends HTMLElement {
       ['sse', 'SSE', this.sseEvents.length],
       ['request', 'Request', null],
       ['scopes', 'Scopes', null],
+      ['stats', 'Stats', null],
       ['logs', 'Logs', this.errorCount() || null],
     ];
     const cls = this.mode === 'page' ? 'page' : 'overlay';
@@ -325,6 +354,8 @@ class ViaDevBar extends HTMLElement {
 
   toggle(on) {
     this.expanded = on;
+    if (on && this.activeTab === 'stats') this.startStats();
+    if (!on) this.stopStats();
     this.render();
   }
 
@@ -341,6 +372,7 @@ class ViaDevBar extends HTMLElement {
   selectTab(id) {
     this.activeTab = id;
     if (id === 'scopes' && !this.scopeTimer) this.pollScopes();
+    if (id === 'stats') this.startStats(); else this.stopStats();
     this.render();
   }
 
@@ -353,6 +385,7 @@ class ViaDevBar extends HTMLElement {
       sse: () => this.renderSse(),
       request: () => this.renderRequest(),
       scopes: () => this.renderScopes(),
+      stats: () => this.renderStats(),
       logs: () => this.renderLogs(),
     }[this.activeTab] || (() => ''))();
 
@@ -483,6 +516,51 @@ class ViaDevBar extends HTMLElement {
     const rows = sc.scopes.map((s) =>
       `<tr><td class="k">${esc(s.scope)}</td><td>${s.contextCount} ctx</td></tr>`).join('');
     return summary + `<table class="kv"><tbody>${rows}</tbody></table>`;
+  }
+
+  renderStats() {
+    if (!this.stats) return `<div class="empty">Loading stats…</div>`;
+    const s = this.stats.stats || {};
+    const rt = this.stats.runtime || {};
+    const num = (v) => (v == null ? '—' : String(v));
+    const ms = (v) => (v == null ? '—' : fmtMs(v));
+    const groups = [
+      ['server', 'every worker', [
+        ['requests', num(s.requests)],
+        ['avg_request_time', ms(s.avg_request_time)],
+        ['actions', num(s.actions)],
+        ['sse_connections', num(s.sse_connections)],
+      ]],
+      [`worker ${this.stats.worker}`, 'the worker that answered', [
+        ['active_sse', num(s.active_sse)],
+        ['active_contexts', num(s.active_contexts)],
+        ['render_count', num(s.render_count)],
+        ['avg_render_time', s.avg_render_time == null ? '—' : fmtMs(s.avg_render_time * 1000)],
+        ['gc_runs', num(s.gc_runs)],
+        ['gc_cycles_freed', num(s.gc_cycles_freed)],
+      ]],
+      ['broadcasts', 'this worker', [
+        ['tick_ms', num(this.stats.broadcast_tick_ms)],
+        ['broadcasts_scheduled', num(s.broadcasts_scheduled)],
+        ['broadcasts_coalesced', num(s.broadcasts_coalesced)],
+        ['broadcast_flushes', num(s.broadcast_flushes)],
+        ['broadcast_flush_overruns', num(s.broadcast_flush_overruns)],
+        ['broadcast_flush_last_ms', ms(s.broadcast_flush_last_ms)],
+        ['broadcast_flush_max_ms', ms(s.broadcast_flush_max_ms)],
+        ['broadcast_flush_total_ms', ms(s.broadcast_flush_total_ms)],
+      ]],
+      ['runtime', 'this worker', [
+        ['hook_flags', `${num(rt.hook_flags)} ${(this.stats.hook_flag_names || []).join(' ')}`],
+        ['aio_worker_num', num(rt.aio_worker_num)],
+        ['aio_task_num', num(rt.aio_task_num)],
+        ['event_loop_lag_ms', ms(rt.event_loop_lag_ms)],
+        ['event_loop_lag_max_ms', ms(rt.event_loop_lag_max_ms)],
+        ['event_loop_lag_avg_ms', ms(rt.event_loop_lag_avg_ms)],
+      ]],
+    ];
+    return `<table class="kv"><tbody>${groups.map(([name, scope, rows]) =>
+      `<tr class="group"><td colspan="2">${esc(name)}<span class="note">${esc(scope)}</span></td></tr>`
+      + rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td data-stat="${esc(k)}">${esc(v)}</td></tr>`).join('')).join('')}</tbody></table>`;
   }
 
   renderLogs() {

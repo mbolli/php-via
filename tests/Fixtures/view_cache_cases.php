@@ -16,6 +16,9 @@ declare(strict_types=1);
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
+// Patches go to arrays: with channels each drain would wait out the SSE keep-alive per context.
+putenv('VIA_TEST_MODE=1');
+
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
@@ -73,6 +76,7 @@ Coroutine::run(static function () use ($case): void {
         }
         echo 'renders=', $GLOBALS['renders'], "\n";
         echo 'fresh=', $fresh, "\n";
+        Timer::clearAll();
 
         return;
     }
@@ -118,6 +122,7 @@ Coroutine::run(static function () use ($case): void {
         // An action's sync() before the next broadcast reads the cache.
         $x2->sync();
         echo 'sync_fresh=', (int) str_contains(implode('', drainElements($x2)), 'v=2'), "\n";
+        Timer::clearAll();
 
         return;
     }

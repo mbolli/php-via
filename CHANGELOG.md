@@ -130,10 +130,6 @@ All notable changes to php-via will be documented in this file.
 - **A tab rebuilt after it was away runs the route's middleware again,** on a GET of the page's URL,
   so an auth gate applies. When the middleware answers instead, the tab reloads, from an SSE reconnect
   or an action, and the page load gets the middleware's answer. See [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival).
-- **Workers turn PHP's own cycle collector runs off** and start them between coroutines. A loop that
-  creates cycles without waiting on I/O frees them only once it ends, and when they outgrow
-  `memory_limit` the worker dies with all its tabs, where PHP's runs would have freed them. Call
-  `gc_collect_cycles()` in such a loop, or keep PHP's runs with `withGcIntervalMs(0)`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
 - **The default shell shows its Live Signals panel in dev mode only.**
 - **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
   where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied. A clone of a
@@ -327,6 +323,9 @@ message that names the new one.
   found", and for a `RedisBroker` without the socket hook its connection needs.
 - **The dev-mode `/_stats`** reports the hook flags, the AIO thread pool and the worker's event loop
   lag under `runtime`.
+- **A Stats panel in the Dev Bar** shows every `getStats()->getAll()` figure, the broadcast tick, and
+  the hook flags, AIO threads and event loop lag of the worker that answers. It reads `/_via/stats`,
+  which answers wherever the Dev Bar does, also outside dev mode.
 - **`Testing\TestApp`** runs an app's pages in a test, with no server and no `VIA_TEST_MODE`, through
   php-via's own request, action and SSE handlers: `$tab = $app->open('/')`, then `action()`,
   `patches()`, `signal()`, `html()`, `connect()`, and `disconnect(expire: true)` for a revival.
@@ -361,16 +360,17 @@ message that names the new one.
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
   `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.
 - **Dev Bar assets** are served from memory with an ETag, and with Brotli level 11. A page view
-  revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
-  download is 6.8 KB with Brotli.
+  revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 29 KB again, and a full
+  download is 7.6 KB with Brotli.
 - **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once
   instead of 20 times while the contexts of a 250,000-view burst expire. See
   [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
-- **Workers run the cycle collector when their memory has grown by half,** not every 10,000
-  possible roots. In a burst of 250,000 page views it runs 9 times instead of 25, takes two thirds
-  less time and lets the worker serve 21% more views a second. When each view leaves a cycle, the
-  worker serves all 250,000 views in 9 s, where PHP's runs took 20 s for 128,000. A run still walks
-  every live context. See [Performance](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
+- **`withGcIntervalMs($ms, onGrowth: true)`** turns PHP's own cycle collector runs off, and workers
+  run the collector when their memory has grown by half instead of every 10,000 possible roots. In a
+  burst of 250,000 page views it runs 9 times instead of 25, takes two thirds less time and lets the
+  worker serve 21% more views a second. A loop that creates cycles without waiting on I/O then frees
+  them only once it ends, and when they outgrow `memory_limit` the worker dies with all its tabs.
+  PHP's own runs stay on by default. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
 - **Broadcasts cost less per tab:** 38% less than 0.13.0 for tabs that share a render, and 5% less
   for tabs that render their own view. A broadcast whose view calls `getClients()` takes 15 to 28%
   less. An SSE stream checks its session cookie against the rotation table only after a rotation,
@@ -470,12 +470,28 @@ message that names the new one.
   cannot send and what its running actions send.
 - A stopping worker, on a deploy or a reload, ended its streams and the tabs waited up to 15 s to
   reconnect. It now asks them to reconnect at once.
+- With several workers and `withContextTimeouts(revivalWindowMs: 0)`, a tab's actions on other
+  workers answered 400: no worker knew where the tab lived. The context directory now keeps the
+  tab's worker with revival off too, until the context is destroyed. A stream that reaches another
+  worker still reloads the tab.
+- `getStats()->getAll()` read 0 for `requests`, `avg_request_time`, `actions`, `sse_connections`,
+  `active_sse` and `active_contexts`. Page, static file and `route()` requests, actions and SSE
+  connections now count for the whole server, and the active counts are read from the answering
+  worker. `Stats::setActiveSse()` and `setActiveContexts()` are removed.
+- A client that read too slowly could park its SSE stream until it disconnected, also with
+  `withSseMaxQueuedBytes()` set. Once the backlog passed `socket_buffer_size`, OpenSwoole parked
+  every write until the backlog was empty, and element frames went out again as soon as it fell
+  below the threshold. They are now dropped until the backlog is empty, and the default
+  `socket_buffer_size` is 2 MiB, twice the default threshold. A threshold above half of
+  `socket_buffer_size` acts as half of it.
 
 ### Tests
 
 - `VIA_TEST_PORT_BASE` gives every fixture that starts a real server a port from one window,
   `VIA_TEST_PORT_COUNT` ports long (50 by default), so the suite runs on a machine where other ports
   are taken. Unset, each fixture keeps the window it had.
+- `tests/Fixtures/view_cache_cases.php` sets `VIA_TEST_MODE` itself. Run on its own, it waited out
+  the SSE keep-alive for every context it drained and ran into its 60 s timeout.
 
 ### Docs
 

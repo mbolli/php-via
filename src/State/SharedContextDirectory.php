@@ -37,6 +37,9 @@ use OpenSwoole\Table;
  * rendered or rebuilt it. Requests of the tab that reach another worker are forwarded there (Http\Forwarder).
  * A home is not released when its context is destroyed: the worker then answers that it does not hold the
  * tab, and the next claim replaces it.
+ *
+ * With revival off a row holds only the home, with no record and no tab state (putHome()): no worker rebuilds the
+ * context, but its requests still reach its worker. Such a row goes when its home destroys the context.
  */
 final class SharedContextDirectory {
     /** Lock rows for tab state writes; contexts hash onto them. */
@@ -102,30 +105,49 @@ final class SharedContextDirectory {
             );
         }
 
-        $key = self::key($contextId);
         $row = ['record' => $serialized, 'expires' => $record['expiresAt']];
         if ($home !== null) {
             $row += ['hwid' => $home[0], 'hpid' => $home[1]];
         }
 
-        if ($this->trySet($key, $row)) {
+        $this->write(self::key($contextId), $row);
+    }
+
+    /**
+     * Store or refresh a row that holds only a context's home, for a server with revival off.
+     *
+     * @param null|array{int, int} $home worker id and process id that become its home; null keeps the home
+     *
+     * @throws \OverflowException if the table is full
+     */
+    public function putHome(string $contextId, int $expiresAt, ?array $home = null): void {
+        $row = ['record' => '', 'expires' => $expiresAt];
+        if ($home !== null) {
+            $row += ['hwid' => $home[0], 'hpid' => $home[1]];
+        }
+
+        $this->write(self::key($contextId), $row);
+    }
+
+    /**
+     * Drop a row that putHome() wrote while $home is still its home, under the context's lock.
+     *
+     * @param array{int, int} $home worker id and process id
+     *
+     * @throws \RuntimeException if the lock is not taken in time
+     */
+    public function releaseHome(string $contextId, array $home): void {
+        $key = self::key($contextId);
+        if (!$this->table->exists($key)) {
             return;
         }
 
-        // Expired records leave only when pruned, so a full table may just need a sweep. The
-        // sweep reads every row, so after one that frees nothing the next waits a second.
-        $now = hrtime(true);
-        if ($now >= $this->pruneBlockedUntilNs) {
-            if ($this->prune() > 0 && $this->trySet($key, $row)) {
-                return;
+        $this->stateLock->run((string) (crc32($key) % self::STATE_STRIPES), function () use ($key, $home): void {
+            $row = $this->table->get($key);
+            if (\is_array($row) && (string) $row['record'] === '' && [(int) $row['hwid'], (int) $row['hpid']] === $home) {
+                $this->table->del($key);
             }
-            $this->pruneBlockedUntilNs = $now + 1_000_000_000;
-        }
-
-        throw new \OverflowException(
-            'The shared context directory is full, so contexts can no longer be rebuilt on '
-            . 'other workers. Raise the row count with Config::withContextDirectorySize().'
-        );
+        });
     }
 
     /**
@@ -147,7 +169,7 @@ final class SharedContextDirectory {
             return null;
         }
 
-        return self::decode((string) $row['record']);
+        return (string) $row['record'] === '' ? null : self::decode((string) $row['record']);
     }
 
     /**
@@ -158,7 +180,7 @@ final class SharedContextDirectory {
      */
     public function getState(string $contextId): ?array {
         $row = $this->table->get(self::key($contextId));
-        if (!\is_array($row) || (int) $row['expires'] <= time()) {
+        if (!\is_array($row) || (int) $row['expires'] <= time() || (string) $row['record'] === '') {
             return null;
         }
 
@@ -180,7 +202,7 @@ final class SharedContextDirectory {
 
         return $this->stateLock->run((string) (crc32($key) % self::STATE_STRIPES), function () use ($key, $change, $name): bool {
             $row = $this->table->get($key);
-            if (!\is_array($row) || (int) $row['expires'] <= time()) {
+            if (!\is_array($row) || (int) $row['expires'] <= time() || (string) $row['record'] === '') {
                 return false;
             }
 
@@ -361,6 +383,32 @@ final class SharedContextDirectory {
         }
 
         return $valid;
+    }
+
+    /**
+     * @param array{record: string, expires: int, hwid?: int, hpid?: int} $row
+     *
+     * @throws \OverflowException if the table is full
+     */
+    private function write(string $key, array $row): void {
+        if ($this->trySet($key, $row)) {
+            return;
+        }
+
+        // Expired records leave only when pruned, so a full table may just need a sweep. The
+        // sweep reads every row, so after one that frees nothing the next waits a second.
+        $now = hrtime(true);
+        if ($now >= $this->pruneBlockedUntilNs) {
+            if ($this->prune() > 0 && $this->trySet($key, $row)) {
+                return;
+            }
+            $this->pruneBlockedUntilNs = $now + 1_000_000_000;
+        }
+
+        throw new \OverflowException(
+            'The shared context directory is full, so other workers can no longer reach or rebuild new '
+            . 'contexts. Raise the row count with Config::withContextDirectorySize().'
+        );
     }
 
     /**
