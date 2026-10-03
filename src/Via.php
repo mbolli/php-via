@@ -2867,6 +2867,24 @@ class Via {
      * @return int how many contexts it reached
      */
     private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
+        if ($this->config->getDevMode()) {
+            $this->viewRenderer->beginFanOut();
+
+            try {
+                return $this->doSyncContexts($contexts, $route, $scope, $rendered, $skipRenderedAfter);
+            } finally {
+                $this->viewRenderer->endFanOut($scope);
+            }
+        }
+
+        return $this->doSyncContexts($contexts, $route, $scope, $rendered, $skipRenderedAfter);
+    }
+
+    /**
+     * @param array<Context>       $contexts
+     * @param null|array<int, int> $rendered see syncLocally()
+     */
+    private function doSyncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
         $epochs = $this->readEpochs;
         $renewals = -1;
         $epoch = 0;

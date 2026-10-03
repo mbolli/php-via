@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
+use OpenSwoole\Coroutine;
 use Twig\Environment;
 
 /**
@@ -20,6 +21,17 @@ use Twig\Environment;
 class ViewRenderer {
     /** @var array<string, true> Routes already warned about a full document asking to share its render */
     private array $documentShareWarned = [];
+
+    /**
+     * Per coroutine, the open fan-outs, innermost last: for each view, the hashes of its update
+     * renders, how many there were and one of its contexts.
+     *
+     * @var array<int, list<array<string, array{hashes: array<string, true>, renders: int, context: Context}>>>
+     */
+    private array $fanOuts = [];
+
+    /** @var array<string, true> Views already given the identical-render hint */
+    private array $identicalHinted = [];
 
     public function __construct(
         private Environment $twig,
@@ -71,8 +83,55 @@ class ViewRenderer {
         }
 
         $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
+        $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+        if ($isUpdate && $this->fanOuts !== []) {
+            $this->noteFanOutRender($result, $scope, $context);
+        }
 
-        return $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+        return $result;
+    }
+
+    /**
+     * Open a fan-out in this coroutine. Until endFanOut(), update renders that are not shared are
+     * compared per view, for the dev-mode hint that a view could share its render.
+     *
+     * @internal called by Via around a broadcast fan-out in dev mode
+     */
+    public function beginFanOut(): void {
+        $this->fanOuts[Coroutine::getCid()][] = [];
+    }
+
+    /**
+     * Close the innermost fan-out of this coroutine and hint, once per view, when every context of
+     * a view rendered the same HTML in it.
+     *
+     * @internal
+     */
+    public function endFanOut(string $scope): void {
+        $cid = Coroutine::getCid();
+        $views = array_pop($this->fanOuts[$cid]) ?? [];
+        if ($this->fanOuts[$cid] === []) {
+            unset($this->fanOuts[$cid]);
+        }
+
+        foreach ($views as $view) {
+            $context = $view['context'];
+            $tabPrimary = $context->getPrimaryScope() === Scope::TAB;
+            $key = ViewCache::viewKey($context->getRoute(), $context->getNamespace()) . ($tabPrimary ? "\0tab" : '');
+            if ($view['renders'] < 2 || \count($view['hashes']) !== 1 || isset($this->identicalHinted[$key])) {
+                continue;
+            }
+            $this->identicalHinted[$key] = true;
+
+            $namespace = $context->getNamespace();
+            $this->logger->info(\sprintf(
+                '%d tabs of %s rendered identical HTML in one broadcast of %s. If this view is the same for every tab, %s so it renders once per broadcast.',
+                $view['renders'],
+                $context->getRoute() . ($namespace !== null ? " (component {$namespace})" : ''),
+                $scope,
+                $tabPrimary ? 'set its shared scope with $c->scope(...) and pass shareRender: true to view()' : 'pass shareRender: true to view()',
+            ), $context);
+        }
     }
 
     /**
@@ -160,6 +219,21 @@ class ViewRenderer {
         }
 
         $tracer->span($isComponent ? 'render.component' : 'render.regions', static fn () => null, $attributes, 'cache');
+    }
+
+    private function noteFanOutRender(string $html, string $scope, Context $context): void {
+        $cid = Coroutine::getCid();
+        $depth = \count($this->fanOuts[$cid] ?? []) - 1;
+        // Empty updates (a static page) and full documents (per-tab ids) say nothing about sharing.
+        if ($depth < 0 || trim($html) === '' || stripos($html, '<html') !== false) {
+            return;
+        }
+
+        $key = $scope . "\0" . ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+        $view = $this->fanOuts[$cid][$depth][$key] ?? ['hashes' => [], 'renders' => 0, 'context' => $context];
+        $view['hashes'][hash('xxh128', $html)] = true;
+        ++$view['renders'];
+        $this->fanOuts[$cid][$depth][$key] = $view;
     }
 
     /**
