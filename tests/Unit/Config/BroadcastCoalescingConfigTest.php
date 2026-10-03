@@ -10,13 +10,13 @@ describe('Config broadcast coalescing', function (): void {
     test('coalescing is on by default with a 25 ms tick', function (): void {
         $config = new Config();
 
-        expect($config->isBroadcastCoalescingEnabled())->toBeTrue();
-        expect($config->getBroadcastTickMs())->toBe(25);
+        expect($config->freeze()->broadcastCoalescingEnabled)->toBeTrue();
+        expect($config->freeze()->broadcastTickMs)->toBe(25);
     });
 
     test('withBroadcastCoalescing(false) turns it off', function (): void {
-        expect((new Config())->withBroadcastCoalescing(false)->isBroadcastCoalescingEnabled())->toBeFalse();
-        expect((new Config())->withBroadcastCoalescing()->isBroadcastCoalescingEnabled())->toBeTrue();
+        expect((new Config())->withBroadcastCoalescing(false)->freeze()->broadcastCoalescingEnabled)->toBeFalse();
+        expect((new Config())->withBroadcastCoalescing()->freeze()->broadcastCoalescingEnabled)->toBeTrue();
     });
 
     test('new Via() warns that turning coalescing off is deprecated, and stays quiet with it on', function (): void {
@@ -40,9 +40,9 @@ describe('Config broadcast coalescing', function (): void {
     });
 
     test('withBroadcastTickMs() sets the tick, 0 keeps no gap and negatives clamp to 0', function (): void {
-        expect((new Config())->withBroadcastTickMs(50)->getBroadcastTickMs())->toBe(50);
-        expect((new Config())->withBroadcastTickMs(0)->getBroadcastTickMs())->toBe(0);
-        expect((new Config())->withBroadcastTickMs(-10)->getBroadcastTickMs())->toBe(0);
+        expect((new Config())->withBroadcastTickMs(50)->freeze()->broadcastTickMs)->toBe(50);
+        expect((new Config())->withBroadcastTickMs(0)->freeze()->broadcastTickMs)->toBe(0);
+        expect((new Config())->withBroadcastTickMs(-10)->freeze()->broadcastTickMs)->toBe(0);
     });
 });
 

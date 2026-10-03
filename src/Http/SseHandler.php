@@ -405,7 +405,7 @@ class SseHandler {
         $droppedFrames = 0;
 
         // A tenth of slack: the park's millisecond timer can end just short of the full interval.
-        $keepAliveNs = $this->via->getConfig()->getSseKeepAliveMs() * 900_000;
+        $keepAliveNs = $this->via->getSettings()->sseKeepAliveMs * 900_000;
         $lastWriteNs = hrtime(true);
 
         // Keep connection alive and listen for patches
@@ -607,7 +607,7 @@ class SseHandler {
      * getClientInfo() costs ~0.32us, negligible against a patch write.
      */
     private function isBackedUp(Response $response, string $patchType): bool {
-        $maxQueued = $this->via->getConfig()->getSseMaxQueuedBytes();
+        $maxQueued = $this->via->getSettings()->sseMaxQueuedBytes;
 
         if ($maxQueued <= 0 || $patchType !== 'elements') {
             return false;

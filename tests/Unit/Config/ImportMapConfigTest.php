@@ -13,7 +13,7 @@ function sri(string $content, string $algo = 'sha384'): string {
 }
 
 /**
- * The JSON inside getImportMapTag(), decoded, or null when there is no tag.
+ * The JSON inside Settings::importMapTag(), decoded, or null when there is no tag.
  *
  * @return null|array<string, array<string, string>>
  */
@@ -110,15 +110,15 @@ describe('Config::withImportMap()', function (): void {
     });
 });
 
-describe('Config::getImportMapTag()', function (): void {
+describe('Settings::importMapTag()', function (): void {
     test('is empty with the plain bundle and no entries', function (): void {
-        expect((new Config())->getImportMapTag())->toBe('');
+        expect((new Config())->freeze()->importMapTag())->toBe('');
     });
 
     test('maps datastar to the versioned URL with the Rocket build', function (): void {
         $config = (new Config())->withDatastarRocket()->withBasePath('/app');
 
-        expect(importMapFromTag($config->getImportMapTag()))->toBe(['imports' => ['datastar' => $config->getDatastarUrl()]])
+        expect(importMapFromTag($config->freeze()->importMapTag()))->toBe(['imports' => ['datastar' => $config->getDatastarUrl()]])
             ->and($config->getDatastarUrl())->toMatch('#^/app/datastar\.js\?v=[0-9a-f]{10}$#')
         ;
     });
@@ -126,7 +126,7 @@ describe('Config::getImportMapTag()', function (): void {
     test('is written with the plain bundle once the app adds entries', function (array $imports, array $integrity): void {
         $config = (new Config())->withImportMap($imports, $integrity);
 
-        expect(importMapFromTag($config->getImportMapTag()))->toBe($config->getImportMap())
+        expect(importMapFromTag($config->freeze()->importMapTag()))->toBe($config->getImportMap())
             ->and($config->getImportMap()['imports']['datastar'])->toBe($config->getDatastarUrl())
         ;
     })->with([
@@ -134,12 +134,13 @@ describe('Config::getImportMapTag()', function (): void {
         'integrity only' => [[], ['/js/chart.js' => sri('a')]],
     ]);
 
-    test('follows Rocket, the base path and later entries after a first call', function (): void {
-        $config = new Config();
-        $first = $config->withImportMap(['chart' => '/js/chart.js'])->getImportMapTag();
-        $rocket = $config->withDatastarRocket()->getImportMapTag();
-        $based = $config->withBasePath('/app')->getImportMapTag();
-        $more = $config->withImportMap(['icons' => '/js/icons.js'])->getImportMapTag();
+    test('follows Rocket, the base path and every entry', function (): void {
+        $chart = static fn (): Config => (new Config())->withImportMap(['chart' => '/js/chart.js']);
+        $first = $chart()->freeze()->importMapTag();
+        $rocket = $chart()->withDatastarRocket()->freeze()->importMapTag();
+        $based = $chart()->withDatastarRocket()->withBasePath('/app')->freeze()->importMapTag();
+        $config = $chart()->withDatastarRocket()->withBasePath('/app')->withImportMap(['icons' => '/js/icons.js']);
+        $more = $config->freeze()->importMapTag();
 
         expect(importMapFromTag($first)['imports']['datastar'])->toBe((new Config())->getDatastarUrl())
             ->and(importMapFromTag($rocket)['imports']['datastar'])->toBe((new Config())->withDatastarRocket()->getDatastarUrl())
@@ -152,7 +153,7 @@ describe('Config::getImportMapTag()', function (): void {
     test('holds the JSON the CSP docs tell apps to hash', function (): void {
         $config = (new Config())->withDatastarRocket()->withImportMap(['chart' => 'https://cdn.example.com/chart.js?v=2&min=1']);
 
-        expect($config->getImportMapTag())->toBe(
+        expect($config->freeze()->importMapTag())->toBe(
             '<script type="importmap">' . json_encode($config->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) . '</script>'
         );
     });
@@ -160,7 +161,7 @@ describe('Config::getImportMapTag()', function (): void {
     test('keeps the JSON from closing the script or opening a comment', function (): void {
         $url = '/x"</script><!--<script>&\'ü.js';
         $config = (new Config())->withImportMap(['x' => $url], [$url => sri('a')]);
-        $tag = $config->getImportMapTag();
+        $tag = $config->freeze()->importMapTag();
         $json = substr($tag, strlen('<script type="importmap">'), -strlen('</script>'));
 
         expect($json)->not->toContain('<')
@@ -186,7 +187,7 @@ describe('Config::getDatastarIntegrity()', function (): void {
         $config = (new Config())->withDatastarRocket();
         $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
 
-        expect(importMapFromTag($config->getImportMapTag())['integrity'])->toBe([$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
+        expect(importMapFromTag($config->freeze()->importMapTag())['integrity'])->toBe([$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
     });
 
     test('a bundle that cannot be read has neither version nor integrity', function (): void {

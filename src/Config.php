@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
-use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
-use Mbolli\PhpVia\Broker\SwooleBroker;
-use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\Rendering\TemplateEngine;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
@@ -27,10 +25,6 @@ final class Config {
     private ?string $templateDir = null;
     private false|string $twigCacheDir = false;
     private ?TemplateEngine $templateEngine = null;
-
-    /** The TwigEngine built from withTemplateDir() and withTwigCacheDir(), once asked for */
-    private ?TwigEngine $templateDirEngine = null;
-
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
@@ -48,9 +42,6 @@ final class Config {
 
     /** @var array<string, string> Module URL => integrity, from withImportMap() */
     private array $importMapIntegrity = [];
-
-    /** @var null|array{string, string} Datastar URL the cached import map JSON was built with, and the JSON */
-    private ?array $importMapTag = null;
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -241,8 +232,8 @@ final class Config {
     /** Maximum number of traces retained in the in-process ring buffer. */
     private int $traceBufferSize = 100;
 
-    /** Set by new Via(): from then on every with* call throws. */
-    private bool $frozen = false;
+    /** Set by new Via() through freeze(): from then on every with* call throws. */
+    private ?Settings $settings = null;
 
     public function withHost(string $host): self {
         $this->assertMutable(__FUNCTION__);
@@ -306,7 +297,6 @@ final class Config {
     public function withTemplateDir(string $dir): self {
         $this->assertMutable(__FUNCTION__);
         $this->templateDir = $dir;
-        $this->templateDirEngine = null;
 
         return $this;
     }
@@ -317,41 +307,8 @@ final class Config {
     public function withTwigCacheDir(string $dir): self {
         $this->assertMutable(__FUNCTION__);
         $this->twigCacheDir = $dir;
-        $this->templateDirEngine = null;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getTwigCacheDir(): false|string {
-        return $this->twigCacheDir;
-    }
-
-    /**
-     * The engine from withTemplateEngine(), or the TwigEngine withTemplateDir() describes, built on
-     * the first call; null when there is neither.
-     *
-     * @internal read by Via at construction
-     *
-     * @throws \LogicException when withTemplateEngine() and withTemplateDir() or withTwigCacheDir() are both set,
-     *                         or withTemplateDir() is set without twig/twig
-     */
-    public function getTemplateEngine(): ?TemplateEngine {
-        if ($this->templateEngine !== null) {
-            if ($this->templateDir !== null || $this->twigCacheDir !== false) {
-                throw new \LogicException('withTemplateEngine() replaces withTemplateDir() and withTwigCacheDir(): set only the engine, and give a TwigEngine its directories as new TwigEngine($templateDir, $cacheDir).');
-            }
-
-            return $this->templateEngine;
-        }
-
-        if ($this->templateDir === null) {
-            return null;
-        }
-
-        return $this->templateDirEngine ??= new TwigEngine($this->templateDir, $this->twigCacheDir);
     }
 
     /**
@@ -366,13 +323,6 @@ final class Config {
         $this->staticDir = rtrim($dir, '/');
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getStaticDir(): ?string {
-        return $this->staticDir;
     }
 
     /**
@@ -417,30 +367,6 @@ final class Config {
     }
 
     /**
-     * @param string $filePath  absolute path of the file being served
-     * @param string $mimeType  resolved MIME type without a charset suffix, e.g. 'text/css'
-     * @param bool   $versioned the URL carries the file's current content version, such as getDatastarUrl()
-     *
-     * @internal
-     */
-    public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
-        if ($this->staticCacheControl instanceof \Closure) {
-            $value = ($this->staticCacheControl)($filePath, $mimeType);
-            if ($value !== null) {
-                return $value;
-            }
-        } elseif ($this->staticCacheControl !== null) {
-            return $this->staticCacheControl;
-        }
-
-        if ($this->devMode) {
-            return 'no-cache';
-        }
-
-        return $versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=3600, must-revalidate';
-    }
-
-    /**
      * Serve Datastar with Rocket, its web component layer, at /datastar.js instead of the plain
      * Datastar bundle, so Rocket components such as Starbase's work on the page.
      *
@@ -458,13 +384,6 @@ final class Config {
         $this->datastarRocket = $enabled;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function isDatastarRocketEnabled(): bool {
-        return $this->datastarRocket;
     }
 
     /**
@@ -542,7 +461,6 @@ final class Config {
 
         $this->importMapImports = array_replace($this->importMapImports, $newImports);
         $this->importMapIntegrity = array_replace($this->importMapIntegrity, $newIntegrity);
-        $this->importMapTag = null;
 
         return $this;
     }
@@ -560,27 +478,6 @@ final class Config {
         }
 
         return $map;
-    }
-
-    /**
-     * getImportMap() as a <script type="importmap"> tag, or '' when php-via writes no map: without
-     * withImportMap() entries and withDatastarRocket(). via_head writes this tag.
-     *
-     * @internal
-     *
-     * @param null|string $nonce CSP nonce for the tag
-     */
-    public function getImportMapTag(?string $nonce = null): string {
-        if (!$this->datastarRocket && $this->importMapImports === [] && $this->importMapIntegrity === []) {
-            return '';
-        }
-
-        $datastarUrl = $this->getDatastarUrl();
-        if ($this->importMapTag === null || $this->importMapTag[0] !== $datastarUrl) {
-            $this->importMapTag = [$datastarUrl, json_encode($this->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR)];
-        }
-
-        return '<script type="importmap"' . Bootstrap::nonceAttribute($nonce) . '>' . $this->importMapTag[1] . '</script>';
     }
 
     public function withShellTemplate(string $path): self {
@@ -614,13 +511,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getSsePollIntervalMs(): int {
-        return $this->ssePollIntervalMs;
-    }
-
-    /**
      * Set how long a page SSE stream may stay silent before it sends an SSE comment (default 15 s).
      *
      * The comment keeps a proxy's idle timeout, such as nginx's 60 s proxy_read_timeout, from
@@ -638,13 +528,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getSseKeepAliveMs(): int {
-        return $this->sseKeepAliveMs;
-    }
-
-    /**
      * Set the per-connection unsent-backlog threshold for dropping element frames.
      *
      * A slow client otherwise parks its SSE coroutine inside write() until it drains
@@ -659,13 +542,6 @@ final class Config {
         $this->sseMaxQueuedBytes = $bytes;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getSseMaxQueuedBytes(): int {
-        return $this->sseMaxQueuedBytes;
     }
 
     /**
@@ -692,13 +568,6 @@ final class Config {
         $this->broadcastCoalescing = $enabled;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function isBroadcastCoalescingEnabled(): bool {
-        return $this->broadcastCoalescing;
     }
 
     /**
@@ -729,13 +598,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getBroadcastTickMs(): int {
-        return $this->broadcastTickMs;
-    }
-
-    /**
      * Raw OpenSwoole server settings, merged over the ones php-via sets: open_http2_protocol, http_compression,
      * socket_buffer_size, max_coroutine, send_yield, max_wait_time, reload_async, enable_reuse_port, hook_flags,
      * log_level, max_conn and backlog. Set the worker count with withWorkerNum(): start() throws for a
@@ -750,56 +612,12 @@ final class Config {
         return $this;
     }
 
-    /**
-     * @internal
-     */
-    public function getHost(): string {
-        return $this->host;
-    }
-
-    /**
-     * @internal
-     */
-    public function getPort(): int {
-        return $this->port;
-    }
-
     public function isDevMode(): bool {
         return $this->devMode;
     }
 
-    /**
-     * @internal
-     */
-    public function getLogLevel(): string {
-        return $this->logLevel;
-    }
-
-    /**
-     * @internal
-     */
-    public function getTemplateDir(): ?string {
-        return $this->templateDir;
-    }
-
-    /**
-     * @internal
-     */
-    public function getShellTemplate(): ?string {
-        return $this->shellTemplate;
-    }
-
     public function getBasePath(): string {
         return $this->basePath;
-    }
-
-    /**
-     * @return array<string, mixed>
-     *
-     * @internal
-     */
-    public function getSwooleSettings(): array {
-        return $this->openSwooleSettings;
     }
 
     /**
@@ -811,13 +629,6 @@ final class Config {
         $this->secureCookie = $secure;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getSecureCookie(): bool {
-        return $this->secureCookie;
     }
 
     /**
@@ -850,29 +661,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getSessionCookieSameSite(): string {
-        return $this->sessionCookieSameSite;
-    }
-
-    /**
-     * @internal
-     */
-    public function isSessionCookiePartitioned(): bool {
-        return $this->sessionCookiePartitioned;
-    }
-
-    /**
-     * @return null|list<string>
-     *
-     * @internal
-     */
-    public function getFrameAncestors(): ?array {
-        return $this->frameAncestors;
-    }
-
-    /**
      * Restrict action POST requests to the given list of Origin header values.
      *
      * Each entry should be a full origin without trailing slash, e.g. 'https://example.com'.
@@ -889,15 +677,6 @@ final class Config {
     }
 
     /**
-     * @return null|list<string>
-     *
-     * @internal
-     */
-    public function getTrustedOrigins(): ?array {
-        return $this->trustedOrigins;
-    }
-
-    /**
      * Accept action requests that carry no Origin header outside dev mode.
      *
      * Browsers send Origin on every POST, so only non-browser clients (curl, server-to-server
@@ -910,13 +689,6 @@ final class Config {
         $this->allowMissingOrigin = $allow;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getAllowMissingOrigin(): bool {
-        return $this->allowMissingOrigin;
     }
 
     /**
@@ -938,13 +710,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getStrictTabSignals(): bool {
-        return $this->strictTabSignals;
-    }
-
-    /**
      * Rate-limit action requests per IP.
      *
      * @param int $maxRequests   Maximum requests per window (0 = no limit)
@@ -956,20 +721,6 @@ final class Config {
         $this->actionRateWindow = max(1, $windowSeconds);
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getActionRateLimit(): int {
-        return $this->actionRateLimit;
-    }
-
-    /**
-     * @internal
-     */
-    public function getActionRateWindow(): int {
-        return $this->actionRateWindow;
     }
 
     /**
@@ -987,13 +738,6 @@ final class Config {
         $this->gcIntervalMs = max(0, $ms);
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getGcIntervalMs(): int {
-        return $this->gcIntervalMs;
     }
 
     /**
@@ -1035,27 +779,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getContextCleanupDelayMs(): int {
-        return $this->contextCleanupDelayMs;
-    }
-
-    /**
-     * @internal
-     */
-    public function getContextConnectTimeoutMs(): int {
-        return $this->contextConnectTimeoutMs;
-    }
-
-    /**
-     * @internal
-     */
-    public function getContextReconnectTimeoutMs(): int {
-        return $this->contextReconnectTimeoutMs;
-    }
-
-    /**
      * How long after a context is destroyed a returning tab can still revive it, in milliseconds; 0 when revival is off.
      */
     public function getContextRevivalWindowMs(): int {
@@ -1075,20 +798,6 @@ final class Config {
         $this->sslKeyFile = $keyFile;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getSslCertFile(): ?string {
-        return $this->sslCertFile;
-    }
-
-    /**
-     * @internal
-     */
-    public function getSslKeyFile(): ?string {
-        return $this->sslKeyFile;
     }
 
     /**
@@ -1154,27 +863,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getBrotli(): bool {
-        return $this->brotli;
-    }
-
-    /**
-     * @internal
-     */
-    public function getBrotliDynamicLevel(): int {
-        return $this->brotliDynamicLevel;
-    }
-
-    /**
-     * @internal
-     */
-    public function getBrotliStaticLevel(): int {
-        return $this->brotliStaticLevel;
-    }
-
-    /**
      * Enable HTTP/2 cleartext (h2c) mode for use behind a TLS-terminating reverse proxy.
      *
      * Use this when Caddy or Nginx handles TLS certs and proxies to OpenSwoole via h2c
@@ -1188,13 +876,6 @@ final class Config {
         $this->h2c = $enabled;
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function isH2c(): bool {
-        return $this->h2c;
     }
 
     /**
@@ -1245,26 +926,6 @@ final class Config {
     }
 
     /**
-     * Return the configured broker error handler, or null if none was set.
-     *
-     * @return null|callable(\Throwable): void
-     *
-     * @internal
-     */
-    public function getBrokerErrorHandler(): ?callable {
-        return $this->brokerErrorHandler;
-    }
-
-    /**
-     * Return the configured broker. Without one, SwooleBroker for more than one worker, else a no-op InMemoryBroker.
-     *
-     * @internal
-     */
-    public function getBroker(): MessageBroker {
-        return $this->broker ?? ($this->workerNum > 1 ? new SwooleBroker() : new InMemoryBroker());
-    }
-
-    /**
      * Set the number of OpenSwoole worker processes.
      *
      * Using more than one worker distributes CPU-bound actions across cores.
@@ -1286,13 +947,6 @@ final class Config {
         $this->workerNum = max(1, $n);
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getWorkerNum(): int {
-        return $this->workerNum;
     }
 
     /**
@@ -1410,55 +1064,6 @@ final class Config {
     }
 
     /**
-     * @internal
-     */
-    public function getSessionTableRows(): int {
-        return $this->sessionTableRows;
-    }
-
-    /**
-     * @internal
-     */
-    public function getSessionTableValueBytes(): int {
-        return $this->sessionTableValueBytes;
-    }
-
-    /**
-     * @internal
-     */
-    public function getContextDirectoryRows(): int {
-        return $this->contextDirectoryRows;
-    }
-
-    /**
-     * @internal
-     */
-    public function getContextDirectoryRecordBytes(): int {
-        return $this->contextDirectoryRecordBytes;
-    }
-
-    /**
-     * @internal
-     */
-    public function getContextDirectoryTtlSeconds(): int {
-        return $this->contextDirectoryTtlSeconds;
-    }
-
-    /**
-     * @internal
-     */
-    public function getScopedSignalTableRows(): int {
-        return $this->scopedSignalTableRows;
-    }
-
-    /**
-     * @internal
-     */
-    public function getScopedSignalTableValueBytes(): int {
-        return $this->scopedSignalTableValueBytes;
-    }
-
-    /**
      * Persist GlobalState to a SQLite file so it survives a server restart.
      *
      * Reads never touch SQLite. Writes land in shared memory at full speed and set a dirty flag;
@@ -1483,34 +1088,6 @@ final class Config {
         $this->globalStateFlushMs = max(50, $flushMs);
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function getGlobalStatePath(): ?string {
-        return $this->globalStatePath;
-    }
-
-    /**
-     * @internal
-     */
-    public function getGlobalStateFlushMs(): int {
-        return $this->globalStateFlushMs;
-    }
-
-    /**
-     * @internal
-     */
-    public function getGlobalStateTableRows(): int {
-        return $this->globalStateTableRows;
-    }
-
-    /**
-     * @internal
-     */
-    public function getGlobalStateTableValueBytes(): int {
-        return $this->globalStateTableValueBytes;
     }
 
     /**
@@ -1550,40 +1127,6 @@ final class Config {
         }
 
         return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function isTracingEnabled(): bool {
-        return $this->devBar ?? $this->devMode;
-    }
-
-    /**
-     * Whether the Dev Bar may write signals: dev mode, the Dev Bar on, and withDevBarOptions(writes: true) or
-     * VIA_DEVBAR_WRITES=1.
-     *
-     * @internal
-     */
-    public function isTracingWritesEnabled(): bool {
-        if (!$this->devMode || !$this->isTracingEnabled()) {
-            return false;
-        }
-
-        if ($this->devBarWrites !== null) {
-            return $this->devBarWrites;
-        }
-
-        $env = getenv('VIA_DEVBAR_WRITES');
-
-        return $env === '1' || $env === 'true';
-    }
-
-    /**
-     * @internal
-     */
-    public function getTraceBufferSize(): int {
-        return $this->traceBufferSize;
     }
 
     /**
@@ -1657,16 +1200,94 @@ final class Config {
     }
 
     /**
-     * Freeze this Config: every later with* call throws.
+     * Freeze this Config, so every later with* call throws, and return what the framework reads from it.
+     * A second call returns the same Settings.
      *
      * @internal called by new Via()
+     *
+     * @throws \LogicException when withTemplateEngine() and withTemplateDir() or withTwigCacheDir() are both set,
+     *                         or withTemplateDir() is set without twig/twig; the Config then stays unfrozen
      */
-    public function freeze(): void {
-        $this->frozen = true;
+    public function freeze(): Settings {
+        return $this->settings ??= new Settings(
+            host: $this->host,
+            port: $this->port,
+            devMode: $this->devMode,
+            logLevel: $this->logLevel,
+            templateEngine: $this->templateEngine(),
+            shellTemplate: $this->shellTemplate,
+            basePath: $this->basePath,
+            staticDir: $this->staticDir,
+            datastarRocketEnabled: $this->datastarRocket,
+            datastarUrl: $this->getDatastarUrl(),
+            importMapJson: $this->datastarRocket || $this->importMapImports !== [] || $this->importMapIntegrity !== []
+                ? json_encode($this->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR)
+                : null,
+            ssePollIntervalMs: $this->ssePollIntervalMs,
+            sseKeepAliveMs: $this->sseKeepAliveMs,
+            sseMaxQueuedBytes: $this->sseMaxQueuedBytes,
+            broadcastCoalescingEnabled: $this->broadcastCoalescing,
+            broadcastTickMs: $this->broadcastTickMs,
+            swooleSettings: $this->openSwooleSettings,
+            secureCookie: $this->secureCookie,
+            sessionCookieSameSite: $this->sessionCookieSameSite,
+            sessionCookiePartitioned: $this->sessionCookiePartitioned,
+            frameAncestors: $this->frameAncestors,
+            trustedOrigins: $this->trustedOrigins,
+            allowMissingOrigin: $this->allowMissingOrigin,
+            strictTabSignals: $this->strictTabSignals,
+            actionRateLimit: $this->actionRateLimit,
+            actionRateWindow: $this->actionRateWindow,
+            gcIntervalMs: $this->gcIntervalMs,
+            contextCleanupDelayMs: $this->contextCleanupDelayMs,
+            contextConnectTimeoutMs: $this->contextConnectTimeoutMs,
+            contextReconnectTimeoutMs: $this->contextReconnectTimeoutMs,
+            contextRevivalWindowMs: $this->contextRevivalWindowMs,
+            sslCertFile: $this->sslCertFile,
+            sslKeyFile: $this->sslKeyFile,
+            https: $this->isHttps(),
+            brotli: $this->brotli,
+            brotliDynamicLevel: $this->brotliDynamicLevel,
+            brotliStaticLevel: $this->brotliStaticLevel,
+            h2c: $this->h2c,
+            brokerErrorHandler: $this->brokerErrorHandler === null ? null : \Closure::fromCallable($this->brokerErrorHandler),
+            workerNum: $this->workerNum,
+            sessionTableRows: $this->sessionTableRows,
+            sessionTableValueBytes: $this->sessionTableValueBytes,
+            contextDirectoryRows: $this->contextDirectoryRows,
+            contextDirectoryRecordBytes: $this->contextDirectoryRecordBytes,
+            contextDirectoryTtlSeconds: $this->contextDirectoryTtlSeconds,
+            scopedSignalTableRows: $this->scopedSignalTableRows,
+            scopedSignalTableValueBytes: $this->scopedSignalTableValueBytes,
+            globalStatePath: $this->globalStatePath,
+            globalStateFlushMs: $this->globalStateFlushMs,
+            globalStateTableRows: $this->globalStateTableRows,
+            globalStateTableValueBytes: $this->globalStateTableValueBytes,
+            tracingEnabled: $this->devBar ?? $this->devMode,
+            traceBufferSize: $this->traceBufferSize,
+            devBarWrites: $this->devBarWrites,
+            configuredBroker: $this->broker,
+            staticCacheControlPolicy: $this->staticCacheControl,
+        );
+    }
+
+    /**
+     * The engine from withTemplateEngine(), or the TwigEngine withTemplateDir() describes; null when there is neither.
+     */
+    private function templateEngine(): ?TemplateEngine {
+        if ($this->templateEngine !== null) {
+            if ($this->templateDir !== null || $this->twigCacheDir !== false) {
+                throw new \LogicException('withTemplateEngine() replaces withTemplateDir() and withTwigCacheDir(): set only the engine, and give a TwigEngine its directories as new TwigEngine($templateDir, $cacheDir).');
+            }
+
+            return $this->templateEngine;
+        }
+
+        return $this->templateDir === null ? null : new TwigEngine($this->templateDir, $this->twigCacheDir);
     }
 
     private function assertMutable(string $method): void {
-        if ($this->frozen) {
+        if ($this->settings !== null) {
             throw new \LogicException(
                 "Config::{$method}() was called after new Via(\$config), which freezes the Config: a later change would be "
                 . 'ignored or only half applied. Make every with* call before new Via().'

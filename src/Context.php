@@ -675,7 +675,7 @@ class Context {
         }
 
         $joined = array_values(array_diff($this->scopes, [Scope::TAB]));
-        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->isDevMode()) {
+        if ($joined !== [] && !$this->tabBroadcastWarned && $this->app->getSettings()->devMode) {
             $this->tabBroadcastWarned = true;
             $this->app->log('warn', \sprintf(
                 'Context::broadcast() syncs only this tab, since its primary scope is TAB; before php-via 0.14 it re-rendered '
@@ -793,7 +793,7 @@ class Context {
     public function render(string $template, array $data = [], ?string $block = null): string {
         $this->templateEngine("render('{$template}')", $block);
         $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
-        $data += ['contextId' => $this->id, 'currentRoute' => $this->route, 'basePath' => $this->app->getConfig()->getBasePath()] + $this->documentData();
+        $data += ['contextId' => $this->id, 'currentRoute' => $this->route, 'basePath' => $this->app->getSettings()->basePath] + $this->documentData();
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
     }
@@ -822,9 +822,9 @@ class Context {
     public function viaHead(): string {
         $page = $this->getPageContext();
         $nonce = $page->cspNonce();
-        $config = $this->app->getConfig();
+        $settings = $this->app->getSettings();
 
-        return Bootstrap::head($page->id, $config->getBasePath(), $config->getImportMapTag($nonce), $nonce);
+        return Bootstrap::head($page->id, $settings->basePath, $settings->importMapTag($nonce), $nonce);
     }
 
     /**
@@ -835,7 +835,7 @@ class Context {
      * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
      */
     public function viaFoot(): string {
-        return Bootstrap::foot($this->app->getConfig()->getDatastarUrl(), $this->getPageContext()->cspNonce());
+        return Bootstrap::foot($this->app->getSettings()->datastarUrl, $this->getPageContext()->cspNonce());
     }
 
     /**
@@ -995,7 +995,7 @@ class Context {
 
         $this->actionRegistry[$actionId] = $fn;
 
-        $action = new Action($actionId, $this->getConfig()->getBasePath());
+        $action = new Action($actionId, $this->app->getSettings()->basePath);
 
         if ($name !== null) {
             $this->namedActions[$name] = $action;
@@ -1022,7 +1022,7 @@ class Context {
             return $this->action(static fn (Context $caller) => $fn($caller, $actionId), $name);
         }
 
-        $action = new Action($actionId, $this->getConfig()->getBasePath());
+        $action = new Action($actionId, $this->app->getSettings()->basePath);
         $this->namedActions[$name] = $action;
 
         if ($this->app->getScopedAction($actionScope, $actionId) !== null) {

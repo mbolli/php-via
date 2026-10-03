@@ -74,11 +74,11 @@ describe('OriginPolicy: absent Origin', function (): void {
     test('is denied in production even with an allowlist', function (): void {
         $config = (new Config())->withTrustedOrigins(['https://example.com']);
 
-        expect(OriginPolicy::allows($config, null, 'example.com'))->toBeFalse();
+        expect(OriginPolicy::allows($config->freeze(), null, 'example.com'))->toBeFalse();
     });
 
     test('is denied in production without an allowlist', function (): void {
-        expect(OriginPolicy::allows(new Config(), null, 'example.com'))->toBeFalse();
+        expect(OriginPolicy::allows((new Config())->freeze(), null, 'example.com'))->toBeFalse();
     });
 
     test('is allowed in production only after an explicit opt-in', function (): void {
@@ -87,23 +87,24 @@ describe('OriginPolicy: absent Origin', function (): void {
             ->withAllowMissingOrigin()
         ;
 
-        expect(OriginPolicy::allows($config, null, 'example.com'))->toBeTrue()
-            ->and(OriginPolicy::allows($config, 'https://evil.example', 'example.com'))->toBeFalse()
-            ->and(OriginPolicy::allows((new Config())->withAllowMissingOrigin(), null, 'example.com'))->toBeTrue()
+        expect(OriginPolicy::allows($config->freeze(), null, 'example.com'))->toBeTrue()
+            ->and(OriginPolicy::allows($config->freeze(), 'https://evil.example', 'example.com'))->toBeFalse()
+            ->and(OriginPolicy::allows((new Config())->withAllowMissingOrigin()->freeze(), null, 'example.com'))->toBeTrue()
         ;
     });
 
     test('is allowed in dev mode with or without an allowlist', function (): void {
         $dev = (new Config())->withDevMode(true);
+        $devWithAllowlist = (new Config())->withDevMode(true)->withTrustedOrigins(['https://example.com']);
 
-        expect(OriginPolicy::allows($dev, null, 'localhost:3000'))->toBeTrue()
-            ->and(OriginPolicy::allows($dev->withTrustedOrigins(['https://example.com']), null, 'localhost:3000'))->toBeTrue()
+        expect(OriginPolicy::allows($dev->freeze(), null, 'localhost:3000'))->toBeTrue()
+            ->and(OriginPolicy::allows($devWithAllowlist->freeze(), null, 'localhost:3000'))->toBeTrue()
         ;
     });
 
     test('the opt-in defaults to off and can be turned off again', function (): void {
-        expect((new Config())->getAllowMissingOrigin())->toBeFalse()
-            ->and((new Config())->withAllowMissingOrigin()->withAllowMissingOrigin(false)->getAllowMissingOrigin())->toBeFalse()
+        expect((new Config())->freeze()->allowMissingOrigin)->toBeFalse()
+            ->and((new Config())->withAllowMissingOrigin()->withAllowMissingOrigin(false)->freeze()->allowMissingOrigin)->toBeFalse()
         ;
     });
 });

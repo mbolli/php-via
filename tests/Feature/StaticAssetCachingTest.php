@@ -16,7 +16,7 @@ use Tests\Support\FakeStaticResponse;
 /*
  * /datastar.js, /via.css, and withStaticDir() files must all emit ETag +
  * Last-Modified, honor If-None-Match / If-Modified-Since with a 304, apply
- * Config::getStaticCacheControl(), and invalidate the in-memory brotli cache
+ * withStaticCacheControl(), and invalidate the in-memory brotli cache
  * when the underlying file changes — none of which existed before (the old
  * code hardcoded "public, max-age=3600" with no validator support at all, and
  * cached compressed bytes forever under a path-only key).
@@ -156,7 +156,7 @@ describe('the Datastar bundle at /datastar.js', function (): void {
     });
 });
 
-describe('Config::getStaticCacheControl() wired into withStaticDir() responses', function (): void {
+describe('withStaticCacheControl() wired into withStaticDir() responses', function (): void {
     $dir = null;
 
     beforeEach(function () use (&$dir): void {
@@ -423,7 +423,7 @@ describe('Brotli for static files', function (): void {
     test('what a worker sends while the helper compresses is not cacheable, the level 11 form is', function () use (&$dir): void {
         $via = createVia((new Config())->withStaticDir($dir));
         $quiet = static function (string $level, string $message): void {};
-        $worker = new StaticBrotli($via->getConfig(), $quiet);
+        $worker = new StaticBrotli($via->getSettings(), $quiet);
         $worker->attachHelper(static function (string $job): void {});
         $handler = new RequestHandler($via, new SseHandler($via), new ActionHandler($via), $worker);
         $bigJs = str_repeat('console.log(1); ', (StaticBrotli::INTERIM_BYTES >> 4) + 1);
@@ -438,7 +438,7 @@ describe('Brotli for static files', function (): void {
         $small = $send('/app.css');
         $big = $send('/big.js');
         $plain = $send('/app.css', []);
-        $helper = new StaticBrotli($via->getConfig(), $quiet);
+        $helper = new StaticBrotli($via->getSettings(), $quiet);
         foreach (['/app.css', '/big.js'] as $path) {
             $file = (string) realpath($dir . $path);
             $worker->receive($helper->compressForWorker($file, (int) filemtime($file), (int) filesize($file)));
@@ -532,7 +532,7 @@ describe('the static file cache', function (): void {
 
     test('an edited file replaces its cached copy instead of adding one per mtime', function () use (&$dir): void {
         $via = createVia((new Config())->withStaticDir($dir)->withDevMode());
-        $brotli = new StaticBrotli($via->getConfig(), static function (string $level, string $message): void {});
+        $brotli = new StaticBrotli($via->getSettings(), static function (string $level, string $message): void {});
         $handler = new RequestHandler($via, new SseHandler($via), new ActionHandler($via), $brotli);
         $etags = [];
         foreach (['red', 'blue', 'green'] as $i => $color) {

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Core;
 
-use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
@@ -112,7 +111,7 @@ class Application {
     private int $directoryPrunedAtNs = 0;
 
     public function __construct(
-        private Config $config,
+        private Settings $settings,
         private Logger $logger,
         private ScopeRegistry $scopeRegistry,
         private SignalManager $signalManager,
@@ -124,13 +123,6 @@ class Application {
     }
 
     /**
-     * Get configuration.
-     */
-    public function getConfig(): Config {
-        return $this->config;
-    }
-
-    /**
      * Register a context.
      */
     public function registerContext(Context $context): void {
@@ -139,7 +131,7 @@ class Application {
         // Publish how to rebuild it, so an action landing on any other worker can. Written at
         // creation rather than destruction: a context alive on another worker right now has no
         // revival record, which is exactly the case that returned HTTP 400.
-        $this->publishContextRecord($context, $this->config->getContextDirectoryTtlSeconds());
+        $this->publishContextRecord($context, $this->settings->contextDirectoryTtlSeconds);
     }
 
     /**
@@ -493,13 +485,13 @@ class Application {
      * Allows time for reconnection or navigation between pages.
      *
      * @param null|int              $delayMs       Grace period in milliseconds. Null uses
-     *                                             Config::getContextCleanupDelayMs().
+     *                                             withContextTimeouts(cleanupDelayMs:).
      * @param null|callable(): bool $isActiveCheck If provided, called when the timer fires.
      *                                             Returns true if an SSE connection is active
      *                                             (the timer reschedules itself instead of destroying).
      */
     public function scheduleContextCleanup(string $contextId, ?int $delayMs = null, ?callable $isActiveCheck = null): void {
-        $delayMs ??= $this->config->getContextCleanupDelayMs();
+        $delayMs ??= $this->settings->contextCleanupDelayMs;
 
         $this->cancelContextCleanup($contextId);
 
@@ -623,7 +615,7 @@ class Application {
      * @internal called by SseHandler::heartbeatStreams() for every context with a running stream
      */
     public function refreshContextRecord(Context $context): void {
-        $this->publishContextRecord($context, $this->config->getContextDirectoryTtlSeconds());
+        $this->publishContextRecord($context, $this->settings->contextDirectoryTtlSeconds);
     }
 
     /**
@@ -709,7 +701,7 @@ class Application {
      */
     private function publishContextRecord(Context $context, int $ttlSeconds): void {
         // With revival off no worker rebuilds a context, so nothing would ever read the record.
-        if ($this->contextDirectory === null || $this->config->getContextRevivalWindowMs() <= 0) {
+        if ($this->contextDirectory === null || $this->settings->contextRevivalWindowMs <= 0) {
             return;
         }
 
@@ -738,7 +730,7 @@ class Application {
      * No-op when the revival window is 0 (feature disabled). Called from the cleanup timer.
      */
     private function recordRevivable(Context $context): void {
-        $windowMs = $this->config->getContextRevivalWindowMs();
+        $windowMs = $this->settings->contextRevivalWindowMs;
         if ($windowMs <= 0) {
             return;
         }

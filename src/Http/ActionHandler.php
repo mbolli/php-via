@@ -32,7 +32,7 @@ class ActionHandler {
         // Allocated here (Via's constructor, so the master process, before $server->start()
         // forks the workers) because an OpenSwoole\Table is only shared with processes that
         // inherit it. Single-worker deployments keep plain per-process counters.
-        $this->rateLimiter = new RateLimiter(shared: $via->getConfig()->getWorkerNum() > 1);
+        $this->rateLimiter = new RateLimiter(shared: $via->getSettings()->workerNum > 1);
     }
 
     public function setRequestLogger(RequestLogger $logger): void {
@@ -47,7 +47,7 @@ class ActionHandler {
 
         // CSRF: Datastar posts with fetch(), so browsers always send Origin (see OriginPolicy).
         $origin = $request->header['origin'] ?? null;
-        if (!OriginPolicy::allows($this->via->getConfig(), $origin, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getSettings(), $origin, $request->header['host'] ?? null)) {
             if ($origin === null) {
                 $this->reportMissingOrigin($actionId);
             }
@@ -61,7 +61,7 @@ class ActionHandler {
         $ip = $request->server['remote_addr'] ?? 'unknown';
         if (!$this->checkRateLimit($ip)) {
             $response->status(429);
-            $response->header('Retry-After', (string) $this->via->getConfig()->getActionRateWindow());
+            $response->header('Retry-After', (string) $this->via->getSettings()->actionRateWindow);
             $response->end('Too Many Requests');
 
             return;
@@ -184,9 +184,9 @@ class ActionHandler {
      * See tests/Feature/ActionRateLimitTest.php.
      */
     private function checkRateLimit(string $ip): bool {
-        $config = $this->via->getConfig();
+        $settings = $this->via->getSettings();
 
-        $allowed = $this->rateLimiter->allow($ip, $config->getActionRateLimit(), $config->getActionRateWindow());
+        $allowed = $this->rateLimiter->allow($ip, $settings->actionRateLimit, $settings->actionRateWindow);
 
         if (!$allowed || !$this->rateLimiter->hasOverflowed() || $this->overflowReported) {
             return $allowed;

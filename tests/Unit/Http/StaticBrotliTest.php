@@ -27,7 +27,7 @@ afterEach(function (): void {
 });
 
 function staticBrotli(?Config $config = null): StaticBrotli {
-    return new StaticBrotli($config ?? new Config(), static function (string $level, string $message): void {});
+    return new StaticBrotli(($config ?? new Config())->freeze(), static function (string $level, string $message): void {});
 }
 
 /** Text that compresses differently at level 4 and 11. */

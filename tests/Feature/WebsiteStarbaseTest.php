@@ -83,11 +83,11 @@ describe('The vendored Starbase components', function (): void {
         $config = (new Config())->withStaticCacheControl(StarbaseComponents::cacheControl(...));
 
         foreach (array_keys(StarbaseComponents::INTEGRITY) as $file) {
-            expect($config->getStaticCacheControl($dir . '/' . $file, 'application/javascript'))->toBe('public, max-age=31536000, immutable');
+            expect($config->freeze()->staticCacheControl($dir . '/' . $file, 'application/javascript'))->toBe('public, max-age=31536000, immutable');
         }
-        expect($config->getStaticCacheControl($dir . '/README.md', 'text/markdown'))->toBe('public, max-age=3600, must-revalidate')
-            ->and($config->getStaticCacheControl(dirname($dir, 2) . '/js/docs-toc.js', 'application/javascript'))->toBe('public, max-age=3600, must-revalidate')
-            ->and($config->getStaticCacheControl('/srv/public/datastar.js', 'application/javascript', versioned: true))->toBe('public, max-age=31536000, immutable')
+        expect($config->freeze()->staticCacheControl($dir . '/README.md', 'text/markdown'))->toBe('public, max-age=3600, must-revalidate')
+            ->and($config->freeze()->staticCacheControl(dirname($dir, 2) . '/js/docs-toc.js', 'application/javascript'))->toBe('public, max-age=3600, must-revalidate')
+            ->and($config->freeze()->staticCacheControl('/srv/public/datastar.js', 'application/javascript', versioned: true))->toBe('public, max-age=31536000, immutable')
         ;
     });
 

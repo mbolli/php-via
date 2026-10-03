@@ -103,7 +103,7 @@ describe('Config freeze', function (): void {
         } catch (LogicException) {
         }
 
-        expect($config->getPort())->toBe(4444);
+        expect($config->freeze()->port)->toBe(4444);
     });
 
     test('getters keep working, and a second Via takes the frozen Config', function (): void {
@@ -114,6 +114,43 @@ describe('Config freeze', function (): void {
         expect($config->isDevMode())->toBeTrue()
             ->and($config->getBasePath())->toBe('/app/')
             ->and($second->getConfig())->toBe($first->getConfig())
+        ;
+    });
+});
+
+describe('Settings snapshot', function (): void {
+    test('new Via() takes it once from the Config it freezes, and a second Via shares it', function (): void {
+        $config = (new Config())->withLogLevel('error')->withDevMode()->withBasePath('/app')->withPort(4444);
+        $first = new Via($config);
+        $second = new Via($config);
+
+        expect($first->getSettings())->toBe($config->freeze())
+            ->and($second->getSettings())->toBe($first->getSettings())
+            ->and($first->getSettings()->devMode)->toBeTrue()
+            ->and($first->getSettings()->basePath)->toBe('/app/')
+            ->and($first->getSettings()->port)->toBe(4444)
+        ;
+    });
+
+    test('cannot be changed', function (): void {
+        $settings = (new Config())->freeze();
+
+        expect(fn () => $settings->port = 1)->toThrow(Error::class, 'Cannot modify readonly property');
+    });
+
+    test('a new Via() that throws for the template setup leaves the Config unfrozen', function (): void {
+        $config = (new Config())->withLogLevel('error')->withTemplateDir(__DIR__)->withTemplateEngine(new class implements TemplateEngine {
+            public function render(string $template, array $data, ?string $block = null): string {
+                return '';
+            }
+
+            public function supportsBlocks(): bool {
+                return false;
+            }
+        });
+
+        expect(fn () => new Via($config))->toThrow(LogicException::class, 'withTemplateEngine() replaces withTemplateDir()')
+            ->and($config->withPort(4445))->toBe($config)
         ;
     });
 });

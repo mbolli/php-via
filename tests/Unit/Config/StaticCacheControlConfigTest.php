@@ -9,29 +9,29 @@ function phpViaTestStaticCacheControlCallable(string $filePath, string $mimeType
 }
 
 /*
- * Config::getStaticCacheControl() governs Cache-Control for /datastar.js, /via.css,
+ * withStaticCacheControl() governs Cache-Control for /datastar.js, /via.css,
  * and withStaticDir() files. Default follows devMode (mirrors withDevBar()'s
  * null = follow devMode pattern) so withStaticDir() edits are visible immediately
  * in local dev without waiting out a cached max-age. A callable can also be passed
  * to fine-tune the value per file path / MIME type.
  */
 
-describe('Config::getStaticCacheControl() — string / default', function (): void {
+describe('Settings::staticCacheControl(): string / default', function (): void {
     test('defaults to a 1 hour revalidated cache outside devMode', function (): void {
-        expect((new Config())->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect((new Config())->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('public, max-age=3600, must-revalidate')
         ;
     });
 
     test('defaults to always-revalidate in devMode', function (): void {
-        expect((new Config())->withDevMode()->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect((new Config())->withDevMode()->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('no-cache')
         ;
     });
 
     test('an explicit value overrides the devMode-based default', function (): void {
         $config = (new Config())->withDevMode()->withStaticCacheControl('public, max-age=31536000, immutable');
-        expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('public, max-age=31536000, immutable')
         ;
     });
@@ -41,13 +41,13 @@ describe('Config::getStaticCacheControl() — string / default', function (): vo
             ->withStaticCacheControl('no-store')
             ->withStaticCacheControl(null)
         ;
-        expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('public, max-age=3600, must-revalidate')
         ;
     });
 });
 
-describe('Config::getStaticCacheControl() — callable', function (): void {
+describe('Settings::staticCacheControl(): callable', function (): void {
     test('invokes the callable with the file path and MIME type', function (): void {
         $seen = [];
         $config = (new Config())->withStaticCacheControl(function (string $filePath, string $mimeType) use (&$seen): string {
@@ -56,7 +56,7 @@ describe('Config::getStaticCacheControl() — callable', function (): void {
             return 'public, max-age=60';
         });
 
-        $result = $config->getStaticCacheControl('/app/public/app.css', 'text/css');
+        $result = $config->freeze()->staticCacheControl('/app/public/app.css', 'text/css');
 
         expect($result)->toBe('public, max-age=60');
         expect($seen)->toBe([['/app/public/app.css', 'text/css']]);
@@ -69,10 +69,10 @@ describe('Config::getStaticCacheControl() — callable', function (): void {
                 : 'public, max-age=3600, must-revalidate'
         );
 
-        expect($config->getStaticCacheControl('/app/public/icon.woff2', 'font/woff2'))
+        expect($config->freeze()->staticCacheControl('/app/public/icon.woff2', 'font/woff2'))
             ->toBe('public, max-age=31536000, immutable')
         ;
-        expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('public, max-age=3600, must-revalidate')
         ;
     });
@@ -82,23 +82,23 @@ describe('Config::getStaticCacheControl() — callable', function (): void {
             fn (string $filePath): ?string => str_contains($filePath, '/fonts/') ? 'public, max-age=31536000, immutable' : null
         );
 
-        expect($config->getStaticCacheControl('/app/public/fonts/a.woff2', 'font/woff2'))->toBe('public, max-age=31536000, immutable')
-            ->and($config->getStaticCacheControl('/app/public/app.css', 'text/css'))->toBe($devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate')
-            ->and($config->getStaticCacheControl('/vendor/php-via/public/datastar.js', 'application/javascript', versioned: true))
+        expect($config->freeze()->staticCacheControl('/app/public/fonts/a.woff2', 'font/woff2'))->toBe('public, max-age=31536000, immutable')
+            ->and($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))->toBe($devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate')
+            ->and($config->freeze()->staticCacheControl('/vendor/php-via/public/datastar.js', 'application/javascript', versioned: true))
             ->toBe($devMode ? 'no-cache' : 'public, max-age=31536000, immutable')
         ;
     })->with(['production' => false, 'devMode' => true]);
 
     test('accepts a first-class callable reference to a named function', function (): void {
         $config = (new Config())->withStaticCacheControl(phpViaTestStaticCacheControlCallable(...));
-        expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('public, max-age=1 (text/css)')
         ;
     });
 
     test('a plain string is always taken literally, never invoked as a function name', function (): void {
         $config = (new Config())->withStaticCacheControl('phpViaTestStaticCacheControlCallable');
-        expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('phpViaTestStaticCacheControlCallable')
         ;
     });
@@ -108,7 +108,7 @@ describe('Config::getStaticCacheControl() — callable', function (): void {
             ->withStaticCacheControl(fn (): string => 'public, max-age=1')
             ->withStaticCacheControl(null)
         ;
-        expect($config->getStaticCacheControl('/app/public/app.css', 'text/css'))
+        expect($config->freeze()->staticCacheControl('/app/public/app.css', 'text/css'))
             ->toBe('public, max-age=3600, must-revalidate')
         ;
     });

@@ -67,11 +67,11 @@ $app->page('/busy', function (Context $c): void {
 });
 
 // What THIS worker sees: the client list, and whether it runs the directory heartbeat timer.
-$app->page('/count', function (Context $c) use ($app, $config): void {
-    $c->view(static function () use ($app, $config): string {
+$app->page('/count', function (Context $c) use ($app): void {
+    $c->view(static function () use ($app): string {
         $heartbeat = 0;
         foreach (Timer::list() as $id) {
-            if ((Timer::info($id)['interval'] ?? 0) === Via::sseHeartbeatIntervalMs($config)) {
+            if ((Timer::info($id)['interval'] ?? 0) === Via::sseHeartbeatIntervalMs($app->getSettings())) {
                 $heartbeat = 1;
             }
         }

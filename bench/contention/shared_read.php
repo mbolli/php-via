@@ -426,7 +426,7 @@ function runMode(string $mode, array $kinds, array $p, Config $cfg, Closure $del
     $base = newVia();
     defineRoute($base, $mode, $kinds, $p, $baseCounter);
 
-    $store = new SharedSignalStore($cfg->getScopedSignalTableRows(), $cfg->getScopedSignalTableValueBytes());
+    $store = new SharedSignalStore(storeSize($cfg)['rows'], storeSize($cfg)['bytes']);
     $shared = newVia();
     $shared->setSharedSignalStore($store);
     defineRoute($shared, $mode, $kinds, $p, $storeCounter);
@@ -531,7 +531,7 @@ function runMode(string $mode, array $kinds, array $p, Config $cfg, Closure $del
     $countError = null;
     $countBroadcasts = (int) $p['count-broadcasts'];
     if ($countBroadcasts > 0) {
-        $tables = installCountingTables($store, $cfg->getScopedSignalTableValueBytes());
+        $tables = installCountingTables($store, storeSize($cfg)['bytes']);
         if (is_string($tables)) {
             $countError = $tables;
             logLine("{$mode}: read counting unavailable: {$tables}");
@@ -597,6 +597,20 @@ function runMode(string $mode, array $kinds, array $p, Config $cfg, Closure $del
 }
 
 /**
+ * The scoped signal table size: from the getters on revisions before 0.14, from the snapshot new Via() takes after.
+ *
+ * @return array{rows: int, bytes: int}
+ */
+function storeSize(Config $cfg): array {
+    if (method_exists($cfg, 'getScopedSignalTableRows')) {
+        return ['rows' => $cfg->getScopedSignalTableRows(), 'bytes' => $cfg->getScopedSignalTableValueBytes()];
+    }
+    $settings = (clone $cfg)->freeze();
+
+    return ['rows' => $settings->scopedSignalTableRows, 'bytes' => $settings->scopedSignalTableValueBytes];
+}
+
+/**
  * Raw SharedSignalStore::get() cost per value kind, for reading the overhead numbers.
  *
  * @param array<string, mixed> $p
@@ -605,7 +619,7 @@ function runMode(string $mode, array $kinds, array $p, Config $cfg, Closure $del
  */
 function micro(array $p, Config $cfg): array {
     $iters = (int) $p['micro-iters'];
-    $store = new SharedSignalStore(64, $cfg->getScopedSignalTableValueBytes());
+    $store = new SharedSignalStore(64, storeSize($cfg)['bytes']);
     $values = [
         'int' => valueFor('int', 1, 1, (int) $p['array-items']),
         'string' => valueFor('string', 2, 1, (int) $p['array-items']),
@@ -635,7 +649,7 @@ function micro(array $p, Config $cfg): array {
  * @return array<string, string>
  */
 function storeBackend(Config $cfg): array {
-    $store = new SharedSignalStore(8, $cfg->getScopedSignalTableValueBytes());
+    $store = new SharedSignalStore(8, storeSize($cfg)['bytes']);
     $out = [];
     foreach ((new ReflectionObject($store))->getProperties() as $prop) {
         if ($prop->isInitialized($store) && is_object($value = $prop->getValue($store))) {
@@ -683,8 +697,8 @@ $result = [
         'jit' => (string) ini_get('opcache.jit'),
         'store_backend' => storeBackend($cfg),
         'delivery' => $delivery,
-        'store_rows' => $cfg->getScopedSignalTableRows(),
-        'store_value_bytes' => $cfg->getScopedSignalTableValueBytes(),
+        'store_rows' => storeSize($cfg)['rows'],
+        'store_value_bytes' => storeSize($cfg)['bytes'],
     ],
     'signal_kinds' => $kinds,
     'micro' => micro($p, $cfg),

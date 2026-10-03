@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\DevBar;
 
-use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\Settings;
 
 /**
  * Builds the Dev Bar overlay block and injects it into a rendered page.
@@ -17,7 +17,7 @@ use Mbolli\PhpVia\Context;
  * template and full Twig <html> pages.
  */
 final class Injector {
-    public function __construct(private Config $config) {}
+    public function __construct(private Settings $settings) {}
 
     public function inject(string $html, Context $context): string {
         // Idempotent: never inject twice (the update path re-asserts the overlay
@@ -26,7 +26,7 @@ final class Injector {
             return $html;
         }
 
-        $base = $this->config->getBasePath();
+        $base = $this->settings->basePath;
 
         // Boot config rides in a single NON-`data-` attribute. Datastar only
         // scans `data-*` attributes, so `via-config` is invisible to it. Using
@@ -36,7 +36,7 @@ final class Injector {
             'base' => $base,
             'context' => $context->getId(),
             'route' => $context->getRoute(),
-            'writes' => $this->config->isTracingWritesEnabled(),
+            'writes' => $this->settings->tracingWritesEnabled(),
             'signals' => SignalManifest::build($context),
         ]);
         if ($config === false) {

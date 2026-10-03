@@ -159,9 +159,9 @@ describe('Multi-worker startup guard', function (): void {
     });
 
     test('more than one worker without withBroker() broadcasts through SwooleBroker', function (): void {
-        expect((new Config())->withWorkerNum(2)->getBroker())->toBeInstanceOf(SwooleBroker::class)
+        expect((new Config())->withWorkerNum(2)->freeze()->broker())->toBeInstanceOf(SwooleBroker::class)
             ->and(createVia((new Config())->withWorkerNum(2))->getBroker())->toBeInstanceOf(SwooleBroker::class)
-            ->and((new Config())->getBroker())->toBeInstanceOf(InMemoryBroker::class)
+            ->and((new Config())->freeze()->broker())->toBeInstanceOf(InMemoryBroker::class)
         ;
     });
 
@@ -169,7 +169,7 @@ describe('Multi-worker startup guard', function (): void {
         // worker_num = 1 is the default; InMemoryBroker is valid.
         // Verify the guard condition is not met (no exception from guard path).
         $config = (new Config())->withWorkerNum(1);
-        expect($config->getWorkerNum())->toBe(1);
+        expect($config->freeze()->workerNum)->toBe(1);
         // The guard is: workerNum > 1 && InMemoryBroker — with workerNum=1 it never fires.
         expect(true)->toBeTrue();
     });
@@ -204,12 +204,12 @@ describe('Multi-worker startup guard', function (): void {
 
     test('withWorkerNum accepts 1 as minimum', function (): void {
         $config = (new Config())->withWorkerNum(0); // should clamp to 1
-        expect($config->getWorkerNum())->toBe(1);
+        expect($config->freeze()->workerNum)->toBe(1);
     });
 
     test('withWorkerNum stores the value', function (): void {
         $config = (new Config())->withWorkerNum(8);
-        expect($config->getWorkerNum())->toBe(8);
+        expect($config->freeze()->workerNum)->toBe(8);
     });
 });
 

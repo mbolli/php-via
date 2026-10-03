@@ -51,7 +51,7 @@ if ($mode === 'IDLE') {
     $config = $config->withGcIntervalMs(0);
 }
 
-$port = $config->getPort();
+$port = $config->freeze()->port;
 $app = new Via($config);
 
 $app->page('/probe', function (Context $c): void {

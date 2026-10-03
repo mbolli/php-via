@@ -191,7 +191,9 @@ function runServer(array $o): void {
             logLine('--poll-ms ignored: this revision has neither Config::withDevBarOptions() nor withSsePollIntervalMs()');
         }
     }
-    if ($n * 2 > $config->getContextDirectoryRows()) {
+    // Revisions before 0.14 have the getter; later ones keep the value in the snapshot new Via() takes.
+    $defaultRows = method_exists(Config::class, 'getContextDirectoryRows') ? (new Config())->getContextDirectoryRows() : (new Config())->freeze()->contextDirectoryRows;
+    if ($n * 2 > $defaultRows) {
         $config = $config->withContextDirectorySize($n * 2);
     }
     if ($n + 1024 > 10000) {

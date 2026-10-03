@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 
 test('withLogLevel() takes the canonical, PSR-3 and syslog names in any case', function (string $level, string $canonical): void {
-    expect((new Config())->withLogLevel($level)->getLogLevel())->toBe($canonical);
+    expect((new Config())->withLogLevel($level)->freeze()->logLevel)->toBe($canonical);
 })->with([
     ['debug', 'debug'],
     ['INFO', 'info'],

@@ -66,7 +66,7 @@ class PatchManager {
         // In test mode (no OpenSwoole server running), use array instead of Channel
         $inTestMode = getenv('VIA_TEST_MODE') === '1';
 
-        $keepAliveMs = $app->getConfig()->getSseKeepAliveMs();
+        $keepAliveMs = $app->getSettings()->sseKeepAliveMs;
         $this->pollTimeout = ($keepAliveMs > 0 ? $keepAliveMs : self::IDLE_BACKSTOP_MS) / 1000;
 
         if ($inTestMode) {

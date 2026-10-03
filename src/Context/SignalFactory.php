@@ -124,7 +124,7 @@ class SignalFactory {
             return $existing;
         }
 
-        if ($clientWritable === null && $this->app->getConfig()->getStrictTabSignals()) {
+        if ($clientWritable === null && $this->app->getSettings()->strictTabSignals) {
             $clientWritable = false;
         }
 

@@ -17,3 +17,15 @@ test('Config, Signal, Action and Scope are final; Via and Context stay open for 
         expect((new ReflectionClass($class))->isFinal())->toBeFalse($class);
     }
 });
+
+test('Config has no getters besides the ones apps read', function (): void {
+    $getters = [];
+    foreach ((new ReflectionClass(Config::class))->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+        if (preg_match('/^(get|is)[A-Z]/', $method->getName()) === 1 && (string) $method->getReturnType() !== 'never') {
+            $getters[] = $method->getName();
+        }
+    }
+    sort($getters);
+
+    expect($getters)->toBe(['getBasePath', 'getContextRevivalWindowMs', 'getDatastarIntegrity', 'getDatastarUrl', 'getImportMap', 'isDevMode', 'isHttps']);
+});

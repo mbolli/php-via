@@ -13,6 +13,7 @@ use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Core\Application;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
@@ -235,6 +236,7 @@ class Via {
     private RequestHandler $requestHandler;
     private SseHandler $sseHandler;
     private StaticBrotli $staticBrotli;
+    private Settings $settings;
     private Logger $logger;
     private RequestLogger $requestLogger;
     private Stats $stats;
@@ -270,20 +272,22 @@ class Via {
 
     /**
      * Freezes $config: a with* call on it afterwards throws.
+     *
+     * @throws \LogicException for a template setup that cannot work, see Config::withTemplateEngine()
      */
     public function __construct(private Config $config) {
-        $this->config->freeze();
-        // First after the freeze, since it throws for a template setup that cannot work.
-        $templateEngine = $this->config->getTemplateEngine();
+        // First, since it throws for a template setup that cannot work.
+        $this->settings = $config->freeze();
+        $templateEngine = $this->settings->templateEngine;
         $this->viaUnsetCallbackRegistered = new \WeakMap();
 
         // Initialize support classes
-        $this->logger = new Logger($this->config->getLogLevel());
-        $this->requestLogger = new RequestLogger($this->config->isDevMode());
+        $this->logger = new Logger($this->settings->logLevel);
+        $this->requestLogger = new RequestLogger($this->settings->devMode);
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
 
-        if (!$this->config->isBroadcastCoalescingEnabled()) {
+        if (!$this->settings->broadcastCoalescingEnabled) {
             $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
                 . '$app->flushBroadcasts() where a broadcast has to land before the next step.');
         }
@@ -291,17 +295,17 @@ class Via {
         // Dev Bar tracing substrate. Allocated here (master process, before fork)
         // so the per-worker tracer + buffer are inherited cleanly. When tracing
         // is off, Tracer::current() stays null and span call sites are no-ops.
-        if ($this->config->isTracingEnabled()) {
-            $this->traceStore = new TraceStore($this->config->getTraceBufferSize());
+        if ($this->settings->tracingEnabled) {
+            $this->traceStore = new TraceStore($this->settings->traceBufferSize);
             $this->tracer = new Tracer($this->traceStore);
             Tracer::setCurrent($this->tracer);
             $this->logBuffer = new LogBuffer();
             $this->logger->setBuffer($this->logBuffer);
-            $this->devBarInjector = new Injector($this->config);
+            $this->devBarInjector = new Injector($this->settings);
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->isDevMode());
+        $this->htmlBuilder = new HtmlBuilder($this->settings->shellTemplate, $this->log(...), $this->settings->devMode);
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -309,7 +313,7 @@ class Via {
 
         // Initialize Core classes
         $this->app = new Application(
-            $this->config,
+            $this->settings,
             $this->logger,
             $this->scopeRegistry,
             $this->signalManager,
@@ -319,7 +323,7 @@ class Via {
         $this->sessionManager = new SessionManager($this->logger);
 
         // Initialize HTTP handlers
-        $this->staticBrotli = new StaticBrotli($this->config, $this->log(...));
+        $this->staticBrotli = new StaticBrotli($this->settings, $this->log(...));
         $this->sseHandler = new SseHandler($this);
         $actionHandler = new ActionHandler($this);
         $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler, $this->staticBrotli);
@@ -331,13 +335,13 @@ class Via {
 
         if ($templateEngine instanceof TwigEngine) {
             // For renders outside a context, such as notFound() pages; a context passes its own basePath.
-            $templateEngine->environment()->addGlobal('basePath', $this->config->getBasePath());
+            $templateEngine->environment()->addGlobal('basePath', $this->settings->basePath);
         }
-        $this->viewRenderer = new ViewRenderer($templateEngine, $this->viewCache, $this->stats, $this->logger);
+        $this->viewRenderer = new ViewRenderer($this->settings, $this->viewCache, $this->stats, $this->logger);
 
         // Broker: default to no-op InMemoryBroker; replaced via Config::withBroker().
         // Subscribe immediately so the handler is wired before connect() spawns the read loop.
-        $this->broker = $this->config->getBroker();
+        $this->broker = $this->settings->broker();
         $this->broker->subscribe(function (string $scope): void {
             if (!Scope::isValidWireScope($scope)) {
                 $this->log('warning', "Broker: rejected invalid scope \"{$scope}\" from wire");
@@ -354,7 +358,7 @@ class Via {
         });
 
         // Wire optional error handler (supported by RedisBroker and NatsBroker).
-        $brokerErrorHandler = $this->config->getBrokerErrorHandler();
+        $brokerErrorHandler = $this->settings->brokerErrorHandler;
 
         if ($brokerErrorHandler !== null && method_exists($this->broker, 'setErrorHandler')) {
             $this->broker->setErrorHandler($brokerErrorHandler);
@@ -400,6 +404,15 @@ class Via {
      */
     public function getConfig(): Config {
         return $this->config;
+    }
+
+    /**
+     * What the framework reads from the Config, taken when new Via() froze it.
+     *
+     * @internal
+     */
+    public function getSettings(): Settings {
+        return $this->settings;
     }
 
     /**     * Get the Router instance.
@@ -898,11 +911,11 @@ class Via {
     public function start(): void {
         // Lazy initialization: create server only when starting
         if ($this->server === null) {
-            self::assertWorkerSettings($this->config);
+            self::assertWorkerSettings($this->settings);
 
             // Multi-worker guard: InMemoryBroker is a no-op. Cross-worker broadcasts
             // will be silently lost. Fail loudly so operators don't run with broken config.
-            if ($this->config->getWorkerNum() > 1 && $this->broker instanceof InMemoryBroker) {
+            if ($this->settings->workerNum > 1 && $this->broker instanceof InMemoryBroker) {
                 throw new \RuntimeException(
                     'worker_num > 1 requires a multi-worker broker, and this server has InMemoryBroker. '
                     . 'Leave withBroker() out to get SwooleBroker (same machine), calling withWorkerNum() before new Via(), '
@@ -912,7 +925,7 @@ class Via {
 
             // Actions, scoped signal values and session data cross workers, but three things do not,
             // and they fail quietly enough that an operator would not connect them to worker_num.
-            if ($this->config->getWorkerNum() > 1) {
+            if ($this->settings->workerNum > 1) {
                 $this->log(
                     'warn',
                     'worker_num > 1: actions, scoped signal values, session data and the client list are '
@@ -929,32 +942,32 @@ class Via {
             }
 
             // Validate Brotli requirements before binding any socket
-            if ($this->config->getBrotli()) {
+            if ($this->settings->brotli) {
                 if (!\function_exists('brotli_compress_init')) {
                     throw new \RuntimeException(
                         'withBrotli() requires the ext-brotli PHP extension. Install it with: pecl install brotli'
                     );
                 }
-                if (!$this->config->isHttps() && !$this->config->isH2c()) {
+                if (!$this->settings->https && !$this->settings->h2c) {
                     throw new \RuntimeException(
                         'withBrotli() requires HTTP/2. Call withCertificate($certFile, $keyFile) for direct HTTPS, '
                         . 'or withH2c() when behind a TLS-terminating reverse proxy (Caddy, Nginx).'
                     );
                 }
                 // Auto-register BrotliMiddleware as the outermost global middleware
-                array_unshift($this->globalMiddleware, new BrotliMiddleware($this->config->getBrotliDynamicLevel()));
+                array_unshift($this->globalMiddleware, new BrotliMiddleware($this->settings->brotliDynamicLevel));
             }
 
             // Validate embeddable (SameSite=None) requirements before binding any socket.
             // A SameSite=None cookie without Secure is silently dropped by browsers, and Secure
             // cookies are only honoured over HTTPS (direct TLS or TLS-terminating proxy via h2c).
-            if ($this->config->getSessionCookieSameSite() === 'None') {
-                if (!$this->config->getSecureCookie()) {
+            if ($this->settings->sessionCookieSameSite === 'None') {
+                if (!$this->settings->secureCookie) {
                     throw new \RuntimeException(
                         'withEmbeddable() requires Secure cookies; do not call withSecureCookie(false) after it.'
                     );
                 }
-                if (!$this->config->isHttps() && !$this->config->isH2c()) {
+                if (!$this->settings->https && !$this->settings->h2c) {
                     throw new \RuntimeException(
                         'withEmbeddable() sets SameSite=None, which requires Secure cookies: '
                         . 'enable withCertificate() (HTTPS) or withH2c() (TLS-terminating proxy).'
@@ -962,17 +975,17 @@ class Via {
                 }
             }
 
-            $settings = self::serverSettings($this->config);
+            $settings = self::serverSettings($this->settings);
             self::assertHookFlags($settings, $this->broker);
             if (((int) ($settings['hook_flags'] ?? 0) & SWOOLE_HOOK_NATIVE_CURL) !== 0 && self::nativeCurlHookCrashes()) {
                 $this->log('warning', 'hook_flags include SWOOLE_HOOK_NATIVE_CURL, and with libcurl 8.20 or newer a curl '
                     . 'request to any hostname crashes the worker. Remove the flag, see https://via.zweiundeins.gmbh/docs/deployment#hooks');
             }
 
-            $socketType = $this->config->isHttps()
+            $socketType = $this->settings->https
                 ? (SWOOLE_SOCK_TCP | SWOOLE_SSL)
                 : SWOOLE_SOCK_TCP;
-            $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::POOL_MODE, $socketType);
+            $this->server = new Server($this->settings->host, $this->settings->port, Server::POOL_MODE, $socketType);
 
             // Configure OpenSwoole for SSE streaming
             $this->server->set($settings);
@@ -984,12 +997,12 @@ class Via {
             // The shared table is needed whenever GlobalState has to be visible beyond one
             // process OR dirty-tracked for persistence, so persistence pulls it in even when
             // running single-worker.
-            $persistPath = $this->config->getGlobalStatePath();
+            $persistPath = $this->settings->globalStatePath;
 
-            if ($this->config->getWorkerNum() > 1 || $persistPath !== null) {
+            if ($this->settings->workerNum > 1 || $persistPath !== null) {
                 $sharedTable = new SharedTable(
-                    $this->config->getGlobalStateTableRows(),
-                    $this->config->getGlobalStateTableValueBytes(),
+                    $this->settings->globalStateTableRows,
+                    $this->settings->globalStateTableValueBytes,
                 );
                 $this->app->setSharedTable($sharedTable);
 
@@ -998,31 +1011,31 @@ class Via {
                 }
             }
 
-            if ($this->config->getWorkerNum() > 1) {
+            if ($this->settings->workerNum > 1) {
                 // Same reason, same timing: scoped signal VALUES have to be visible across
                 // workers or every worker runs its own divergent copy of the scope.
                 $this->setSharedSignalStore(new SharedSignalStore(
-                    $this->config->getScopedSignalTableRows(),
-                    $this->config->getScopedSignalTableValueBytes(),
+                    $this->settings->scopedSignalTableRows,
+                    $this->settings->scopedSignalTableValueBytes,
                 ));
 
                 // Lets any worker rebuild a context created by any other, which is what turns
                 // an action landing on the "wrong" worker from a 400 into a served request.
                 $this->app->setContextDirectory(new SharedContextDirectory(
-                    $this->config->getContextDirectoryRows(),
-                    $this->config->getContextDirectoryRecordBytes(),
+                    $this->settings->contextDirectoryRows,
+                    $this->settings->contextDirectoryRecordBytes,
                 ));
 
                 // So getClients() and the connect/disconnect hooks see the whole server rather
                 // than whichever streams this worker happened to serve.
                 $this->app->setClientRegistry(new SharedClientRegistry(
-                    $this->config->getContextDirectoryRows(),
+                    $this->settings->contextDirectoryRows,
                 ));
 
                 // A tab's next request can land on any worker, so its session data has to be there.
                 $this->app->setSessionStore(new SharedSessionStore(
-                    $this->config->getSessionTableRows(),
-                    $this->config->getSessionTableValueBytes(),
+                    $this->settings->sessionTableRows,
+                    $this->settings->sessionTableValueBytes,
                 ));
             }
 
@@ -1045,12 +1058,12 @@ class Via {
             });
 
             $this->server->on('start', function (Server $server): void {
-                $scheme = $this->config->isHttps() ? 'https' : 'http';
-                $this->log('info', "Via server started on {$scheme}://{$this->config->getHost()}:{$this->config->getPort()}");
+                $scheme = $this->settings->https ? 'https' : 'http';
+                $this->log('info', "Via server started on {$scheme}://{$this->settings->host}:{$this->settings->port}");
 
                 // Write master PID so external tools (e.g. scripts/dev.sh) can send
                 // SIGUSR1 to the correct process for hot worker reload.
-                if ($this->config->isDevMode()) {
+                if ($this->settings->devMode) {
                     $pidFile = sys_get_temp_dir() . '/php-via-master.pid';
                     file_put_contents($pidFile, (string) $server->master_pid);
                 }
@@ -1141,7 +1154,7 @@ class Via {
                 // to prevent unpredictable mid-request pauses. PHP's automatic cycle
                 // collector fires when its root buffer fills (~10,000 roots); calling
                 // it periodically spreads the work out during idle gaps between requests.
-                $gcIntervalMs = $this->config->getGcIntervalMs();
+                $gcIntervalMs = $this->settings->gcIntervalMs;
                 if ($gcIntervalMs > 0) {
                     $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
 
@@ -1173,7 +1186,7 @@ class Via {
                 }
 
                 if ($this->app->getContextDirectory() !== null) {
-                    $id = Timer::tick(self::sseHeartbeatIntervalMs($this->config), function (): void {
+                    $id = Timer::tick(self::sseHeartbeatIntervalMs($this->settings), function (): void {
                         try {
                             $this->sseHandler->heartbeatStreams();
                         } catch (\Throwable $e) {
@@ -1187,7 +1200,7 @@ class Via {
                 }
 
                 // A browser that cancels one HTTP/2 stream keeps the connection, so no close event tells the worker.
-                if ((self::serverSettings($this->config)['open_http2_protocol'] ?? false) === true) {
+                if ((self::serverSettings($this->settings)['open_http2_protocol'] ?? false) === true) {
                     $id = Timer::tick(SseHandler::RESET_CHECK_MS, function (): void {
                         try {
                             $this->sseHandler->endResetStreams();
@@ -1255,7 +1268,7 @@ class Via {
 
             // Runs in the worker that owns the connection, about 1 ms after the client's FIN. OpenSwoole
             // rejects it under dispatch_mode 1, 3 and 7; the SSE keep-alive wake covers those.
-            if (self::deliversCloseEvents(self::serverSettings($this->config))) {
+            if (self::deliversCloseEvents(self::serverSettings($this->settings))) {
                 $this->server->on('close', function (Server $server, int $fd): void {
                     try {
                         $this->sseHandler->onConnectionClose($fd);
@@ -1267,12 +1280,12 @@ class Via {
 
             // Last, after the settings are final: the helper process is added and the static files compressed in
             // the master process, so every worker inherits them.
-            $assets = [DatastarBundle::path($this->config->isDatastarRocketEnabled()), RequestHandler::viaCssPath()];
-            if ($this->config->isTracingEnabled()) {
+            $assets = [DatastarBundle::path($this->settings->datastarRocketEnabled), RequestHandler::viaCssPath()];
+            if ($this->settings->tracingEnabled) {
                 $assets[] = DevBarController::defaultAssetPath('devbar.css');
                 $assets[] = DevBarController::defaultAssetPath('devbar.js');
             }
-            $this->staticBrotli->prepare($this->server, $assets, $this->config->getStaticDir());
+            $this->staticBrotli->prepare($this->server, $assets, $this->settings->staticDir);
         }
 
         $this->server->start();
@@ -1542,7 +1555,7 @@ class Via {
      * @internal Used by HTTP handlers
      */
     public function getSessionId(Request $request): string {
-        return $this->sessionManager->getOrCreateSessionId($request, $this->config->getSecureCookie());
+        return $this->sessionManager->getOrCreateSessionId($request, $this->settings->secureCookie);
     }
 
     /**
@@ -1551,13 +1564,12 @@ class Via {
      * @internal Used by HTTP handlers
      */
     public function setSessionCookie(Response $response, string $sessionId): void {
-        $config = $this->app->getConfig();
         $this->sessionManager->setSessionCookie(
             $response,
             $sessionId,
-            $config->getSecureCookie(),
-            $config->getSessionCookieSameSite(),
-            $config->isSessionCookiePartitioned(),
+            $this->settings->secureCookie,
+            $this->settings->sessionCookieSameSite,
+            $this->settings->sessionCookiePartitioned,
         );
     }
 
@@ -1604,7 +1616,7 @@ class Via {
      * @internal used by the page and action handlers
      */
     public function armConnectDeadline(string $contextId): void {
-        $timeoutMs = $this->config->getContextConnectTimeoutMs();
+        $timeoutMs = $this->settings->contextConnectTimeoutMs;
         // Only a running server has an event loop to fire the timer; a CLI script or test would wait for it.
         if ($timeoutMs <= 0 || $this->server === null || ($this->activeSseCount[$contextId] ?? 0) > 0) {
             return;
@@ -1628,8 +1640,8 @@ class Via {
             return;
         }
 
-        $connectMs = $this->config->getContextConnectTimeoutMs();
-        $timeoutMs = isset($this->app->getClients()[$contextId]) ? $connectMs : $this->config->getContextReconnectTimeoutMs();
+        $connectMs = $this->settings->contextConnectTimeoutMs;
+        $timeoutMs = isset($this->app->getClients()[$contextId]) ? $connectMs : $this->settings->contextReconnectTimeoutMs;
         if ($timeoutMs <= 0) {
             $timeoutMs = $connectMs;
         }
@@ -1674,7 +1686,7 @@ class Via {
      * @internal
      */
     public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false): ?Context {
-        if ($this->config->getContextRevivalWindowMs() <= 0) {
+        if ($this->settings->contextRevivalWindowMs <= 0) {
             return null;
         }
 
@@ -1787,7 +1799,7 @@ class Via {
             $content,
             $context,
             $context->getId(),
-            $this->config->getBasePath(),
+            $this->settings->basePath,
         );
 
         // Inject the Dev Bar overlay before </body> when tracing is enabled.
@@ -1882,9 +1894,9 @@ class Via {
      *
      * @internal
      */
-    public static function serverSettings(Config $config): array {
+    public static function serverSettings(Settings $settings): array {
         $defaults = [
-            'open_http2_protocol' => $config->isHttps() || $config->isH2c(),
+            'open_http2_protocol' => $settings->https || $settings->h2c,
             'http_compression' => false,
             // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
             // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
@@ -1893,7 +1905,7 @@ class Via {
             // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
             'socket_buffer_size' => 1024 * 1024,
             'max_coroutine' => 100000,
-            'worker_num' => $config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
+            'worker_num' => $settings->workerNum,  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,
             'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onWorkerStop callbacks
             'reload_async' => true,  // Enable async reload
@@ -1908,9 +1920,9 @@ class Via {
         ];
 
         // Caller overrides win over the defaults; explicit SSL paths win over both.
-        return array_merge($defaults, $config->getSwooleSettings(), array_filter([
-            'ssl_cert_file' => $config->getSslCertFile(),
-            'ssl_key_file' => $config->getSslKeyFile(),
+        return array_merge($defaults, $settings->swooleSettings, array_filter([
+            'ssl_cert_file' => $settings->sslCertFile,
+            'ssl_key_file' => $settings->sslKeyFile,
         ]));
     }
 
@@ -2000,9 +2012,9 @@ class Via {
      *
      * @internal
      */
-    public static function sseHeartbeatIntervalMs(Config $config): int {
-        $seconds = $config->getContextDirectoryTtlSeconds();
-        $windowMs = $config->getContextRevivalWindowMs();
+    public static function sseHeartbeatIntervalMs(Settings $settings): int {
+        $seconds = $settings->contextDirectoryTtlSeconds;
+        $windowMs = $settings->contextRevivalWindowMs;
         if ($windowMs > 0) {
             $seconds = min($seconds, (int) ceil($windowMs / 1000));
         }
@@ -2072,17 +2084,17 @@ class Via {
      *
      * @throws \RuntimeException
      */
-    private static function assertWorkerSettings(Config $config): void {
-        $settings = $config->getSwooleSettings();
-        if (!\array_key_exists('worker_num', $settings) || (int) $settings['worker_num'] === $config->getWorkerNum()) {
+    private static function assertWorkerSettings(Settings $settings): void {
+        $swoole = $settings->swooleSettings;
+        if (!\array_key_exists('worker_num', $swoole) || (int) $swoole['worker_num'] === $settings->workerNum) {
             return;
         }
 
-        $n = (int) $settings['worker_num'];
+        $n = (int) $swoole['worker_num'];
 
         throw new \RuntimeException(
             "withSwooleSettings(['worker_num' => {$n}]) would start {$n} workers that php-via sets up as "
-            . "{$config->getWorkerNum()}: sessions, scoped signals and contexts would not be shared between them. "
+            . "{$settings->workerNum}: sessions, scoped signals and contexts would not be shared between them. "
             . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(). "
             . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
         );
@@ -2132,7 +2144,7 @@ class Via {
                 $this->log('error', 'GlobalState flush failed: ' . $e->getMessage());
             }
         };
-        $this->setInterval($flush, $this->config->getGlobalStateFlushMs());
+        $this->setInterval($flush, $this->settings->globalStateFlushMs);
 
         // The leader flushes once more when it stops: a second SIGTERM to the master can end it
         // before its shutdown event, and then only this flush saves the last window.
@@ -2353,7 +2365,7 @@ class Via {
      * Whether a broadcast from the current code is marked for the next flush instead of run now.
      */
     private function shouldCoalesce(): bool {
-        return $this->config->isBroadcastCoalescingEnabled() && !$this->shuttingDown && Coroutine::getCid() > 0;
+        return $this->settings->broadcastCoalescingEnabled && !$this->shuttingDown && Coroutine::getCid() > 0;
     }
 
     /**
@@ -2361,7 +2373,7 @@ class Via {
      */
     private function receiveBroadcast(string $scope): void {
         // pipeMessage runs in a coroutine on OpenSwoole 26, but a started worker can schedule without one.
-        if ($this->config->isBroadcastCoalescingEnabled() && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
+        if ($this->settings->broadcastCoalescingEnabled && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
             $this->markDirty($scope, publish: false);
             $this->scheduleFlush();
 
@@ -2509,7 +2521,7 @@ class Via {
      * 0 when a flush may start now, else the wait in ms (at least 1: Timer::after(0) fails).
      */
     private function msUntilNextTick(): int {
-        $tickNs = $this->config->getBroadcastTickMs() * 1_000_000;
+        $tickNs = $this->settings->broadcastTickMs * 1_000_000;
         if ($tickNs === 0 || $this->lastFlushStartNs === null) {
             return 0;
         }
@@ -2584,7 +2596,7 @@ class Via {
         } finally {
             unset($this->runningFlushes[$cid]);
             $this->lastFlushEndNs = hrtime(true);
-            $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->config->getBroadcastTickMs());
+            $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->settings->broadcastTickMs);
             $this->scheduleFlush();
         }
     }
@@ -2842,7 +2854,7 @@ class Via {
      * @return int how many contexts it reached
      */
     private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
-        if ($this->config->isDevMode()) {
+        if ($this->settings->devMode) {
             $this->viewRenderer->beginFanOut();
 
             try {

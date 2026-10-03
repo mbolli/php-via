@@ -102,7 +102,7 @@ class RequestHandler {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
         $this->actionHandler = $actionHandler;
-        $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getConfig(), $via->log(...));
+        $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getSettings(), $via->log(...));
         $this->psrRequestFactory = new PsrRequestFactory();
         $this->psrResponseEmitter = new PsrResponseEmitter();
         $this->staticCache = new StaticBodyCache(self::STATIC_CACHE_TOTAL_BYTES, self::STATIC_CACHE_FILE_BYTES);
@@ -253,7 +253,7 @@ class RequestHandler {
 
         // Serve static files from configured staticDir (if set). Only a path that looks like a file
         // is looked up before routing; any other only once no route matched.
-        $staticDir = $this->via->getConfig()->getStaticDir();
+        $staticDir = $this->via->getSettings()->staticDir;
         $staticFirst = $staticDir !== null && self::looksLikeStaticFile($path);
         if ($staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
@@ -303,7 +303,7 @@ class RequestHandler {
 
         // Handle stats endpoint (devMode only: exposes client IPs and memory usage)
         if ($path === '/_stats' && $method === 'GET') {
-            if (!$this->via->getConfig()->isDevMode()) {
+            if (!$this->via->getSettings()->devMode) {
                 $response->status(404);
                 $response->end('Not Found');
 
@@ -326,7 +326,7 @@ class RequestHandler {
         // Dev Bar endpoints (/_via/*, /_traces), gated on tracing being enabled.
         // 404 when disabled so production never advertises the surface.
         if ($path === '/_via' || $path === '/_traces' || str_starts_with($path, '/_via/')) {
-            if (!$this->via->getConfig()->isTracingEnabled()) {
+            if (!$this->via->getSettings()->tracingEnabled) {
                 $response->status(404);
                 $response->end('Not Found');
 
@@ -472,7 +472,7 @@ class RequestHandler {
 
         // Restrict who may frame this app, when configured via Config::withEmbeddable().
         // Document responses only, not SSE/action/static responses.
-        $ancestors = $this->via->getConfig()->getFrameAncestors();
+        $ancestors = $this->via->getSettings()->frameAncestors;
         if ($ancestors !== null) {
             $response->header('Content-Security-Policy', 'frame-ancestors ' . implode(' ', $ancestors));
         }
@@ -496,7 +496,7 @@ class RequestHandler {
         $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
         $this->logRequest($method, $path, 500, $requestStart);
         $response->status(500);
-        if (!$this->via->getConfig()->isDevMode()) {
+        if (!$this->via->getSettings()->devMode) {
             $response->end('Internal Server Error');
 
             return;
@@ -529,7 +529,7 @@ class RequestHandler {
 
             return;
         }
-        if (($path === '/_via/devbar.css' || $path === '/_via/devbar.js') && $this->via->getConfig()->isTracingEnabled()) {
+        if (($path === '/_via/devbar.css' || $path === '/_via/devbar.js') && $this->via->getSettings()->tracingEnabled) {
             $this->devBar ??= new DevBarController($this->via, staticBrotli: $this->staticBrotli);
             $this->devBar->handle($path, $request, $response);
 
@@ -747,7 +747,7 @@ class RequestHandler {
     private function handleSessionClose(Request $request, Response $response): int {
         // sendBeacon() sends Origin (literal "null" under Referrer-Policy: no-referrer, which is denied;
         // the SSE disconnect schedules the same cleanup).
-        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getSettings(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end('Forbidden: untrusted origin');
 
@@ -781,7 +781,7 @@ class RequestHandler {
             'render_stats' => $this->via->getStats()->getStats(),
             // Per worker: the worker that served this request.
             'broadcast_stats' => [
-                'tick_ms' => $this->via->getConfig()->getBroadcastTickMs(),
+                'tick_ms' => $this->via->getSettings()->broadcastTickMs,
                 ...$this->via->getStats()->getBroadcastStats(),
             ],
             // Per worker: a call that blocks the worker shows up as event loop lag, hooked file I/O as AIO threads.
@@ -805,8 +805,8 @@ class RequestHandler {
 
         // handleStats() is directly routed, not inside a middleware coreHandler,
         // so no PSR-7 attributes are available. Use brotli_compress() inline.
-        if ($this->via->getConfig()->getBrotli() && str_contains($request->header['accept-encoding'] ?? '', 'br')) {
-            $compressed = brotli_compress($json, $this->via->getConfig()->getBrotliDynamicLevel(), BROTLI_TEXT);
+        if ($this->via->getSettings()->brotli && str_contains($request->header['accept-encoding'] ?? '', 'br')) {
+            $compressed = brotli_compress($json, $this->via->getSettings()->brotliDynamicLevel, BROTLI_TEXT);
             if ($compressed !== false) {
                 $response->header('Content-Encoding', 'br');
                 $response->header('Vary', 'Accept-Encoding');
@@ -816,7 +816,7 @@ class RequestHandler {
             }
         }
 
-        if ($this->via->getConfig()->getBrotli()) {
+        if ($this->via->getSettings()->brotli) {
             $response->header('Vary', 'Accept-Encoding');
         }
         $response->end($json);
@@ -860,10 +860,10 @@ class RequestHandler {
      * Serve the Datastar bundle: the Rocket build with Config::withDatastarRocket(), else the plain one.
      */
     private function serveDatastarJs(Request $request, Response $response): void {
-        $config = $this->via->getConfig();
-        $path = DatastarBundle::path($config->isDatastarRocketEnabled());
+        $settings = $this->via->getSettings();
+        $path = DatastarBundle::path($settings->datastarRocketEnabled);
         $version = $request->get['v'] ?? null;
-        $versioned = \is_string($version) && DatastarBundle::url($config->getBasePath(), $version) === $config->getDatastarUrl();
+        $versioned = \is_string($version) && DatastarBundle::url($settings->basePath, $version) === $settings->datastarUrl;
         $this->sendStaticFile($path, 'application/javascript', true, $request, $response, $versioned);
     }
 
@@ -936,7 +936,7 @@ class RequestHandler {
      * @param bool $versioned The URL carries the file's current content version
      */
     private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response, bool $versioned = false): void {
-        if ($this->via->getConfig()->isDevMode()) {
+        if ($this->via->getSettings()->devMode) {
             // Under the file hooks PHP keeps stat() results across writes, which would hide an edit.
             clearstatcache(true, $filePath);
         }
@@ -947,7 +947,7 @@ class RequestHandler {
         $mimeType = explode(';', $contentType, 2)[0];
         $brotli = $compressible && $this->staticBrotli->enabled() ? $this->staticBrotli : null;
 
-        $response->header('Cache-Control', $this->via->getConfig()->getStaticCacheControl($filePath, $mimeType, $versioned));
+        $response->header('Cache-Control', $this->via->getSettings()->staticCacheControl($filePath, $mimeType, $versioned));
         $response->header('ETag', $etag);
         $response->header('Last-Modified', ConditionalGet::lastModified($mtime));
         if ($brotli !== null) {
@@ -1028,7 +1028,7 @@ class RequestHandler {
             return;
         }
 
-        $devMode = $this->via->getConfig()->isDevMode();
+        $devMode = $this->via->getSettings()->devMode;
         if (!$this->staticCache->fits($size, $devMode, $filePath)) {
             $response->sendfile($filePath);
 
@@ -1075,7 +1075,7 @@ class RequestHandler {
             }
         }
 
-        if ($this->via->getConfig()->getBrotli()) {
+        if ($this->via->getSettings()->brotli) {
             $response->header('Vary', 'Accept-Encoding');
         }
         $response->end($html);

@@ -17,31 +17,31 @@ describe('Config: CSRF options', function (): void {
     test('secureCookie defaults to false', function (): void {
         $config = new Config();
 
-        expect($config->getSecureCookie())->toBeFalse();
+        expect($config->freeze()->secureCookie)->toBeFalse();
     });
 
     test('withSecureCookie(true) enables secure flag', function (): void {
         $config = (new Config())->withSecureCookie(true);
 
-        expect($config->getSecureCookie())->toBeTrue();
+        expect($config->freeze()->secureCookie)->toBeTrue();
     });
 
     test('withSecureCookie(false) explicitly disables secure flag', function (): void {
         $config = (new Config())->withSecureCookie(false);
 
-        expect($config->getSecureCookie())->toBeFalse();
+        expect($config->freeze()->secureCookie)->toBeFalse();
     });
 
     test('trustedOrigins defaults to null (same-host check)', function (): void {
         $config = new Config();
 
-        expect($config->getTrustedOrigins())->toBeNull();
+        expect($config->freeze()->trustedOrigins)->toBeNull();
     });
 
     test('withTrustedOrigins sets the allowlist', function (): void {
         $config = (new Config())->withTrustedOrigins(['https://example.com', 'https://app.example.com']);
 
-        expect($config->getTrustedOrigins())->toBe(['https://example.com', 'https://app.example.com']);
+        expect($config->freeze()->trustedOrigins)->toBe(['https://example.com', 'https://app.example.com']);
     });
 
     test('withTrustedOrigins(null) falls back to the same-host check', function (): void {
@@ -50,7 +50,7 @@ describe('Config: CSRF options', function (): void {
             ->withTrustedOrigins(null)
         ;
 
-        expect($config->getTrustedOrigins())->toBeNull();
+        expect($config->freeze()->trustedOrigins)->toBeNull();
     });
 });
 
@@ -69,7 +69,7 @@ describe('OriginPolicy: Origin validation', function (): void {
             ->withAllowMissingOrigin($allowMissingOrigin)
         ;
 
-        return OriginPolicy::allows($config, $originHeader, $hostHeader);
+        return OriginPolicy::allows($config->freeze(), $originHeader, $hostHeader);
     }
 
     test('no trustedOrigins + no devMode + present cross-origin → blocked (same-host fallback)', function (): void {

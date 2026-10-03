@@ -19,7 +19,7 @@ describe('hook flag sets', function (): void {
         $expected = Via::nativeCurlHookCrashes() ? SWOOLE_HOOK_ALL & ~SWOOLE_HOOK_NATIVE_CURL : SWOOLE_HOOK_ALL;
 
         expect(Via::defaultHookFlags())->toBe($expected);
-        expect(Via::serverSettings(new Config())['hook_flags'])->toBe(Via::defaultHookFlags());
+        expect(Via::serverSettings((new Config())->freeze())['hook_flags'])->toBe(Via::defaultHookFlags());
     });
 
     test('the narrow set hooks sockets, sleep and proc_open, no file or stdio I/O, and native curl where it does not crash', function (): void {
@@ -55,7 +55,7 @@ describe('hook flag sets', function (): void {
     test('withSwooleSettings() overrides the default', function (): void {
         $config = (new Config())->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
 
-        expect(Via::serverSettings($config)['hook_flags'])->toBe(Via::noFileIoHookFlags());
+        expect(Via::serverSettings($config->freeze())['hook_flags'])->toBe(Via::noFileIoHookFlags());
     });
 });
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\DevBar;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\Http\OriginPolicy;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
@@ -38,7 +39,7 @@ final class DevBarController {
     private StaticBrotli $staticBrotli;
 
     public function __construct(private Via $via, private string $assetDir = self::ASSET_DIR, ?StaticBrotli $staticBrotli = null) {
-        $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getConfig(), $via->log(...));
+        $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getSettings(), $via->log(...));
     }
 
     /**
@@ -129,14 +130,14 @@ final class DevBarController {
     /**
      * Apply a signal write requested from the Dev Bar.
      *
-     * Enforces the hard production guard ({@see Config::isTracingWritesEnabled()}),
+     * Enforces the hard production guard ({@see Settings::tracingWritesEnabled()}),
      * then sets the value through the framework's normal signal path so scoped
      * broadcasts fire, and syncs the owning context so its browser updates.
      *
      * @return array{status: int, body: array<string, mixed>}
      */
     public function writeSignal(string $contextId, string $signalId, mixed $value): array {
-        if (!$this->via->getConfig()->isTracingWritesEnabled()) {
+        if (!$this->via->getSettings()->tracingWritesEnabled()) {
             return ['status' => 403, 'body' => ['error' => 'Signal writes are disabled']];
         }
 
@@ -219,7 +220,7 @@ final class DevBarController {
         $response->header('Content-Type', 'application/json');
         $response->header('Cache-Control', 'no-store');
 
-        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getSettings(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end((string) json_encode(['error' => 'Untrusted origin']));
 
@@ -237,7 +238,7 @@ final class DevBarController {
         $response->header('Cache-Control', 'no-store');
 
         // Defence in depth: same-origin check (writes are devMode-only already).
-        if (!OriginPolicy::allows($this->via->getConfig(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getSettings(), $request->header['origin'] ?? null, $request->header['host'] ?? null)) {
             $response->status(403);
             $response->end((string) json_encode(['error' => 'Untrusted origin']));
 
@@ -272,7 +273,7 @@ final class DevBarController {
      */
     private function loadAsset(string $file): ?array {
         $cached = $this->assets[$file] ?? null;
-        if ($cached !== null && !$this->via->getConfig()->isDevMode()) {
+        if ($cached !== null && !$this->via->getSettings()->devMode) {
             return $cached;
         }
 
@@ -296,13 +297,13 @@ final class DevBarController {
     }
 
     private function serveConsole(Response $response): void {
-        $base = $this->via->getConfig()->getBasePath();
+        $base = $this->via->getSettings()->basePath;
         $store = $this->via->getTraceStore();
         $initial = $store !== null ? json_encode($store->recent()) : '[]';
         if ($initial === false) {
             $initial = '[]';
         }
-        $writes = $this->via->getConfig()->isTracingWritesEnabled();
+        $writes = $this->via->getSettings()->tracingWritesEnabled();
         $config = htmlspecialchars(
             (string) json_encode(['mode' => 'page', 'base' => $base, 'writes' => $writes]),
             ENT_QUOTES,
@@ -338,7 +339,7 @@ final class DevBarController {
      * The front-end consumes this with EventSource + addEventListener. The SSE
      * id carries both cursors as "{traceCursor}.{logCursor}" so a reconnect can
      * resume each independently via Last-Event-ID. Polls the buffers every
-     * Config::getSsePollIntervalMs().
+     * withDevBarOptions(pollMs:).
      */
     private function serveStream(Request $request, Response $response): void {
         $traceStore = $this->via->getTraceStore();
@@ -356,7 +357,7 @@ final class DevBarController {
         $response->header('X-Accel-Buffering', 'no');
 
         [$traceCursor, $logCursor] = self::parseCursor($request->header['last-event-id'] ?? '');
-        $pollMs = $this->via->getConfig()->getSsePollIntervalMs();
+        $pollMs = $this->via->getSettings()->ssePollIntervalMs;
 
         while (true) {
             if ($this->via->isShuttingDown() || !$response->isWritable()) {

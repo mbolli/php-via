@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Rendering;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
@@ -33,7 +34,7 @@ class ViewRenderer {
     private array $identicalHinted = [];
 
     public function __construct(
-        private ?TemplateEngine $engine,
+        private Settings $settings,
         private ViewCache $cache,
         private Stats $stats,
         private Logger $logger
@@ -145,18 +146,18 @@ class ViewRenderer {
      * @throws \LogicException without a template engine
      */
     public function renderTemplate(string $template, array $data = [], ?string $block = null): string {
-        if ($this->engine === null) {
+        if ($this->settings->templateEngine === null) {
             throw new \LogicException("No template engine renders '{$template}'.");
         }
 
-        return $this->engine->render($template, $data, $block);
+        return $this->settings->templateEngine->render($template, $data, $block);
     }
 
     /**
      * The app's template engine, null when it renders closures only.
      */
     public function getEngine(): ?TemplateEngine {
-        return $this->engine;
+        return $this->settings->templateEngine;
     }
 
     /**
@@ -164,9 +165,9 @@ class ViewRenderer {
      * recording a `render.regions` span. Zero-overhead when tracing is off.
      */
     private function renderTraced(callable $viewFn, bool $isUpdate, Context $context, string $scope, bool $cacheHit): string {
-        $run = function () use ($viewFn, $isUpdate, $context): string {
+        $run = function () use ($viewFn, $isUpdate): string {
             $startTime = microtime(true);
-            $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
+            $result = $viewFn($isUpdate, $this->settings->basePath);
             $this->stats->trackRender(microtime(true) - $startTime);
 
             return $result;
@@ -235,7 +236,7 @@ class ViewRenderer {
         }
 
         $route = $context->getRoute();
-        if ($context->getConfig()->isDevMode() && !isset($this->documentShareWarned[$route])) {
+        if ($this->settings->devMode && !isset($this->documentShareWarned[$route])) {
             $this->documentShareWarned[$route] = true;
             $this->logger->warn("The view of {$route} renders a full document, which holds this tab's context id, so shareRender: true is ignored and every tab renders its own update. Pass block: to render updates without the document, or drop shareRender.", $context);
         }

@@ -165,7 +165,7 @@ describe('withTemplateDir()', function (): void {
         $cache = sys_get_temp_dir() . '/via-twig-cache-' . bin2hex(random_bytes(4));
         $config = (new Config())->withTwigCacheDir($cache)->withTemplateDir(dirname(__DIR__, 2) . '/website/templates')->withBasePath('/base');
         $via = createVia($config);
-        $engine = $config->getTemplateEngine();
+        $engine = $config->freeze()->templateEngine;
 
         expect($engine)->toBeInstanceOf(TwigEngine::class)
             ->and($via->getTwig())->toBe($engine->environment())

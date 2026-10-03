@@ -64,9 +64,9 @@ describe('DatastarBundle fingerprints', function (): void {
 
 describe('Config Datastar options', function (): void {
     test('Rocket is off by default and toggled by withDatastarRocket()', function (): void {
-        expect((new Config())->isDatastarRocketEnabled())->toBeFalse()
-            ->and((new Config())->withDatastarRocket()->isDatastarRocketEnabled())->toBeTrue()
-            ->and((new Config())->withDatastarRocket()->withDatastarRocket(false)->isDatastarRocketEnabled())->toBeFalse()
+        expect((new Config())->freeze()->datastarRocketEnabled)->toBeFalse()
+            ->and((new Config())->withDatastarRocket()->freeze()->datastarRocketEnabled)->toBeTrue()
+            ->and((new Config())->withDatastarRocket()->withDatastarRocket(false)->freeze()->datastarRocketEnabled)->toBeFalse()
         ;
     });
 

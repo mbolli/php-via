@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
-use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Core\Settings;
 use OpenSwoole\Atomic;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Socket;
@@ -108,7 +108,7 @@ final class StaticBrotli {
     /**
      * @param \Closure(string, string): void $log level and message
      */
-    public function __construct(private Config $config, private \Closure $log) {
+    public function __construct(private Settings $settings, private \Closure $log) {
         $this->boot = new StaticBodyCache(self::BOOT_CACHE_BYTES, self::BODY_BYTES);
         $this->cache = new StaticBodyCache(self::WORKER_CACHE_BYTES, self::BODY_BYTES);
     }
@@ -117,7 +117,7 @@ final class StaticBrotli {
      * Whether static files get Brotli: a static level above 0. Sidecars are sent even without ext-brotli.
      */
     public function enabled(): bool {
-        return $this->config->getBrotliStaticLevel() > 0;
+        return $this->settings->brotliStaticLevel > 0;
     }
 
     /**
@@ -156,7 +156,7 @@ final class StaticBrotli {
         }
 
         if (!$this->inServer) {
-            return $this->compressNow($path, $mtime, $size, $contents, $this->config->getBrotliStaticLevel(), true);
+            return $this->compressNow($path, $mtime, $size, $contents, $this->settings->brotliStaticLevel, true);
         }
 
         $this->request($path, $mtime, $size);
@@ -190,7 +190,7 @@ final class StaticBrotli {
         }
 
         // Only files in the static dir, or edited in dev mode, change after start.
-        if ($staticDir !== null || $this->config->isDevMode()) {
+        if ($staticDir !== null || $this->settings->devMode) {
             $process = new Process(function (Process $process) use ($server): void {
                 $this->serveHelper($process, $server);
             });
@@ -202,7 +202,7 @@ final class StaticBrotli {
             };
         }
 
-        if ($this->config->isDevMode()) {
+        if ($this->settings->devMode) {
             return;
         }
 
@@ -219,7 +219,7 @@ final class StaticBrotli {
         ]);
         ($this->log)('info', \sprintf(
             'Brotli level %d: compressed %d static files (%d KB to %d KB) in %d ms before start%s',
-            $this->config->getBrotliStaticLevel(),
+            $this->settings->brotliStaticLevel,
             $result['files'],
             intdiv($result['bytes'], 1024),
             intdiv($result['compressed'], 1024),
@@ -252,7 +252,7 @@ final class StaticBrotli {
      * @return array{files: int, bytes: int, compressed: int, ms: int, stopped: bool, deferred: int, left: int, rest: bool}
      */
     public function precompress(array $assets, ?string $staticDir, int $budgetMs = self::BOOT_BUDGET_MS): array {
-        $level = $this->config->getBrotliStaticLevel();
+        $level = $this->settings->brotliStaticLevel;
         $start = hrtime(true);
         $deadline = $start + $budgetMs * 1_000_000;
         // Level 11 took 90 to 180 ms per 100 KB of JavaScript and CSS. The estimate rises with slower files but never
@@ -363,7 +363,7 @@ final class StaticBrotli {
                 } else {
                     $this->warm = [];
                 }
-            } elseif (!$this->cache->put($path, $job['mtime'], $job['size'], $body, true, $this->config->isDevMode())) {
+            } elseif (!$this->cache->put($path, $job['mtime'], $job['size'], $body, true, $this->settings->devMode)) {
                 $this->refuse($path, $job['mtime'], $job['size']);
             }
         } elseif ($head['status'] === self::REFUSED) {
@@ -397,7 +397,7 @@ final class StaticBrotli {
             return self::reply($path, $mtime, $size, self::CHANGED);
         }
 
-        $body = brotli_compress($contents, $this->config->getBrotliStaticLevel(), BROTLI_TEXT);
+        $body = brotli_compress($contents, $this->settings->brotliStaticLevel, BROTLI_TEXT);
         if (!\is_string($body) || \strlen($body) > self::BODY_BYTES) {
             return self::reply($path, $mtime, $size, self::REFUSED);
         }
@@ -557,7 +557,7 @@ final class StaticBrotli {
         if (!\is_string($body)) {
             return null;
         }
-        $this->cache->put($path, $mtime, $size, $body, $final, $this->config->isDevMode());
+        $this->cache->put($path, $mtime, $size, $body, $final, $this->settings->devMode);
 
         return ['body' => $body];
     }
@@ -579,7 +579,7 @@ final class StaticBrotli {
         if (!\is_string($body)) {
             return null;
         }
-        $this->cache->put($path, $mtime, $size, $body, true, $this->config->isDevMode());
+        $this->cache->put($path, $mtime, $size, $body, true, $this->settings->devMode);
 
         return ['body' => $body];
     }
@@ -589,7 +589,7 @@ final class StaticBrotli {
      */
     private function freshSidecar(string $path, int $mtime): ?string {
         $sidecar = $path . '.br';
-        if ($this->config->isDevMode()) {
+        if ($this->settings->devMode) {
             clearstatcache(true, $sidecar);
         }
         $sidecarMtime = self::stat($sidecar)[0] ?? null;

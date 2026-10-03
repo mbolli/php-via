@@ -136,7 +136,8 @@ pcntl_signal(SIGALRM, function () use (&$results, $params): void {
 });
 pcntl_alarm($timeout);
 
-$defaultRows = (new Config())->getContextDirectoryRows();
+// Revisions before 0.14 have the getter; later ones keep the value in the snapshot new Via() takes.
+$defaultRows = method_exists(Config::class, 'getContextDirectoryRows') ? (new Config())->getContextDirectoryRows() : (new Config())->freeze()->contextDirectoryRows;
 
 /**
  * @return array<string, mixed>
