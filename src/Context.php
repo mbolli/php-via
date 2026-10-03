@@ -1078,7 +1078,10 @@ class Context {
      * own script reads from the URL or from localStorage: $initialValue is only the server's fallback.
      * The page seed and the first sync leave the signal out, declaring it again keeps the live value, and
      * until the server writes it, every SSE connect gives it the browser's value before the view renders.
-     * Such a signal is client-writable.
+     * Such a signal is client-writable. The browser must hold the value when via_head's SSE connect runs,
+     * so declare it on <html> or in <head> before via_head (data-signals, data-init): Datastar applies
+     * attributes in document order, and a value declared in <body> misses the first connect, which then
+     * renders the fallback.
      *
      * @throws \LogicException           without a scope, after scope() set a primary scope other than TAB
      * @throws \InvalidArgumentException for $clientSeeded with a shared scope or with clientWritable: false

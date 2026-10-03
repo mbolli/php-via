@@ -214,8 +214,9 @@ message that names the new one.
 - **`$c->signal($fallback, 'name', clientSeeded: true)`** declares a TAB signal whose initial value
   the browser holds, such as one the page's own script reads from the URL. The page seed and the
   first sync leave it out, a second declaration keeps the live value, and every SSE connect gives it
-  the browser's value before the view renders, until the server writes it. It replaces calling
-  `markSynced()` right after `signal()`, which keeps working.
+  the browser's value before the view renders, until the server writes it. The browser declares the
+  value on `<html>` or in `<head>` before `via_head`. It replaces calling `markSynced()` right after
+  `signal()`, which keeps working.
 - **Typed client writes.** A value the browser sends for a signal must have the type of the
   signal's initial value or `#[Signal]` property. A lossless form, such as `'5'` from a textarea for
   a number or `'false'` from a radio group for a bool, is stored as that type; any other value is
