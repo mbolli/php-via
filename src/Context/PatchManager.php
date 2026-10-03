@@ -124,7 +124,9 @@ class PatchManager {
                 $this->patchChannel = $this->evictOne($this->patchChannel);
             }
             $this->patchChannel[] = $patch;
-            $this->resumeParked();
+            if ($this->parked !== null) {
+                $this->resumeParked();
+            }
         } else {
             // OpenSwoole Channel for production
             $channel = $this->getPatchChannel();
@@ -771,7 +773,7 @@ class PatchManager {
         $nested = [];
 
         foreach ($flat as $key => $value) {
-            if (mb_strpos($key, '.') !== false) {
+            if (str_contains($key, '.')) {
                 // Namespaced signal - convert to nested structure
                 $parts = explode('.', $key);
                 $current = &$nested;
