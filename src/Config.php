@@ -781,7 +781,9 @@ final class Config {
      * A worker turns PHP's own runs off and runs the collector when its memory has grown by half since the last
      * run, and at least every $ms while possible roots wait. PHP ran it every 10,000 or more roots, which in a
      * burst of page views or in an app whose requests leave cycles meant a walk of every live context each time.
-     * A long loop that creates cycles without ever waiting on I/O frees them only once it ends.
+     * A long loop that creates cycles without ever waiting on I/O frees them only once it ends, and when they
+     * outgrow memory_limit first, the worker dies with a fatal error and takes its tabs with it: call
+     * gc_collect_cycles() in such a loop, or pass 0.
      *
      * @param int $ms longest time between runs, 30 s by default. 0 leaves the collector to PHP, as before 0.14.
      */

@@ -87,33 +87,41 @@
     </ul>
     <p>
         The collector's work then grows with the memory a worker allocates, not with how many objects its
-        requests touch. One worker served 20&nbsp;s bursts of page views to a counter page, once as it is and
-        once with each view leaving a cycle of 1&nbsp;KB:
+        requests touch. One worker served bursts of up to 250,000 page views of a counter page within 20&nbsp;s,
+        once as it is and once with each view leaving a cycle of 1&nbsp;KB:
     </p>
     <table>
         <thead><tr><th>Burst</th><th>Runs</th><th>In the collector</th><th>Longest pause</th></tr></thead>
         <tbody>
-            <tr><td>No cycles, PHP's runs</td><td>24</td><td>3.7&nbsp;s</td><td>0.44 to 0.46&nbsp;s</td></tr>
-            <tr><td>No cycles, php-via's runs</td><td>10</td><td>1.4 to 1.6&nbsp;s</td><td>0.53 to 0.58&nbsp;s</td></tr>
-            <tr><td>A cycle per view, PHP's runs</td><td>146 to 148</td><td>13.3&nbsp;s</td><td>0.19&nbsp;s</td></tr>
-            <tr><td>A cycle per view, php-via's runs</td><td>11</td><td>1.5 to 1.8&nbsp;s</td><td>0.49 to 0.60&nbsp;s</td></tr>
+            <tr><td>No cycles, PHP's runs</td><td>25</td><td>2.2 to 2.8&nbsp;s</td><td>0.30 to 0.37&nbsp;s</td></tr>
+            <tr><td>No cycles, php-via's runs</td><td>8 to 9</td><td>0.5 to 0.8&nbsp;s</td><td>0.24 to 0.40&nbsp;s</td></tr>
+            <tr><td>A cycle per view, PHP's runs</td><td>201 to 206</td><td>16.0 to 16.2&nbsp;s</td><td>0.19 to 0.27&nbsp;s</td></tr>
+            <tr><td>A cycle per view, php-via's runs</td><td>10</td><td>1.1&nbsp;s</td><td>0.35 to 0.43&nbsp;s</td></tr>
         </tbody>
     </table>
     <p>
-        With a cycle per view and PHP's runs, the worker spent two thirds of the burst in the collector and
-        served 91,000 views instead of 245,000.
+        Without cycles, php-via's runs let the worker serve 29,700 views a second instead of 24,600. With a
+        cycle per view and PHP's runs, it spent 16 of the 20&nbsp;s in the collector and served 128,000 views;
+        with php-via's runs it served all 250,000 in 9&nbsp;s.
     </p>
     <p class="note">
-        Three runs each, on two efficiency cores of the reference machine without a held clock: compare the
-        rows with each other, not with the other figures on this page.
+        Three runs each, held at full clock as above, without Brotli. The longest pause follows the number of
+        live contexts when the last run of the burst comes, which varies from run to run.
     </p>
     <p>
         A run still walks every live context, so the longest pause stays about one such walk, and runs that
-        come less often each handle more possible roots. Cycles take at most about half the live memory before
-        a run frees them. The check runs between coroutines, so a long loop that creates cycles without waiting
-        on I/O, such as a CPU-bound import inside one action, frees them only once it ends: call
-        <code>gc_collect_cycles()</code> inside such a loop. <code>Config::withGcIntervalMs($ms)</code> sets
-        the longest time between runs, and <code>withGcIntervalMs(0)</code> leaves the collector to PHP.
+        come less often each handle more possible roots. Between runs, cycles can take as much memory as the
+        growth that makes a run due: half of what the worker used after the last run and at least 32&nbsp;MiB,
+        or half the room left below <code>memory_limit</code> when that is less. A worker of 5&nbsp;MB can thus
+        hold more than six times its live memory in cycles.
+    </p>
+    <p id="cycle-collector-loops">
+        The check runs between coroutines, so a loop that creates cycles without waiting on I/O, such as a
+        CPU-bound import inside one action, frees them only once it ends. If they outgrow the room below
+        <code>memory_limit</code> first, the worker dies with a fatal error and every tab on it with it, where
+        PHP's own runs would have freed them as the loop went. Call <code>gc_collect_cycles()</code> inside such
+        a loop, once per batch of rows say, or keep PHP's runs with <code>withGcIntervalMs(0)</code>.
+        <code>Config::withGcIntervalMs($ms)</code> otherwise sets the longest time between runs.
     </p>
 
     <h2 id="broadcasts">Keeping broadcasts narrow</h2>

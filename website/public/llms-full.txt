@@ -430,6 +430,15 @@ A view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`
 static page once. Size the shared context directory for peak open
 tabs plus peak page views per second times 630. The harness is bench/capacity in the repository.
 
+Workers turn PHP's own cycle collector runs off and run it themselves, checked every 100 ms between
+coroutines, when memory has grown by half since the last run (by 32 MiB at least, or by half the
+room left below `memory_limit` when that is less), or after `withGcIntervalMs()` (30 s) while
+possible roots wait. A loop
+that creates cycles without waiting on I/O, such as a CPU-bound import in one action, frees them only
+once it ends; when they outgrow `memory_limit` first, the worker dies with a fatal error and every tab
+on it with it. Call `gc_collect_cycles()` in such a loop, or keep PHP's runs with
+`withGcIntervalMs(0)`. https://via.zweiundeins.gmbh/docs/performance#cycle-collector
+
 ---
 
 ## Shared and Persistent State
@@ -477,7 +486,9 @@ $config = (new Config())
         connectMs: 30_000,                    // free a context whose stream never connects
         reconnectMs: 60_000,                  // keep a tab whose stream is down after an action
         revivalWindowMs: 600_000,             // rebuild a returning tab
+        forwardMs: 60_000,                    // wait for the worker that holds a tab, then answer 504
     )
+    ->withGcIntervalMs(30_000)                // cycle collector, see Capacity and memory; 0 = PHP's own runs
     ->withStrictTabSignals()                  // TAB signals server-owned by default
     ->withPersistentGlobalState(__DIR__ . '/state.db')
     ->withTrustedOrigins(['https://example.com'])

@@ -131,8 +131,9 @@ All notable changes to php-via will be documented in this file.
   so an auth gate applies. When the middleware answers instead, the tab reloads, from an SSE reconnect
   or an action, and the page load gets the middleware's answer. See [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival).
 - **Workers turn PHP's own cycle collector runs off** and start them between coroutines. A loop that
-  creates cycles without waiting on I/O frees them only once it ends: call `gc_collect_cycles()` in
-  it, or keep PHP's runs with `withGcIntervalMs(0)`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
+  creates cycles without waiting on I/O frees them only once it ends, and when they outgrow
+  `memory_limit` the worker dies with all its tabs, where PHP's runs would have freed them. Call
+  `gc_collect_cycles()` in such a loop, or keep PHP's runs with `withGcIntervalMs(0)`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
 - **The default shell shows its Live Signals panel in dev mode only.**
 - **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
   where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied. A clone of a
@@ -366,13 +367,14 @@ message that names the new one.
   instead of 20 times while the contexts of a 250,000-view burst expire. See
   [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
 - **Workers run the cycle collector when their memory has grown by half,** not every 10,000
-  possible roots. In a burst of 250,000 page views it runs 10 times instead of 24 and takes 60% less
-  time, and an app whose requests leave cycles no longer spends most of a burst in it. A run still
-  walks every live context. See [Performance](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
-- **Broadcasts cost less per tab:** 39% less than 0.13.1 for tabs that share a render, and 8% less
-  for tabs that render their own view. With more than one worker, `getClients()` rebuilds its list
-  faster after a connect. An SSE stream checks its session cookie against the rotation table only
-  after a rotation, where it did for every frame.
+  possible roots. In a burst of 250,000 page views it runs 9 times instead of 25, takes two thirds
+  less time and lets the worker serve 21% more views a second. When each view leaves a cycle, the
+  worker serves all 250,000 views in 9 s, where PHP's runs took 20 s for 128,000. A run still walks
+  every live context. See [Performance](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
+- **Broadcasts cost less per tab:** 38% less than 0.13.0 for tabs that share a render, and 5% less
+  for tabs that render their own view. A broadcast whose view calls `getClients()` takes 15 to 28%
+  less. An SSE stream checks its session cookie against the rotation table only after a rotation,
+  where it did for every frame.
 
 ### Security
 
