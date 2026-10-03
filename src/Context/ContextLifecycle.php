@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
@@ -55,7 +56,9 @@ class ContextLifecycle {
             try {
                 $callback(...$args);
             } catch (\Throwable $e) {
-                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $this->context->get());
+                $context = $this->context->get();
+                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $context);
+                $this->via->reportError($e, $context, ErrorPhase::Timer);
             }
         });
         $this->timerIds[] = $timerId;

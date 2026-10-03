@@ -38,6 +38,7 @@ use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\State\SqliteSnapshot;
 use Mbolli\PhpVia\Support\DatastarBundle;
+use Mbolli\PhpVia\Support\ErrorHooks;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
@@ -168,6 +169,8 @@ class Via {
     /** @var array<callable(Context): void> Callbacks to run when a client disconnects from SSE */
     private array $clientDisconnectCallbacks = [];
 
+    private ErrorHooks $errorHooks;
+
     /** @var null|callable(Request, Response): void Handler for unmatched routes (404) */
     private $notFoundHandler;
 
@@ -279,6 +282,7 @@ class Via {
         $this->requestLogger = new RequestLogger($this->settings->devMode);
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
+        $this->errorHooks = new ErrorHooks($this->log(...));
 
         if (!$this->settings->broadcastCoalescingEnabled) {
             $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
@@ -1135,6 +1139,7 @@ class Via {
                             $callback();
                         } catch (\Throwable $e) {
                             $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
+                            $this->reportError($e, null, ErrorPhase::Timer);
                         }
                     });
 
@@ -1404,6 +1409,45 @@ class Via {
      */
     public function onClientDisconnect(callable $callback): void {
         $this->clientDisconnectCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a callback that sees each throw php-via catches from app code, to report it: to an error
+     * tracker, as a metric, or in an error signal on the tab. It only observes. php-via still logs the
+     * throw and handles it as before, so a failing action still answers 500 and sends the signals it
+     * changed, the ones the callback writes included.
+     *
+     * $phase says where the throw came from:
+     * - Action: an action threw, or something it called, such as a sync() whose view threw. $c is the
+     *   tab's page context, also for a component's action, and $action the action's id: the name given
+     *   to action(), after the component's namespace and a dash, or action0, action1 for unnamed ones.
+     * - Render: a page handler or view threw on page load or revival ($c is the context being built,
+     *   which is discarded), a view on a stream's first sync, or a view in a broadcast. A broadcast
+     *   reports each distinct failure once per pass, with the first context it failed for.
+     * - Timer: a Context::setInterval() callback threw, or a Via::setInterval() one, with $c null.
+     * - Task: a Context::spawn() task threw.
+     * $action is null outside Action.
+     *
+     * Callbacks run in the order registered, in the coroutine that caught the throw; for an action
+     * before its changed signals are sent, so what they write goes out with them. A throw from a
+     * callback is logged and reaches no callback, and so is a throw caught while a callback runs in
+     * the same coroutine, such as a view failing in a broadcast the callback starts.
+     * php-via's own failures, such as a broker that cannot publish, and throws from lifecycle
+     * callbacks (onClientConnect(), onCleanup(), onWorkerStop() and the like) are only logged.
+     *
+     * @param callable(\Throwable, ?Context, ErrorPhase, ?string): void $callback receives the throwable, the context, the phase and the action id
+     */
+    public function onError(callable $callback): void {
+        $this->errorHooks->add($callback);
+    }
+
+    /**
+     * Pass a throw php-via caught, after handling it, to the onError() callbacks.
+     *
+     * @internal called where php-via catches a throw from an action, a render, a timer or a task
+     */
+    public function reportError(\Throwable $e, ?Context $context, ErrorPhase $phase, ?string $action = null): void {
+        $this->errorHooks->report($e, $context, $phase, $action);
     }
 
     /**
@@ -1722,6 +1766,7 @@ class Via {
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
+            $this->reportError($e, $context, ErrorPhase::Render);
 
             return null;
         }
@@ -2952,6 +2997,7 @@ class Via {
     private function logSyncFailures(string $scope): void {
         foreach ($this->syncFailures[$scope] ?? [] as [$e, $context, $count]) {
             $this->log('error', "Sync failed during broadcast of {$scope} for {$count} context(s): " . Logger::describe($e), $context);
+            $this->reportError($e, $context, ErrorPhase::Render);
         }
         $this->syncFailures[$scope] = [];
     }

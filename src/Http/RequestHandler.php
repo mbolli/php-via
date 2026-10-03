@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\DevBar\DevBarController;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
 use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
 use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
@@ -424,6 +425,7 @@ class RequestHandler {
         } catch (\Throwable $e) {
             $this->discardContext($context);
             $this->failPage('Page handler exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
+            $this->via->reportError($e, $context, ErrorPhase::Render);
 
             return;
         }
@@ -441,6 +443,7 @@ class RequestHandler {
         } catch (\Throwable $e) {
             $this->discardContext($context);
             $this->failPage('Page render exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
+            $this->via->reportError($e, $context, ErrorPhase::Render);
 
             return;
         }
