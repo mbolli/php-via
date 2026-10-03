@@ -67,7 +67,8 @@ $vote = $c->action(function (Context $c) use ($app, $votes): void {
     <p>
         <code>$c->input()</code>, <code>$c->file()</code>, <code>$c->cookie()</code> and
         <code>$c->getRequestAttribute()</code> return the values of the request that posted the action, and a
-        cookie from <code>$c->setCookie()</code> goes out with that action's response, whatever its status.
+        cookie from <code>$c->setCookie()</code>, like the new session cookie of <code>$c->regenerateSession()</code>,
+        goes out with that action's response, whatever its status.
         This holds when two actions of one tab run at once and one of them waits on I/O.
     </p>
     <ul>

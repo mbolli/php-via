@@ -516,8 +516,9 @@ $c->clearSessionData();                // clear entire session bucket
     </p>
     <p>
         The old cookie keeps working for 10 seconds, for the requests other tabs sent before the browser had the new
-        one, and then starts a new session. Called outside an action or a page handler, the rotation waits for the
-        tab's next action. Middleware and <code>route()</code> handlers use
+        one, and then starts a new session. In an action, the new cookie goes out with that action's response, also
+        when another action of the tab runs at the same time. Called outside an action or a page handler, the
+        rotation waits for the tab's next action. Middleware and <code>route()</code> handlers use
         <a href="#via-regenerate-session"><code>$app-&gt;regenerateSession($request)</code></a>.
     </p>
     <p>

@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 /*
  * Real-server fixture for ActionRequestScopeTest: two actions of one tab at once, a spawn() task that outlives its
- * action, and a timer, each reading the request through the Context.
+ * action, and a timer, each reading the request through the Context, and session rotations in an action and a task.
  *
  * Action 1 reads its request, sleeps while action 2 (a multipart upload from another cookie) runs, and reads again.
  * Prints key=value lines: first, second (what each action read before and after its sleep), first_cookies,
- * second_cookies, task, next_cookies, timer.
+ * second_cookies, task, next_cookies, timer, login_cookies, during_login_cookies, task_login_cookies,
+ * after_task_login_cookies.
  */
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
@@ -67,6 +68,18 @@ $app->page('/', function (Context $c) use (&$seen): void {
         });
     }, 'task');
 
+    $c->action(function (Context $c): void {
+        $c->regenerateSession();
+        Coroutine::usleep((int) $c->input('sleep', 0));
+    }, 'login');
+
+    $c->action(function (Context $c): void {
+        $c->spawn(static function (Context $c): void {
+            Coroutine::usleep(150_000);
+            $c->regenerateSession();
+        });
+    }, 'logintask');
+
     $c->setInterval(static function () use ($c, &$seen): void {
         $seen['timer'] = (string) $c->input('q') . '/' . (string) $c->input('v');
     }, 50);
@@ -76,10 +89,11 @@ $app->page('/', function (Context $c) use (&$seen): void {
 
 /**
  * @param array<string, string> $files field => path, sent as multipart/form-data with via_ctx as a field
+ * @param array<string, string> $set   receives the cookies the response sets, name => value
  *
  * @return list<string> the names of the cookies the response sets
  */
-function post(int $port, string $path, string $ctx, string $cookie, array $files = []): array {
+function post(int $port, string $path, string $ctx, string $cookie, array $files = [], array &$set = []): array {
     $client = new Client('127.0.0.1', $port);
     $client->set(['timeout' => 10]);
     $headers = ['Origin' => "http://127.0.0.1:{$port}", 'Cookie' => $cookie];
@@ -94,6 +108,7 @@ function post(int $port, string $path, string $ctx, string $cookie, array $files
         $client->post($path, ['via_ctx' => $ctx]);
     }
     $names = array_map(static fn (string $raw): string => explode('=', $raw, 2)[0], (array) ($client->set_cookie_headers ?? []));
+    $set = (array) ($client->cookies ?? []);
     $status = $client->statusCode;
     $client->close();
 
@@ -135,6 +150,22 @@ $app->setInterval(static function () use ($app, $port, &$seen): void {
         echo 'task=', $seen['task'] ?? '', "\n";
         echo 'next_cookies=', implode(',', post($port, '/_action/probe?v=3', $ctx, "{$session}; who=dave")), "\n";
         echo 'timer=', $seen['timer'] ?? '', "\n";
+
+        $login = [];
+        $set = [];
+        Coroutine::create(static function () use ($port, $ctx, $session, $done, &$login, &$set): void {
+            $login = post($port, '/_action/login?sleep=300000', $ctx, $session, set: $set);
+            $done->push(true);
+        });
+        Coroutine::usleep(100_000);
+        echo 'during_login_cookies=', implode(',', post($port, '/_action/probe?v=4', $ctx, $session)), "\n";
+        $done->pop(5);
+        echo 'login_cookies=', implode(',', $login), "\n";
+
+        $rotated = 'via_session_id=' . ($set['via_session_id'] ?? '');
+        echo 'task_login_cookies=', implode(',', post($port, '/_action/logintask', $ctx, $rotated)), "\n";
+        Coroutine::usleep(300_000);
+        echo 'after_task_login_cookies=', implode(',', post($port, '/_action/probe?v=5', $ctx, $rotated)), "\n";
 
         @unlink($upload);
         $app->getServer()?->shutdown();

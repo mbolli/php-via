@@ -54,4 +54,15 @@ describe('the request of an action on a real server', function (): void {
             ->and($r['timer'] ?? null)->toBe('page/')
         ;
     });
+
+    test('a session rotation goes out with the response of the action that asked for it, also while another runs', function (): void {
+        [$r, $out] = requestScopeFixture();
+
+        expect($r['login_cookies'] ?? null)->toBe('via_session_id', $out)
+            ->and($r['during_login_cookies'] ?? null)->toBe('probe4')
+            // a task that rotates after its action answered, with the tab's next action response
+            ->and($r['task_login_cookies'] ?? null)->toBe('')
+            ->and($r['after_task_login_cookies'] ?? null)->toBe('probe5,via_session_id')
+        ;
+    });
 });

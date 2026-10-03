@@ -144,8 +144,7 @@ class ActionHandler {
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, true);
 
-            self::sendCookies($response, $context, $scope);
-            $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation());
+            $this->sendCookies($request, $response, $context, $scope);
             $response->status(200);
             $response->end();
         } catch (\Throwable $e) {
@@ -159,8 +158,7 @@ class ActionHandler {
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, false);
 
-            self::sendCookies($response, $context, $scope);
-            $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation());
+            $this->sendCookies($request, $response, $context, $scope);
             $response->status(500);
             $response->end('Action failed');
         } finally {
@@ -172,9 +170,11 @@ class ActionHandler {
     }
 
     /**
-     * Set the cookies queued outside an action (a timer's, say) and then those of this action, which win a tie.
+     * Set the cookies queued outside an action (a timer's, say) and then those of this action, which win a tie, and
+     * the session cookie of a rotation this action or one outside a request asked for.
      */
-    private static function sendCookies(Response $response, Context $context, RequestScope $scope): void {
+    private function sendCookies(Request $request, Response $response, Context $context, RequestScope $scope): void {
+        $rotateQueued = $context->takeSessionRotation();
         foreach ([...$context->flushPendingCookies(), ...$scope->answer()] as $cookie) {
             $response->cookie(
                 $cookie['name'],
@@ -187,6 +187,7 @@ class ActionHandler {
                 $cookie['sameSite'],
             );
         }
+        $this->via->writeSessionCookie($request, $response, rotate: $scope->rotatesSession || $rotateQueued);
     }
 
     private function syncSignalsAfterAction(Context $context, string $actionId): void {

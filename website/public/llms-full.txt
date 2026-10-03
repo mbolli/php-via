@@ -172,11 +172,12 @@ warning.
 
 Each action reads its own request: `input()`, `file()`, `cookie()` and
 `getRequestAttribute()` return the values of the request that posted it, and a cookie from
-`setCookie()` goes out with that action's response, also when two actions of one tab run at
-once. A `spawn()` task keeps the request of its action, but `file()` is null once the action
-has answered (OpenSwoole deletes the temporary file). Code outside an action, such as a
-timer, reads the page request, and a cookie it sets goes out with the tab's next action
-response. Signals are tab state: an action that waits sees values a later action posted.
+`setCookie()`, like the new session cookie of `regenerateSession()`, goes out with that
+action's response, also when two actions of one tab run at once. A `spawn()` task keeps the
+request of its action, but `file()` is null once the action has answered (OpenSwoole deletes
+the temporary file). Code outside an action, such as a timer, reads the page request, and a
+cookie it sets goes out with the tab's next action response. Signals are tab state: an
+action that waits sees values a later action posted.
 
 Datastar cancels an in-flight request when the page sends another one with the same method
 and URL, from any element. A request cancelled before it reaches the server never runs its

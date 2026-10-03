@@ -8,9 +8,9 @@ use Mbolli\PhpVia\Context;
 use OpenSwoole\Coroutine;
 
 /**
- * The request an action runs for: its input, uploaded files, cookies and middleware attributes, and the cookies it
- * queues for its response. It is bound to the coroutine that handles the request, so two actions of one tab that run
- * at once each read their own request and answer with their own cookies.
+ * The request an action runs for: its input, uploaded files, cookies and middleware attributes, and the cookies and
+ * session rotation it queues for its response. It is bound to the coroutine that handles the request, so two actions
+ * of one tab that run at once each read their own request and answer with their own cookies.
  *
  * @internal
  *
@@ -19,6 +19,9 @@ use OpenSwoole\Coroutine;
  */
 final class RequestScope {
     private const string KEY = 'via.request';
+
+    /** Whether regenerateSession() asked for a new session cookie with the response */
+    public private(set) bool $rotatesSession = false;
 
     /** @var array<int, self> scopes bound outside a coroutine, as TestApp handles requests, by Fiber (0 for none) */
     private static array $outside = [];
@@ -120,6 +123,18 @@ final class RequestScope {
             return false;
         }
         $this->queuedCookies[] = $cookie;
+
+        return true;
+    }
+
+    /**
+     * Ask for a new session cookie with the response, unless it is already sent.
+     */
+    public function rotateSession(): bool {
+        if ($this->answered) {
+            return false;
+        }
+        $this->rotatesSession = true;
 
         return true;
     }

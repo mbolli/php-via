@@ -94,7 +94,7 @@ class Context {
     /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued outside an action, sent with the next response */
     private array $pendingCookies = [];
 
-    /** Whether regenerateSession() asked for a new session cookie with the next response */
+    /** Whether regenerateSession() asked outside an action for a new session cookie with the next response */
     private bool $rotateSession = false;
 
     /** Whether broadcast() has warned that it no longer reaches the scopes this TAB-primary context joined */
@@ -206,7 +206,8 @@ class Context {
      *
      * The session keeps its id, its data, its SESSION signals and its other tabs. The old cookie keeps working
      * for 10 seconds, for the requests other tabs sent before the browser had the new one, and then starts a new
-     * session. Called outside an action or a page handler, such as in a timer, it waits for the tab's next action.
+     * session. In an action, and in the spawn() tasks it starts until it answers, the new cookie goes out with that
+     * action's response. Called later, or outside a request such as in a timer, it waits for the tab's next action.
      * Pair it with clearSessionData() for a logout. Middleware and route() handlers use Via::regenerateSession().
      *
      * @throws \OverflowException when the rotation table is full of sessions that need their rows
@@ -217,11 +218,18 @@ class Context {
         }
 
         $this->app->getSessionManager()->tokens()->reserve();
+        $request = RequestScope::current($this);
+        if ($request !== null && $request->rotateSession()) {
+            return;
+        }
+        if ($request !== null) {
+            $this->app->log('warn', "regenerateSession() ran after its action had answered, so the new cookie goes out with the tab's next action response", $this);
+        }
         $this->requestOwner()->rotateSession = true;
     }
 
     /**
-     * Whether regenerateSession() asked for a new cookie since the last call.
+     * Whether regenerateSession() asked outside an action for a new cookie since the last call.
      *
      * @internal called by the handlers that answer a request of this context
      */
