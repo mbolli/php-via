@@ -476,10 +476,11 @@ svg, ico, ttf, otf, txt, md, csv, html, htm, xml, rss, atom), `/datastar.js`, `/
 Dev Bar assets go out with Brotli level 11 to clients that accept it, with or without
 `withBrotli()`, with `Vary: Accept-Encoding` and one weak ETag for every encoding. woff2, woff,
 raster images (png, jpg, webp, gif, avif), pdf, audio and video are sent as they are. A worker
-never compresses at level 11 itself: files present at start are compressed in the master process
-before the port opens (about 2 s at most, the website takes 0.3 s; not in dev mode) and shared by
-all workers; a file that changes later goes to a helper process at the lowest CPU priority, and
-until the result arrives workers send it at level 4 up to 256 KB, uncompressed above, with
+never compresses at level 11 itself: files of up to 128 KiB present at start are compressed in the
+master process before the port opens (2.3 s at most, the website takes 0.3 s; not in dev mode) and
+shared by all workers, and a helper process at the lowest CPU priority compresses bigger ones right
+after start; a file that changes later goes to the helper on its first request, and until the
+result arrives workers send it at level 4 up to 256 KB, uncompressed above, with
 `Cache-Control: no-store`. A sidecar `foo.css.br` next to `foo.css`, at least as new, is sent as
 it is, even without ext-brotli: the way to ship large assets (`brotli --best app.js`). Build
 sidecars in the deploy step and keep them out of git: after a fresh clone a stale sidecar has the

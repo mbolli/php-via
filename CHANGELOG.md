@@ -113,8 +113,9 @@ All notable changes to php-via will be documented in this file.
 - **Dev Bar assets** are served from memory with an ETag, and with Brotli level 11. A page view
   revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
   download is 6.8 KB with Brotli.
-- **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once or
-  twice instead of 18 to 20 times while the contexts of a 220,000-view burst expire. See
+- **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once
+  instead of 20 times while the contexts of a 250,000-view burst expire, and the longest pause in
+  such a burst falls from 0.6 to 0.33 s. See
   [Performance](https://via.zweiundeins.gmbh/docs/performance#page-views).
 
 ### Fixed
@@ -132,7 +133,7 @@ All notable changes to php-via will be documented in this file.
 - A burst of page views that never opened a stream froze a worker once their contexts expired: each
   destroyed context walked every revival record and, above 10,000, sorted them all. After 250,000
   page views in 15 s a worker stopped answering for 60 to 74 s, and any client could cause it with
-  GET requests. Pruning now stops at the first record still valid, and the longest pause is 0.7 s.
+  GET requests. Pruning now stops at the first record still valid, and the longest pause is 0.33 s.
 - On libcurl 8.20 or newer, a curl request to any host name crashed the worker under the default
   `hook_flags` (OpenSwoole's native curl hook, curl#21558). The default now leaves
   `SWOOLE_HOOK_NATIVE_CURL` out there, so curl blocks the worker for the request, and `start()`

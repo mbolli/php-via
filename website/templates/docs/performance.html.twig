@@ -68,9 +68,10 @@
         When the contexts of such a burst expire, php-via destroys them in 10&nbsp;ms slices, and each one is
         freed as soon as nothing refers to it. Its internal helpers hold it weakly, so a destroyed context leaves
         no reference cycles for PHP's cycle collector, whose every run walks all live contexts. While the
-        contexts of a 220,000-view burst expired, the collector ran once or twice, where it ran 18 to 20 times
-        when each destroyed context left some 10 objects in cycles. The pauses left in such a burst come from
-        collector runs while the views arrive: they find nothing to free but still walk every live context.
+        contexts of a 250,000-view burst expire, the collector runs once, where it ran 20 times when each
+        destroyed context left some 10 objects in cycles. The longest pause left in such a burst, 0.33&nbsp;s,
+        comes at its end from collector runs while the views arrive: they find nothing to free but still walk
+        every live context.
     </p>
 
     <h2 id="broadcasts">Keeping broadcasts narrow</h2>
