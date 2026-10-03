@@ -4,8 +4,8 @@
 <article>
     <h1>Development</h1>
     <p>
-        This page covers local development workflow: starting a dev server with hot PHP reload,
-        file watching with <code>entr</code>, and running tests.
+        This page covers the local development workflow: starting a dev server with hot PHP reload,
+        file watching with <code>entr</code>, what dev mode changes, and running tests.
     </p>
 
     <h2 id="quick-start">Quick start</h2>
@@ -42,12 +42,26 @@ composer run dev
     </ol>
     <p>Ctrl+C kills all three cleanly.</p>
 
-    <p><strong><code>APP_ENV=dev</code></strong> enables:</p>
+    <p><strong><code>APP_ENV=dev</code></strong> makes the website's <code>app.php</code> call <code>withDevMode(true)</code> and enables:</p>
     <ul>
         <li>Debug-level logging</li>
-        <li>Self-signed TLS certificate loading (if <code>certs/dev.crt</code> and <code>certs/dev.key</code> exist, see <a href="{{ basePath }}docs/deployment#brotli-dev">Deployment → Dev mode</a>)</li>
+        <li>Self-signed TLS certificate loading (if <code>certs/dev.crt</code> and <code>certs/dev.key</code> exist, see <a href="{{ basePath }}docs/deployment#brotli-dev">Deployment: dev mode</a>)</li>
         <li>CORS logger output</li>
     </ul>
+
+    <h2 id="dev-mode">What dev mode changes</h2>
+    <p><code>Config::withDevMode(true)</code> trades speed and safety for feedback:</p>
+    <ul>
+        <li>A page that throws shows the exception's class and message instead of "Internal Server Error". A failing action still answers "Action failed" and logs the exception.</li>
+        <li>The <a href="{{ basePath }}docs/dev-bar">Dev Bar</a> is on, its signal editor can be turned on with <code>withDevBarOptions(writes: true)</code>, and <code>/_stats</code> answers.</li>
+        <li>The default shell shows its Live Signals panel.</li>
+        <li>Shell templates are read again after an edit, and static files are checked on every request, so an edit shows on the next reload. Static responses carry <code>Cache-Control: no-cache</code>.</li>
+        <li>The server opens its port without compressing static files first.</li>
+        <li>Action requests without an <code>Origin</code> header are accepted, so curl works without <code>withAllowMissingOrigin()</code>.</li>
+        <li>php-via warns once about mistakes that are quiet in production: a browser value of the wrong type for a signal, a view whose tabs all rendered the same HTML without <code>shareRender</code>, a page with <code>via_head</code> and no Datastar script, a second import map.</li>
+        <li>The master process writes its PID to <code>php-via-master.pid</code> in the system's temp directory, which <code>scripts/dev.sh</code> reads.</li>
+    </ul>
+    <p>Turn it off in production: <code>withDevMode(getenv('APP_ENV') === 'dev')</code>.</p>
 
     <h2 id="hot-reload">How PHP hot reload works</h2>
     <p>
@@ -83,8 +97,8 @@ $app->middleware(/* ... */);
 $app->group('/docs', function (Via $app): void { /* ... */ });
 
 // Defer example route registration to worker startup
-$app->onWorkerStart(function () use ($app): void {
-    require __DIR__ . '/routes.php';   // ← loaded fresh per worker
+$app->onWorkerStart(function (int $workerId) use ($app): void {
+    require __DIR__ . '/routes.php';   // loaded fresh per worker
 });
 
 $app->start();
@@ -105,6 +119,8 @@ ChatExample::register($app);
         <tbody>
             <tr><td>Files in <code>routes.php</code> and its <code>use</code>d classes</td><td>USR1 (<code>entr</code> automatic)</td><td>Fresh worker re-includes <code>routes.php</code></td></tr>
             <tr><td>Twig templates (<code>.twig</code>)</td><td>USR1 (<code>entr</code> automatic)</td><td>Fresh worker clears in-memory compiled-template cache and ViewCache</td></tr>
+            <tr><td>Shell templates (<code>withShellTemplate()</code>)</td><td>None in dev mode, USR1 otherwise</td><td>Read again after an edit in dev mode, once per worker otherwise</td></tr>
+            <tr><td>Files in <code>withStaticDir()</code></td><td>None in dev mode, USR1 otherwise</td><td>Checked on every request in dev mode, kept in worker memory otherwise</td></tr>
             <tr><td>CSS (<code>.css.src</code>)</td><td>None (already live)</td><td><code>pnpm dev</code> watches and rebuilds</td></tr>
             <tr><td>Changes to <code>app.php</code> itself</td><td>Full restart</td><td>Ctrl+C → <code>composer run dev</code></td></tr>
             <tr><td>Framework files in <code>src/</code></td><td>Full restart</td><td>Framework classes load in master</td></tr>
@@ -125,10 +141,11 @@ opcache.revalidate_freq = 0   ; check every request (0 = always)
 
     <h2 id="templates">Twig template changes</h2>
     <p>
+        Twig templates need <code>twig/twig</code> (<code>composer require twig/twig</code>); php-via no longer installs it.
         Twig compiles each template into a PHP class and stores it in memory for the worker's lifetime.
         Editing a <code>.twig</code> file triggers <code>entr</code> → USR1 → a fresh worker, which starts
-        with an empty template cache and also clears ViewCache (important for ROUTE/SESSION/GLOBAL scoped pages
-        that cache rendered HTML in memory). No browser action needed beyond the automatic reload.
+        with an empty template cache and an empty ViewCache, which holds the shared renders of views with
+        <code>shareRender: true</code>. No browser action needed beyond the automatic reload.
     </p>
 
     <h2 id="css">CSS changes</h2>
@@ -147,8 +164,43 @@ composer run test
 composer run watch-test
     {% endverbatim %}{% endcode %}
     <p>
-        Tests use <code>VIA_TEST_MODE=1</code> (set in <code>tests/Pest.php</code>), which prevents
-        OpenSwoole from binding a port: no running server needed.
+        php-via's own suite sets <code>VIA_TEST_MODE=1</code> in <code>tests/Pest.php</code>, which keeps
+        <code>start()</code> from binding a port. Tests that start a real server take their port from a window per
+        fixture, or from one window for all of them:
+    </p>
+    {% code 'bash' %}{% verbatim %}
+VIA_TEST_PORT_BASE=4350 VIA_TEST_PORT_COUNT=40 composer run test
+    {% endverbatim %}{% endcode %}
+    <p>
+        An app tests its pages with <code>Testing\TestApp</code>, which runs them through php-via's own request, action and
+        SSE handlers in the test's process, with no server, no port and no <code>VIA_TEST_MODE</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Testing\TestApp;
+use Mbolli\PhpVia\Via;
+
+it('counts clicks', function (): void {
+    $app = new TestApp(new Config(), function (Via $via): void {
+        $via->page('/counter', function (Context $c): void {
+            $count = $c->signal(0, 'count');
+            $c->action(fn () => $count->setValue($count->int() + 1), 'increment');
+            $c->view(fn (): string => "<main id=\"counter\">{$count->int()}</main>");
+        });
+    });
+    $tab = $app->open('/counter');
+    $tab->action('increment');
+
+    expect($tab->signal('count'))->toBe(1);
+    $app->shutdown();
+});
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>patches()</code> returns what the stream sent since the last call, <code>html()</code> renders the page from
+        server state, <code>disconnect(expire: true)</code> and <code>connect()</code> test a revival, and
+        <code>runTasks()</code> runs <code>spawn()</code> tasks and timers. TestApp runs one worker and renders broadcasts at
+        once, without the broadcast tick.
     </p>
 
     <h2 id="your-project">Using this pattern in your project</h2>
@@ -159,6 +211,7 @@ composer run watch-test
         <li><code>app.php</code> must not <code>use</code> or instantiate any class you want to hot-reload.</li>
         <li>Put all hot-reloadable route registrations in a separate file (e.g. <code>routes.php</code>) and load it via <code>onWorkerStart()</code>.</li>
         <li>Any code that runs before <code>$app->onWorkerStart()</code> in <code>app.php</code> is fixed for the lifetime of the master process.</li>
+        <li>Make every <code>Config</code> call before <code>new Via($config)</code>, which freezes the Config.</li>
     </ul>
 
     <p>A minimal <code>scripts/dev.sh</code> for your project:</p>
@@ -193,6 +246,7 @@ done
     <ul>
         <li><a href="{{ basePath }}docs/deployment">Deployment</a>: systemd, Caddy, TLS, graceful restart in production</li>
         <li><a href="{{ basePath }}docs/lifecycle">Lifecycle</a>: <code>onWorkerStart</code>, <code>onWorkerStop</code>, timers</li>
+        <li><a href="{{ basePath }}docs/upgrading">Upgrading to 0.14</a>: what to change in a 0.13 app</li>
     </ul>
 </article>
 {% endblock %}

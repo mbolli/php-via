@@ -6,8 +6,7 @@
     <p>
         A php-via server keeps a context in memory for every open tab and holds one SSE stream per tab.
         Its capacity depends on what each page view, open tab, action and broadcast costs, and those
-        costs are listed below, measured on the code of this website. The full tables, and the earlier
-        comparison of 0.13.0 with 0.13.1, are in
+        costs are listed below, measured with 0.14.0 on the code of this website. The full tables are in
         <a href="https://github.com/mbolli/php-via/blob/master/bench/capacity/RESULTS.md" target="_blank" rel="noopener">bench/capacity/RESULTS.md</a>.
     </p>
     <p class="note">
@@ -26,13 +25,14 @@
             <tr><td>Open tab, Brotli level 1</td><td>none while idle</td><td>65 to 125&nbsp;KB</td></tr>
             <tr><td>Open tab, no Brotli</td><td>none while idle</td><td>40 to 75&nbsp;KB</td></tr>
             <tr><td>Private action with a <code>sync()</code></td><td>0.16 to 0.20&nbsp;ms</td><td></td></tr>
+            <tr><td>Action passed to the worker that holds its tab</td><td>about twice that of one that reaches it</td><td></td></tr>
             <tr><td>Broadcast, per receiving tab</td><td>about 0.05&nbsp;ms</td><td></td></tr>
             <tr><td>Keep-alive comment every 15&nbsp;s</td><td>under 1% of a core for 1,000 tabs</td><td></td></tr>
         </tbody>
     </table>
     <p>
-        A broadcast renders a cached view once per scope and then writes and compresses one frame per tab,
-        so the per-tab cost is what grows with the audience. Broadcasts coalesce: a worker renders a busy
+        A broadcast to tabs whose views pass <code>shareRender: true</code> renders once per scope and then writes and
+        compresses one frame per tab, so the per-tab cost is what grows with the audience. Broadcasts coalesce: a worker renders a busy
         scope at most once per tick (25&nbsp;ms by default), however many actions marked it.
         <a href="/docs/broadcasting#timing">Broadcasting</a> explains the timing.
     </p>
@@ -61,16 +61,14 @@
     <p>
         A crawler, a link preview or a prefetch loads the page but never connects its stream. php-via keeps
         that context until the connect timeout (<code>withContextTimeouts(connectMs: ...)</code>, 30&nbsp;s by
-        default), so a crawler fetching 50 pages per second holds about 50&nbsp;MB. Before 0.13.1 such
-        contexts, and every page that called <code>$c->scope()</code>, were never freed.
+        default), so a crawler fetching 50 pages per second holds about 50&nbsp;MB.
     </p>
     <p>
         When the contexts of such a burst expire, php-via destroys them in 10&nbsp;ms slices, and each one is
         freed as soon as nothing refers to it. Its internal helpers hold it weakly, so a destroyed context leaves
         no reference cycles for PHP's cycle collector, whose every run walks all live contexts. While the
-        contexts of a 250,000-view burst expire, the collector runs once, where it ran 20 times when each
-        destroyed context left some 10 objects in cycles. The pauses left in such a burst come from collector
-        runs while the views arrive, which the next section covers.
+        contexts of a 250,000-view burst expire, the collector runs once. The pauses left in such a burst come
+        from collector runs while the views arrive, which the next section covers.
     </p>
 
     <h2 id="cycle-collector">Cycle collector</h2>
@@ -126,10 +124,18 @@
 
     <h2 id="broadcasts">Keeping broadcasts narrow</h2>
     <p>
-        A broadcast to a page's scope re-renders the page and every component on it. Three patterns from this
+        A broadcast to a page's scope re-renders the page and every component on it. Four patterns from this
         website keep a busy page cheap:
     </p>
     <ul>
+        <li>
+            Share the render of a view that is the same for every tab: <code>$c->view(..., shareRender: true)</code> after
+            <code>$c->scope(...)</code>. Without it each tab renders its own update. In the
+            <code>shared_read</code> benchmark of <code>bench/contention</code>, which renders without writing frames, a
+            broadcast to 2,000 contexts whose view reads five scoped signals from the shared store took 3.8&nbsp;ms with a
+            shared render and 22&nbsp;ms when each context rendered its own. <a href="/docs/views">Views</a> says when a
+            render must not be shared.
+        </li>
         <li>
             Give a busy widget a scope of its own and broadcast to that scope. The home page counter lives in
             <code>home:counter</code>, so a click re-renders the counters and not the poll next to them.
@@ -155,9 +161,17 @@ $app->page('/docs/install', function (Context $c): void {
     <h2 id="workers">More workers</h2>
     <p>
         With <code>withWorkerNum(2)</code> on two cores, page views per second rose from 797 to 1,390 for
-        <code>/docs/signals</code> and from 238 to 468 for <code>/docs/api</code>. Scoped signals, session data and the client list are shared between
-        workers, and the shared context directory has to be sized for your traffic:
-        <a href="/docs/deployment#same-machine">Deployment</a> gives the rule.
+        <code>/docs/signals</code> and from 238 to 468 for <code>/docs/api</code>, over HTTP/1.1. Scoped signals, session data
+        and the client list are shared between workers, and the shared context directory has to be sized for your
+        traffic: <a href="/docs/deployment#same-machine">Deployment</a> gives the rule.
+    </p>
+    <p>
+        Two things limit what extra workers buy. Behind a proxy that speaks h2c to php-via, every client arrives on one
+        connection and so on one worker until that connection carries 1,280 streams. Over HTTP/1.1 the clients spread,
+        but a tab's actions usually reach another worker than its stream, which passes them on: with N workers about
+        (N&minus;1)/N of the actions, each at about twice the CPU. <a href="/docs/deployment#tab-worker">Deployment</a>
+        explains both. Handlers that spend their time on CPU gain the most; an app whose actions mostly broadcast gains
+        little.
     </p>
 
     <h2 id="small-server">A small server, worked through</h2>
