@@ -303,7 +303,12 @@ class RequestHandler {
 
                 return;
             }
-            $status = $this->via->getApp()->downloads()->send($response, substr($path, \strlen(DownloadHandler::PATH) + 1), $this->via->getSessionId($request));
+            $status = $this->via->getApp()->downloads()->send(
+                $response,
+                substr($path, \strlen(DownloadHandler::PATH) + 1),
+                $this->via->getSessionId($request),
+                fn (\Throwable $e, Context $page) => $this->via->reportError($e, $page, ErrorPhase::Render),
+            );
             $this->logRequest($method, $path, $status, $requestStart);
 
             return;

@@ -1390,7 +1390,8 @@ class Context {
      * size without holding it in memory. The URL works once and only for this tab's session, while its context
      * lives: it is gone after the first request for it or when the context is destroyed, and one asked for on a
      * destroyed context, such as by a spawn() task, answers 404. Send the browser there,
-     * with a link the view renders or $c->execScript('window.location = ' . json_encode($url)).
+     * with a link the view renders or $c->execScript('window.location = ' . json_encode($url)). A callable that
+     * throws is logged and reaches Via::onError() as ErrorPhase::Render, and the browser sees the download fail.
      *
      * With more than one worker only the worker that holds the context serves the URL, which a request over the
      * tab's HTTP/2 connection reaches; on another worker it answers 404.

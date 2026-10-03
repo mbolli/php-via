@@ -78,11 +78,12 @@ final class DownloadHandler {
      * Answer a request for a download: 404 for an unknown, used or expired token, 403 for another session,
      * which leaves the download to its own session, and otherwise the content, after which the token is gone.
      *
-     * @param string $sessionId the requester's session
+     * @param string                                   $sessionId the requester's session
+     * @param null|\Closure(\Throwable, Context): void $onError   sees a source's throw, after it is logged
      *
      * @return int the status sent
      */
-    public function send(Response $response, string $token, string $sessionId): int {
+    public function send(Response $response, string $token, string $sessionId, ?\Closure $onError = null): int {
         $download = $this->downloads[$token] ?? null;
         $page = $download === null ? null : $download['page']->get();
         if ($download === null || $page === null) {
@@ -119,16 +120,17 @@ final class DownloadHandler {
             return 200;
         }
 
-        return $this->stream($response, $source, $download['filename'], $download['mimeType'], $page);
+        return $this->stream($response, $source, $download['filename'], $download['mimeType'], $page, $onError);
     }
 
     /**
      * Send what the callable returns or yields. Headers go out with the first chunk, so a callable that throws
      * before it gets a 500; one that throws later has its connection closed, so the browser sees the download fail.
      *
-     * @param callable(): mixed $source checked here, since what it returns or yields is not
+     * @param callable(): mixed                        $source  checked here, since what it returns or yields is not
+     * @param null|\Closure(\Throwable, Context): void $onError
      */
-    private function stream(Response $response, callable $source, string $filename, string $mimeType, Context $page): int {
+    private function stream(Response $response, callable $source, string $filename, string $mimeType, Context $page, ?\Closure $onError): int {
         $started = false;
 
         try {
@@ -169,11 +171,13 @@ final class DownloadHandler {
             $this->logger->log('error', "Download {$filename} failed: " . Logger::describe($e), $page);
             if ($started) {
                 $response->close();
-
-                return 500;
+            } else {
+                $response->status(500);
+                $response->end('Download failed');
             }
-            $response->status(500);
-            $response->end('Download failed');
+            if ($onError !== null) {
+                $onError($e, $page);
+            }
 
             return 500;
         }

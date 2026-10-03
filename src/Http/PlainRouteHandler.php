@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
 use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
 use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
@@ -81,6 +82,7 @@ final class PlainRouteHandler {
             $this->via->log('error', "Route handler exception on {$definition->getRoute()}: " . Logger::describe($e));
             $response->status(500);
             $response->end('Internal Server Error');
+            $this->via->reportError($e, null, ErrorPhase::Route, $definition->getRoute());
 
             return 500;
         }

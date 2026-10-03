@@ -636,7 +636,8 @@ class Via {
      * attribute of its name. HEAD is answered as GET without the body; list OPTIONS for a CORS preflight.
      * php-via checks no Origin header here, as for pages: add CSRF or auth middleware where a route changes
      * state. The response sets no session cookie. Plain routes go before pages, so a page on the same path
-     * answers the other methods; on a path with no page, the other methods get 405.
+     * answers the other methods; on a path with no page, the other methods get 405. A throw from the handler
+     * or a middleware answers 500, is logged and reaches onError() as ErrorPhase::Route.
      *
      * ```php
      * $app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
@@ -1530,10 +1531,13 @@ class Via {
      *   to action(), after the component's namespace and a dash, or action0, action1 for unnamed ones.
      * - Render: a page handler or view threw on page load or revival ($c is the context being built,
      *   which is discarded), a view on a stream's first sync, or a view in a broadcast. A broadcast
-     *   reports each distinct failure once per pass, with the first context it failed for.
+     *   reports each distinct failure once per pass, with the first context it failed for. A
+     *   Context::download() source that throws reports here too, with its page context.
      * - Timer: a Context::setInterval() callback threw, or a Via::setInterval() one, with $c null.
      * - Task: a Context::spawn() task threw.
-     * $action is null outside Action.
+     * - Route: a route() handler or its middleware threw, with $c null and $action the route's path
+     *   as registered, such as '/api/items/{id}'. The request still answers 500.
+     * $action is null outside Action and Route.
      *
      * Callbacks run in the order registered, in the coroutine that caught the throw; for an action
      * before its changed signals are sent, so what they write goes out with them. A throw from a
@@ -1542,7 +1546,7 @@ class Via {
      * php-via's own failures, such as a broker that cannot publish, and throws from lifecycle
      * callbacks (onClientConnect(), onCleanup(), onWorkerStop() and the like) are only logged.
      *
-     * @param callable(\Throwable, ?Context, ErrorPhase, ?string): void $callback receives the throwable, the context, the phase and the action id
+     * @param callable(\Throwable, ?Context, ErrorPhase, ?string): void $callback receives the throwable, the context, the phase and the action id or route path
      */
     public function onError(callable $callback): void {
         $this->errorHooks->add($callback);
@@ -1551,7 +1555,7 @@ class Via {
     /**
      * Pass a throw php-via caught, after handling it, to the onError() callbacks.
      *
-     * @internal called where php-via catches a throw from an action, a render, a timer or a task
+     * @internal called where php-via catches a throw from an action, a render, a timer, a task or a route
      */
     public function reportError(\Throwable $e, ?Context $context, ErrorPhase $phase, ?string $action = null): void {
         $this->errorHooks->report($e, $context, $phase, $action);
