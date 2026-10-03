@@ -243,7 +243,8 @@ message that names the new one.
   task's syncs, patches and downloads do nothing.
 - **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, shell or
   template, for JSON, webhooks and MCP, behind the global and route middleware as a page is. A
-  response body of unknown size goes out as it is read.
+  response body of unknown size goes out as it is read. `'*'` takes every method, and the handler
+  gets uploaded files.
 - **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
   what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
   only and goes with its context, so exports no longer travel through the SSE stream.

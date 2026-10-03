@@ -632,18 +632,21 @@ class Via {
      *
      * The PSR-15 handler gets the request after the global middleware and the route's own (->middleware() on
      * the returned definition), outermost first, and its response goes out as it is, a body of unknown size
-     * as it is read. The request carries the session id in 'via.session' and each path parameter as an
-     * attribute of its name. HEAD is answered as GET without the body; list OPTIONS for a CORS preflight.
-     * php-via checks no Origin header here, as for pages: add CSRF or auth middleware where a route changes
-     * state. The response sets no session cookie. Plain routes go before pages, so a page on the same path
-     * answers the other methods; on a path with no page, the other methods get 405. A throw from the handler
-     * or a middleware answers 500, is logged and reaches onError() as ErrorPhase::Route.
+     * as it is read. The request carries the session id in 'via.session', each path parameter as an
+     * attribute of its name, and uploaded files in getUploadedFiles(). A HEAD reaches a GET route as GET,
+     * and its response goes out without the body; list OPTIONS for a CORS preflight. '*' takes every
+     * method the path has no route of its own for, for a handler that answers each one itself, such as
+     * 404 while it is switched off. php-via checks no Origin header here, as for pages: add CSRF or auth
+     * middleware where a route changes state. The response sets no session cookie. Plain routes go before
+     * pages, so a page on the same path answers the other methods; on a path with no page, the other
+     * methods get 405. A throw from the handler, a middleware or the response body answers 500, or closes
+     * the connection once the body has started, is logged and reaches onError() as ErrorPhase::Route.
      *
      * ```php
      * $app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
      * ```
      *
-     * @param list<string>|string $methods an HTTP method, or several: 'POST', ['GET', 'POST', 'OPTIONS']
+     * @param list<string>|string $methods an HTTP method, or several: 'POST', ['GET', 'POST', 'OPTIONS'], or '*'
      * @param string              $path    route pattern with {params}, as for page(); a group() prefix applies
      *
      * @throws \InvalidArgumentException without a method, or for one that is no HTTP method name
@@ -2330,11 +2333,11 @@ class Via {
     /**
      * @param mixed $method an entry of route()'s $methods, whose type PHP does not check
      *
-     * @throws \InvalidArgumentException for anything but letters
+     * @throws \InvalidArgumentException for anything but letters or '*'
      */
     private static function httpMethod(mixed $method): string {
-        if (!\is_string($method) || preg_match('/^[A-Za-z]+$/', $method) !== 1) {
-            throw new \InvalidArgumentException('route() takes HTTP method names such as \'GET\' or \'POST\', got ' . var_export($method, true) . '.');
+        if (!\is_string($method) || preg_match('/^(?:[A-Za-z]+|\*)$/', $method) !== 1) {
+            throw new \InvalidArgumentException('route() takes HTTP method names such as \'GET\' or \'POST\', or \'*\', got ' . var_export($method, true) . '.');
         }
 
         return strtoupper($method);

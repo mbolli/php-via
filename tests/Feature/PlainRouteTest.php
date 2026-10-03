@@ -2,15 +2,19 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Support\LogBuffer;
+use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Via;
 use Nyholm\Psr7\Response;
 use OpenSwoole\Coroutine\Http\Client;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Tests\Support\FakeRequest;
@@ -53,6 +57,77 @@ final class PlainTraceMiddleware implements MiddlewareInterface {
 
         return $this->deny ? new Response(401, [], 'denied') : $handler->handle($request);
     }
+}
+
+/**
+ * A body of unknown size that reads $parts in turn, throwing the ones that are throwables.
+ *
+ * @param list<string|Throwable> $parts
+ */
+function plainFailingBody(array $parts): StreamInterface {
+    return new class($parts) implements StreamInterface {
+        /** @param list<string|Throwable> $parts */
+        public function __construct(private array $parts) {}
+
+        public function __toString(): string {
+            return '';
+        }
+
+        public function close(): void {}
+
+        public function detach() {
+            return null;
+        }
+
+        public function getSize(): ?int {
+            return null;
+        }
+
+        public function tell(): int {
+            return 0;
+        }
+
+        public function eof(): bool {
+            return $this->parts === [];
+        }
+
+        public function isSeekable(): bool {
+            return false;
+        }
+
+        public function seek(int $offset, int $whence = SEEK_SET): void {}
+
+        public function rewind(): void {}
+
+        public function isWritable(): bool {
+            return false;
+        }
+
+        public function write(string $string): int {
+            return 0;
+        }
+
+        public function isReadable(): bool {
+            return true;
+        }
+
+        public function read(int $length): string {
+            $part = array_shift($this->parts);
+            if ($part instanceof Throwable) {
+                throw $part;
+            }
+
+            return (string) $part;
+        }
+
+        public function getContents(): string {
+            return '';
+        }
+
+        public function getMetadata(?string $key = null): mixed {
+            return null;
+        }
+    };
 }
 
 /**
@@ -148,7 +223,7 @@ describe('Via::route()', function (): void {
         ;
     });
 
-    test('answers HEAD through a GET route, with the length of the body GET sends and no body', function (): void {
+    test('answers HEAD through a GET route, which sees GET, with the length of the body GET sends and no body', function (): void {
         $via = createVia();
         $handler = new PlainEchoHandler();
         $via->route('GET', '/api', $handler);
@@ -157,9 +232,43 @@ describe('Via::route()', function (): void {
 
         expect($response->statusCode)->toBe(200)
             ->and($response->body)->toBe('')
-            ->and($response->headers['Content-Length'] ?? null)->toBe((string) strlen((string) json_encode(['handler' => 'echo', 'method' => 'HEAD', 'body' => ''])))
-            ->and($handler->requests[0]->getMethod())->toBe('HEAD')
+            ->and($response->headers['Content-Length'] ?? null)->toBe((string) strlen((string) json_encode(['handler' => 'echo', 'method' => 'GET', 'body' => ''])))
+            ->and($handler->requests[0]->getMethod())->toBe('GET')
             ->and(plainRequest($via, 'HEAD', '/nothing')->statusCode)->toBe(404)
+        ;
+    });
+
+    test('hands HEAD to a route registered for HEAD as HEAD, still without the body', function (): void {
+        $via = createVia();
+        $get = new PlainEchoHandler('get');
+        $head = new PlainEchoHandler('head');
+        $via->route('GET', '/api', $get);
+        $via->route('HEAD', '/api', $head);
+
+        $response = plainRequest($via, 'HEAD', '/api');
+
+        expect($response->body)->toBe('')
+            ->and($get->requests)->toBe([])
+            ->and($head->requests[0]->getMethod())->toBe('HEAD')
+        ;
+    });
+
+    test("takes every method with '*', after the path's own routes, so the path never answers 405", function (): void {
+        $via = createVia();
+        $any = new PlainEchoHandler('any');
+        $via->route('*', '/mcp', $any);
+        $via->route('GET', '/mcp', new PlainEchoHandler('get'));
+
+        $put = plainRequest($via, 'PUT', '/mcp', body: 'x');
+        $patch = plainRequest($via, 'PATCH', '/mcp');
+        $get = plainRequest($via, 'GET', '/mcp');
+        $head = plainRequest($via, 'HEAD', '/mcp');
+
+        expect(json_decode($put->body, true))->toBe(['handler' => 'any', 'method' => 'PUT', 'body' => 'x'])
+            ->and(json_decode($patch->body, true)['method'] ?? null)->toBe('PATCH')
+            ->and(json_decode($get->body, true)['handler'] ?? null)->toBe('get')
+            ->and($head->statusCode)->toBe(200)
+            ->and($any->requests)->toHaveCount(2)
         ;
     });
 
@@ -211,6 +320,49 @@ describe('Via::route()', function (): void {
         ;
     });
 
+    test('answers 500 and reports Route when the response body throws before its first chunk', function (): void {
+        $reports = [];
+        $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$reports): void {
+            $via->onError(static function (Throwable $e, ?Context $c, ErrorPhase $phase, ?string $route) use (&$reports): void {
+                $reports[] = [$phase, $route, $e->getMessage(), $c];
+            });
+            $via->route('GET', '/events', new class implements RequestHandlerInterface {
+                public function handle(ServerRequestInterface $request): ResponseInterface {
+                    return new Response(200, ['Content-Type' => 'text/event-stream'], plainFailingBody([new RuntimeException('upstream down')]));
+                }
+            });
+        });
+
+        $response = $app->request('GET', '/events');
+        $app->shutdown();
+
+        expect($response->getStatusCode())->toBe(500)
+            ->and((string) $response->getBody())->toBe('Internal Server Error')
+            ->and($response->getHeaderLine('Content-Type'))->not->toBe('text/event-stream')
+            ->and($reports)->toBe([[ErrorPhase::Route, '/events', 'upstream down', null]])
+            ->and(implode("\n", $app->logs()))->toContain('Route response body failed on /events: RuntimeException: upstream down')
+        ;
+    });
+
+    test('breaks the response off and reports Route when the response body throws after a chunk', function (): void {
+        $reports = [];
+        $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$reports): void {
+            $via->onError(static function (Throwable $e, ?Context $c, ErrorPhase $phase, ?string $route) use (&$reports): void {
+                $reports[] = "{$phase->value} {$route} {$e->getMessage()}";
+            });
+            $via->route('POST', '/mcp', new class implements RequestHandlerInterface {
+                public function handle(ServerRequestInterface $request): ResponseInterface {
+                    return new Response(200, ['Content-Type' => 'text/event-stream'], plainFailingBody(["event: message\ndata: {}\n\n", new RuntimeException('upstream failed mid-stream')]));
+                }
+            });
+        });
+
+        expect(fn () => $app->request('POST', '/mcp', '{}'))->toThrow(RuntimeException::class, 'broke off')
+            ->and($reports)->toBe(['route /mcp upstream failed mid-stream'])
+        ;
+        $app->shutdown();
+    });
+
     test('throws for no method, or for a method name that is not one', function (mixed $methods): void {
         // @phpstan-ignore argument.type
         createVia()->route($methods, '/x', new PlainEchoHandler());
@@ -218,6 +370,7 @@ describe('Via::route()', function (): void {
         'none' => [[]],
         'a path in the name' => ['GET /x'],
         'a number' => [[1]],
+        'a wildcard in a name' => ['GE*'],
     ]);
 });
 
@@ -228,7 +381,7 @@ describe('Via::route() on a real server', function (): void {
         }
     });
 
-    test('answers JSON, a streamed body, HEAD, a preflight and 405 over HTTP', function (): void {
+    test('answers JSON, a streamed body, HEAD, a preflight, 405, any method and uploads over HTTP, and closes a body that fails', function (): void {
         $out = (string) shell_exec(
             'timeout 60 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/plain_route_server.php') . ' 2>&1'
         );
@@ -244,6 +397,12 @@ describe('Via::route() on a real server', function (): void {
             ->and($r['preflight'] ?? null)->toBe('204 POST')
             ->and($r['wrong_method'] ?? null)->toBe('405 GET, HEAD')
             ->and($r['set_cookie'] ?? null)->toBe('none')
+            ->and($r['head_as_get'] ?? null)->toBe('200 body=0')
+            ->and($r['any_method'] ?? null)->toBe('404 off for PUT')
+            ->and($r['upload'] ?? null)->toBe('200 up.csv:7:id,name docs=2 name=flows')
+            ->and($r['body_early'] ?? null)->toBe('500 text/html Internal Server Error')
+            ->and($r['body_midway'] ?? null)->toBe('200 "data: 1\n\n" ended=no')
+            ->and($r['reports'] ?? null)->toBe('route /api/early upstream down | route /api/midway upstream failed mid-stream')
         ;
     });
 });
