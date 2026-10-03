@@ -25,6 +25,12 @@ final class StaticBrotli {
     /** Time prepare() spends compressing before the server starts listening. */
     public const int BOOT_BUDGET_MS = 2000;
 
+    /**
+     * Largest file prepare() compresses; a bigger one is left to the helper. Level 11 takes 1.3 to 2.1 us per byte,
+     * so start-up compression ends at most one such file, about 0.3 s, after BOOT_BUDGET_MS.
+     */
+    public const int BOOT_FILE_BYTES = 128 << 10;
+
     /** Brotli bodies compressed at start, shared by all workers. */
     public const int BOOT_CACHE_BYTES = 32 << 20;
 
@@ -187,9 +193,13 @@ final class StaticBrotli {
         }
 
         $result = $this->precompress($assets, $staticDir);
-        if ($result['files'] === 0 && !$result['stopped']) {
+        if ($result['files'] === 0 && !$result['stopped'] && $result['deferred'] === 0) {
             return;
         }
+        $left = array_filter([
+            $result['deferred'] > 0 ? \sprintf('%d over %d KB', $result['deferred'], self::BOOT_FILE_BYTES >> 10) : '',
+            $result['stopped'] ? \sprintf('the rest past the %d ms budget', self::BOOT_BUDGET_MS) : '',
+        ]);
         ($this->log)('info', \sprintf(
             'Brotli level %d: compressed %d static files (%d KB to %d KB) in %d ms before start%s',
             $this->config->getBrotliStaticLevel(),
@@ -197,30 +207,28 @@ final class StaticBrotli {
             intdiv($result['bytes'], 1024),
             intdiv($result['compressed'], 1024),
             $result['ms'],
-            $result['stopped'] ? \sprintf(
-                '; stopped at the %d ms budget, the rest is compressed in the background on first request. '
-                . 'Ship .br sidecars to skip this, see https://via.zweiundeins.gmbh/docs/deployment#static-compression',
-                self::BOOT_BUDGET_MS,
-            ) : '',
+            $left !== [] ? '; ' . implode(' and ', $left) . ' are compressed in the background on first request. '
+                . 'Ship .br sidecars to skip this, see https://via.zweiundeins.gmbh/docs/deployment#static-compression' : '',
         ));
     }
 
     /**
-     * Compress files into the boot cache, the framework's own first, until $budgetMs is used up.
+     * Compress files of up to BOOT_FILE_BYTES into the boot cache, the framework's own first, until $budgetMs is used
+     * up. Files are only started while their estimated time fits, so the budget is passed by at most one file.
      *
      * @param list<string> $assets
      *
-     * @return array{files: int, bytes: int, compressed: int, ms: int, stopped: bool}
+     * @return array{files: int, bytes: int, compressed: int, ms: int, stopped: bool, deferred: int}
      */
     public function precompress(array $assets, ?string $staticDir, int $budgetMs = self::BOOT_BUDGET_MS): array {
         $level = $this->config->getBrotliStaticLevel();
         $start = hrtime(true);
         $deadline = $start + $budgetMs * 1_000_000;
         // Level 11 took 90 to 180 ms per 100 KB of JavaScript and CSS. The estimate rises with slower files but never
-        // drops below this floor, or one very compressible file would let a big bundle run far past the deadline.
+        // drops below this floor, or one very compressible file would let the next file run past the deadline.
         $floorNsPerByte = $level >= 10 ? 1_700.0 : 50.0;
         $nsPerByte = $floorNsPerByte;
-        $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'ms' => 0, 'stopped' => false];
+        $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'ms' => 0, 'stopped' => false, 'deferred' => 0];
         $spentNs = 0;
 
         $walkCut = false;
@@ -237,6 +245,11 @@ final class StaticBrotli {
                 continue;
             }
             [$mtime, $size] = $stat;
+            if ($size > self::BOOT_FILE_BYTES) {
+                ++$result['deferred'];
+
+                continue;
+            }
             if ($now + $size * $nsPerByte > $deadline) {
                 $result['stopped'] = true;
 

@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\DevBar\DevBarController;
+use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
+use Mbolli\PhpVia\Support\DatastarBundle;
 
 /*
  * The worker side of static Brotli talks to the helper through one packed job and one packed reply per file. Here a
@@ -274,12 +277,12 @@ describe('compressing at start', function (): void {
     });
 
     test('skips a file whose estimated time does not fit the budget, and takes smaller ones after it', function (): void {
-        $big = writeStatic($this->dir . '/a-big.js', compressibleText(StaticBrotli::INTERIM_BYTES * 4))[0];
+        $big = writeStatic($this->dir . '/a-big.js', compressibleText(StaticBrotli::BOOT_FILE_BYTES))[0];
         $small = writeStatic($this->dir . '/b-small.js', compressibleText(2000))[0];
         $brotli = staticBrotli();
 
-        // About 1.7 us per byte at level 11: the 1 MB file needs 1.7 s, the small one 3 ms.
-        $result = $brotli->precompress([], $this->dir, budgetMs: 300);
+        // At least 1.7 us per byte at level 11: the 128 KiB file needs 0.2 s, the small one 3 ms.
+        $result = $brotli->precompress([], $this->dir, budgetMs: 100);
 
         expect($result['stopped'])->toBeTrue()
             ->and($brotli->bootCache()->entries())->toHaveKey($small)
@@ -288,19 +291,40 @@ describe('compressing at start', function (): void {
     });
 
     test('a very compressible file does not lower the estimate for the files after it', function (): void {
-        // 384 KB that compress in a few ms, where JavaScript would take about 0.6 s.
-        $data = writeStatic($this->dir . '/data.csv', str_repeat("2026-10-02,flow,10.0.0.1,10.0.0.2,443,TCP,1500\n", 8_000))[0];
+        // 40 KB that compress in a few ms, where JavaScript would take about 70 ms.
+        $data = writeStatic($this->dir . '/data.csv', str_repeat("2026-10-02,flow,10.0.0.1,10.0.0.2,443,TCP,1500\n", 850))[0];
         mkdir($this->dir . '/public');
-        $bundle = writeStatic($this->dir . '/public/bundle.js', compressibleText(StaticBrotli::INTERIM_BYTES * 4))[0];
+        $bundle = writeStatic($this->dir . '/public/bundle.js', compressibleText(StaticBrotli::BOOT_FILE_BYTES))[0];
         $brotli = staticBrotli();
 
-        $result = $brotli->precompress([$data], $this->dir . '/public', budgetMs: 1000);
+        $result = $brotli->precompress([$data], $this->dir . '/public', budgetMs: 150);
 
         expect($result['stopped'])->toBeTrue()
-            ->and($result['ms'])->toBeLessThan(1000)
+            ->and($result['ms'])->toBeLessThan(150)
             ->and($brotli->bootCache()->entries())->toHaveKey($data)
             ->and($brotli->bootCache()->entries())->not->toHaveKey($bundle)
         ;
+    });
+
+    test('leaves a file over BOOT_FILE_BYTES to the helper, however much of the budget is left', function (): void {
+        // A file that fits the budget may compress slower than estimated; one this small can overrun it by 0.3 s.
+        $limit = writeStatic($this->dir . '/a-limit.js', compressibleText(StaticBrotli::BOOT_FILE_BYTES, 1))[0];
+        $over = writeStatic($this->dir . '/b-over.js', compressibleText(StaticBrotli::BOOT_FILE_BYTES + 1, 2))[0];
+        $brotli = staticBrotli();
+
+        $result = $brotli->precompress([], $this->dir);
+
+        expect(array_keys($brotli->bootCache()->entries()))->toBe([$limit])
+            ->and($result['deferred'])->toBe(1)
+            ->and($result['stopped'])->toBeFalse()
+        ;
+    });
+
+    test('the framework\'s own files are small enough to be compressed at start', function (): void {
+        // Without a static dir no helper runs, so they would never get the static level.
+        $assets = [DatastarBundle::path(false), DatastarBundle::path(true), RequestHandler::viaCssPath(), DevBarController::defaultAssetPath('devbar.css'), DevBarController::defaultAssetPath('devbar.js')];
+
+        expect(array_filter($assets, static fn (string $path): bool => filesize($path) > StaticBrotli::BOOT_FILE_BYTES))->toBe([]);
     });
 
     test('skips a link to a file that is never served', function (): void {
