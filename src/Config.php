@@ -190,9 +190,14 @@ final class Config {
     private int $actionRateWindow = 60;
 
     /**
-     * Longest time in milliseconds between a worker's cycle collector runs. 0 leaves the collector to PHP.
+     * Milliseconds between a worker's cycle collector runs; 0 for none.
      */
     private int $gcIntervalMs = 30_000;
+
+    /**
+     * Whether workers turn PHP's own collector runs off and run the collector when their memory grows.
+     */
+    private bool $gcOnGrowth = false;
 
     /**
      * Grace period in milliseconds before an inactive context (no live SSE connection) is
@@ -778,18 +783,24 @@ final class Config {
     /**
      * Set how a worker runs PHP's cycle collector, whose every run walks all live objects.
      *
-     * A worker turns PHP's own runs off and runs the collector when its memory has grown by half since the last
-     * run, and at least every $ms while possible roots wait. PHP ran it every 10,000 or more roots, which in a
-     * burst of page views or in an app whose requests leave cycles meant a walk of every live context each time.
-     * A long loop that creates cycles without ever waiting on I/O frees them only once it ends, and when they
-     * outgrow memory_limit first, the worker dies with a fatal error and takes its tabs with it: call
-     * gc_collect_cycles() in such a loop, or pass 0.
+     * By default PHP runs the collector itself, once 10,000 or more possible roots wait, and each worker also runs
+     * it every $ms.
      *
-     * @param int $ms longest time between runs, 30 s by default. 0 leaves the collector to PHP, as before 0.14.
+     * With $onGrowth, a worker turns PHP's own runs off and runs the collector when its memory has grown by half
+     * since the last run (by 32 MiB at least, by half the room left below memory_limit at most), and every $ms while
+     * possible roots wait. In a burst of page views, or an app whose requests leave cycles, that walks the live
+     * contexts far less often. The risk: a loop that creates cycles without waiting on I/O frees them only once it
+     * ends, and when they outgrow memory_limit first, the worker dies with a fatal error and takes all its tabs with
+     * it, where PHP's runs would have freed them. Turn it on only when no request runs such a loop, or call
+     * gc_collect_cycles() inside it.
+     *
+     * @param int  $ms       milliseconds between timed runs, 30 s by default; 0 runs none
+     * @param bool $onGrowth turn PHP's own runs off and run the collector when memory grows
      */
-    public function withGcIntervalMs(int $ms): self {
+    public function withGcIntervalMs(int $ms, bool $onGrowth = false): self {
         $this->assertMutable(__FUNCTION__);
         $this->gcIntervalMs = max(0, $ms);
+        $this->gcOnGrowth = $onGrowth;
 
         return $this;
     }
@@ -1587,6 +1598,7 @@ final class Config {
             actionRateLimit: $this->actionRateLimit,
             actionRateWindow: $this->actionRateWindow,
             gcIntervalMs: $this->gcIntervalMs,
+            gcOnGrowth: $this->gcOnGrowth,
             contextCleanupDelayMs: $this->contextCleanupDelayMs,
             contextConnectTimeoutMs: $this->contextConnectTimeoutMs,
             contextReconnectTimeoutMs: $this->contextReconnectTimeoutMs,

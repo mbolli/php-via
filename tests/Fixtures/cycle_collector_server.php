@@ -7,7 +7,7 @@ declare(strict_types=1);
  * far fewer possible roots than PHP's collector waits for. A forked client asks /gc for the worker's collector state
  * before and after.
  *
- * argv[1] = the withGcIntervalMs() value
+ * argv[1] = the withGcIntervalMs() value, argv[2] = growth for onGrowth: true
  *
  * Prints key=value lines.
  */
@@ -23,6 +23,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Tests\Support\FixturePort;
 
 $intervalMs = (int) ($argv[1] ?? 30_000);
+$onGrowth = ($argv[2] ?? '') === 'growth';
 
 try {
     $port = FixturePort::pick(4330, 20);
@@ -68,7 +69,7 @@ if ($pid === 0) {
     exit(0);
 }
 
-$config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')->withGcIntervalMs($intervalMs);
+$config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')->withGcIntervalMs($intervalMs, onGrowth: $onGrowth);
 $app = new Via($config);
 
 $app->route('GET', '/gc', new class implements RequestHandlerInterface {

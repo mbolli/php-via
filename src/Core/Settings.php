@@ -56,6 +56,7 @@ final readonly class Settings {
         public int $actionRateLimit,
         public int $actionRateWindow,
         public int $gcIntervalMs,
+        public bool $gcOnGrowth,
         public int $contextCleanupDelayMs,
         public int $contextConnectTimeoutMs,
         public int $contextReconnectTimeoutMs,

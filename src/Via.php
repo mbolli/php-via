@@ -1341,10 +1341,10 @@ class Via {
                     }
                 }
 
-                // The worker runs the cycle collector itself, see Config::withGcIntervalMs().
+                // See Config::withGcIntervalMs().
                 $gcIntervalMs = $this->settings->gcIntervalMs;
-                if ($gcIntervalMs > 0) {
-                    $collector = new CycleCollector($gcIntervalMs, CycleCollector::memoryLimit((string) \ini_get('memory_limit')));
+                if ($this->settings->gcOnGrowth) {
+                    $collector = new CycleCollector($gcIntervalMs > 0 ? $gcIntervalMs : PHP_INT_MAX, CycleCollector::memoryLimit((string) \ini_get('memory_limit')));
                     gc_disable();
                     $id = Timer::tick(CycleCollector::CHECK_MS, function () use ($collector): void {
                         if ($collector->isDue()) {
@@ -1358,6 +1358,12 @@ class Via {
                         $this->collectsCycles = true;
                     } else {
                         gc_enable();
+                    }
+                } elseif ($gcIntervalMs > 0) {
+                    $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
+
+                    if ($id !== false) {
+                        $this->serverIntervalIds[] = $id;
                     }
                 }
 
@@ -1765,7 +1771,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * @internal run when a worker's CycleCollector finds a run due, see Config::withGcIntervalMs()
+     * @internal run by a worker's collector timer, see Config::withGcIntervalMs()
      */
     public function runGcCycle(): void {
         $cycles = gc_collect_cycles();
