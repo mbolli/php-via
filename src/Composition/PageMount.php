@@ -38,8 +38,8 @@ final class PageMount {
             $class = $meta->class;
             $instance = $factory !== null ? ($factory)() : new $class();
 
-            // 2. Register #[Action] methods. An unscoped one is a per-tab action; it is registered
-            //    before #[Broadcast] sets the primary scope so that it cannot inherit it.
+            // 2. Register #[Action] methods. An unscoped one is a per-tab action; a scoped one is
+            //    registered once per scope and runs on the calling context's instance.
             $joinScopes = [];
             foreach ($meta->actions as ['method' => $method, 'name' => $name, 'scope' => $scope]) {
                 $run = self::actionRunner($instance, $method, $meta);
