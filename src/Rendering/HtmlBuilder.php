@@ -25,10 +25,10 @@ class HtmlBuilder {
     /** @var array<int, string> */
     private array $footIncludes = [];
 
-    /** @var array<string, true> Shell paths already checked for a missing or mismatched import map */
+    /** @var array<string, true> Shell paths already checked for via_head, in dev mode */
     private array $checkedShells = [];
 
-    /** @var array<string, true> Routes whose full-document view was already checked for a missing import map */
+    /** @var array<string, true> Routes whose page was already checked for via_head and a second import map, in dev mode */
     private array $checkedDocuments = [];
 
     /**
@@ -66,28 +66,24 @@ class HtmlBuilder {
      * Build complete HTML document from rendered content.
      *
      * A view that renders its own `<html>` document is completed by injectIntoDocument(); any other
-     * view is placed into the shell template.
+     * view is placed into the shell template. In dev mode, warns once per shell and once per
+     * full-document route without via_head, and once per route with more than one import map.
      *
-     * @param string      $content     Rendered HTML content
-     * @param Context     $context     Context for signal injection
-     * @param string      $contextId   Context ID for initial signals
-     * @param string      $basePath    Base path for URLs
-     * @param null|string $datastarUrl URL of the Datastar bundle, '<basePath>datastar.js' when null
-     * @param string      $importMap   The import map tag for {{ import_map }}, see Config::getImportMapTag()
+     * @param string  $content   Rendered HTML content
+     * @param Context $context   Context for signal injection
+     * @param string  $contextId Context ID for initial signals
+     * @param string  $basePath  Base path for URLs
      *
      * @return string Complete HTML document
      */
-    public function buildDocument(string $content, Context $context, string $contextId, string $basePath, ?string $datastarUrl = null, string $importMap = ''): string {
+    public function buildDocument(string $content, Context $context, string $contextId, string $basePath): string {
         if (stripos($content, '<html') !== false) {
             $route = $context->getRoute();
-            if ($importMap !== '' && !isset($this->checkedDocuments[$route])) {
-                $this->checkedDocuments[$route] = true;
-                if (stripos($content, 'importmap') === false) {
-                    $this->log('warning', "The document rendered for {$route} has no import map: write the importMap Twig variable into its <head>, or the map from withDatastarRocket() or withImportMap() is left out", $context);
-                }
+            if ($this->devMode && !isset($this->checkedDocuments[$route . "\0head"]) && !$this->hasViaHead($content)) {
+                $this->warnOnce($this->checkedDocuments, $route . "\0head", "The document rendered for {$route} has no via_head: write {{ via_head() }} (Twig) or \$c->viaHead() right after <meta charset>, and via_foot before </body>, or the page never opens its SSE stream.", $context);
             }
 
-            return $this->injectIntoDocument($content, $context, initial: true);
+            return $this->checkImportMaps($this->injectIntoDocument($content, $context, initial: true), $context);
         }
 
         [$headIncludes, $footIncludes] = $this->includes($context);
@@ -108,19 +104,6 @@ class HtmlBuilder {
             $replacements['{{ ' . $name . '.id }}'] = $signal->id();
         }
 
-        $datastarUrl ??= $basePath . 'datastar.js';
-        $replacements = [
-            '{{ signals_json }}' => $signalsJson,
-            '{{ context_id }}' => $contextId,
-            '{{ base_path }}' => $basePath,
-            '{{ datastar_url }}' => htmlspecialchars($datastarUrl, ENT_QUOTES, 'UTF-8'),
-            '{{ import_map }}' => $importMap,
-            '{{ head_content }}' => implode("\n", $headIncludes),
-            '{{ content }}' => $content,
-            '{{ foot_content }}' => implode("\n", $footIncludes),
-            '{{ styles }}' => '',
-        ] + $replacements;
-
         // Per-context shell overrides the configured one
         $shellPath = $context->getShellTemplate() ?? $this->shellTemplate ?? __DIR__ . '/shell.html';
         $shell = $this->loadShell($shellPath);
@@ -129,19 +112,24 @@ class HtmlBuilder {
             throw new \RuntimeException("Failed to load shell template from: {$shellPath}");
         }
 
-        if ($importMap !== '' && !isset($this->checkedShells[$shellPath])) {
-            $this->checkedShells[$shellPath] = true;
-            if (!str_contains($shell, '{{ import_map }}')) {
-                if (!str_contains($shell, 'importmap')) {
-                    $this->log('warning', "Shell {$shellPath} has no {{ import_map }}: the import map from withDatastarRocket() or withImportMap() is left out", $context);
-                }
-            } elseif (!str_contains($shell, '{{ datastar_url }}')) {
-                $this->log('warning', "Shell {$shellPath} has {{ import_map }} but loads Datastar without {{ datastar_url }}: modules that import 'datastar' will start a second Datastar engine", $context);
-            }
+        $replacements = [
+            '{{ signals_json }}' => $signalsJson,
+            '{{ context_id }}' => $contextId,
+            '{{ base_path }}' => $basePath,
+            '{{ via_head }}' => str_contains($shell, '{{ via_head }}') ? $context->viaHead() : '',
+            '{{ head_content }}' => implode("\n", $headIncludes),
+            '{{ content }}' => $content,
+            '{{ foot_content }}' => implode("\n", $footIncludes),
+            '{{ via_foot }}' => str_contains($shell, '{{ via_foot }}') ? $context->viaFoot() : '',
+            '{{ styles }}' => '',
+        ] + $replacements;
+
+        if ($this->devMode && !str_contains($shell, '{{ via_head }}')) {
+            $this->warnOnce($this->checkedShells, $shellPath, "Shell {$shellPath} has no {{ via_head }}: write it right after <meta charset>, and {{ via_foot }} before </body>, in place of a copied SSE bootstrap, Datastar script and import map.", $context);
         }
 
         // strtr() replaces in one pass, so placeholder text inside the content or a value stays as is
-        return strtr($shell, $replacements);
+        return $this->checkImportMaps(strtr($shell, $replacements), $context);
     }
 
     /**
@@ -203,6 +191,36 @@ class HtmlBuilder {
         }
 
         return $html;
+    }
+
+    /**
+     * Whether the document carries via_head's marker on a tag.
+     */
+    private function hasViaHead(string $html): bool {
+        return preg_match('/<[a-z][^>]*\s' . Bootstrap::MARKER . '[\s=>]/i', $html) === 1;
+    }
+
+    /**
+     * In dev mode, warn once per route about a page with more than one import map, of which a
+     * browser uses only the first.
+     */
+    private function checkImportMaps(string $html, Context $context): string {
+        $key = $context->getRoute() . "\0maps";
+        if ($this->devMode && !isset($this->checkedDocuments[$key]) && preg_match_all('/<script\s[^>]*type=["\']?importmap\b/i', $html) > 1) {
+            $this->warnOnce($this->checkedDocuments, $key, "The page of {$context->getRoute()} has more than one import map, and a browser may use only the first: add your entries with Config::withImportMap() and leave the writing to via_head.", $context);
+        }
+
+        return $html;
+    }
+
+    /**
+     * @param array<string, true> $warned keys already warned about
+     */
+    private function warnOnce(array &$warned, string $key, string $message, Context $context): void {
+        if (!isset($warned[$key])) {
+            $warned[$key] = true;
+            $this->log('warning', $message, $context);
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Rendering\TemplateEngine;
 use Mbolli\PhpVia\Via;
 
 /** @return array<string, Closure(Config): Config> one call per Config setter */
@@ -15,6 +16,15 @@ function configSetterCalls(): array {
         'withLogLevel' => fn (Config $c) => $c->withLogLevel('warn'),
         'withTemplateDir' => fn (Config $c) => $c->withTemplateDir(__DIR__),
         'withTwigCacheDir' => fn (Config $c) => $c->withTwigCacheDir(sys_get_temp_dir()),
+        'withTemplateEngine' => fn (Config $c) => $c->withTemplateEngine(new class implements TemplateEngine {
+            public function render(string $template, array $data, ?string $block = null): string {
+                return '';
+            }
+
+            public function supportsBlocks(): bool {
+                return false;
+            }
+        }),
         'withStaticDir' => fn (Config $c) => $c->withStaticDir(__DIR__),
         'withStaticCacheControl' => fn (Config $c) => $c->withStaticCacheControl('no-store'),
         'withDatastarRocket' => fn (Config $c) => $c->withDatastarRocket(),

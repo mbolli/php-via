@@ -7,9 +7,12 @@ namespace Mbolli\PhpVia;
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Broker\SwooleBroker;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\TemplateEngine;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Removed;
+use Mbolli\PhpVia\Twig\TwigEngine;
 
 /**
  * Configuration class with fluent API.
@@ -23,6 +26,11 @@ final class Config {
     private string $logLevel = 'info';
     private ?string $templateDir = null;
     private false|string $twigCacheDir = false;
+    private ?TemplateEngine $templateEngine = null;
+
+    /** The TwigEngine built from withTemplateDir() and withTwigCacheDir(), once asked for */
+    private ?TwigEngine $templateDirEngine = null;
+
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
@@ -41,7 +49,7 @@ final class Config {
     /** @var array<string, string> Module URL => integrity, from withImportMap() */
     private array $importMapIntegrity = [];
 
-    /** @var null|array{string, string} Datastar URL the cached import map tag was built with, and the tag */
+    /** @var null|array{string, string} Datastar URL the cached import map JSON was built with, and the JSON */
     private ?array $importMapTag = null;
 
     /** @var array<string, mixed> */
@@ -275,22 +283,75 @@ final class Config {
         return $this;
     }
 
+    /**
+     * The engine that renders template views, view('page.html.twig', ...) and Context::render():
+     *
+     * ```php
+     * $config->withTemplateEngine(new TwigEngine(__DIR__ . '/templates', cacheDir: '/tmp/twig'));
+     * ```
+     *
+     * Without an engine, views are closures that return HTML, and a template view throws.
+     */
+    public function withTemplateEngine(TemplateEngine $engine): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->templateEngine = $engine;
+
+        return $this;
+    }
+
+    /**
+     * Twig templates from $dir: short for withTemplateEngine(new TwigEngine($dir)), with the cache
+     * directory from withTwigCacheDir(). Needs twig/twig; new Via() throws without it.
+     */
     public function withTemplateDir(string $dir): self {
         $this->assertMutable(__FUNCTION__);
         $this->templateDir = $dir;
+        $this->templateDirEngine = null;
 
         return $this;
     }
 
+    /**
+     * Where the TwigEngine that withTemplateDir() sets up keeps its compiled templates.
+     */
     public function withTwigCacheDir(string $dir): self {
         $this->assertMutable(__FUNCTION__);
         $this->twigCacheDir = $dir;
+        $this->templateDirEngine = null;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getTwigCacheDir(): false|string {
         return $this->twigCacheDir;
+    }
+
+    /**
+     * The engine from withTemplateEngine(), or the TwigEngine withTemplateDir() describes, built on
+     * the first call; null when there is neither.
+     *
+     * @internal read by Via at construction
+     *
+     * @throws \LogicException when withTemplateEngine() and withTemplateDir() or withTwigCacheDir() are both set,
+     *                         or withTemplateDir() is set without twig/twig
+     */
+    public function getTemplateEngine(): ?TemplateEngine {
+        if ($this->templateEngine !== null) {
+            if ($this->templateDir !== null || $this->twigCacheDir !== false) {
+                throw new \LogicException('withTemplateEngine() replaces withTemplateDir() and withTwigCacheDir(): set only the engine, and give a TwigEngine its directories as new TwigEngine($templateDir, $cacheDir).');
+            }
+
+            return $this->templateEngine;
+        }
+
+        if ($this->templateDir === null) {
+            return null;
+        }
+
+        return $this->templateDirEngine ??= new TwigEngine($this->templateDir, $this->twigCacheDir);
     }
 
     /**
@@ -389,8 +450,8 @@ final class Config {
      * A page must run exactly one Datastar module. Rocket components import it by the bare specifier
      * 'datastar', so an import map has to map 'datastar' to the URL Datastar is loaded from, byte for
      * byte, query string included, before any module script; another URL loads a second engine. The
-     * default shell emits both from getDatastarUrl(); a custom shell uses the {{ import_map }} and
-     * {{ datastar_url }} placeholders, a Twig layout the importMap and datastarUrl variables.
+     * default shell emits both from getDatastarUrl(); a custom shell or a layout writes them with
+     * via_head and via_foot (see Context::viaHead()).
      */
     public function withDatastarRocket(bool $enabled = true): self {
         $this->assertMutable(__FUNCTION__);
@@ -436,9 +497,8 @@ final class Config {
      * Add entries to the import map php-via writes into its pages, merged with earlier calls: a later
      * URL for the same specifier, or integrity for the same URL, replaces the earlier one.
      *
-     * The map is written when this added entries or withDatastarRocket() is on: by the default shell,
-     * by a custom shell's {{ import_map }} placeholder and by a Twig layout's importMap variable. It
-     * always maps 'datastar' to getDatastarUrl(), so that specifier is reserved.
+     * The map is written when this added entries or withDatastarRocket() is on, by via_head (see
+     * Context::viaHead()). It always maps 'datastar' to getDatastarUrl(), so that specifier is reserved.
      *
      * ```php
      * $config->withImportMap(
@@ -504,21 +564,23 @@ final class Config {
 
     /**
      * getImportMap() as a <script type="importmap"> tag, or '' when php-via writes no map: without
-     * withImportMap() entries and withDatastarRocket(). The default shell, {{ import_map }} and the
-     * importMap Twig variable hold this tag.
+     * withImportMap() entries and withDatastarRocket(). via_head writes this tag.
+     *
+     * @internal
+     *
+     * @param null|string $nonce CSP nonce for the tag
      */
-    public function getImportMapTag(): string {
+    public function getImportMapTag(?string $nonce = null): string {
         if (!$this->datastarRocket && $this->importMapImports === [] && $this->importMapIntegrity === []) {
             return '';
         }
 
         $datastarUrl = $this->getDatastarUrl();
         if ($this->importMapTag === null || $this->importMapTag[0] !== $datastarUrl) {
-            $json = json_encode($this->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR);
-            $this->importMapTag = [$datastarUrl, '<script type="importmap">' . $json . '</script>'];
+            $this->importMapTag = [$datastarUrl, json_encode($this->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR)];
         }
 
-        return $this->importMapTag[1];
+        return '<script type="importmap"' . Bootstrap::nonceAttribute($nonce) . '>' . $this->importMapTag[1] . '</script>';
     }
 
     public function withShellTemplate(string $path): self {
@@ -713,6 +775,9 @@ final class Config {
         return $this->logLevel;
     }
 
+    /**
+     * @internal
+     */
     public function getTemplateDir(): ?string {
         return $this->templateDir;
     }

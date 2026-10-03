@@ -10,13 +10,12 @@ use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Coroutine;
-use Twig\Environment;
 
 /**
  * Handles view rendering with scope-based caching.
  *
- * Manages Twig template rendering and caching strategies
- * based on context scope (TAB, ROUTE, SESSION, GLOBAL, custom).
+ * Renders templates through the app's TemplateEngine and shares update renders
+ * by context scope (TAB, ROUTE, SESSION, GLOBAL, custom).
  */
 class ViewRenderer {
     /** @var array<string, true> Routes already warned about a full document asking to share its render */
@@ -34,7 +33,7 @@ class ViewRenderer {
     private array $identicalHinted = [];
 
     public function __construct(
-        private Environment $twig,
+        private ?TemplateEngine $engine,
         private ViewCache $cache,
         private Stats $stats,
         private Logger $logger
@@ -135,39 +134,29 @@ class ViewRenderer {
     }
 
     /**
-     * Render a Twig template.
+     * Render a template through the app's template engine.
      *
      * @param string               $template Template name
      * @param array<string, mixed> $data     Data to pass to template
      * @param null|string          $block    Optional block name to render
      *
      * @return string Rendered HTML
+     *
+     * @throws \LogicException without a template engine
      */
     public function renderTemplate(string $template, array $data = [], ?string $block = null): string {
-        if ($block !== null) {
-            return $this->twig->load($template)->renderBlock($block, $data);
+        if ($this->engine === null) {
+            throw new \LogicException("No template engine renders '{$template}'.");
         }
 
-        return $this->twig->render($template, $data);
+        return $this->engine->render($template, $data, $block);
     }
 
     /**
-     * Render a Twig template from string.
-     *
-     * @param string               $template Template string
-     * @param array<string, mixed> $data     Data to pass to template
-     *
-     * @return string Rendered HTML
+     * The app's template engine, null when it renders closures only.
      */
-    public function renderString(string $template, array $data = []): string {
-        return $this->twig->createTemplate($template)->render($data);
-    }
-
-    /**
-     * Get the Twig environment.
-     */
-    public function getTwig(): Environment {
-        return $this->twig;
+    public function getEngine(): ?TemplateEngine {
+        return $this->engine;
     }
 
     /**

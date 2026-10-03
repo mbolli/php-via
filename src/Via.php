@@ -46,6 +46,7 @@ use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
+use Mbolli\PhpVia\Twig\TwigEngine;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
@@ -272,6 +273,8 @@ class Via {
      */
     public function __construct(private Config $config) {
         $this->config->freeze();
+        // First after the freeze, since it throws for a template setup that cannot work.
+        $templateEngine = $this->config->getTemplateEngine();
         $this->viaUnsetCallbackRegistered = new \WeakMap();
 
         // Initialize support classes
@@ -327,8 +330,11 @@ class Via {
         $actionHandler->setRequestLogger($this->requestLogger);
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
-        // Initialize ViewRenderer with Twig from Application
-        $this->viewRenderer = new ViewRenderer($this->app->getTwig(), $this->viewCache, $this->stats, $this->logger);
+        if ($templateEngine instanceof TwigEngine) {
+            // For renders outside a context, such as notFound() pages; a context passes its own basePath.
+            $templateEngine->environment()->addGlobal('basePath', $this->config->getBasePath());
+        }
+        $this->viewRenderer = new ViewRenderer($templateEngine, $this->viewCache, $this->stats, $this->logger);
 
         // Broker: default to no-op InMemoryBroker; replaced via Config::withBroker().
         // Subscribe immediately so the handler is wired before connect() spawns the read loop.
@@ -403,15 +409,6 @@ class Via {
      */
     public function getRouter(): Router {
         return $this->router;
-    }
-
-    /**
-     * Apply configuration changes (called internally after fluent config).
-     *
-     * @internal
-     */
-    public function applyConfig(): void {
-        $this->app->applyConfig();
     }
 
     /**
@@ -1514,12 +1511,21 @@ class Via {
     }
 
     /**
-     * Get Twig environment.
+     * The Twig Environment of the app's TwigEngine, for extensions, globals and runtime loaders, and
+     * for templates held as strings: $app->getTwig()->createTemplate($src)->render($data). Short for
+     * the engine's environment().
      *
-     * @internal Used by Context for template rendering
+     * @throws \LogicException when the app renders templates with no engine or another engine than TwigEngine
      */
     public function getTwig(): Environment {
-        return $this->app->getTwig();
+        $engine = $this->viewRenderer->getEngine();
+        if ($engine instanceof TwigEngine) {
+            return $engine->environment();
+        }
+
+        throw new \LogicException($engine === null
+            ? 'getTwig() needs Twig templates, and this app has no template engine. Run composer require twig/twig, then set $config->withTemplateDir(__DIR__ . \'/templates\') or ->withTemplateEngine(new \\Mbolli\\PhpVia\\Twig\\TwigEngine(__DIR__ . \'/templates\')).'
+            : 'getTwig() returns the Twig environment of a TwigEngine, but this app renders templates with ' . $engine::class . '.');
     }
 
     /**
@@ -1783,8 +1789,6 @@ class Via {
             $context,
             $context->getId(),
             $this->config->getBasePath(),
-            $this->config->getDatastarUrl(),
-            $this->config->getImportMapTag(),
         );
 
         // Inject the Dev Bar overlay before </body> when tracing is enabled.

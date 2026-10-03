@@ -13,6 +13,12 @@ All notable changes to php-via will be documented in this file.
 - **Session ids stay on the server.** SESSION scopes and signal ids carried the raw session id, the
   value of the HttpOnly session cookie, into the page HTML, the Dev Bar, traces and broker messages.
   They use a hash of it now, and php-via accepts only session ids in the form it issues.
+- **Twig is optional.** `twig/twig` no longer comes with php-via: closure views need nothing more,
+  and Twig apps run `composer require twig/twig`. `withTemplateDir()` keeps working, and
+  `Config::withTemplateEngine()` takes any `TemplateEngine`.
+- **One bootstrap for every layout.** `{{ via_head }}` and `{{ via_foot }}` in a shell,
+  `{{ via_head() }}` and `{{ via_foot() }}` in Twig and `$c->viaHead()` and `$c->viaFoot()` in a
+  closure write what a page needs to connect, with a CSP nonce when middleware sets one.
 - **Datastar 1.0.4.** php-via serves Datastar 1.0.4 instead of 1.0.1. The SSE format is the same,
   but Datastar now cancels an in-flight request when any element sends another one to the same URL,
   so check pages where two elements post the same action. Breaking Changes lists the rest.
@@ -73,6 +79,11 @@ All notable changes to php-via will be documented in this file.
 - **`signal()` needs a name.** Unnamed signals all shared one object, so two of them on one page
   were the same signal. An empty name throws.
 - **`Signal::text()` is removed** and throws; use `ref()`.
+- **`twig/twig` moved from `require` to `suggest`.** Twig templates need `composer require twig/twig`.
+  Without Twig, `new Via()` throws for `withTemplateDir()`, and `view('page.html.twig')`,
+  `render()` and `getTwig()` throw with the command. See [Templates](https://via.zweiundeins.gmbh/docs/twig).
+- **`Context::renderString()` is removed** and throws; use
+  `$app->getTwig()->createTemplate($src)->render($data)`.
 - **`component()` needs a namespace, unique on its page:** `$c->component($fn, 'cart')`. A second
   component with the same namespace throws, since both would share its signals and actions.
 - **`#[OnDisconnect]` is removed.** A class that uses it throws at `Via::mount()` and
@@ -133,13 +144,11 @@ All notable changes to php-via will be documented in this file.
   components. Sources, patches and hashes are in `public/DATASTAR.md`.
 - **`Config::withImportMap()`** adds modules and integrity hashes to the import map php-via writes,
   so Starbase components load pinned from its catalog. `Config::getDatastarIntegrity()` returns the
-  served bundle's hash for apps that pin Datastar too. Custom shells get the map as
-  `{{ import_map }}`, Twig layouts as `importMap`. See
+  served bundle's hash for apps that pin Datastar too. `via_head` writes the map. See
   [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-modules).
 - **Versioned Datastar URL.** `Config::getDatastarUrl()` returns `/datastar.js?v=<content hash>`,
-  cached for a year by default. Load Datastar from it in custom shells (`{{ datastar_url }}`) and Twig
-  layouts (`datastarUrl`): an unversioned `datastar.js` stays cached for up to an hour after an
-  upgrade. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
+  cached for a year by default. `via_foot` loads Datastar from it: an unversioned `datastar.js` stays
+  cached for up to an hour after an upgrade. See [Web components](https://via.zweiundeins.gmbh/docs/web-components#own-shell).
 - **A `withStaticCacheControl()` closure can return `null`** to keep the default policy for a file,
   so per-file rules no longer lose the year-long cache of `/datastar.js?v=`.
 - **`Signal::bind('value')`** binds an element property (`data-bind__prop.value`), the form to use
@@ -160,6 +169,14 @@ All notable changes to php-via will be documented in this file.
   found", and for a `RedisBroker` without the socket hook its connection needs.
 - **The dev-mode `/_stats`** reports the hook flags, the AIO thread pool and the worker's event loop
   lag under `runtime`.
+- **`via_head` and `via_foot`** replace the SSE bootstrap, import map and Datastar script that
+  custom shells and full-document layouts copied from the default shell. Put `via_head` right after
+  `<meta charset>` and `via_foot` before `</body>`. Every tag carries the nonce from the page
+  request's `via.csp_nonce` attribute. Dev mode warns once per shell or route without `via_head`, and
+  once per route with a second import map. A copied bootstrap keeps working.
+- **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
+  `Twig\TwigEngine` is php-via's, and `withTemplateDir()` sets one up. `view(..., block:)` with an
+  engine that renders no blocks throws.
 - **`$c->patchElements($html, $selector, PatchMode::Append)`** sends HTML to the page outside a
   view render. `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace`
   needs a selector. A component's patches go to its page, and a client that falls behind gets

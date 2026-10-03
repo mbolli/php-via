@@ -234,12 +234,12 @@ describe('Signal::bind()', function (): void {
         expect(fn () => $signal->bind($prop))->toThrow(InvalidArgumentException::class);
     })->with(['', 'Value', 'value"', 'a b', 'value__event.input', 'value.x', '-value', 'value-']);
 
-    test('Twig passes the property through bind() and exposes datastarUrl', function (): void {
-        $via = createVia((new Config())->withDatastarRocket());
+    test('Twig passes the property through bind()', function (): void {
+        $via = createVia((new Config())->withTemplateEngine(arrayTwig([])));
         $signal = (new Context(testContextId(), '/test', $via))->signal('', 'name');
 
-        $out = $via->getTwig()->createTemplate('{{ bind(s) }}|{{ bind(s, "value") }}|{{ datastarUrl }}')->render(['s' => $signal]);
+        $out = $via->getTwig()->createTemplate('{{ bind(s) }}|{{ bind(s, "value") }}')->render(['s' => $signal]);
 
-        expect($out)->toBe($signal->bind() . '|' . $signal->bind('value') . '|' . $via->getConfig()->getDatastarUrl());
+        expect($out)->toBe($signal->bind() . '|' . $signal->bind('value'));
     });
 });

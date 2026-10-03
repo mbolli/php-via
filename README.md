@@ -35,6 +35,7 @@ Real-time reactive web framework for PHP. Server-side reactive UIs with zero Jav
 
 ```
 composer require mbolli/php-via
+composer require twig/twig   # for Twig templates, as in the quick start
 ```
 
 ## Quick Start
