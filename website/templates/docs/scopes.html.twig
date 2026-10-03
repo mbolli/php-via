@@ -4,8 +4,8 @@
 <article>
     <h1>Scopes</h1>
     <p>
-        The scope system is php-via's killer feature. A scope determines <em>which clients share a signal</em>.
-        Change one line and state that was private becomes multiplayer.
+        A scope decides which tabs share a signal and which tabs a broadcast renders again. Every tab has a TAB
+        scope of its own. Give a signal a shared scope, and state that was private becomes multiplayer.
     </p>
 
     <h2 id="scope-types">Scope types</h2>
@@ -26,73 +26,112 @@
             </tr>
             <tr style="border-block-end: 1px solid var(--border);">
                 <td style="padding: var(--size-2) var(--size-3);"><code>Scope::ROUTE</code></td>
-                <td style="padding: var(--size-2) var(--size-3);">Every user on same URL</td>
+                <td style="padding: var(--size-2) var(--size-3);">Every tab on the same route</td>
                 <td style="padding: var(--size-2) var(--size-3);">Live feeds, shared boards, todo lists</td>
             </tr>
             <tr style="border-block-end: 1px solid var(--border);">
                 <td style="padding: var(--size-2) var(--size-3);"><code>Scope::SESSION</code></td>
-                <td style="padding: var(--size-2) var(--size-3);">All of this user's tabs</td>
+                <td style="padding: var(--size-2) var(--size-3);">Every tab of one browser session</td>
                 <td style="padding: var(--size-2) var(--size-3);">User preferences, auth state</td>
             </tr>
             <tr style="border-block-end: 1px solid var(--border);">
                 <td style="padding: var(--size-2) var(--size-3);"><code>Scope::GLOBAL</code></td>
-                <td style="padding: var(--size-2) var(--size-3);">Every connected client, every route</td>
+                <td style="padding: var(--size-2) var(--size-3);">Every tab, on every route</td>
                 <td style="padding: var(--size-2) var(--size-3);">Site-wide banners, system notifications</td>
             </tr>
             <tr>
                 <td style="padding: var(--size-2) var(--size-3);"><code>'room:lobby'</code></td>
-                <td style="padding: var(--size-2) var(--size-3);">Clients you add to this custom scope</td>
+                <td style="padding: var(--size-2) var(--size-3);">The tabs that joined this custom scope</td>
                 <td style="padding: var(--size-2) var(--size-3);">Chat rooms, collaborative documents, teams</td>
             </tr>
         </tbody>
     </table>
 
-    <h2 id="setting-a-scope">Setting a scope</h2>
-    {% code 'php' %}{% verbatim %}
-// Set the context's primary scope
-$c->scope(Scope::ROUTE);
+    <p>
+        Wherever a context takes a scope, in <code>scope()</code>, <code>addScope()</code>,
+        <code>removeScope()</code>, <code>signal()</code> and <code>#[Action(scope: ...)]</code>,
+        <code>Scope::ROUTE</code> becomes this route's scope and <code>Scope::SESSION</code> this session's. A
+        route scope belongs to the route as registered: on <code>/blog/{slug}</code>, <code>Scope::ROUTE</code>
+        is <code>Scope::routeScope('/blog/{slug}')</code>, shared by every post. For one scope per post, use a
+        custom scope such as <code>'post:' . $slug</code>.
+    </p>
 
-// Add a secondary scope (this context belongs to both)
-$c->addScope('room:lobby');
+    <h2 id="who-a-scope-reaches">Which tabs a scope reaches</h2>
+    <p>
+        A route scope reaches every tab on its route, and <code>Scope::GLOBAL</code> every tab. A session scope
+        and a custom scope reach the tabs that joined them, which a context does in three ways:
+    </p>
+    <ul>
+        <li>a signal declared with the scope joins it,</li>
+        <li><code>$c-&gt;scope($scope)</code> makes it the context's primary scope,</li>
+        <li><code>$c-&gt;addScope($scope)</code> adds it, and <code>$c-&gt;removeScope($scope)</code> leaves it again.</li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$c->signal(0, 'online', 'room:lobby'); // joins room:lobby
+$c->addScope('user:' . $userId);       // joins user:42 as well
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="setting-a-scope">The primary scope</h2>
+    {% code 'php' %}{% verbatim %}
+// The target of $c->broadcast() and the key of a shared render
+$c->scope(Scope::ROUTE);
 {% endverbatim %}{% endcode %}
     <p>
-        Calling <code>$c-&gt;scope()</code> with <code>Scope::ROUTE</code> expands to the actual route path automatically.
-        So on <code>/blog/post-1</code>, it becomes <code>route:/blog/post-1</code>.
+        The primary scope does two things: <code>$c-&gt;broadcast()</code> renders the tabs in it, and a view
+        with <code>shareRender: true</code> shares its render with them. It is no default for anything else.
+        A signal without a scope stays private, so after <code>scope()</code> set a shared scope,
+        <code>signal()</code> without one throws and names the fix. An action runs for the tab that posts it.
+        <code>scope()</code> replaces the primary scope set before and keeps the scopes the context joined with
+        <code>addScope()</code> or a scoped signal.
     </p>
 
-    <h3 id="scope-and-the-view-cache">Scope and the view cache</h3>
+    <h3 id="scope-and-the-view-cache">Scope and the shared render</h3>
     <p>
-        Update renders are cached per <strong>primary</strong> scope: the one set by
-        <code>scope()</code>, which is <code>Scope::TAB</code> unless you change it. One render is
-        then shared by every client in that scope.
-    </p>
-    <p>
-        <code>addScope()</code> joins a broadcast channel but does <em>not</em> change the primary
-        scope. <strong>Every client in the shared scope renders its own update on each
-        broadcast</strong>, which is what a view that embeds anything client-specific (a
-        username, a per-tab signal ID, a personal viewport) needs:
+        Each tab renders its own update on a broadcast, which a view that shows anything client-specific (a
+        username, a TAB signal's id, a personal viewport) needs:
     </p>
     {% code 'php' %}{% verbatim %}
 $c->addScope($roomScope);
 
-// Renders per client: the view embeds this user's name and TAB signal IDs.
+// Renders per tab: the view embeds this user's name and TAB signal ids.
 $c->view('room.html.twig', fn (): array => [...]);
 {% endverbatim %}{% endcode %}
     <p>
-        If the view really is identical for every client, set the shared scope with
-        <code>$c-&gt;scope($roomScope)</code> and pass <code>shareRender: true</code> to <code>view()</code>
-        to get one render for all of them.
+        If the view really is identical for every tab, set the shared scope with
+        <code>$c-&gt;scope($roomScope)</code> and pass <code>shareRender: true</code> to <code>view()</code>: the
+        first context renders, and every context with the same primary scope, route and component gets the
+        same HTML. See <a href="/docs/views#caching">Sharing one render</a>.
     </p>
 
     <h2 id="broadcasting">Broadcasting</h2>
-    <p>When signals change inside an action, clients in the same scope get updated automatically. To push updates from outside an action (e.g., a timer):</p>
+    <p>
+        A write to a scoped signal broadcasts its scope by itself. To render the tabs of a scope after a change
+        outside signals, such as a database row or GlobalState, broadcast it:
+    </p>
     {% code 'php' %}{% verbatim %}
-// Push to all clients on this route
-$app->broadcast(Scope::routeScope('/'));
-
-// Push to a custom scope
-$app->broadcast('room:lobby');
+$app->broadcast(Scope::routeScope('/board'));              // every tab on /board
+$app->broadcast(Scope::sessionScope($c->getSessionId()));  // every tab of this session
+$app->broadcast('room:lobby');                             // the tabs in a custom scope
+$app->broadcast('room:*');                                 // every room
+$app->broadcast(Scope::GLOBAL);                            // every tab
+$c->broadcast();                                           // this context's primary scope
 {% endverbatim %}{% endcode %}
+    <p>
+        <code>$app-&gt;broadcast()</code> takes a resolved scope: the bare <code>Scope::TAB</code>,
+        <code>Scope::ROUTE</code> and <code>Scope::SESSION</code> throw, since outside a context there is no route
+        or session to resolve them against. <code>$c-&gt;broadcast()</code> on a context whose primary scope is TAB
+        renders that tab only; reach the scopes it joined with <code>$app-&gt;broadcast()</code>.
+    </p>
+    <p>
+        A broadcast from an action or a timer is rendered once on the worker's next flush, however often it was
+        called, and it reaches the other workers and, with a broker, the other servers.
+        <code>$app-&gt;flushBroadcasts()</code> renders it at once. <code>Config::withBroadcastThrottle()</code>
+        renders a busy scope at most once per interval, and the last state always arrives:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withBroadcastThrottle('import:*', 250); // each import renders at most 4 times a second
+{% endverbatim %}{% endcode %}
+    <p>See <a href="/docs/broadcasting">Broadcasting</a> for the timing and for presence.</p>
 
     <div class="docs-demo">
         <div class="docs-demo-header">A TAB counter beside a ROUTE counter</div>
@@ -107,18 +146,88 @@ $app->broadcast('room:lobby');
         </div>
     </div>
 
-    <h2 id="custom-scopes">Custom scopes</h2>
-    <p>You can create any custom scope string. Clients that share the same scope string receive each other's broadcasts:</p>
+    <h2 id="session-scopes">Session scopes</h2>
+    <p>
+        A session is one browser's session cookie, which all its tabs send. <code>$c-&gt;getSessionId()</code>
+        returns the session's id, a hash of the cookie, and <code>Scope::sessionScope($id)</code> the scope of its
+        tabs, which is what <code>Scope::SESSION</code> resolves to in a context. The cookie's value never
+        reaches the page, the Dev Bar, traces or broker messages. Middleware reads the same id from the
+        <code>via.session</code> request attribute.
+    </p>
+    <p>
+        <code>$c-&gt;regenerateSession()</code> gives the session a new cookie at a login and keeps its id, so its
+        scope, its SESSION signals and its tabs stay as they are. See
+        <a href="/docs/actions#login">Logging in</a>.
+    </p>
+
+    <h2 id="counting">Counting the tabs in a scope</h2>
+    <p>
+        <code>$app-&gt;countClients($scope)</code> counts the tabs with an open stream that a broadcast of the scope
+        reaches, on every worker. Use it to skip work nobody watches:
+    </p>
     {% code 'php' %}{% verbatim %}
-$roomId = $request->getQueryParam('room');
-$roomScope = 'room:' . $roomId;
-
-$c->addScope($roomScope);
-
-// All clients in this room get the update
-$app->broadcast($roomScope);
+$app->setInterval(function () use ($app, $prices): void {
+    if ($app->countClients(Scope::routeScope('/ticker')) === 0) {
+        return; // nobody is watching
+    }
+    $app->setGlobalState('price', $prices->latest());
+    $app->broadcast(Scope::routeScope('/ticker'));
+}, 1000);
 {% endverbatim %}{% endcode %}
-    <p>See the <a href="/examples">chat room example</a> for a full implementation.</p>
+    <p>
+        A tab counts from its SSE connect until its stream closes. <code>$app-&gt;getLocalContexts($scope)</code>
+        lists this worker's contexts in a scope, connected or not, and <code>$app-&gt;getClients()</code> lists
+        every connected tab.
+    </p>
+
+    <h2 id="custom-scopes">Custom scopes</h2>
+    <p>Any other string is a custom scope. Tabs that join the same string share its signals and receive its broadcasts:</p>
+    {% code 'php' %}{% verbatim %}
+$app->page('/chat/{room}', function (Context $c, string $room): void {
+    $roomScope = 'room:' . $room;
+    $messages  = $c->signal([], 'messages', $roomScope); // joins the room
+    $draft     = $c->signal('', 'draft');
+
+    $c->action(function () use ($messages, $draft): void {
+        $messages->mutate(fn (array $list): array => [...$list, $draft->string()]);
+        $draft->setValue('');
+    }, 'send');
+
+    // ... view ...
+});
+{% endverbatim %}{% endcode %}
+    <p>
+        A pattern with <code>*</code> reaches every matching scope in a broadcast, so <code>'room:*'</code>
+        renders every room. With more than one worker or server, a broadcast crosses to the others only for a
+        scope made of letters, digits and <code>_ - . : /</code>, so build custom scopes from keys you control.
+        See the <a href="/examples">chat room example</a> for a full implementation.
+    </p>
+
+    <h2 id="scope-lifetime">When a scope's signals go</h2>
+    <p>
+        A worker drops a scope's signals and actions when its last context in that scope is destroyed. With one
+        worker, the next tab that declares such a signal starts from its initial value again. Keep a value that
+        has to outlive its visitors in GlobalState or your database, and seed the signal from it:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$visits = $c->signal($app->globalState('visits', 0), 'visits', Scope::ROUTE);
+{% endverbatim %}{% endcode %}
+
+    <h2 id="actions-and-scopes">Actions and scopes</h2>
+    <p>
+        <code>$c-&gt;action()</code> takes no scope: an action runs for the tab that posts it, whatever scopes the
+        tab is in. A class page can declare <code>#[Action(scope: ...)]</code> to register one action for a
+        whole scope, which still runs on the posting tab's own instance. See
+        <a href="/docs/composition#actions">Composition</a>.
+    </p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/signals#scopes">Signals</a>: declaring a shared signal</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: timing, presence and GlobalState</li>
+        <li><a href="/docs/views#caching">Views</a>: sharing one render in a scope</li>
+        <li><a href="/docs/api#scope">API: Scope</a>: the constants and helpers</li>
+    </ul>
 </article>
 
 {% endblock %}

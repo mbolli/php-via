@@ -16,19 +16,22 @@ $app = new Via(new Config());
 $app->page('/', function (Context $c): void {
     $count = $c->signal(0, 'count');
 
-    $increment = $c->action(function () use ($c, $count): void {
+    $increment = $c->action(function () use ($count): void {
         $count->setValue($count->int() + 1);
-        $c->syncSignals(); // push the new value to this tab
-    });
+    }, 'increment');
 
-    $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="\${$count->id()}">
-            {$count->int()}
-        </strong></p>
-        <button data-on:click="@post('{$increment->url()}')">
-            +1
-        </button>
-    HTML);
+    $c->view(fn (): string => <<<HTML
+        <div id="counter">
+            <p>Count:
+                <strong data-text="{$count->ref()}">
+                    {$count->int()}
+                </strong>
+            </p>
+            <button data-on:click="@post('{$increment->url()}')">
+                +1
+            </button>
+        </div>
+        HTML);
 });
 
 $app->start();

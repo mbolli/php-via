@@ -4,46 +4,51 @@
 <article>
     <h1>Components</h1>
     <p>
-        Components are reusable UI blocks backed by their own sub-context. Each component has isolated signals, actions,
-        and a view, but shares the parent connection. They're the building block for composable real-time UIs.
+        Components are reusable UI blocks backed by their own sub-context. Each component has its own signals,
+        actions and view, and shares its page's SSE stream. They're the building block for composable real-time
+        UIs.
     </p>
 
     <h2 id="creating">Creating a component</h2>
-    <p>Define a component as a callable that configures a <code>Context</code>:</p>
+    <p>Define a component as a callable that configures a <code>Context</code>, as a page handler does:</p>
     {% code 'php' %}{% verbatim %}
 $counterComponent = function (Context $c): void {
     $count = $c->signal(0, 'count');
-    $inc   = $c->action(fn() => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
+    $inc   = $c->action(fn () => $count->increment(), 'inc');
 
-    // count and inc are auto-injected into the template as Signal/Action objects
-    $c->view('components/counter.html.twig');
+    $c->view(fn (): string => <<<HTML
+        <p>Count: <span data-text="{$count->ref()}">{$count->int()}</span>
+            <button data-on:click="@post('{$inc->url()}')">+1</button></p>
+        HTML);
 };
 {% endverbatim %}{% endcode %}
+    <p>
+        A template view works the same way: <code>$c-&gt;view('components/counter.html.twig')</code> gets
+        <code>count</code> and <code>inc</code> as variables.
+    </p>
 
     <h2 id="mounting">Mounting a component</h2>
     <p>
-        Mount a component inside a page handler via <code>$c-&gt;component()</code>, giving it a namespace to prevent
-        signal ID collisions. The returned callable renders the component's current HTML. Call it inside the page's
-        view closure, so every render of the page carries the component as it is now:
+        Mount a component inside a page handler with <code>$c-&gt;component()</code> and a namespace. The returned
+        callable renders the component's current HTML. Call it inside the page's view closure, so every render
+        of the page carries the component as it is now:
     </p>
     {% code 'php' %}{% verbatim %}
 $app->page('/', function (Context $c) use ($counterComponent): void {
     $counter = $c->component($counterComponent, 'counter');
 
-    $c->view(fn (): string => $c->render('pages/home.html.twig', [
-        'counter' => $counter(), // rendered each time the page renders
-    ]));
+    $c->view(fn (): string => <<<HTML
+        <main id="home">
+            <h1>Welcome</h1>
+            {$counter()}
+        </main>
+        HTML);
 });
 {% endverbatim %}{% endcode %}
-
-    {% code 'html' %}{% verbatim %}
-{# pages/home.html.twig #}
-<main>
-    <h1>Welcome</h1>
-    {{ counter | raw }}
-</main>
-{% endverbatim %}{% endcode %}
-
+    <p>
+        With Twig, pass it the same way: <code>$c-&gt;view(fn (): string =&gt; $c-&gt;render('pages/home.html.twig',
+        ['counter' =&gt; $counter()]))</code>, and print it with {% verbatim %}<code>{{ counter | raw }}</code>{% endverbatim %}.
+    </p>
     <p>
         The page view renders again on a broadcast that reaches the page, on a reconnect and on a revival. Passing
         <code>$counter()</code> to <code>$c-&gt;view('pages/home.html.twig', [...])</code> renders the component once,
@@ -55,12 +60,13 @@ $app->page('/', function (Context $c) use ($counterComponent): void {
         and must not be shared: leave <code>shareRender</code> off on that page's <code>view()</code>.
     </p>
 
-    <h2 id="namespacing">Namespacing</h2>
+    <h2 id="namespacing">Namespaces</h2>
     <p>
-        The namespace prefixes all signal and action IDs in the component. This lets you mount the same component
-        multiple times on one page without signal conflicts. It takes letters, digits, <code>_</code> and
-        <code>-</code> only, since it goes into action URLs and signal names; anything else throws an
-        <code>InvalidArgumentException</code>:
+        <code>component()</code> needs a namespace, unique on its page. It prefixes the component's signal ids
+        and action URLs, so one component can be mounted several times, and it keeps the component's id the
+        same each time the page is built, so a revived tab's component finds its elements. It takes letters,
+        digits, <code>_</code> and <code>-</code> only. Any other character, or a namespace the page already
+        has, throws an <code>InvalidArgumentException</code>:
     </p>
     {% code 'php' %}{% verbatim %}
 $counterA = $c->component($counterComponent, 'counter-a');
@@ -69,29 +75,53 @@ $counterB = $c->component($counterComponent, 'counter-b');
 // counter-a has signal ID 'counter_a_count____dn', action '/_action/counter-a-inc'
 // counter-b has signal ID 'counter_b_count____dn', action '/_action/counter-b-inc'
 
-$c->view(fn (): string => $c->render('page.html.twig', [
-    'counterA' => $counterA(),
-    'counterB' => $counterB(),
-]));
+$c->view(fn (): string => <<<HTML
+    <main id="counters">{$counterA()} {$counterB()}</main>
+    HTML);
 {% endverbatim %}{% endcode %}
+    <p>
+        For a list, build each namespace from the item's key, such as <code>'item-' . $item-&gt;id</code>, or
+        <code>'item-' . md5($key)</code> for a key with other characters.
+    </p>
+
+    <h2 id="component-actions">Actions and state in a component</h2>
+    <p>
+        A component action runs for its own tab, whatever scope the component joined. The TAB signals it
+        changed go to the tab when it returns, as for a page action. Inside a component:
+    </p>
+    <ul>
+        <li><code>$c-&gt;getPageContext()</code> returns the page the component sits on, to tell which tab an
+            action came from,</li>
+        <li><code>$c-&gt;isConnected()</code> says whether the tab's stream is open,</li>
+        <li><code>getSessionId()</code>, <code>sessionData()</code> and <code>setSessionData()</code> reach the
+            tab's session,</li>
+        <li><code>tabState()</code> and <code>setTabState()</code> keep keys of the component's own,</li>
+        <li><code>dispatch()</code>, <code>execScript()</code> and <code>patchElements()</code> go to the page.</li>
+    </ul>
+
+    <h2 id="updates">How a component updates</h2>
+    <p>
+        A component's <code>sync()</code> renders its view and patches only its own wrapper element. A sync of
+        the page renders the page view, which carries the components it embeds, and renders the other
+        components only when their signals changed. A component whose view reads other state, such as a
+        database, calls <code>sync()</code> on its own context, or joins a scope and renders on its broadcasts.
+    </p>
 
     <h2 id="scoped-components">Scoped components</h2>
     <p>
-        Components can set their own scope, independent of the parent. The website's presence indicator
-        is a component in a scope of its own, so a visitor arriving or leaving re-renders the indicators
-        and nothing else:
+        Components can join scopes of their own, independent of the page. The website's presence indicator is a
+        component in a scope of its own, so a visitor arriving or leaving renders the indicators and nothing
+        else:
     </p>
     {% code 'php' %}{% verbatim %}
-$presenceComponent = function (Context $c) use ($app, $twig): void {
+$presenceComponent = function (Context $c) use ($app): void {
     $c->scope('site:presence'); // only presence indicators join this scope
 
-    $c->view(function () use ($app, $twig): string {
-        $count = count($app->getClients());
+    $c->view(function () use ($app): string {
+        $count  = count($app->getClients());
+        $person = $count === 1 ? 'person' : 'people';
 
-        return $twig->render('components/presence.html.twig', [
-            'count'  => $count,
-            'person' => $count === 1 ? 'person' : 'people',
-        ]);
+        return "<p>{$count} {$person} online</p>";
     });
 };
 
@@ -99,20 +129,15 @@ $app->onClientConnect(fn () => $app->broadcast('site:presence'));
 $app->onClientDisconnect(fn () => $app->broadcast('site:presence'));
 {% endverbatim %}{% endcode %}
     <p>
-        A broadcast to the page's scope re-renders every component on the page, so give a busy widget its
-        own scope and broadcast to that. A component action runs for its own tab, whatever scope the
-        component joined. It reads the request that posted it (<code>$c->input()</code>, <code>$c->cookie()</code>)
-        and broadcasts with <code>$app->broadcast()</code>:
+        A broadcast that reaches the page renders the page view, and with it every component the view embeds,
+        so give a busy widget its own scope and broadcast to that. A shared counter needs no broadcast call: its
+        signal joins the scope, and the write broadcasts it.
     </p>
     {% code 'php' %}{% verbatim %}
-$counterComponent = function (Context $c) use ($app): void {
-    $c->scope('home:counter');
-    $count = $c->signal(0, 'count', 'home:counter');
+$counterComponent = function (Context $c): void {
+    $count = $c->signal(0, 'count', 'home:counter'); // joins home:counter
 
-    $c->action(function () use ($app, $count): void {
-        $count->increment();
-        $app->broadcast('home:counter');
-    }, 'increment');
+    $c->action(fn () => $count->increment(), 'increment');
 
     $c->view('counter.html.twig');
 };
@@ -120,8 +145,8 @@ $counterComponent = function (Context $c) use ($app): void {
 
     <h2 id="lifecycle">Component lifecycle</h2>
     <p>
-        Components follow the same lifecycle as contexts. They support <code>onCleanup</code>,
-        <code>setInterval</code>, and all other context methods:
+        Components follow the same lifecycle as contexts, and they go with their page. They support
+        <code>onCleanup()</code>, <code>setInterval()</code>, <code>spawn()</code> and all other context methods:
     </p>
     {% code 'php' %}{% verbatim %}
 $roomComponent = function (Context $c) use ($room, $app): void {
@@ -139,6 +164,7 @@ $roomComponent = function (Context $c) use ($room, $app): void {
     <ul>
         <li><a href="/docs/scopes">Scopes</a>: share component state across users</li>
         <li><a href="/docs/views">Views</a>: how component views update independently</li>
+        <li><a href="/docs/composition#components">Composition</a>: components as classes</li>
         <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, and timer hooks</li>
         <li><a href="/docs/api#context-component">API: component()</a>: full method signature</li>
     </ul>
