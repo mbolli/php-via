@@ -777,6 +777,11 @@ class Via {
     /**
      * Get a scoped signal by the name it was declared with, for code outside a context such as a timer.
      *
+     * It never creates a signal: null means no context declared it. With worker_num > 1, on a worker where no
+     * context declared it but another worker did, it returns a detached handle on the shared value. The handle
+     * is not registered on this worker, so a later declaration here keeps its own default and flags, and a
+     * write through it always broadcasts the scope, even for a signal declared with autoBroadcast: false.
+     *
      * @param string      $scope     a resolved scope: Scope::routeScope('/path'), not Scope::ROUTE
      * @param null|string $namespace the component namespace, for a signal declared inside a component
      *
@@ -784,8 +789,20 @@ class Via {
      */
     public function getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal {
         $scope = Scope::resolve($scope, null, 'Via::getScopedSignalByName()');
+        $signalId = SignalId::scoped($scope, $namespace, $name);
 
-        return $this->signalManager->getSignal($scope, SignalId::scoped($scope, $namespace, $name));
+        $signal = $this->signalManager->getSignal($scope, $signalId);
+        if ($signal !== null || $this->sharedSignalStore === null) {
+            return $signal;
+        }
+
+        $handle = new Signal($signalId, null, $scope, true, null, $this);
+        if (!$this->sharedSignalStore->has($handle->sharedKey())) {
+            return null;
+        }
+        $handle->attachSharedStore($this->sharedSignalStore);
+
+        return $handle;
     }
 
     /**
