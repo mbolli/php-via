@@ -33,7 +33,7 @@ final class LoginExample {
         '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code>: one call shields both.',
         '<strong>AuthMiddleware reads the session cookie</strong> from the PSR-7 request, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute.',
         '<strong>The handlers read <code>$c->getRequestAttribute(\'auth\')</code></strong>: the middleware-set attribute is automatically bridged from the PSR-7 request to the Via Context. No manual session checks needed.',
-        '<strong>Logout clears the session</strong> and redirects back to the login form. The middleware will block any subsequent protected access until login succeeds again.',
+        '<strong>Login and logout rotate the session cookie</strong> with <code>$c->regenerateSession()</code>, so a cookie someone planted or read before no longer reaches the account. Logout also clears <code>sessionData(\'auth\')</code>, and the middleware blocks protected pages until the next login.',
     ];
 
     private const array GITHUB_LINKS = [
@@ -96,6 +96,7 @@ final class LoginExample {
                 }
 
                 $errorMsg->setValue('');
+                $ctx->regenerateSession();
                 $ctx->setSessionData('auth', [
                     'user' => $user,
                     'name' => $record['name'],
@@ -118,7 +119,7 @@ final class LoginExample {
                         ['name' => 'error', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Validation error message shown beneath the form.'],
                     ],
                     'actions' => [
-                        ['name' => 'login', 'desc' => 'Validates credentials. On success, writes auth to sessionData and redirects to the middleware-protected dashboard.'],
+                        ['name' => 'login', 'desc' => 'Validates credentials. On success, rotates the session cookie, writes auth to sessionData and redirects to the middleware-protected dashboard.'],
                     ],
                     'views' => self::VIEWS_ANATOMY,
                     'middleware' => self::MIDDLEWARE_ANATOMY,
@@ -140,6 +141,7 @@ final class LoginExample {
 
                 $logout = $c->action(function (Context $ctx): void {
                     $ctx->clearSessionData('auth');
+                    $ctx->regenerateSession();
                     $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
@@ -150,7 +152,7 @@ final class LoginExample {
                     'anatomy' => [
                         'signals' => [],
                         'actions' => [
-                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\') and redirects to the login form.'],
+                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\'), rotates the session cookie and redirects to the login form.'],
                         ],
                         'views' => self::VIEWS_ANATOMY,
                         'middleware' => self::MIDDLEWARE_ANATOMY,
@@ -166,6 +168,7 @@ final class LoginExample {
 
                 $logout = $c->action(function (Context $ctx): void {
                     $ctx->clearSessionData('auth');
+                    $ctx->regenerateSession();
                     $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
@@ -176,7 +179,7 @@ final class LoginExample {
                     'anatomy' => [
                         'signals' => [],
                         'actions' => [
-                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\') and redirects to the login form.'],
+                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\'), rotates the session cookie and redirects to the login form.'],
                         ],
                         'views' => self::VIEWS_ANATOMY,
                         'middleware' => self::MIDDLEWARE_ANATOMY,
