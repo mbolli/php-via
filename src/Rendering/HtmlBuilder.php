@@ -160,8 +160,8 @@ class HtmlBuilder {
      * Head and foot includes the document does not already contain go before the first `</head>`
      * and the last `</body>`. On the initial render a `via_ctx` meta (only when no data-signals
      * attribute of the document declares via_ctx) and a `data-signals__ifmissing` seed with the values the first sync sends go right after
-     * the opening `<head>` tag, ahead of the document's SSE bootstrap. The bootstrap and
-     * `datastar.js` are left to the document.
+     * via_head's via_ctx meta, or without via_head right after the opening `<head>` tag, ahead of the document's
+     * SSE bootstrap. The bootstrap and `datastar.js` are left to the document.
      *
      * @param bool $initial True for the initial page render, false for an SSE update render
      */
@@ -193,12 +193,16 @@ class HtmlBuilder {
                 if ($head !== []) {
                     $html = substr_replace($html, implode("\n", $head) . "\n", $headEnd, 0);
                 }
-                // Datastar applies attributes in document order, so via_ctx must precede a bootstrap @get in <head>
+                // Datastar applies attributes in document order, so via_ctx must precede a bootstrap @get in <head>:
+                // right after via_head's via_ctx meta, before its SSE connect, else right after <head>
                 if ($signals !== []) {
-                    $headStart = preg_match('/<head(?=[\s>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd
-                        ? $m[0][1] + \strlen($m[0][0])
-                        : $headEnd;
-                    $html = substr_replace($html, "\n" . implode("\n", $signals), $headStart, 0);
+                    $at = $headEnd;
+                    if (preg_match('/<[a-z][^>]*\s' . Bootstrap::MARKER . '(?=[\s=>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd) {
+                        $at = $m[0][1] + \strlen($m[0][0]);
+                    } elseif (preg_match('/<head(?=[\s>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd) {
+                        $at = $m[0][1] + \strlen($m[0][0]);
+                    }
+                    $html = substr_replace($html, "\n" . implode("\n", $signals), $at, 0);
                 }
             }
         }

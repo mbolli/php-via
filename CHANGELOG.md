@@ -369,6 +369,8 @@ message that names the new one.
   truthiness.
 - `Config::withLogLevel()` treated unknown names as `info`. It accepts `warning` and the other
   PSR-3 and syslog names now, and throws for anything else.
+- A full-document view got its signal seed right after `<head>`, ahead of `<meta charset>`. With
+  `via_head` it goes right after `via_head`'s first tag now.
 
 ### Tests
 
