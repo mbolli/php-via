@@ -238,6 +238,10 @@ message that names the new one.
 - **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
 - **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
 - **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
+- **`Testing\TestApp`** runs an app's pages in a test, with no server and no `VIA_TEST_MODE`, through
+  php-via's own request, action and SSE handlers: `$tab = $app->open('/')`, then `action()`,
+  `patches()`, `signal()`, `html()`, `connect()`, and `disconnect(expire: true)` for a revival. It
+  replaces tests' calls to `executeAction()`, `getPatch()`, `injectSignals()` and other internals.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
