@@ -252,6 +252,9 @@ composer run dev
 # Run tests
 composer run test
 
+# Run tests with every real-server fixture on a port from 4350-4389 (default: a window per fixture)
+VIA_TEST_PORT_BASE=4350 VIA_TEST_PORT_COUNT=40 composer run test
+
 # Watch tests on file change (requires entr)
 composer run watch-test
 

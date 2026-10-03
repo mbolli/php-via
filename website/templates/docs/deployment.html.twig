@@ -653,7 +653,9 @@ $config->withStaticDir(__DIR__ . '/public');
         proxy that isn't handling <code>/public/*</code>), every response, including the framework's own
         <code>/datastar.js</code> and <code>/via.css</code>, carries an <code>ETag</code> and
         <code>Last-Modified</code>, and honors <code>If-None-Match</code> / <code>If-Modified-Since</code>
-        with a <code>304</code>. The <code>Cache-Control</code> policy on top of that follows
+        with a <code>304</code>. A <code>HEAD</code> request gets the same headers and no body, with the
+        <code>Content-Length</code> of the body a <code>GET</code> would get; over HTTP/2, OpenSwoole 26.2 leaves
+        that header out. The <code>Cache-Control</code> policy on top of that follows
         <code>devMode</code> by default (<code>no-cache</code> in dev, so edits show up on the next reload;
         <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly.
         The default policy caches <code>/datastar.js?v=&lt;hash&gt;</code> with the served bundle's hash for a
@@ -731,16 +733,18 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
     </p>
     <ul>
         <li>
-            <strong>At start</strong>, php-via compresses the files that exist in the master process, so every
-            worker inherits them without a copy of its own. It skips any file it expects to push it past 2&nbsp;s and
-            leaves it for later, so the step takes about 2&nbsp;s at most. The port opens after this step, so a restart takes
+            <strong>At start</strong>, php-via compresses the files of up to 128&nbsp;KiB that exist, in the master
+            process, so every worker inherits them without a copy of its own. It starts a file only while its expected
+            time fits a 2&nbsp;s budget, and leaves bigger files and the rest for later. Level 11 takes 1.3 to
+            2.1&nbsp;&micro;s per byte, and a file can take longer than expected, so the step ends at most one
+            128&nbsp;KiB file, about 0.3&nbsp;s, past the budget: by 2.3&nbsp;s. The port opens after this step, so a restart takes
             that much longer, and readiness checks and rolling restarts have to allow for it: the website (11 files,
             300&nbsp;KB compressed to 64&nbsp;KB) takes 0.3&nbsp;s. Dev mode skips it.
         </li>
         <li>
-            <strong>Later</strong>, a file that changed or was left out at start goes to a helper process, which
-            php-via starts with <code>withStaticDir()</code> or in dev mode. Until its result arrives, a worker sends
-            the file at level 4 when it is up to 256&nbsp;KB and uncompressed when it is bigger, with
+            <strong>Later</strong>, a file that changed or was left out at start goes to a helper process on its
+            first Brotli request. php-via starts the helper with <code>withStaticDir()</code> or in dev mode. Until
+            its result arrives, a worker sends the file at level 4 when it is up to 256&nbsp;KB and uncompressed when it is bigger, with
             <code>Cache-Control: no-store</code>, so neither a browser nor a CDN keeps that stand-in. The helper
             compresses one file at a time at the lowest CPU priority, so on a core a worker needs, the worker goes
             first. An edited 91&nbsp;KB stylesheet got level 11 after 0.1&nbsp;s, a 546&nbsp;KB library after

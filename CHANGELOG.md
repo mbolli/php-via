@@ -45,7 +45,7 @@ All notable changes to php-via will be documented in this file.
   overrides one of them has to match.
 - **Static files get Brotli without `withBrotli()`.** Whenever ext-brotli is loaded, compressible
   static files go out at level 11 to clients that accept it, with `Vary: Accept-Encoding`, and the
-  server opens its port only after compressing the files present at start (about 2 s at most,
+  server opens its port only after compressing the files present at start (2.3 s at most,
   0.3 s for the website). `withBrotli(false)` turns it off, `withBrotli(false, staticLevel: 11)`
   keeps it for static files only. A static level of 0 now means none instead of Brotli level 0.
 - **`worker_num` in `withSwooleSettings()` throws** at `start()` when it differs from
@@ -101,17 +101,23 @@ All notable changes to php-via will be documented in this file.
   of 0.161 ms without. Each worker keeps files up to 2 MiB, 16 MiB per encoding. Bigger files go out
   with `sendfile()`. See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
 - **Level 11 never runs in a worker.** The first Brotli request for a 91 KB stylesheet held its
-  worker for 79 ms, and for a 1.7 MB library for 2.1 s; now for about 2 ms. Files present at start
-  are compressed in the master process and shared by all workers. A file that changes later goes
-  to a low-priority helper process, and until it is done workers send it at level 4, or
-  uncompressed above 256 KB, with `Cache-Control: no-store`. Files up to 8 MiB get level 11, where
-  2 MiB was the limit: a 2.3 MB bundle goes out as 500 KB.
+  worker for 79 ms, and for a 1.7 MB library for 2.1 s; now for about 2 ms. Files of up to 128 KiB
+  present at start are compressed in the master process and shared by all workers. A bigger file, or
+  one that changes later, goes to a low-priority helper process, and until it is done workers send it
+  at level 4, or uncompressed above 256 KB, with `Cache-Control: no-store`. Files up to 8 MiB get
+  level 11, where 2 MiB was the limit: a 2.3 MB bundle goes out as 500 KB.
 - **Only paths with a file extension are looked up in `withStaticDir()` before routing,** and the
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
   `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.
 - **Dev Bar assets** are served from memory with an ETag, and with Brotli level 11. A page view
   revalidates `devbar.js` with a 304 of 256 bytes instead of downloading 25 KB again, and a full
   download is 6.8 KB with Brotli.
+- **A destroyed context leaves nothing for PHP's cycle collector.** Its helper objects referred back
+  to it, so each destroyed context left about 10 objects in reference cycles, and while the contexts
+  of a 220,000-view burst expired the collector ran 20 times, each run walking every live context.
+  Contexts are freed by their last reference now: the collector runs once while such a burst expires,
+  and the longest pause is about half as long. The pauses left come from collector runs during the
+  burst, which free nothing but also walk every live context.
 
 ### Fixed
 
@@ -137,6 +143,15 @@ All notable changes to php-via will be documented in this file.
   stream polled with `usleep()`. It now uses `Coroutine::usleep()`.
 - In dev mode, an edited static file was served with its old ETag, and to Brotli clients with its
   old content, because PHP's stat cache under the file hooks hid the edit.
+- HEAD on a static file, `/datastar.js`, `/via.css` or a Dev Bar asset answered 404. It now gets the
+  headers GET would, with the `Content-Length` of the body GET would send, and no body, which
+  OpenSwoole 26.2 would otherwise send on HEAD too.
+
+### Tests
+
+- `VIA_TEST_PORT_BASE` gives every fixture that starts a real server a port from one window,
+  `VIA_TEST_PORT_COUNT` ports long (50 by default), so the suite runs on a machine where other ports
+  are taken. Unset, each fixture keeps the window it had.
 
 ### Docs
 

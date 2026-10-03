@@ -955,9 +955,9 @@ class Config {
      * **Static files** (withStaticDir() files of a compressible type, /datastar.js, /via.css and the Dev Bar
      * assets) get Brotli at level 11 whenever ext-brotli is loaded, also without a call to withBrotli().
      * `withBrotli(false)` turns that off too, `withBrotli(false, staticLevel: 11)` keeps it for static files only.
-     * Files are compressed in the master process before the server listens (about 2 s at most, not in dev mode),
-     * later ones by a helper process, so a worker never compresses at this level. A precompressed foo.css.br next
-     * to foo.css, at least as new, is sent as it is, even without ext-brotli.
+     * Files up to 128 KiB are compressed in the master process before the server listens (2.3 s at most, not in dev
+     * mode), bigger and later ones by a helper process, so a worker never compresses at this level. A precompressed
+     * foo.css.br next to foo.css, at least as new, is sent as it is, even without ext-brotli.
      * See https://via.zweiundeins.gmbh/docs/deployment#static-compression
      *
      * **The dynamic level is a memory decision, not just a bandwidth one.** A streaming Brotli
