@@ -7,6 +7,7 @@ namespace Mbolli\PhpVia\Http;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\ErrorPhase;
+use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -90,7 +91,15 @@ class ActionHandler {
         // action success tracked 1/worker_num: every other worker answered 400. Also covers
         // the single-worker case SseHandler already handled: a backgrounded tab whose context
         // was cleaned up, then fires an action before its SSE stream reconnects.
-        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request, attributes: $attributes) === null) {
+        $refused = null;
+        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request, attributes: $attributes, refused: $refused) === null) {
+            // The route's middleware, such as an auth gate, answers as it would on a page load.
+            if ($refused !== null) {
+                $this->via->writeSessionCookie($request, $response);
+                (new PsrResponseEmitter())->emit($refused, $response);
+
+                return;
+            }
             $response->status(400);
             $response->end('Invalid context');
 
@@ -129,6 +138,7 @@ class ActionHandler {
             $request->files ?? [],
             $request->cookie ?? [],
             $attributes,
+            $this->via->getRequestSession($request),
         );
         $scope->bind();
 
@@ -175,6 +185,10 @@ class ActionHandler {
      */
     private function sendCookies(Request $request, Response $response, Context $context, RequestScope $scope): void {
         $rotateQueued = $context->takeSessionRotation();
+        $pending = $context->takePendingSessionToken();
+        if ($pending !== null) {
+            $this->via->getSessionManager()->adoptIssued($request, $this->via->getSettings()->secureCookie, $pending);
+        }
         foreach ([...$context->flushPendingCookies(), ...$scope->answer()] as $cookie) {
             $response->cookie(
                 $cookie['name'],
@@ -187,7 +201,7 @@ class ActionHandler {
                 $cookie['sameSite'],
             );
         }
-        $this->via->writeSessionCookie($request, $response, rotate: $scope->rotatesSession || $rotateQueued);
+        $this->via->writeSessionCookie($request, $response, rotate: $rotateQueued);
     }
 
     private function syncSignalsAfterAction(Context $context, string $actionId): void {

@@ -11,9 +11,11 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Via;
+use Nyholm\Psr7\Response as Psr7Response;
 use OpenSwoole\Http\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Tests\Support\FakeActionRequest;
 use Tests\Support\FakeStaticResponse;
@@ -659,5 +661,65 @@ describe('Revival and middleware attributes', function (): void {
         $tab->disconnect(expire: true)->action('noop')->connect();
 
         expect(json_encode($tab->patches()))->toContain('<p id=\"me\">ada<\/p>');
+    });
+});
+
+/** Per-route middleware: refuses with a redirect when closed, else passes the user and the URL it saw on. */
+final class ReviveRouteGate implements MiddlewareInterface {
+    public bool $open = true;
+    public int $runs = 0;
+
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        ++$this->runs;
+        if (!$this->open) {
+            return new Psr7Response(302, ['Location' => '/login']);
+        }
+
+        return $handler->handle($request->withAttribute('user', 'grace')->withAttribute('url', $request->getMethod() . ' ' . $request->getUri()->getPath() . '?' . $request->getUri()->getQuery()));
+    }
+}
+
+function reviveGateApp(ReviveRouteGate $gate): TestApp {
+    return new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use ($gate): void {
+        $via->page('/item/{id}', static function (Context $c, string $id): void {
+            $seen = (string) $c->getRequestAttribute('user', 'nobody') . ' ' . (string) $c->getRequestAttribute('url', '') . ' ' . $id;
+            $c->action(static fn () => null, 'noop');
+            $c->view(static fn (): string => '<p id="me">' . htmlspecialchars($seen) . '</p>');
+        })->middleware($gate);
+    });
+}
+
+describe('Revival and per-route middleware', function (): void {
+    test('a rebuilt tab runs the route\'s middleware again, on a GET of the page\'s URL, and reads its attributes', function (): void {
+        $gate = new ReviveRouteGate();
+        $tab = reviveGateApp($gate)->open('/item/a%20b', ['x' => '1']);
+        $tab->patches();
+        $tab->disconnect(expire: true)->connect();
+
+        expect(json_encode($tab->patches(), JSON_UNESCAPED_SLASHES))->toContain('grace GET /item/a%20b?x=1 a b')
+            ->and($gate->runs)->toBe(2)
+        ;
+    });
+
+    test('a rebuild the middleware refuses reloads the tab from an SSE reconnect', function (): void {
+        $gate = new ReviveRouteGate();
+        $tab = reviveGateApp($gate)->open('/item/1');
+        $tab->patches();
+        $gate->open = false;
+        $tab->disconnect(expire: true)->connect();
+
+        expect(json_encode($tab->patches(), JSON_UNESCAPED_SLASHES))->toContain('window.location.reload()')
+            ->and(fn () => $tab->context())->toThrow(LogicException::class, 'is destroyed')
+        ;
+    });
+
+    test('a rebuild the middleware refuses answers an action with the middleware\'s response', function (): void {
+        $gate = new ReviveRouteGate();
+        $tab = reviveGateApp($gate)->open('/item/1');
+        $tab->patches();
+        $gate->open = false;
+        $tab->disconnect(expire: true);
+
+        expect(fn () => $tab->action('noop'))->toThrow(RuntimeException::class, "Action 'noop' answered 302");
     });
 });

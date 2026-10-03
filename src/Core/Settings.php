@@ -60,6 +60,7 @@ final readonly class Settings {
         public int $contextConnectTimeoutMs,
         public int $contextReconnectTimeoutMs,
         public int $contextRevivalWindowMs,
+        public int $contextForwardTimeoutMs,
         public ?string $sslCertFile,
         public ?string $sslKeyFile,
         public bool $https,

@@ -19,6 +19,7 @@ $app = new Via(
 
     <h3 id="via-page"><code>page(string $route, callable $handler): RouteDefinition</code></h3>
     <p>Register a page route. Path params use <code>{name}</code> syntax and are injected as typed arguments. Returns a <code>RouteDefinition</code> for fluent middleware registration.</p>
+    <p>A parameter matches one path segment as the browser sent it and arrives percent-decoded: <code>/users/caf%C3%A9</code> gives <code>café</code>. An encoded slash stays inside its parameter and arrives as <code>/</code>, so <code>/files/a%2Fb</code> gives <code>a/b</code>: check a parameter you build a file path from. <code>route()</code> passes its parameters the same way.</p>
     {% code 'php' %}{% verbatim %}
 $app->page('/', fn(Context $c) => $c->view('home.html.twig'));
 
@@ -64,8 +65,8 @@ $app->middleware(new CorsMiddleware([...]));
 
     <h3 id="via-regenerate-session"><code>regenerateSession(ServerRequestInterface $request): void</code></h3>
     <p>
-        <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the response to
-        <code>$request</code> sets a new session cookie. Middleware calls it before
+        <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the session rotates
+        at the call, and the response to <code>$request</code> sets the new cookie. Middleware calls it before
         <code>$handler-&gt;handle()</code>, which sends the page or the action's response; afterwards it throws a
         <code>LogicException</code>. Like the context's, it throws an <code>OverflowException</code> when the record
         of rotated cookies is full, so call it before the login writes anything.
@@ -327,10 +328,10 @@ $status = $c->signal('idle', 'status', clientWritable: false);
     </p>
     <p>
         A server-owned TAB signal lives in the worker that holds the context. With
-        <code>worker_num &gt; 1</code>, an action that lands on another worker rebuilds the context
-        there, and the signal starts from its initial value, so each worker keeps its own copy. Use
-        <code>worker_num = 1</code> for such pages, or keep the value in a scoped signal, which is
-        shared across workers.
+        <code>worker_num &gt; 1</code>, actions that land on another worker are passed to that one, but
+        when the tab's stream reconnects to another worker, the context is rebuilt there and the signal
+        starts from its initial value. Keep a value that has to survive that in a scoped signal or in
+        <code>tabState()</code>, or use <code>worker_num = 1</code>.
     </p>
     <p>
         Every signal gets an id that is unique per tab: the browser uses it in <code>data-bind</code>,
@@ -519,8 +520,9 @@ $c->clearSessionData();                // clear entire session bucket
         rotated cookies is full, and the visitor then stays logged out.
     </p>
     <p>
-        The old cookie keeps working for 10 seconds, for the requests other tabs sent before the browser had the new
-        one, and whoever holds it reaches the session until then. After that it starts a new session, and an SSE
+        The rotation happens at the call, and the old cookie keeps working for 10 seconds from then, for the requests
+        other tabs sent before the browser had the new one; whoever holds it reaches the session until then. A login
+        that does slow work after the call should call it last. After that it starts a new session, and an SSE
         stream opened with it ends: the tab is asked to reconnect, which a browser with the new cookie does at once,
         and one with only the old cookie is refused. In an action, the new cookie goes out with that action's response, also
         when another action of the tab runs at the same time. Called outside an action or a page handler, the

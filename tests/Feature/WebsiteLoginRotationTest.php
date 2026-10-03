@@ -104,8 +104,9 @@ test('a dashboard tab rebuilt after it was away still shows the user, and goes t
     $dashboard->disconnect(expire: true)->connect();
     $afterLogout = json_encode($dashboard->patches(), JSON_UNESCAPED_SLASHES);
 
+    // The route's AuthMiddleware runs again for the rebuild and refuses it, so the tab reloads into the login form.
     expect($revived)->toContain('Grace Hopper')
         ->and($afterLogout)->not->toContain('Grace Hopper')
-        ->and($afterLogout)->toContain("window.location.href = '/examples/login'")
+        ->and($afterLogout)->toContain('window.location.reload()')
     ;
 });

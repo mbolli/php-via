@@ -58,7 +58,9 @@ $app->page('/', function (Context $c) use ($counterComponent): void {
     <h2 id="namespacing">Namespacing</h2>
     <p>
         The namespace prefixes all signal and action IDs in the component. This lets you mount the same component
-        multiple times on one page without signal conflicts:
+        multiple times on one page without signal conflicts. It takes letters, digits, <code>_</code> and
+        <code>-</code> only, since it goes into action URLs and signal names; anything else throws an
+        <code>InvalidArgumentException</code>:
     </p>
     {% code 'php' %}{% verbatim %}
 $counterA = $c->component($counterComponent, 'counter-a');

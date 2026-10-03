@@ -492,6 +492,39 @@ class PatchManager {
     }
 
     /**
+     * Take the queued patches that no render sends again (isOneShot()), for the worker a tab moved to, with their
+     * mode as its value. The other patches are dropped: the new worker's first sync sends view and signals.
+     *
+     * @return list<array{type: string, content: string, selector?: string, mode?: string}>
+     */
+    public function takeOneShotPatches(): array {
+        if ($this->useArray) {
+            /** @var list<QueuedPatch> $queued */
+            $queued = \is_array($this->patchChannel) ? $this->patchChannel : [];
+            $this->patchChannel = [];
+        } else {
+            $queued = $this->patchChannel instanceof Channel ? $this->drainChannel($this->patchChannel) : [];
+        }
+
+        $taken = [];
+        foreach ($queued as $patch) {
+            if (!self::isOneShot($patch) || !\is_string($patch['content'])) {
+                continue;
+            }
+            $one = ['type' => $patch['type'], 'content' => $patch['content']];
+            if (isset($patch['selector'])) {
+                $one['selector'] = $patch['selector'];
+            }
+            if (isset($patch['mode'])) {
+                $one['mode'] = $patch['mode']->value;
+            }
+            $taken[] = $one;
+        }
+
+        return $taken;
+    }
+
+    /**
      * Whether a patch has no re-send path, so that dropping it changes the page: a script, or an element
      * patch with a mode, as Context::patchElements() queues. Its target, such as a toast or a modal, may
      * lie outside the view, and a dropped Remove or Append is never repaired.

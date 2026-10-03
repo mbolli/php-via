@@ -11,6 +11,7 @@ use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\Context\SignalFactory;
+use Mbolli\PhpVia\Core\RequestSession;
 use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Rendering\Bootstrap;
 use Mbolli\PhpVia\Rendering\Html;
@@ -96,6 +97,12 @@ class Context {
 
     /** Whether regenerateSession() asked outside an action for a new session cookie with the next response */
     private bool $rotateSession = false;
+
+    /** The session of the page request while its handler runs and until its response goes out */
+    private ?RequestSession $pageSession = null;
+
+    /** A session cookie a rotation issued for a response that never reached the browser, for the next one */
+    private ?string $pendingSessionToken = null;
 
     /** Whether broadcast() has warned that it no longer reaches the scopes this TAB-primary context joined */
     private bool $tabBroadcastWarned = false;
@@ -204,14 +211,16 @@ class Context {
      * Give this session a new cookie with the response to the current action or page load, as a login should,
      * so a cookie someone planted or read before it stops reaching the session.
      *
-     * The session keeps its id, its data, its SESSION signals and its other tabs. The old cookie keeps working
-     * for 10 seconds, for the requests other tabs sent before the browser had the new one. Then it starts a new
-     * session, and a stream opened with it ends: a tab whose browser has the new cookie reconnects at once.
+     * The session keeps its id, its data, its SESSION signals and its other tabs. The rotation happens at the call:
+     * from then on the old cookie keeps working for 10 seconds, for the requests other tabs sent before the browser
+     * had the new one, and then starts a new session, and a stream opened with it ends. A tab whose browser has the
+     * new cookie reconnects at once. Call it after slow work such as a password check and before the login writes
+     * anything, so a throw leaves the visitor logged out.
      *
      * In an action, and in the spawn() tasks it starts until it answers, the new cookie goes out with that action's
-     * response. Called later, or outside a request such as in a timer, it waits for the tab's next action. Call it
-     * before the login writes anything, so a throw leaves the visitor logged out. Pair it with clearSessionData()
-     * for a logout. Middleware and route() handlers use Via::regenerateSession().
+     * response, and in a page handler with the page. Called later, or outside a request such as in a timer, the
+     * rotation waits for the tab's next action. Pair it with clearSessionData() for a logout. Middleware and route()
+     * handlers use Via::regenerateSession().
      *
      * @throws \OverflowException when the rotation table is full of sessions that need their rows
      */
@@ -220,15 +229,61 @@ class Context {
             return;
         }
 
-        $this->app->getSessionManager()->tokens()->reserve();
         $request = RequestScope::current($this);
-        if ($request !== null && $request->rotateSession()) {
+        $session = $request !== null ? ($request->isAnswered() ? null : $request->session) : $this->requestOwner()->pageSession;
+        if ($session !== null && !$session->written) {
+            $this->app->getSessionManager()->rotateNow($session);
+
             return;
         }
+
+        $this->app->getSessionManager()->tokens()->reserve();
         if ($request !== null) {
             $this->app->log('warn', "regenerateSession() ran after its action had answered, so the new cookie goes out with the tab's next action response", $this);
         }
         $this->requestOwner()->rotateSession = true;
+    }
+
+    /**
+     * Bind the session of the page request while its handler runs, so regenerateSession() rotates it; null unbinds.
+     *
+     * @internal called by RequestHandler
+     */
+    public function bindPageSession(?RequestSession $session): void {
+        $this->pageSession = $session;
+    }
+
+    /**
+     * Queue a cookie of a response that never reached the browser for the tab's next action response.
+     *
+     * @internal called by Via when the worker that passed an action here gave up waiting
+     *
+     * @param array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string} $cookie
+     */
+    public function queueCookieForNextResponse(array $cookie): void {
+        $this->requestOwner()->pendingCookies[] = $cookie;
+    }
+
+    /**
+     * Keep a session cookie a rotation issued for a response that never reached the browser, for the next one.
+     *
+     * @internal called by Via when the worker that passed an action here gave up waiting
+     */
+    public function requeueSessionCookie(string $token): void {
+        $this->requestOwner()->pendingSessionToken = $token;
+    }
+
+    /**
+     * The session cookie requeueSessionCookie() keeps, once.
+     *
+     * @internal called by the action handler
+     */
+    public function takePendingSessionToken(): ?string {
+        $owner = $this->requestOwner();
+        $token = $owner->pendingSessionToken;
+        $owner->pendingSessionToken = null;
+
+        return $token;
     }
 
     /**
@@ -1358,11 +1413,20 @@ class Context {
      *
      * @param callable|class-string $fn        Component setup function, or class name
      * @param string                $namespace Name of the component, unique on its page: it prefixes the component's
-     *                                         signals and actions and keeps its id stable when the page is rebuilt
+     *                                         signals and actions and keeps its id stable when the page is rebuilt.
+     *                                         Letters, digits, '_' and '-' only, as it goes into action URLs and signal names.
      *
      * @return callable Returns a function that renders the component
+     *
+     * @throws \InvalidArgumentException for a namespace with other characters, or one already on the page
      */
     public function component(callable|string $fn, string $namespace): callable {
+        if (preg_match('/^[A-Za-z0-9_-]+$/', $namespace) !== 1) {
+            throw new \InvalidArgumentException(
+                'A component namespace takes letters, digits, \'_\' and \'-\' only, since it goes into action URLs and signal names, got '
+                . var_export($namespace, true) . ". Build it from a key with something like 'item-' . md5(\$key)."
+            );
+        }
         if (\is_string($fn)) {
             $fn = PageMount::buildClosure(ClassMetadata::analyze($fn), $this->app);
         }
@@ -1477,7 +1541,7 @@ class Context {
     public function download(callable|string $source, string $filename, string $mimeType): string {
         $token = $this->app->getApp()->downloads()->register($this->getPageContext(), $source, $filename, $mimeType);
 
-        return $this->app->getSettings()->basePath . DownloadHandler::PATH . $token;
+        return $this->app->getSettings()->basePath . DownloadHandler::PATH . $this->app->downloadTokenPrefix() . $token;
     }
 
     /**

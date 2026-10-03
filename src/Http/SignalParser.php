@@ -12,11 +12,16 @@ use OpenSwoole\Http\Request;
  * @internal
  */
 final class SignalParser {
+    /** @var null|\WeakMap<Request, array<string, mixed>> the signals of each request read, as the forwarder, the handler and a revival read them */
+    private static ?\WeakMap $read = null;
+
     /**
      * @return array<string, mixed>
      */
     public static function read(Request $request): array {
-        return self::parse($request->get ?? [], $request->post ?? [], $request->getContent());
+        self::$read ??= new \WeakMap();
+
+        return self::$read[$request] ??= self::parse($request->get ?? [], $request->post ?? [], $request->getContent());
     }
 
     /**

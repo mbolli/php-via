@@ -7,7 +7,8 @@ declare(strict_types=1);
  * itself, then signals its own master the way docker stop, systemctl stop or Ctrl-C would.
  *
  * Appends "shutdown <pid>" per onWorkerStop call and "disconnect <pid>" per onClientDisconnect call
- * to the marker file. Prints sse=open once the stream is up and sse=eof when the server ends it.
+ * to the marker file. Prints sse=open once the stream is up, sse=eof when the server ends it, and sse_reconnect=1 when
+ * its last message asked the tab to reconnect.
  *
  * argv[1] = worker count
  * argv[2] = TERM, INT (to the master), INTGRP (to the process group, run it under setsid),
@@ -155,7 +156,9 @@ $app->setInterval(static function () use ($port, $mode, $marker, $reloadFlag, $w
         };
 
         // Hold the stream until the server ends it, so only the shutdown can close it.
-        while (!feof($sock) && fread($sock, 8192) !== false) {
+        $body = '';
+        while (!feof($sock) && ($chunk = fread($sock, 8192)) !== false) {
+            $body .= $chunk;
             if (stream_get_meta_data($sock)['timed_out']) {
                 echo "sse=timeout\n";
 
@@ -163,6 +166,7 @@ $app->setInterval(static function () use ($port, $mode, $marker, $reloadFlag, $w
             }
         }
         echo "sse=eof\n";
+        echo 'sse_reconnect=', (int) str_contains($body, '_via_reconnect'), "\n";
     });
 }, 300);
 

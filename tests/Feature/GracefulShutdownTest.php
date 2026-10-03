@@ -137,6 +137,12 @@ describe('stopping a real server', function (): void {
         expect($r['out'])->toContain('served=ok');
         expectCleanStop($r, 4);
     });
+
+    test('a stopping worker asks its tabs to reconnect before it ends their streams', function (string $mode): void {
+        $r = runGracefulShutdownServer(2, $mode);
+        expectCleanStop($r, $mode === 'USR1' ? 4 : 2);
+        expect($r['out'])->toContain('sse_reconnect=1');
+    })->with(['TERM', 'USR1']);
 });
 
 describe('runWorkerShutdown', function (): void {

@@ -95,6 +95,9 @@ class RequestHandler {
     private StaticBrotli $staticBrotli;
     private PlainRouteHandler $plainRoutes;
 
+    /** Passes requests of tabs another worker holds there; null with one worker. */
+    private ?Forwarder $forwarder = null;
+
     /** Uncompressed static file bodies, kept while the file's mtime and size match. */
     private StaticBodyCache $staticCache;
 
@@ -114,6 +117,31 @@ class RequestHandler {
 
     public function setRequestLogger(RequestLogger $logger): void {
         $this->requestLogger = $logger;
+    }
+
+    /**
+     * @internal set in each worker of a server with more than one
+     */
+    public function setForwarder(?Forwarder $forwarder): void {
+        $this->forwarder = $forwarder;
+    }
+
+    /**
+     * Run a request another worker passed here because this one holds its tab, as handleRequest() runs one of its
+     * own, but never passing it on.
+     *
+     * @internal called by Forwarder
+     */
+    public function serveForwarded(Request $request, Response $response): void {
+        try {
+            $this->dispatch($request, $response, forwarded: true);
+        } catch (\Throwable $e) {
+            $this->via->log('error', 'Unhandled exception on a passed request ' . (string) ($request->server['request_uri'] ?? '') . ': ' . Logger::describe($e));
+            if ($response->isWritable()) {
+                $response->status(500);
+                $response->end('Internal Server Error');
+            }
+        }
     }
 
     /**
@@ -244,7 +272,7 @@ class RequestHandler {
         return array_diff_key($attributes, ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
     }
 
-    private function dispatch(Request $request, Response $response): void {
+    private function dispatch(Request $request, Response $response, bool $forwarded = false): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
         $requestStart = hrtime(true);
@@ -306,6 +334,10 @@ class RequestHandler {
                 return;
             }
 
+            if (!$forwarded && $this->forwarder?->forwardAction($request, $response) === true) {
+                return;
+            }
+
             $this->handleActionWithMiddleware($request, $response, $matches[1]);
 
             return;
@@ -318,9 +350,19 @@ class RequestHandler {
 
                 return;
             }
+            $token = substr($path, \strlen(DownloadHandler::PATH) + 1);
+            // With several workers the URL starts with the id of the worker that holds the download.
+            if (preg_match('/^(\d+)-(.+)$/', $token, $m) === 1) {
+                if (!$forwarded && $this->forwarder?->forwardDownload($request, $response, (int) $m[1]) === true) {
+                    $this->logRequest($method, $path, 200, $requestStart);
+
+                    return;
+                }
+                $token = $m[2];
+            }
             $status = $this->via->getApp()->downloads()->send(
                 $response,
-                substr($path, \strlen(DownloadHandler::PATH) + 1),
+                $token,
                 $this->via->getSessionId($request),
                 fn (\Throwable $e, Context $page) => $this->via->reportError($e, $page, ErrorPhase::Render),
             );
@@ -473,9 +515,13 @@ class RequestHandler {
             $context->setRequestAttributes($contextAttributes);
         }
 
+        // regenerateSession() in the handler rotates this request's session, whose cookie goes out with the page.
+        $context->bindPageSession($this->via->getRequestSession($request));
+
         try {
             $this->via->invokeHandlerWithParams($handler, $context, $params);
         } catch (\Throwable $e) {
+            $context->bindPageSession(null);
             $this->discardContext($context);
             $this->failPage('Page handler exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
             $this->via->reportError($e, $context, ErrorPhase::Render);
@@ -485,7 +531,7 @@ class RequestHandler {
 
         // Store context (in both legacy array and Application)
         $this->via->contexts[$contextId] = $context;
-        $this->via->getApp()->registerContext($context);
+        $this->via->getApp()->registerContext($context, asHome: true);
         $this->via->getApp()->setContextSession($contextId, $sessionId);
 
         // Register context in its default TAB scope
@@ -494,6 +540,7 @@ class RequestHandler {
         try {
             $html = $this->via->buildHtmlDocument($context);
         } catch (\Throwable $e) {
+            $context->bindPageSession(null);
             $this->discardContext($context);
             $this->failPage('Page render exception on ', $route, $e, $tracer, $method, $path, $requestStart, $response);
             $this->via->reportError($e, $context, ErrorPhase::Render);
@@ -505,6 +552,7 @@ class RequestHandler {
         $this->via->armConnectDeadline($contextId);
 
         $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation(), refresh: true);
+        $context->bindPageSession(null);
 
         // Apply any cookies queued by the page handler
         foreach ($context->flushPendingCookies() as $cookie) {

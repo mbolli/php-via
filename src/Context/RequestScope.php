@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\RequestSession;
 use OpenSwoole\Coroutine;
 
 /**
- * The request an action runs for: its input, uploaded files, cookies and middleware attributes, and the cookies and
- * session rotation it queues for its response. It is bound to the coroutine that handles the request, so two actions
+ * The request an action runs for: its input, uploaded files, cookies, middleware attributes and session, and the
+ * cookies it queues for its response. It is bound to the coroutine that handles the request, so two actions
  * of one tab that run at once each read their own request and answer with their own cookies.
  *
  * @internal
@@ -19,9 +20,6 @@ use OpenSwoole\Coroutine;
  */
 final class RequestScope {
     private const string KEY = 'via.request';
-
-    /** Whether regenerateSession() asked for a new session cookie with the response */
-    public private(set) bool $rotatesSession = false;
 
     /** @var array<int, self> scopes bound outside a coroutine, as TestApp handles requests, by Fiber (0 for none) */
     private static array $outside = [];
@@ -37,6 +35,7 @@ final class RequestScope {
      * @param array<string, UploadedFile> $files
      * @param array<string, string>       $cookies
      * @param array<string, mixed>        $attributes set by the middleware that ran on the request
+     * @param null|RequestSession         $session    the request's session, which regenerateSession() rotates
      */
     public function __construct(
         public readonly Context $page,
@@ -44,6 +43,7 @@ final class RequestScope {
         private readonly array $files,
         public readonly array $cookies,
         public readonly array $attributes,
+        public readonly ?RequestSession $session = null,
     ) {}
 
     /**
@@ -127,16 +127,8 @@ final class RequestScope {
         return true;
     }
 
-    /**
-     * Ask for a new session cookie with the response, unless it is already sent.
-     */
-    public function rotateSession(): bool {
-        if ($this->answered) {
-            return false;
-        }
-        $this->rotatesSession = true;
-
-        return true;
+    public function isAnswered(): bool {
+        return $this->answered;
     }
 
     /**

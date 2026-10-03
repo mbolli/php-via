@@ -18,7 +18,10 @@ use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
+use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
+use Mbolli\PhpVia\Http\Forwarder;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
+use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\RouteGroup;
@@ -53,6 +56,8 @@ use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
 use Mbolli\PhpVia\Twig\TwigEngine;
+use Nyholm\Psr7\Response as Psr7Response;
+use Nyholm\Psr7\Stream;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
@@ -60,6 +65,7 @@ use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
@@ -254,6 +260,12 @@ class Via {
     private RequestHandler $requestHandler;
     private SseHandler $sseHandler;
     private StaticBrotli $staticBrotli;
+
+    /** Passes requests of tabs another worker holds there; set in workerStart with more than one worker. */
+    private ?Forwarder $forwarder = null;
+
+    /** Builds the request a route's middleware gets when a tab is rebuilt, created with the first. */
+    private ?PsrRequestFactory $psrRequestFactory = null;
     private Settings $settings;
     private Logger $logger;
     private RequestLogger $requestLogger;
@@ -544,9 +556,9 @@ class Via {
 
     /**
      * Give the visitor of $request a new session cookie with the response, for a login handled in middleware or
-     * a route() handler. The session keeps its id, its data and its tabs; the old cookie keeps working for
-     * 10 seconds, for requests the browser sent before the new one arrived, and then starts a new session.
-     * See Context::regenerateSession() for an action or a page handler.
+     * a route() handler. The session keeps its id, its data and its tabs. The rotation happens at the call: from
+     * then on the old cookie keeps working for 10 seconds, for requests the browser sent before the new one
+     * arrived, and then starts a new session. See Context::regenerateSession() for an action or a page handler.
      *
      * Middleware calls it before $handler->handle(), which sends the page or the action's response, and before
      * the login writes anything, so a throw leaves the visitor logged out.
@@ -565,8 +577,7 @@ class Via {
             throw new \LogicException('regenerateSession() came after the response of this request went out. In middleware, call it before $handler->handle().');
         }
 
-        $this->sessionManager->tokens()->reserve();
-        $session->rotate = true;
+        $this->sessionManager->rotateNow($session);
     }
 
     /**
@@ -1064,20 +1075,23 @@ class Via {
                 );
             }
 
-            // Actions, scoped signal values and session data cross workers, but three things do not,
-            // and they fail quietly enough that an operator would not connect them to worker_num.
+            // Scoped signal values and session data cross workers, and actions reach the worker that holds
+            // their tab, but three things do not, and they fail quietly enough that an operator would not
+            // connect them to worker_num.
             if ($this->settings->workerNum > 1) {
                 $this->log(
                     'warn',
-                    'worker_num > 1: actions, scoped signal values, session data and the client list are '
-                    . 'shared across workers. Three things are not. (1) Mutating a scoped signal by reading '
+                    'worker_num > 1: scoped signal values, session data and the client list are shared across workers, '
+                    . 'and an action or a download that reaches another worker is passed to the one that holds its tab. '
+                    . 'Three things are not shared. (1) Mutating a scoped signal by reading '
                     . 'it and calling setValue() loses updates: use Signal::increment() for counters and '
                     . 'Signal::mutate() for anything else. Reading a session data key and writing it back '
                     . 'loses updates the same way and has no atomic form. (2) PHP statics in your own handlers are '
-                    . 'per-process, so a simulation kept in one diverges per worker. (3) A server-owned TAB '
-                    . 'signal (clientWritable: false, or any TAB signal without clientWritable: true under '
-                    . 'withStrictTabSignals()) lives in one worker: an action another worker takes rebuilds '
-                    . 'it from its initial value, so keep that state in a scoped signal or use worker_num = 1. '
+                    . 'per-process, so a simulation kept in one diverges per worker. (3) A tab lives on the worker of '
+                    . 'its SSE stream. When the stream reconnects to another worker, that worker rebuilds the tab as a '
+                    . 'revival does, so a server-owned TAB signal (clientWritable: false, or any TAB signal without '
+                    . 'clientWritable: true under withStrictTabSignals()) starts from its initial value: keep state that '
+                    . 'must survive in a scoped signal or tabState(), or use worker_num = 1. '
                     . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
                 );
             }
@@ -1191,6 +1205,11 @@ class Via {
             // in SwooleBroker::publish(), but kept as a belt-and-suspenders guard).
             $this->server->on('pipeMessage', function (Server $server, int $srcWorkerId, string $data): void {
                 try {
+                    if (str_starts_with($data, Forwarder::MESSAGE_PREFIX)) {
+                        $this->forwarder?->receive($srcWorkerId, $data);
+
+                        return;
+                    }
                     if (str_starts_with($data, StaticBrotli::MESSAGE_PREFIX)) {
                         $this->staticBrotli->receive($data);
 
@@ -1262,6 +1281,17 @@ class Via {
                 });
 
                 $this->workerId = $workerId;
+                if ($this->app->getContextDirectory() !== null) {
+                    $this->forwarder = new Forwarder(
+                        $this,
+                        $server,
+                        $workerId,
+                        self::resolveWorkerNum($server),
+                        $this->settings->contextForwardTimeoutMs,
+                        $this->requestHandler->serveForwarded(...),
+                    );
+                    $this->requestHandler->setForwarder($this->forwarder);
+                }
                 foreach ($this->startCallbacks as $callback) {
                     $callback($workerId);
                 }
@@ -1885,17 +1915,18 @@ class Via {
      *
      * When an SSE reconnect names a context that was already cleaned up, this re-creates it with
      * the *same* ID (so signal IDs regenerate byte-identical and the already-loaded DOM (bindings,
-     * action URLs, via_ctx) keeps working), re-runs the page handler, and re-seeds TAB signal
-     * values from what the client still holds (sent with the reconnect). Returns null (and the
-     * caller falls back to a full reload) when revival is disabled, no record exists, it expired,
-     * the requester's session doesn't own the context, or the route is no longer registered.
+     * action URLs, via_ctx) keeps working), re-runs the page handler behind the route's own middleware,
+     * and re-seeds TAB signal values from what the client still holds (sent with the reconnect). Returns
+     * null (and the caller falls back to a full reload) when revival is disabled, no record exists, it
+     * expired, the requester's session doesn't own the context, the route is no longer registered, or
+     * the route's middleware answered instead of running the handler, which $refused then holds.
      *
      * @param bool                 $byConnect  Whether an SSE connect revives it, which seeds the context itself
      * @param array<string, mixed> $attributes PSR-7 request attributes the middleware of the reviving request set
      *
      * @internal used by SseHandler on reconnect to a missing context
      */
-    public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = []): ?Context {
+    public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = [], ?ResponseInterface &$refused = null): ?Context {
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
@@ -1903,6 +1934,8 @@ class Via {
             $request->cookie ?? [],
             $byConnect,
             $attributes,
+            fn (string $route, array $params, string $query): ServerRequestInterface => $this->revivalRequest($request, $route, $params, $query, $attributes),
+            $refused,
         );
     }
 
@@ -1910,16 +1943,18 @@ class Via {
      * Testable core of {@see reviveContext()}, free of OpenSwoole Request types, so it can be exercised
      * without a live server.
      *
-     * @param string                $requesterSession Session ID of the reconnecting client
-     * @param array<string, mixed>  $clientSignals    Signal values the client still holds
-     * @param array<string, string> $cookies          Request cookies (forwarded to the context)
-     * @param bool                  $byConnect        Whether an SSE connect revives it, which seeds the context itself
-     * @param array<string, mixed>  $attributes       PSR-7 request attributes the middleware of the reviving request set,
-     *                                                which the page handler reads as on a page load
+     * @param string                                                                       $requesterSession Session ID of the reconnecting client
+     * @param array<string, mixed>                                                         $clientSignals    Signal values the client still holds
+     * @param array<string, string>                                                        $cookies          Request cookies (forwarded to the context)
+     * @param bool                                                                         $byConnect        Whether an SSE connect revives it, which seeds the context itself
+     * @param array<string, mixed>                                                         $attributes       PSR-7 request attributes the middleware of the reviving request set,
+     *                                                                                                       which the page handler reads as on a page load
+     * @param null|\Closure(string, array<string, string>, string): ServerRequestInterface $routeRequest     the request the route's middleware gets, from route, parameters and query; without it the middleware is skipped
+     * @param null|ResponseInterface                                                       $refused          set to what the route's middleware answered when it did not run the handler
      *
      * @internal
      */
-    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false, array $attributes = []): ?Context {
+    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false, array $attributes = [], ?\Closure $routeRequest = null, ?ResponseInterface &$refused = null): ?Context {
         if ($this->settings->contextRevivalWindowMs <= 0) {
             return null;
         }
@@ -1962,7 +1997,7 @@ class Via {
         $context->importTabState($record['tabState'] ?? []);
 
         try {
-            $this->invokeHandlerWithParams($handler, $context, $record['params']);
+            $refusal = $this->runRevivedHandler($handler, $context, $route, $record['params'], $record['query'] ?? '', $routeRequest);
         } catch (\Throwable $e) {
             $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
             // The half-built context may already have joined scopes and started timers.
@@ -1972,6 +2007,17 @@ class Via {
                 unset($this->contextSessions[$contextId]);
             }
             $this->reportError($e, $context, ErrorPhase::Render);
+
+            return null;
+        }
+        if ($refusal !== null) {
+            $this->log('info', "The middleware of {$route} answered {$refusal->getStatusCode()} instead of rebuilding context {$contextId}");
+            $context->cleanup();
+            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            if (!isset($this->contexts[$contextId])) {
+                unset($this->contextSessions[$contextId]);
+            }
+            $refused = $refusal;
 
             return null;
         }
@@ -2012,6 +2058,140 @@ class Via {
         $this->log('info', "Revived context {$contextId} on route {$route}", $context);
 
         return $context;
+    }
+
+    /**
+     * Make this worker the home of a tab whose stream connected here, and ask the worker that held it to give it up.
+     *
+     * @internal used by SseHandler
+     */
+    public function claimStream(string $contextId): void {
+        $directory = $this->app->getContextDirectory();
+        if ($this->forwarder === null || $directory === null || $directory->home($contextId) === $this->app->workerIdentity()) {
+            return;
+        }
+
+        [$claimed, $previous] = $this->app->claimHome($contextId, true, null, $this->forwarder->isLive(...));
+        if ($claimed && $previous !== null) {
+            $this->forwarder->handOver($contextId, $previous);
+        }
+    }
+
+    /**
+     * Give up this worker's copy of a tab whose stream connected to another worker: destroy it, which ends a stream
+     * it still has here, without touching its record, and return the patches no render sends again, for the new home.
+     *
+     * @internal called by Forwarder on a handover
+     *
+     * @return list<array{type: string, content: string, selector?: string, mode?: string}>
+     */
+    public function releaseHandedOver(string $contextId): array {
+        $context = $this->contexts[$contextId] ?? null;
+        $home = $this->app->getContextDirectory()?->home($contextId);
+        if ($context === null || $context->isDestroyed() || $home === null || $home === $this->app->workerIdentity()) {
+            return [];
+        }
+
+        $patches = $context->getPatchManager()->takeOneShotPatches();
+        $this->log('debug', "Handed context {$contextId} over to worker {$home[0]}, which its stream reached", $context);
+        $this->app->cancelContextCleanup($contextId);
+        unset($this->cleanupTimers[$contextId]);
+        $this->app->destroyContext($contextId, handedOver: true);
+        if (($this->contexts[$contextId] ?? null) === $context) {
+            unset($this->contexts[$contextId], $this->contextSessions[$contextId]);
+        }
+
+        return $patches;
+    }
+
+    /**
+     * Queue the patches the previous home of a tab handed over.
+     *
+     * @internal called by Forwarder
+     *
+     * @param array<mixed> $patches as releaseHandedOver() returns them
+     */
+    public function queueHandedOverPatches(string $contextId, array $patches): void {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null || $context->isDestroyed()) {
+            return;
+        }
+
+        foreach ($patches as $patch) {
+            if (!\is_array($patch) || !\in_array($patch['type'] ?? null, ['script', 'elements'], true) || !\is_string($patch['content'] ?? null)) {
+                continue;
+            }
+            $queued = ['type' => (string) $patch['type'], 'content' => $patch['content']];
+            if (\is_string($patch['selector'] ?? null)) {
+                $queued['selector'] = $patch['selector'];
+            }
+            $mode = \is_string($patch['mode'] ?? null) ? PatchMode::tryFrom($patch['mode']) : null;
+            if ($mode !== null) {
+                $queued['mode'] = $mode;
+            }
+            $context->getPatchManager()->queuePatch($queued);
+        }
+    }
+
+    /**
+     * Give the cookies of an action response that never reached the browser, because the worker that got the
+     * request stopped waiting for it, to the tab's next action response.
+     *
+     * @internal called by Forwarder
+     *
+     * @param array<mixed> $cookies cookie calls: method and arguments
+     * @param array<mixed> $headers header calls, for a session cookie written as a header
+     */
+    public function requeueResponseCookies(string $contextId, array $cookies, array $headers): void {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null || $context->isDestroyed()) {
+            return;
+        }
+
+        $sessionCookie = $this->settings->secureCookie ? SessionManager::SESSION_COOKIE_NAME_SECURE : SessionManager::SESSION_COOKIE_NAME;
+        $requeued = 0;
+        foreach ($cookies as $call) {
+            $args = \is_array($call) && \is_array($call[1] ?? null) ? array_values($call[1]) : [];
+            if (!\is_string($args[0] ?? null)) {
+                continue;
+            }
+            ++$requeued;
+            $value = (string) ($args[1] ?? '');
+            if ($args[0] === $sessionCookie) {
+                $context->requeueSessionCookie($value);
+
+                continue;
+            }
+            $context->queueCookieForNextResponse([
+                'name' => $args[0],
+                'value' => $value,
+                'expires' => (int) ($args[2] ?? 0),
+                'path' => (string) ($args[3] ?? '/'),
+                'domain' => (string) ($args[4] ?? ''),
+                'secure' => (bool) ($args[5] ?? true),
+                'httpOnly' => (bool) ($args[6] ?? true),
+                'sameSite' => (string) ($args[7] ?? 'Lax'),
+            ]);
+        }
+        foreach ($headers as $call) {
+            if (\is_array($call) && strtolower((string) ($call[0] ?? '')) === 'set-cookie'
+                && preg_match('/^' . preg_quote($sessionCookie, '/') . '=([0-9a-f]{32})/', (string) ($call[1] ?? ''), $m) === 1) {
+                ++$requeued;
+                $context->requeueSessionCookie($m[1]);
+            }
+        }
+        if ($requeued > 0) {
+            $this->log('warn', 'The response to an action of this tab never reached the browser, so its cookies go out with the next one', $context);
+        }
+    }
+
+    /**
+     * What a download URL starts with: with more than one worker this worker's id, so any worker passes it here.
+     *
+     * @internal used by Context::download()
+     */
+    public function downloadTokenPrefix(): string {
+        return $this->forwarder !== null ? $this->workerId . '-' : '';
     }
 
     /**
@@ -2383,6 +2563,72 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Run the page handler of a context being rebuilt behind its route's middleware, as a page load runs it, so
+     * an auth gate applies again and its attributes reach the handler.
+     *
+     * @param array<string, string>                                                        $params
+     * @param null|\Closure(string, array<string, string>, string): ServerRequestInterface $routeRequest
+     *
+     * @return null|ResponseInterface what the middleware answered when it did not run the handler
+     */
+    private function runRevivedHandler(callable $handler, Context $context, string $route, array $params, string $query, ?\Closure $routeRequest): ?ResponseInterface {
+        $middleware = $this->getRouteMiddleware($route);
+        if ($middleware === [] || $routeRequest === null) {
+            $this->invokeHandlerWithParams($handler, $context, $params);
+
+            return null;
+        }
+
+        $core = new class($this, $handler, $context, $params) implements RequestHandlerInterface {
+            public bool $handled = false;
+
+            /**
+             * @param callable              $pageHandler
+             * @param array<string, string> $params
+             */
+            public function __construct(private Via $via, private mixed $pageHandler, private Context $context, private array $params) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $this->handled = true;
+                $this->context->setRequestAttributes(RequestHandler::contextAttributes($request->getAttributes()));
+                $this->via->invokeHandlerWithParams($this->pageHandler, $this->context, $this->params);
+
+                return new Psr7Response(200);
+            }
+        };
+        $response = (new MiddlewareDispatcher($middleware, $core))->handle($routeRequest($route, $params, $query));
+
+        return $core->handled ? null : $response;
+    }
+
+    /**
+     * The request the route's middleware gets when a tab is rebuilt: a GET of the page's URL, with the headers,
+     * cookies and session of the request that rebuilds it and the attributes its middleware set.
+     *
+     * @param array<string, string> $params
+     * @param array<string, mixed>  $attributes
+     */
+    private function revivalRequest(Request $request, string $route, array $params, string $query, array $attributes): ServerRequestInterface {
+        $path = (string) preg_replace_callback('/\{([a-zA-Z_]\w*)\}/', static fn (array $m): string => rawurlencode($params[$m[1]] ?? ''), $route);
+        parse_str($query, $queryParams);
+
+        $psr = ($this->psrRequestFactory ??= new PsrRequestFactory())->create($request, 'page');
+        $psr = $psr->withMethod('GET')
+            ->withUri($psr->getUri()->withPath($path)->withQuery($query))
+            ->withQueryParams($queryParams)
+            ->withParsedBody(null)
+            ->withUploadedFiles([])
+            ->withBody(Stream::create(''))
+            ->withAttribute('via.session', $this->getRequestSession($request)->key)
+        ;
+        foreach ($attributes as $name => $value) {
+            $psr = $psr->withAttribute($name, $value);
+        }
+
+        return $psr;
     }
 
     /**

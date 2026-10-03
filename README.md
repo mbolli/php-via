@@ -164,9 +164,10 @@ $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide
 > (10-minute window); tune or disable with `Config::withContextTimeouts(revivalWindowMs: ...)`. Revival re-runs the
 > page handler, so server-only `#[Persist]` state resets and lifecycle hooks re-fire, just as on a
 > reload. Server-owned TAB signals (`clientWritable: false`, or all of them under
-> `Config::withStrictTabSignals()`) start from the handler's initial value. With `worker_num > 1` an
-> action on another worker rebuilds the context the same way, so those signals are per-worker state:
-> use `worker_num = 1` or keep that state in a scoped signal.
+> `Config::withStrictTabSignals()`) start from the handler's initial value. With `worker_num > 1` a
+> tab lives on the worker of its SSE stream, and actions that reach another worker are passed there;
+> when the stream reconnects to another worker, the context is rebuilt the same way, so keep state that
+> has to survive in a scoped signal or `tabState()`, or use `worker_num = 1`.
 
 ### Route Groups: shared prefix and/or middleware
 

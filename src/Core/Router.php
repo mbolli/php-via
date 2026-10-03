@@ -39,7 +39,8 @@ class Router {
     }
 
     /**
-     * Find a matching route for the given path.
+     * Find a matching route for the given path. Parameters are percent-decoded after matching: '%20' becomes a
+     * space, and '%2F' a '/' within the one parameter.
      *
      * @param string                $path   Request path
      * @param array<string, string> $params Output array for extracted parameters
@@ -169,10 +170,10 @@ class Router {
 
         // Match and extract parameters
         if (preg_match($pattern, $path, $matches)) {
-            // Extract named parameters
+            // Decoded after matching, so an encoded slash (%2F) stays in its segment and arrives as '/'.
             foreach ($matches as $key => $value) {
                 if (\is_string($key)) {
-                    $params[$key] = $value;
+                    $params[$key] = rawurldecode($value);
                 }
             }
 

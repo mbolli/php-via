@@ -129,7 +129,7 @@ $app->page('/dashboard', function (Context $c): void {
         In an action, <code>getRequestAttribute()</code> returns what the middleware set on that action's
         request. Only global middleware runs on actions, so an attribute that per-route middleware sets is
         there in the page handler only: read it there and pass it to the action's closure. A page handler
-        that runs again to rebuild a tab that was away gets no per-route attributes either; see
+        that runs again to rebuild a tab that was away runs behind the per-route middleware again; see
         <a href="/docs/lifecycle#revival">Revival</a>.
     </p>
 
@@ -181,8 +181,8 @@ $config = (new Config())
         reaches the account. In an action, call <code>$c-&gt;regenerateSession()</code>; in middleware or a
         <code>route()</code> handler, <code>$app-&gt;regenerateSession($request)</code>, before
         <code>$handler-&gt;handle()</code>. The session keeps its id, so <code>via.session</code>,
-        session data and the tabs of the session stay as they are. The old cookie works for 10 more seconds, and
-        then the streams opened with it end.
+        session data and the tabs of the session stay as they are. The session rotates at the call: the old cookie
+        works for 10 more seconds, and then the streams opened with it end.
         See <a href="/docs/api#context-regenerate-session">regenerateSession()</a>.
     </p>
 
