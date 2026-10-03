@@ -2360,15 +2360,10 @@ class Via {
      */
     private function invalidateForBroadcast(string $scope): void {
         if (Scope::isRouteBased($scope) && (Scope::parse($scope)[1] ?? null) === null) {
-            // Bare "route" reaches every route. Cache keys carry an :initial or :update
-            // suffix, so strip it to invalidate each route scope once.
-            $seenScopes = [];
-            foreach ($this->viewCache->getKeys() as $cacheKey) {
-                $baseScope = (string) preg_replace('/:(?:initial|update)$/', '', $cacheKey);
-
-                if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
-                    $this->invalidateViewCache($baseScope);
-                    $seenScopes[$baseScope] = true;
+            // Bare "route" reaches every route.
+            foreach ($this->viewCache->getScopes() as $cachedScope) {
+                if (Scope::isRouteBased($cachedScope)) {
+                    $this->invalidateViewCache($cachedScope);
                 }
             }
 

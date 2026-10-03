@@ -51,10 +51,12 @@ class ViewRenderer {
         $shouldCache = $scope !== Scope::TAB && $isUpdate;
 
         if ($shouldCache) {
+            $view = ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+
             // If context allows update caching (default true), use cache for performance
             // This prevents rendering once per client (e.g., game of life)
             if ($context->shouldCacheUpdates()) {
-                $cached = $this->cache->get($scope, true);
+                $cached = $this->cache->get($scope, true, $view);
                 if ($cached !== null) {
                     $this->logger->debug("Using cached update view for scope: {$scope}", $context);
                     $this->recordCacheHit($scope, $context);
@@ -72,7 +74,7 @@ class ViewRenderer {
             // Cache the result if updates are cacheable, unless a broadcast invalidated the scope while
             // the view rendered: the render saw the older state.
             if ($context->shouldCacheUpdates()) {
-                $this->cache->setIfCurrent($scope, $result, true, $generation);
+                $this->cache->setIfCurrent($scope, $result, true, $generation, $view);
             }
 
             return $result;
