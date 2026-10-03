@@ -30,10 +30,8 @@ final class RelayResponse extends Response {
     private ?Channel $acks = null;
 
     /**
-     * @param ?string $contextId the tab of a forwarded action, whose cookies wait for its next response when the receiver gave up
-     */
-    /**
-     * @param array{int, int} $receiver worker id and process id of the worker that passed the request
+     * @param array{int, int} $receiver  worker id and process id of the worker that passed the request
+     * @param ?string         $contextId the tab of a forwarded action, whose cookies wait for its next response when the receiver gave up
      */
     public function __construct(private Forwarder $forwarder, private array $receiver, private int $id, private int $timeoutMs, private ?string $contextId) {
         $this->fd = 0;
