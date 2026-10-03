@@ -382,12 +382,14 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
 &lt;!DOCTYPE html&gt;
 &lt;html&gt;
 &lt;head&gt;
-    &lt;meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'&gt;
+    &lt;meta charset="UTF-8"&gt;
+    {{ via_head() }}
     &lt;title&gt;{% block title %}{% endblock %}&lt;/title&gt;
 &lt;/head&gt;
 &lt;body&gt;
     &lt;nav&gt;...shared nav...&lt;/nav&gt;
     &lt;main&gt;{% block content %}{% endblock %}&lt;/main&gt;
+    {{ via_foot() }}
 &lt;/body&gt;
 &lt;/html&gt;
 

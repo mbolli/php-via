@@ -31,15 +31,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    {{ import_map }}
-    <meta data-signals='{{ signals_json }}'>
+    {{ via_head }}
     {{ head_content }}
 </head>
 <body>
     {{ content }}
     {{ foot_content }}
-    <script type="module"
-        src="{{ datastar_url }}"></script>
+    {{ via_foot }}
 </body>
 </html>
             {% endverbatim %}{% endcode %}
@@ -97,17 +95,13 @@ $c->view(function () use ($count): string {
 <html>
 <head>
     <meta charset="UTF-8">
-    {{ importMap }}
-    <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
-    <meta data-indicator="_connecting"
-        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
-    <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ basePath }}_session/close', '{{ contextId }}'); });">
+    {{ via_head() }}
     <title>{% block title %}{% endblock %}</title>
 </head>
 <body>
     <nav>...shared nav...</nav>
     <main>{% block content %}{% endblock %}</main>
-    <script type="module" src="{{ datastarUrl }}"></script>
+    {{ via_foot() }}
 </body>
 </html>
     {% endverbatim %}{% endcode %}
@@ -139,7 +133,7 @@ $c->view(function () use ($count): string {
     {% code 'php' %}{% verbatim %}
 $app = new Via(
     (new Config())
-        ->withTemplateDir(__DIR__ . '/templates')    // Twig views
+        ->withTemplateDir(__DIR__ . '/templates')    // Twig views, after composer require twig/twig
         ->withShellTemplate(__DIR__ . '/shell.html') // optional plain-HTML shell
 );
     {% endverbatim %}{% endcode %}

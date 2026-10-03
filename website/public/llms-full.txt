@@ -569,8 +569,8 @@ passes the context's signals and actions to the template by name, plus:
 | `contextId` | The tab's context id |
 | `currentRoute` | The matched route, e.g. `/docs/signals` |
 | `basePath` | Base URL path, always ends with `/` (default: `/`) |
-| `datastarUrl` | URL of the Datastar bundle, versioned by content, e.g. `/datastar.js?v=727844adfc` |
-| `importMap` | The page's `<script type="importmap">` tag, empty without Rocket or `withImportMap()` entries |
+| `via_head()` | The tags that connect the page (via_ctx, the import map, the SSE connect, the close beacon), right after `<meta charset>` |
+| `via_foot()` | The Datastar module script from `Config::getDatastarUrl()`, before `</body>` |
 
 Datastar attributes in templates, with ids written from the signal objects:
 ```twig
@@ -611,12 +611,13 @@ document writes both itself:
 
 ```twig
 <head>
-    {{ importMap }}
+    <meta charset="UTF-8">
+    {{ via_head() }}
     ...
 </head>
 <body>
     ...
-    <script type="module" src="{{ datastarUrl }}"></script>
+    {{ via_foot() }}
 </body>
 ```
 

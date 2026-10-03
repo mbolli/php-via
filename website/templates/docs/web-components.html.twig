@@ -104,15 +104,13 @@ $app = new Via(
 <html>
 <head>
     <meta charset="UTF-8">
-    {{ import_map }}
-    <meta data-signals='{{ signals_json }}'>
-    <!-- the SSE bootstrap metas from the default shell.html -->
+    {{ via_head }}
     {{ head_content }}
 </head>
 <body>
     {{ content }}
     {{ foot_content }}
-    <script type="module" src="{{ datastar_url }}"></script>
+    {{ via_foot }}
 </body>
 </html>
     {% endverbatim %}{% endcode %}
@@ -139,16 +137,12 @@ $app = new Via(
 <html>
 <head>
     <meta charset="UTF-8">
-    {{ importMap }}
-    <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
-    <meta data-indicator="_connecting"
-        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
-    <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ basePath }}_session/close', '{{ contextId }}'); });">
+    {{ via_head() }}
     <title>{% block title %}{% endblock %}</title>
 </head>
 <body>
     {% block content %}{% endblock %}
-    <script type="module" src="{{ datastarUrl }}"></script>
+    {{ via_foot() }}
 </body>
 </html>
     {% endverbatim %}{% endcode %}
