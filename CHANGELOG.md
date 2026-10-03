@@ -241,8 +241,11 @@ message that names the new one.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
+- **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, shell or
+  template, for JSON, webhooks and MCP, behind the global and route middleware as a page is. A
+  response body of unknown size goes out as it is read.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
-  actions and SSE, so middleware no longer reads the session cookie, whose name
+  actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.
 
 ### Deprecated

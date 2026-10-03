@@ -56,6 +56,7 @@ use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
 use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 use Twig\Environment;
 
 /**
@@ -259,6 +260,12 @@ class Via {
 
     /** @var array<string, RouteDefinition> Route definitions indexed by route pattern */
     private array $routeDefinitions = [];
+
+    /** @var array<string, array<string, array{RequestHandlerInterface, RouteDefinition}>> route()'s routes: pattern => method => handler and definition */
+    private array $plainRoutes = [];
+
+    /** @var list<RouteDefinition> route()'s definitions in registration order, for group() */
+    private array $plainRouteDefinitions = [];
 
     /** Active URL prefix set by the currently executing group() closure */
     private string $groupPrefix = '';
@@ -596,10 +603,60 @@ class Via {
     }
 
     /**
+     * Register a plain HTTP route, with no context, shell or template: a JSON endpoint, a webhook, an MCP server.
+     *
+     * The PSR-15 handler gets the request after the global middleware and the route's own (->middleware() on
+     * the returned definition), outermost first, and its response goes out as it is, a body of unknown size
+     * as it is read. The request carries the session id in 'via.session' and each path parameter as an
+     * attribute of its name. HEAD is answered as GET without the body; list OPTIONS for a CORS preflight.
+     * php-via checks no Origin header here, as for pages: add CSRF or auth middleware where a route changes
+     * state. The response sets no session cookie. Plain routes go before pages, so a page on the same path
+     * answers the other methods; on a path with no page, the other methods get 405.
+     *
+     * ```php
+     * $app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
+     * ```
+     *
+     * @param list<string>|string $methods an HTTP method, or several: 'POST', ['GET', 'POST', 'OPTIONS']
+     * @param string              $path    route pattern with {params}, as for page(); a group() prefix applies
+     *
+     * @throws \InvalidArgumentException without a method, or for one that is no HTTP method name
+     */
+    public function route(array|string $methods, string $path, RequestHandlerInterface $handler): RouteDefinition {
+        $methods = \is_string($methods) ? [$methods] : $methods;
+        if ($methods === []) {
+            throw new \InvalidArgumentException('route() needs at least one HTTP method, such as \'GET\' or [\'GET\', \'POST\'].');
+        }
+
+        if ($this->groupPrefix !== '') {
+            $base = rtrim($this->groupPrefix, '/');
+            $path = ($path === '' || $path === '/') ? $base : $base . '/' . ltrim($path, '/');
+        }
+
+        $methods = array_map(self::httpMethod(...), $methods);
+        $definition = new RouteDefinition($path, $handler->handle(...));
+        foreach ($methods as $method) {
+            $this->plainRoutes[$path][$method] = [$handler, $definition];
+        }
+        $this->plainRouteDefinitions[] = $definition;
+
+        return $definition;
+    }
+
+    /**
+     * @internal read by the request handler
+     *
+     * @return array<string, array<string, array{RequestHandlerInterface, RouteDefinition}>> pattern => method => handler and definition
+     */
+    public function getPlainRoutes(): array {
+        return $this->plainRoutes;
+    }
+
+    /**
      * Register a group of routes that share a URL prefix and/or middleware.
      *
-     * Optionally pass a URL prefix as the first argument: every `page()` call inside
-     * the closure will have the prefix prepended to its route. Call `->middleware()` on
+     * Optionally pass a URL prefix as the first argument: every `page()` and `route()` call
+     * inside the closure will have the prefix prepended to its route. Call `->middleware()` on
      * the returned RouteGroup to apply shared middleware to all routes in the group.
      *
      * ```php
@@ -628,6 +685,7 @@ class Via {
         }
 
         $before = array_keys($this->routeDefinitions);
+        $plainBefore = \count($this->plainRouteDefinitions);
         $this->groupPrefix = $prefix;
 
         try {
@@ -641,7 +699,7 @@ class Via {
         $newRoutes = array_diff($after, $before);
         $definitions = array_values(array_map(fn (string $r) => $this->routeDefinitions[$r], $newRoutes));
 
-        return new RouteGroup($definitions);
+        return new RouteGroup([...$definitions, ...\array_slice($this->plainRouteDefinitions, $plainBefore)]);
     }
 
     /**
@@ -2073,6 +2131,19 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * @param mixed $method an entry of route()'s $methods, whose type PHP does not check
+     *
+     * @throws \InvalidArgumentException for anything but letters
+     */
+    private static function httpMethod(mixed $method): string {
+        if (!\is_string($method) || preg_match('/^[A-Za-z]+$/', $method) !== 1) {
+            throw new \InvalidArgumentException('route() takes HTTP method names such as \'GET\' or \'POST\', got ' . var_export($method, true) . '.');
+        }
+
+        return strtoupper($method);
     }
 
     /**

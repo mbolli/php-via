@@ -91,6 +91,7 @@ class RequestHandler {
     private PsrResponseEmitter $psrResponseEmitter;
     private ?DevBarController $devBar = null;
     private StaticBrotli $staticBrotli;
+    private PlainRouteHandler $plainRoutes;
 
     /** Uncompressed static file bodies, kept while the file's mtime and size match. */
     private StaticBodyCache $staticCache;
@@ -105,6 +106,7 @@ class RequestHandler {
         $this->staticBrotli = $staticBrotli ?? new StaticBrotli($via->getSettings(), $via->log(...));
         $this->psrRequestFactory = new PsrRequestFactory();
         $this->psrResponseEmitter = new PsrResponseEmitter();
+        $this->plainRoutes = new PlainRouteHandler($via, $this->psrRequestFactory, $this->psrResponseEmitter);
         $this->staticCache = new StaticBodyCache(self::STATIC_CACHE_TOTAL_BYTES, self::STATIC_CACHE_FILE_BYTES);
     }
 
@@ -353,6 +355,17 @@ class RequestHandler {
             return;
         }
 
+        // Plain routes from Via::route(), for their methods; a page on the same path takes the others
+        $params = [];
+        $allowed = [];
+        $plain = $this->plainRoutes->find($method, $path, $params, $allowed);
+        if ($plain !== null) {
+            $status = $this->plainRoutes->serve($request, $response, $plain[0], $plain[1], $params);
+            $this->logRequest($method, $path, $status, $requestStart);
+
+            return;
+        }
+
         // Handle page routes
         $params = [];
         $handler = $this->via->getRouter()->matchRoute($path, $params);
@@ -365,6 +378,13 @@ class RequestHandler {
                     return;
                 }
             }
+        }
+
+        if ($allowed !== []) {
+            self::methodNotAllowed($request, $response, implode(', ', $allowed));
+            $this->logRequest($method, $path, 405, $requestStart);
+
+            return;
         }
 
         // An extension-less static file, such as an ACME challenge token
@@ -522,8 +542,8 @@ class RequestHandler {
 
     /**
      * Answer a HEAD request that no static file took: /_health, an action URL and a Dev Bar asset as GET would, any
-     * other framework endpoint 404, a page route with 200 and no body, an extension-less file in $staticDir as GET
-     * would, anything else 404.
+     * other framework endpoint 404, a plain route that takes GET or HEAD through its handler, a page route with 200
+     * and no body, an extension-less file in $staticDir as GET would, anything else 404.
      */
     private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir): void {
         if ($path === '/_health') {
@@ -551,11 +571,25 @@ class RequestHandler {
         }
 
         $params = [];
+        $allowed = [];
+        $plain = $this->plainRoutes->find('HEAD', $path, $params, $allowed);
+        if ($plain !== null) {
+            $this->plainRoutes->serve($request, $response, $plain[0], $plain[1], $params);
+
+            return;
+        }
+
         $handler = $this->via->getRouter()->matchRoute($path, $params);
         if ($handler !== null) {
             $response->status(200);
             $response->header('Content-Type', 'text/html; charset=utf-8');
             $response->end();
+
+            return;
+        }
+
+        if ($allowed !== []) {
+            self::methodNotAllowed($request, $response, implode(', ', $allowed));
 
             return;
         }

@@ -22,7 +22,7 @@ class PsrRequestFactory {
     }
 
     /**
-     * @param string $requestType One of 'page', 'action', 'sse'
+     * @param string $requestType One of 'page', 'action', 'sse', 'route'
      */
     public function create(Request $swooleRequest, string $requestType = 'page'): ServerRequestInterface {
         $server = $swooleRequest->server ?? [];
