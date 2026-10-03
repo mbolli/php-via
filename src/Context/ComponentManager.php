@@ -98,7 +98,7 @@ class ComponentManager {
             $componentId = $context->getId() . '/_component/' . IdGenerator::generate();
         }
         $componentNamespace = $namespace ?? 'c' . mb_substr(md5($componentId), 0, 8);
-        $componentContext = new Context($componentId, $context->getRoute(), $this->app, $componentNamespace);
+        $componentContext = new Context($componentId, $context->getRoute(), $this->app, $componentNamespace, $context->getSessionId());
 
         // A nested component's patches and request go to the page too.
         $componentContext->getComponentManager()->setParentPageContext($this->getParentPageContext() ?? $context);
