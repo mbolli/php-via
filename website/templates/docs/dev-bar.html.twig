@@ -17,7 +17,7 @@
     <h2 id="enabling">Enabling it</h2>
     <p>
         The Dev Bar follows <code>devMode</code> by default: on in development, off (and 404-ing all
-        its endpoints) in production. Override it explicitly with <code>withTracing()</code>. That's
+        its endpoints) in production. Override it explicitly with <code>withDevBar()</code>. That's
         how this public site demos it. Read-only does not mean private: every visitor sees the traces,
         scopes, session ids and context ids of all tabs, so in production turn it on only for trusted
         visitors such as admins.
@@ -124,8 +124,8 @@ $config
     <div class="callout callout--warn">
         <strong>Writes can never be enabled in production.</strong>
         <code>isTracingWritesEnabled()</code> begins with a <code>devMode</code> check, so even an
-        explicit <code>withTracingWrites(true)</code> is ignored when devMode is off:
-        <code>withTracing(true)</code> on a public site is always read-only. Any visitor who could
+        explicit <code>withDevBarOptions(writes: true)</code> is ignored when devMode is off:
+        <code>withDevBar(true)</code> on a public site is always read-only. Any visitor who could
         reach an editable panel could mutate shared <code>ROUTE</code>/<code>SESSION</code>/<code>GLOBAL</code>
         state, so never enable writes on untrusted traffic.
     </div>

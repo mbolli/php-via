@@ -15,12 +15,12 @@
         <li><strong>SSE connect (GET /_sse)</strong>: <code>onClientConnect</code> fires, context syncs</li>
         <li><strong>Actions</strong>: POST to <code>/_action/{name}</code>, callback runs, patches stream back</li>
         <li><strong>SSE disconnect</strong>: <code>onClientDisconnect</code> fires immediately</li>
-        <li><strong>Cleanup (after timeout)</strong>: <code>onDisconnect</code> / <code>onCleanup</code> fire, timers cancelled</li>
+        <li><strong>Cleanup (after timeout)</strong>: <code>onCleanup</code> callbacks fire, timers cancelled</li>
     </ol>
     <p>
         If the browser reconnects within the cleanup timeout (default: 5 seconds), the context is reused
         and cleanup is cancelled: you won't see a spurious disconnect/reconnect for normal page refreshes.
-        Configure the timeout with <code>Config::withContextCleanupDelay()</code>. A longer delay
+        Configure the timeout with <code>Config::withContextTimeouts(cleanupDelayMs: ...)</code>. A longer delay
         tolerates flakier clients at the cost of holding idle contexts (and their in-memory view
         payloads) in memory longer under concurrent disconnects; pass <code>0</code> to clean up
         immediately with no reconnect grace period:
@@ -32,10 +32,10 @@ $config->withContextTimeouts(cleanupDelayMs: 60_000); // 60 seconds
     <p>
         A context whose SSE stream never connects (a crawler, a prefetch, a tab closed before it
         connected) is destroyed after the connect timeout, 30 seconds by default, and its
-        <code>onDisconnect</code> / <code>onCleanup</code> callbacks run. With several workers the same
+        <code>onCleanup</code> callbacks run. With several workers the same
         applies to a copy an action rebuilt on a worker the tab does not stream from; every action on it
         starts the timeout again. A tab that connects later is rebuilt by revival.
-        <code>Config::withContextConnectTimeout(0)</code> keeps such contexts until the worker stops.
+        <code>Config::withContextTimeouts(connectMs: 0)</code> keeps such contexts until the worker stops.
     </p>
     <p>
         An action that reaches a tab whose stream is down, because the stream dropped or because the
@@ -126,7 +126,7 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
     <p>
         This is on by default (10-minute window) and needs no application code. Because revival re-runs
         the page handler, it is not lossless: server-only state (<code>#[Persist]</code>) resets and
-        <code>onDisconnect</code>/connect hooks re-fire, exactly as they would on a reload. Named
+        <code>onCleanup</code> and connect hooks re-fire, exactly as they would on a reload. Named
         components survive; anonymous components (created without an explicit name) reset. Tune the
         window, or disable revival entirely (falling back to a reload on reconnect), with:
     </p>
@@ -166,7 +166,7 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
 
     <p>These two hooks together replace a polling timer for presence features. See <a href="/docs/broadcasting">Broadcasting</a>.</p>
 
-    <h2 id="on-disconnect">onDisconnect / onCleanup (per-context)</h2>
+    <h2 id="on-disconnect">onCleanup (per-context)</h2>
     <p>
         Register cleanup logic <em>per context</em>. Fires after the SSE connection has been closed and the
         cleanup timeout has elapsed (or the browser sent a close beacon). Use this for resource cleanup
@@ -209,8 +209,8 @@ $app->setInterval(function () use ($app): void {
     <p>
         Under the hood <code>setInterval()</code> calls <code>Timer::tick()</code> when the leader worker starts
         and clears it when that worker stops. Pass <code>everyWorker: true</code> to arm it in every worker
-        instead, for work that belongs to each process. Call <code>Timer::tick()</code> from <code>onStart</code> yourself
-        when you need the timer ID for conditional logic; <code>onStart</code> runs in every worker, so that
+        instead, for work that belongs to each process. Call <code>Timer::tick()</code> from <code>onWorkerStart()</code> yourself
+        when you need the timer ID for conditional logic; <code>onWorkerStart()</code> runs in every worker, so that
         timer does too.
     </p>
 

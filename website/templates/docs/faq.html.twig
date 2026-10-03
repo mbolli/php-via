@@ -416,7 +416,7 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         <ul>
             <li>The server was restarted: all contexts from the previous process are gone, but the
                 browser still has stale action URLs and signal values from the old session.</li>
-            <li>The SSE connection dropped and the context was cleaned up via <code>onDisconnect</code>,
+            <li>The SSE connection dropped and the context was cleaned up (<code>onCleanup</code> ran),
                 but the UI wasn't refreshed.</li>
             <li>The <code>via_ctx</code> signal was omitted from the request body or query params.</li>
         </ul>

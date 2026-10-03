@@ -128,7 +128,7 @@ $count->id();
 ```
 
 **Ids**: a signal's id is unique per tab and includes the tab for TAB signals, so always
-write it from the signal object: `$signal->id()`, `bind()`, `text()` in PHP, or
+write it from the signal object: `$signal->id()`, `bind()`, `ref()` in PHP, or
 `{{ count.id }}` in Twig. A scoped signal outside a component whose name and scope are
 plain letters and digits keeps a readable id such as `global_count`; every other id ends in
 `____` plus codes, so names that differ only in punctuation never collide. To find a scoped
@@ -351,7 +351,7 @@ $c->onCleanup(function (Context $c): void { /* ... */ });
 
 - **A closed tab is noticed at once.** A stream ends about 1 ms after the browser closes
   the connection: `onClientDisconnect` runs, the client leaves `getClients()`, and
-  `onDisconnect`/`onCleanup` run after the cleanup delay (`withContextCleanupDelay()`,
+  `onCleanup` runs after the cleanup delay (`withContextTimeouts(cleanupDelayMs: ...)`,
   5 s by default).
 - **Idle streams stay open behind proxies.** A stream silent for 15 s writes an SSE
   comment (`withSseKeepAliveMs()`, `0` turns it off).
@@ -360,15 +360,15 @@ $c->onCleanup(function (Context $c): void { /* ... */ });
   `reverse_proxy h2c://127.0.0.1:3000` with `withH2c()`. The SSE response's
   `X-Accel-Buffering: no` header turns nginx's proxy buffering off for it.
 - **A context whose stream never connects is freed** after the connect timeout
-  (`withContextConnectTimeout()`, 30 s by default), running its cleanup hooks.
+  (`withContextTimeouts(connectMs: ...)`, 30 s by default), running its cleanup hooks.
 - **An action on a tab whose stream is down keeps it for the reconnect.** The stream
   dropped or the action revived the context: it is freed the reconnect timeout
-  (`withContextReconnectTimeout()`, 60 s by default) after the last action, longer than
+  (`withContextTimeouts(reconnectMs: ...)`, 60 s by default) after the last action, longer than
   Datastar's 30 s `retryMaxWait`. A context freed before its stream returns drops its
   queued patches; the revived tab gets its signals and a fresh view, not one-off patches.
 - **Revival.** A tab that comes back after its context was cleaned up is rebuilt with the
   same id and the signal values it still holds, within the revival window
-  (`withContextRevivalWindow()`, 10 minutes by default), instead of reloading.
+  (`withContextTimeouts(revivalWindowMs: ...)`, 10 minutes by default), instead of reloading.
   Its page handler reads the attributes of the reviving action's or reconnect's middleware;
   per-route middleware does not run, so read what it would set from the session.
 - **Reconnects.** After a network error Datastar retries the stream after 1, 2, 4, 8 and

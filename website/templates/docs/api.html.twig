@@ -142,12 +142,12 @@ $app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?
 
     <h3 id="via-on-start"><code>onWorkerStart(callable $callback): void</code></h3>
     <h3 id="via-on-shutdown"><code>onWorkerStop(callable $callback): void</code></h3>
-    <p>Server lifecycle hooks. Use <code>onStart</code> to create timers; <code>onShutdown</code> to clear them.
-    <code>onStart</code> callbacks run once in each worker process as it starts, so with <code>worker_num &gt; 1</code>
+    <p>Server lifecycle hooks. Use <code>onWorkerStart</code> to create timers; <code>onWorkerStop</code> to clear them.
+    <code>onWorkerStart</code> callbacks run once in each worker process as it starts, so with <code>worker_num &gt; 1</code>
     a timer created there fires in every worker. Use <a href="#via-set-interval"><code>setInterval()</code></a>
     for a timer that should fire once per interval for the whole server.</p>
     <p>
-        <code>onShutdown</code> callbacks run once in each worker process when that worker stops: on
+        <code>onWorkerStop</code> callbacks run once in each worker process when that worker stops: on
         <code>SIGTERM</code> or <code>SIGINT</code> (<code>docker stop</code>, <code>systemctl stop</code>,
         Ctrl-C), and also when a worker is reloaded (<code>SIGUSR1</code>) or recycled after
         <code>max_request</code>. A callback cannot tell a reload from a stop. They run inside a coroutine. Before
@@ -158,7 +158,7 @@ $app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?
         whole seconds the real budget is roughly <code>max_wait_time</code> minus up to one second.
     </p>
     <p>
-        End long-lived coroutines, sockets and <code>Event::add</code> fds from <code>onShutdown</code>, or have
+        End long-lived coroutines, sockets and <code>Event::add</code> fds from <code>onWorkerStop</code>, or have
         background loops check <code>$app-&gt;isShuttingDown()</code>. Anything still alive holds the worker until
         <code>max_wait_time</code>, and then OpenSwoole kills it. The worker logs a warning with the number of
         coroutines left.
@@ -177,7 +177,7 @@ $app->onWorkerStop(function (int $workerId) use (&$timerId): void {
     <p>
         Register a server-wide recurring timer that fires every <code>$ms</code> milliseconds.
         It is armed when the worker starts and cleared when it stops, with no manual
-        <code>onStart</code>/<code>onShutdown</code> wiring. With <code>worker_num &gt; 1</code> it runs on one
+        <code>onWorkerStart</code>/<code>onWorkerStop</code> wiring. With <code>worker_num &gt; 1</code> it runs on one
         worker only, so the callback fires once per interval for the whole server. Pass
         <code>everyWorker: true</code> for work that has to happen in each process.
     </p>
@@ -340,7 +340,7 @@ $status = $c->signal('idle', 'status', clientWritable: false);
         <code>route__examples_counter_count</code>. Every other id, which includes all TAB and component
         signals, ends in <code>____</code> plus one code per <code>_</code> saying what it stands for, so
         two names that differ only in punctuation never share an id. Use <code>$signal-&gt;id()</code>,
-        <code>bind()</code> and <code>text()</code> in templates instead of writing ids by hand, and
+        <code>bind()</code> and <code>ref()</code> in templates instead of writing ids by hand, and
         <code>$app-&gt;getScopedSignalByName()</code> to find a scoped signal from code outside a context.
     </p>
     <p>

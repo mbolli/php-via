@@ -16,7 +16,7 @@ final class ChatRoomExample {
     private const array SUMMARY = [
         '<strong>Custom scopes</strong> isolate each room. Messages in "lobby" never leak to "general": each room has its own broadcast channel built with <code>Scope::build()</code>.',
         '<strong>Session-scoped usernames</strong> persist across tabs. Your username is stored in SESSION scope, so switching rooms or opening a new tab keeps the same identity.',
-        '<strong>Presence + typing</strong> indicators update in real time. When a user disconnects, the <code>onDisconnect</code> hook removes them from the room\'s user list.',
+        '<strong>Presence + typing</strong> indicators update in real time. When a user disconnects, the <code>onCleanup</code> hook removes them from the room\'s user list.',
         '<strong>addScope()</strong> lets a context join a broadcast channel mid-flight. The room page starts in TAB scope for private input, then adds the room scope for shared messages.',
         '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code> and the last 50 are loaded on connect, no in-memory state required.',
         '<strong>Multi-room architecture</strong>: open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
@@ -34,7 +34,7 @@ final class ChatRoomExample {
             ['name' => 'updateTyping', 'desc' => 'Sets the typing indicator with username and broadcasts to room. The server clears it 5 s after the last keystroke.'],
         ],
         'views' => [
-            ['name' => 'chat_room.html.twig', 'desc' => 'Sidebar room list + chat panel with message list, user presence, and typing indicator. Uses onDisconnect for cleanup.'],
+            ['name' => 'chat_room.html.twig', 'desc' => 'Sidebar room list + chat panel with message list, user presence, and typing indicator. Uses onCleanup for cleanup.'],
         ],
     ];
 

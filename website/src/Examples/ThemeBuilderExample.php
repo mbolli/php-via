@@ -15,7 +15,7 @@ use Mbolli\PhpVia\Via;
  * The undo/redo history is per-connection state, which maps directly onto #[Persist]:
  * each connection gets its own instance, so $history and $historyIdx live for exactly
  * as long as the tab is open and are freed automatically when it closes. That removes
- * the closure version's static maps keyed by context id, and its onDisconnect cleanup.
+ * the closure version's static maps keyed by context id, and its onCleanup hook.
  *
  * There are no signals: the visual state is server-authoritative. Each action mutates
  * the history array and calls $ctx->sync() to re-render the (callable) demo view.
@@ -67,7 +67,7 @@ final class ThemeBuilderExample {
             'description' => 'Composition API: undo/redo history lives in a <code>#[Persist]</code> array (per-connection server state, no signals). Click swatches to repaint the preview card server-side.',
             'summary' => [
                 '<strong>#[Persist] history</strong>: the undo/redo stack is a plain instance array. Each connection gets its own instance, so no static maps keyed by context id are needed; the state is freed automatically when the tab closes.',
-                '<strong>No signals, no onDisconnect</strong>: the visual state is fully server-authoritative and bound to the instance lifetime. The closure version\'s manual onDisconnect cleanup disappears entirely.',
+                '<strong>No signals, no onCleanup</strong>: the visual state is fully server-authoritative and bound to the instance lifetime. The closure version\'s manual onCleanup hook disappears entirely.',
                 '<strong>Undo/redo without JavaScript</strong>: setColor pushes a new entry; undo decrements <code>$this->historyIdx</code>, redo increments it. History truncation on branch is a single array_slice.',
                 '<strong>Callable view + $ctx->sync()</strong>: each #[Action] mutates the history, then calls sync() to re-render. The view closure re-reads the live <code>$this->history</code> entry every render.',
                 '<strong>Input validation</strong>: only pre-approved swatch hex values are accepted. The server ignores any color not in its whitelist, making the action safe from injected values.',

@@ -60,7 +60,7 @@
     <h2 id="page-views">Page views that never open a stream</h2>
     <p>
         A crawler, a link preview or a prefetch loads the page but never connects its stream. php-via keeps
-        that context until the connect timeout (<code>withContextConnectTimeout()</code>, 30&nbsp;s by
+        that context until the connect timeout (<code>withContextTimeouts(connectMs: ...)</code>, 30&nbsp;s by
         default), so a crawler fetching 50 pages per second holds about 50&nbsp;MB. Before 0.13.1 such
         contexts, and every page that called <code>$c->scope()</code>, were never freed.
     </p>

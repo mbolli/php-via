@@ -58,8 +58,8 @@ composer run dev
     <ol>
         <li>The current worker finishes its in-flight requests.</li>
         <li>A new worker process is forked from the master.</li>
-        <li>The new worker runs <code>onWorkerStart</code>, which executes the <code>onStart</code> callbacks.</li>
-        <li>The <code>onStart</code> callback <code>require</code>s <code>routes.php</code>, loading fresh class definitions from disk.</li>
+        <li>The new worker runs the <code>onWorkerStart()</code> callbacks.</li>
+        <li>The <code>onWorkerStart()</code> callback <code>require</code>s <code>routes.php</code>, loading fresh class definitions from disk.</li>
         <li>The route table is refreshed so <code>RequestHandler</code> sees the new routes.</li>
     </ol>
 
@@ -71,7 +71,7 @@ composer run dev
     <p>
         The solution is a <strong>thin <code>app.php</code></strong>: the entry script only sets up configuration,
         middleware, and routes that don't reference app-layer classes. Everything else (example classes, route handlers,
-        and the sitemap) lives in <code>routes.php</code>, which is loaded via <code>onStart()</code> and therefore
+        and the sitemap) lives in <code>routes.php</code>, which is loaded via <code>onWorkerStart()</code> and therefore
         runs inside the worker, not master:
     </p>
     {% code 'php' %}{% verbatim %}
@@ -157,8 +157,8 @@ composer run watch-test
     </p>
     <ul>
         <li><code>app.php</code> must not <code>use</code> or instantiate any class you want to hot-reload.</li>
-        <li>Put all hot-reloadable route registrations in a separate file (e.g. <code>routes.php</code>) and load it via <code>onStart()</code>.</li>
-        <li>Any code that runs before <code>$app->onStart()</code> in <code>app.php</code> is fixed for the lifetime of the master process.</li>
+        <li>Put all hot-reloadable route registrations in a separate file (e.g. <code>routes.php</code>) and load it via <code>onWorkerStart()</code>.</li>
+        <li>Any code that runs before <code>$app->onWorkerStart()</code> in <code>app.php</code> is fixed for the lifetime of the master process.</li>
     </ul>
 
     <p>A minimal <code>scripts/dev.sh</code> for your project:</p>
@@ -192,7 +192,7 @@ done
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="{{ basePath }}docs/deployment">Deployment</a>: systemd, Caddy, TLS, graceful restart in production</li>
-        <li><a href="{{ basePath }}docs/lifecycle">Lifecycle</a>: <code>onStart</code>, <code>onShutdown</code>, timers</li>
+        <li><a href="{{ basePath }}docs/lifecycle">Lifecycle</a>: <code>onWorkerStart</code>, <code>onWorkerStop</code>, timers</li>
     </ul>
 </article>
 {% endblock %}

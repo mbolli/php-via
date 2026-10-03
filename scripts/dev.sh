@@ -80,7 +80,7 @@ pkill -f "entr -dn" 2>/dev/null || true
 APP_ENV=dev php website/app.php &
 SERVER_PID=$!
 
-# Wait for Via's onStart callback to write the master PID file (up to 10 s).
+# Wait for Via to write the master PID file (up to 10 s).
 # This file is written by the framework from $server->master_pid — authoritative.
 echo "⚡ Waiting for server to start..."
 for i in $(seq 1 20); do

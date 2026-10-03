@@ -493,9 +493,9 @@ kill -USR1 $(cat /var/run/myapp.pid)
     <p>
         On a reload each old worker ends its SSE streams, which fires
         <code>onClientDisconnect</code> (the browsers reconnect to the new workers), and then runs your
-        <code>onShutdown</code> callbacks, exactly as on <code>SIGTERM</code> or <code>SIGINT</code>. The same
+        <code>onWorkerStop</code> callbacks, exactly as on <code>SIGTERM</code> or <code>SIGINT</code>. The same
         happens when a worker is recycled after <code>max_request</code>. A callback cannot tell a reload from a
-        stop, so keep "server going down" announcements out of <code>onShutdown</code>. Register cleanup callbacks
+        stop, so keep "server going down" announcements out of <code>onWorkerStop</code>. Register cleanup callbacks
         for any timers or open resources.
     </p>
 
@@ -532,9 +532,9 @@ $config = (new Config())
         or of the revival window, whichever is shorter (150&nbsp;s by default). A context that does not fit
         in the directory is logged, and its actions on other workers answer 400. A copy that an action
         rebuilt on a worker the tab does not stream from is freed after the connect timeout
-        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again. A tab
+        (<code>withContextTimeouts(connectMs: ...)</code>); every action on it starts the timeout again. A tab
         that streams from no worker keeps the reconnect timeout instead
-        (<code>withContextReconnectTimeout()</code>), see <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
+        (<code>withContextTimeouts(reconnectMs: ...)</code>), see <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
     </p>
     <p>
         Each worker keeps the <code>getClients()</code> list it built last, about 2.3&nbsp;KB per client,
@@ -583,7 +583,7 @@ $config = (new Config())
         per second &times; 630; the default 4&nbsp;096 rows (about 8&nbsp;000 in practice) covers about
         12 page views per second. When it is full, new contexts get no row and a warning is logged at most
         every 10&nbsp;s per worker; those tabs work, but their actions on other workers answer 400. With
-        <code>withContextRevivalWindow(0)</code> no worker rebuilds another worker's context, so no rows
+        <code>withContextTimeouts(revivalWindowMs: 0)</code> no worker rebuilds another worker's context, so no rows
         are written.
     </p>
     <p>
@@ -817,7 +817,7 @@ brotli --best public/js/app.js    # writes public/js/app.js.br; rerun after each
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: onStart, onShutdown, cleanup hooks</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: onWorkerStart, onWorkerStop, cleanup hooks</li>
         <li><a href="/docs/actions#url">Actions → URL</a>: why <code>@post()</code> is required</li>
         <li><a href="/docs/broker">Broker</a>: SwooleBroker, RedisBroker, NatsBroker</li>
         <li><a href="/docs/api">API Reference</a>: Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>, <code>withEmbeddable</code>)</li>
