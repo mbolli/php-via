@@ -66,3 +66,16 @@ test('a fresh .br sidecar is sent as it is, and a stale one is ignored', functio
         ->and($r['stale_form'])->toBe('l11', $r['out'])
     ;
 });
+
+test('HEAD answers like GET with no body: same headers, and the length of the body GET sends', function (): void {
+    // OpenSwoole 26.2 sends end()'s body and sendfile()'s file on HEAD as well, and HEAD on a static file answered 404.
+    $r = staticBrotliServer('head');
+
+    expect($r['head_cases'])->toBe('16', $r['out'])
+        ->and($r['head_mismatches'])->toBe('none')
+        ->and($r['head_then_get'])->toBe('ok')
+        ->and($r['head_304'])->toBe('304 0')
+        ->and($r['head_route'])->toBe('200')
+        ->and($r['head_missing'])->toBe('404')
+    ;
+});

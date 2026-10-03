@@ -14,6 +14,7 @@ declare(strict_types=1);
  *            meanwhile
  *   workers  as later, with two workers
  *   sidecar  a fresh .br sidecar is sent as it is and a stale one is ignored
+ *   head     HEAD on static files, the framework's bundles and the Dev Bar assets answers as GET does, with no body
  *
  * Prints key=value lines.
  */
@@ -24,6 +25,7 @@ putenv('VIA_TEST_MODE=');
 
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use Tests\Support\FixturePort;
 
@@ -94,6 +96,48 @@ function probeRequest(int $port, string $path, array $headers = [], float $timeo
     return ['status' => (int) (explode(' ', $lines[0])[1] ?? 0), 'headers' => $parsed, 'body' => $body, 'ms' => (microtime(true) - $start) * 1000];
 }
 
+/**
+ * Requests written at once on one connection, and everything the server sends back until it closes.
+ *
+ * @param list<string> $requests "METHOD /path" with optional extra header lines after a newline
+ */
+function rawExchange(int $port, array $requests): string {
+    $sock = @stream_socket_client("tcp://127.0.0.1:{$port}", $errno, $err, 5);
+    if ($sock === false) {
+        return '';
+    }
+    $last = count($requests) - 1;
+    $out = '';
+    foreach ($requests as $i => $request) {
+        [$line, $extra] = array_pad(explode("\n", $request, 2), 2, '');
+        $out .= "{$line} HTTP/1.1\r\nHost: 127.0.0.1\r\n" . ($extra !== '' ? str_replace("\n", "\r\n", $extra) . "\r\n" : '')
+            . ($i === $last ? "Connection: close\r\n" : '') . "\r\n";
+    }
+    fwrite($sock, $out);
+    stream_set_timeout($sock, 5);
+    $raw = (string) stream_get_contents($sock);
+    fclose($sock);
+
+    return $raw;
+}
+
+/**
+ * One response on a connection that closes after it: status, headers, and every byte after them.
+ *
+ * @return array{status: int, headers: array<string, string>, rest: string}
+ */
+function parseResponse(string $raw): array {
+    [$head, $rest] = array_pad(explode("\r\n\r\n", $raw, 2), 2, '');
+    $lines = explode("\r\n", $head);
+    $headers = [];
+    foreach (array_slice($lines, 1) as $line) {
+        [$name, $value] = array_pad(explode(':', $line, 2), 2, '');
+        $headers[strtolower(trim($name))] = trim($value);
+    }
+
+    return ['status' => (int) (explode(' ', $lines[0])[1] ?? 0), 'headers' => $headers, 'rest' => $rest];
+}
+
 function report(string $key, float|int|string $value): void {
     fwrite(STDOUT, "{$key}={$value}\n");
 }
@@ -130,6 +174,13 @@ $small = generatedJs(40 << 10, 2);
 $big = generatedJs(700 << 10, 3);
 file_put_contents("{$dir}/boot.js", $boot);
 
+if ($mode === 'head') {
+    // Over 2 MiB, so GET sends both with sendfile(): the image as it is, the stylesheet's sidecar to Brotli clients.
+    file_put_contents("{$dir}/big.png", random_bytes(2_200_000));
+    file_put_contents("{$dir}/big.css", generatedJs(300 << 10, 4));
+    file_put_contents("{$dir}/big.css.br", random_bytes(2_200_000));
+}
+
 if ($mode === 'sidecar') {
     file_put_contents("{$dir}/fresh.js", $big);
     file_put_contents("{$dir}/fresh.js.br", brotli_compress($big, 5, BROTLI_TEXT));
@@ -159,6 +210,46 @@ if ($pid === 0) {
         report('boot_vary', $first['headers']['vary'] ?? '');
         report('datastar_form', form(probeRequest($port, '/datastar.js', ['Accept-Encoding' => 'br']), (string) file_get_contents(dirname(__DIR__, 2) . '/public/datastar.js')));
         report('plain_form', form(probeRequest($port, '/boot.js'), $boot));
+    } elseif ($mode === 'head') {
+        $mismatches = [];
+        $cases = 0;
+        foreach (['/boot.js', '/datastar.js', '/datastar.js?v=1', '/via.css', '/_via/devbar.js', '/_via/devbar.css', '/big.png', '/big.css'] as $path) {
+            foreach (['', "\nAccept-Encoding: br"] as $extra) {
+                $get = parseResponse(rawExchange($port, ["GET {$path}{$extra}"]));
+                $head = parseResponse(rawExchange($port, ["HEAD {$path}{$extra}"]));
+                ++$cases;
+                $label = $path . ($extra !== '' ? ' br' : '');
+                if ($get['status'] !== 200 || $head['status'] !== 200) {
+                    $mismatches[] = "{$label}: status GET {$get['status']} HEAD {$head['status']}";
+
+                    continue;
+                }
+                foreach (['etag', 'vary', 'cache-control', 'content-encoding', 'content-type', 'last-modified'] as $name) {
+                    if (($get['headers'][$name] ?? null) !== ($head['headers'][$name] ?? null)) {
+                        $mismatches[] = "{$label}: {$name} GET " . ($get['headers'][$name] ?? '-') . ' HEAD ' . ($head['headers'][$name] ?? '-');
+                    }
+                }
+                if (($head['headers']['content-length'] ?? '') !== (string) strlen($get['rest'])) {
+                    $mismatches[] = "{$label}: content-length HEAD " . ($head['headers']['content-length'] ?? '-') . ' GET body ' . strlen($get['rest']);
+                }
+                if ($head['rest'] !== '') {
+                    $mismatches[] = "{$label}: HEAD sent " . strlen($head['rest']) . ' body bytes';
+                }
+            }
+        }
+        report('head_cases', $cases);
+        report('head_mismatches', $mismatches === [] ? 'none' : implode(' | ', $mismatches));
+
+        // On a kept-alive connection, a body after HEAD would be read as the next response.
+        $raw = rawExchange($port, ["HEAD /boot.js\nAccept-Encoding: br", 'GET /_health']);
+        $first = parseResponse($raw);
+        report('head_then_get', str_starts_with($first['rest'], 'HTTP/1.1 200') ? 'ok' : substr($first['rest'], 0, 40));
+
+        $etag = parseResponse(rawExchange($port, ['HEAD /boot.js']))['headers']['etag'] ?? '';
+        $notModified = parseResponse(rawExchange($port, ["HEAD /boot.js\nIf-None-Match: {$etag}"]));
+        report('head_304', $notModified['status'] . ' ' . strlen($notModified['rest']));
+        report('head_route', parseResponse(rawExchange($port, ['HEAD /page']))['status']);
+        report('head_missing', parseResponse(rawExchange($port, ['HEAD /missing.js']))['status']);
     } elseif ($mode === 'sidecar') {
         $fresh = probeRequest($port, '/fresh.js', ['Accept-Encoding' => 'br']);
         report('fresh_sidecar', (int) ($fresh['body'] === file_get_contents("{$dir}/fresh.js.br")));
@@ -222,8 +313,14 @@ if ($mode === 'later' || $mode === 'workers') {
 if ($mode === 'workers') {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker());
 }
+if ($mode === 'head') {
+    $config = $config->withTracing();
+}
 
 $app = new Via($config);
+if ($mode === 'head') {
+    $app->page('/page', static fn (Context $c) => $c->view(static fn (): string => '<div id="p">page</div>'));
+}
 $app->start();
 pcntl_waitpid($pid, $status);
 exec('rm -rf ' . escapeshellarg($dir));

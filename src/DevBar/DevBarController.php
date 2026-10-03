@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\DevBar;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\OriginPolicy;
+use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
 use Mbolli\PhpVia\Support\ConditionalGet;
 use Mbolli\PhpVia\Via;
@@ -18,8 +19,8 @@ use OpenSwoole\Http\Response;
  *
  * Routes:
  *   GET  /_via             standalone Dev Console (full-screen panel)
- *   GET  /_via/devbar.css  overlay stylesheet
- *   GET  /_via/devbar.js   overlay web component
+ *   GET  /_via/devbar.css  overlay stylesheet (HEAD too)
+ *   GET  /_via/devbar.js   overlay web component (HEAD too)
  *   GET  /_via/stream      SSE stream of new traces (EventSource)
  *   GET  /_via/scopes      JSON snapshot for the Scopes/Contexts panel
  *   POST /_via/signal      signal write (devMode + writes-enabled only)
@@ -263,7 +264,7 @@ final class DevBarController {
         foreach ($result['headers'] as $name => $value) {
             $response->header($name, $value);
         }
-        $response->end($result['body']);
+        RequestHandler::endWithBody($request, $response, $result['body']);
     }
 
     /**

@@ -211,6 +211,21 @@ class RequestHandler {
         return preg_match(self::REFUSED_EXTENSIONS, pathinfo($relative, PATHINFO_EXTENSION)) !== 1;
     }
 
+    /**
+     * End a response with $body, or for HEAD with only its length.
+     *
+     * @internal also used by the Dev Bar's assets
+     */
+    public static function endWithBody(Request $request, Response $response, string $body): void {
+        if (self::isHead($request)) {
+            self::endHead($response, \strlen($body));
+
+            return;
+        }
+
+        $response->end($body);
+    }
+
     private function dispatch(Request $request, Response $response): void {
         $path = $request->server['request_uri'];
         $method = $request->server['request_method'];
@@ -219,13 +234,6 @@ class RequestHandler {
         // Note: $_GET/$_POST/$_FILES are intentionally NOT set here.
         // Superglobals are shared across coroutines in OpenSwoole and cause
         // race conditions. Use $c->input() in actions or $request->get in handlers.
-
-        // Handle HEAD requests without logging or rendering
-        if ($method === 'HEAD') {
-            $this->handleHeadRequest($path, $response);
-
-            return;
-        }
 
         // Serve Datastar.js
         if ($path === '/datastar.js') {
@@ -254,6 +262,13 @@ class RequestHandler {
             return;
         }
 
+        // Anything else answers HEAD without rendering
+        if ($method === 'HEAD') {
+            $this->handleHeadRequest($path, $request, $response, $staticDir !== null && !$staticFirst ? $staticDir : null);
+
+            return;
+        }
+
         // Handle SSE connection (logged separately by SseHandler)
         if ($path === '/_sse') {
             $this->handleSseWithMiddleware($request, $response);
@@ -266,7 +281,7 @@ class RequestHandler {
             // State-changing actions must not be invocable via GET browser navigation
             // (top-level cross-site navigation CSRF).  Allow POST/PATCH/PUT/DELETE;
             // non-GET safe methods all trigger CORS preflight in browsers.
-            // Note: HEAD is already handled above and never reaches this point.
+            // Note: HEAD is answered above and never reaches this point.
             if ($method === 'GET') {
                 $response->status(405);
                 $response->header('Allow', 'POST');
@@ -492,9 +507,17 @@ class RequestHandler {
     }
 
     /**
-     * Handle HEAD requests for route checking.
+     * Answer a HEAD request that no static file took: a Dev Bar asset as its GET would, a page route with 200 and no
+     * body, an extension-less file in $staticDir as GET would, anything else 404.
      */
-    private function handleHeadRequest(string $path, Response $response): void {
+    private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir): void {
+        if (($path === '/_via/devbar.css' || $path === '/_via/devbar.js') && $this->via->getConfig()->isTracingEnabled()) {
+            $this->devBar ??= new DevBarController($this->via, staticBrotli: $this->staticBrotli);
+            $this->devBar->handle($path, $request, $response);
+
+            return;
+        }
+
         $params = [];
         $handler = $this->via->getRouter()->matchRoute($path, $params);
         if ($handler !== null) {
@@ -504,6 +527,13 @@ class RequestHandler {
 
             return;
         }
+
+        if ($staticDir !== null && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
+            $this->serveStaticFile($realFile, $request, $response);
+
+            return;
+        }
+
         // Route not found
         $response->status(404);
         $response->end();
@@ -919,17 +949,41 @@ class RequestHandler {
             }
             if ($compressed !== null) {
                 $response->header('Content-Encoding', 'br');
-                if (isset($compressed['file'])) {
-                    $response->sendfile($compressed['file']);
+                if (!isset($compressed['file'])) {
+                    self::endWithBody($request, $response, $compressed['body']);
+                } elseif (self::isHead($request)) {
+                    self::endHead($response, (int) filesize($compressed['file']));
                 } else {
-                    $response->end($compressed['body']);
+                    $response->sendfile($compressed['file']);
                 }
 
                 return;
             }
         }
 
+        if (self::isHead($request)) {
+            self::endHead($response, $size);
+
+            return;
+        }
+
         $this->sendStaticBody($response, $filePath, $mtime, $size);
+    }
+
+    private static function isHead(Request $request): bool {
+        return ($request->server['request_method'] ?? '') === 'HEAD';
+    }
+
+    /**
+     * End a HEAD response with the length of the body GET would send. OpenSwoole 26.2 sends end()'s body and
+     * sendfile()'s file on HEAD too, which a client reads as the start of the next response. Over HTTP/2 it drops
+     * this Content-Length.
+     */
+    private static function endHead(Response $response, int $length): void {
+        if ($length > 0) {
+            $response->header('Content-Length', (string) $length);
+        }
+        $response->end();
     }
 
     /**
