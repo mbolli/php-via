@@ -132,7 +132,7 @@ describe('page render', function (): void {
         expect($via->contexts)->toBe([]);
         expect($via->contextSessions)->toBe([]);
         expect($via->getApp()->getAllContexts())->toBe([]);
-        expect($via->getContextsByScope(Scope::routeScope('/viewthrow')))->toBe([]);
+        expect($via->getLocalContexts(Scope::routeScope('/viewthrow')))->toBe([]);
 
         $renders = 0;
         ob_start();
@@ -193,7 +193,7 @@ describe('page render', function (): void {
         expect($log)->toContain('Page handler exception on /handlerthrow: RuntimeException: handler failed');
         expect($alive)->toBeFalse();
         expect($via->contextSessions)->toBe([]);
-        expect($via->getContextsByScope('room:doomed'))->toBe([]);
+        expect($via->getLocalContexts('room:doomed'))->toBe([]);
     });
 });
 

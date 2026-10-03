@@ -138,7 +138,7 @@ final class ChatRoomExample {
             self::$app?->broadcast($roomScope);
         }, 'updateTyping');
 
-        $c->onDisconnect(function () use ($room, $roomScope, $contextId, $username): void {
+        $c->onCleanup(function () use ($room, $roomScope, $contextId, $username): void {
             unset(self::$lastSent[$contextId]);
             $changed = false;
             if (isset(self::$roomUsers[$room][$contextId])) {

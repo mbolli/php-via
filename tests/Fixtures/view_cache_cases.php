@@ -130,7 +130,7 @@ Coroutine::run(static function () use ($case): void {
         if (!empty($GLOBALS['yield'])) {
             Coroutine::usleep(10_000);
         }
-        $c->onDisconnect(static function (): void { ++$GLOBALS['cleaned']; });
+        $c->onCleanup(static function (): void { ++$GLOBALS['cleaned']; });
         $c->setInterval(static function (): void { ++$GLOBALS['ticks']; }, 5);
         $c->view(static fn (): string => '<div id="p">x</div>');
     });

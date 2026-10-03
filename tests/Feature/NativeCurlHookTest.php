@@ -31,7 +31,7 @@ function startViaOnce(?string $settings): string {
         . '$config = (new Mbolli\PhpVia\Config())->withHost("127.0.0.1")->withPort(' . $port . ')'
         . ($settings !== null ? "->withSwooleSettings({$settings})" : '') . ';'
         . '$app = new Mbolli\PhpVia\Via($config);'
-        . '$app->onStart(static fn () => OpenSwoole\Timer::after(50, static fn () => $app->getServer()?->shutdown()));'
+        . '$app->onWorkerStart(static fn () => OpenSwoole\Timer::after(50, static fn () => $app->getServer()?->shutdown()));'
         . '$app->start(); echo "stopped\n";';
 
     return (string) shell_exec('timeout 20 ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' 2>&1');

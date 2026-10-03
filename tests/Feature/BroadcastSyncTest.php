@@ -43,7 +43,7 @@ describe('Broadcast Sync Behavior', function (): void {
         $ctx3->renderView();
 
         // Verify all contexts are registered in ROUTE scope
-        $routeContexts = $app->getContextsByScope('route:/test');
+        $routeContexts = $app->getLocalContexts('route:/test');
         expect($routeContexts)->toHaveCount(3);
 
         // Simulate data change and broadcast

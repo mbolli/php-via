@@ -778,7 +778,7 @@ class RequestHandler {
         $stats = [
             'contexts' => \count($this->via->contexts),
             'clients' => $this->via->getClients(),
-            'render_stats' => $this->via->getRenderStats(),
+            'render_stats' => $this->via->getStats()->getStats(),
             // Per worker: the worker that served this request.
             'broadcast_stats' => [
                 'tick_ms' => $this->via->getConfig()->getBroadcastTickMs(),

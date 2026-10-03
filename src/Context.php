@@ -426,25 +426,24 @@ class Context {
     }
 
     /**
-     * Register a callback to be executed when the context is cleaned up (SSE disconnect).
+     * Register a callback to run when this context is destroyed, the moment its tab is gone for good:
+     * - the SSE connection closed and stayed closed for the cleanup delay (Config::withContextTimeouts())
+     * - the browser sent the tab-close beacon
+     * - no SSE stream attached within the connect timeout
+     *
+     * Via::onClientDisconnect() runs earlier, when the stream closes, also for a reconnect blip.
+     *
+     * @param callable(Context): void $callback
      */
     public function onCleanup(callable $callback): void {
         $this->lifecycle->addCleanupCallback($callback);
     }
 
     /**
-     * Register a callback to be executed when the user disconnects.
-     *
-     * This is an alias for onCleanup() with clearer semantics.
-     * The callback is executed when:
-     * - the SSE connection closes and stays closed for the cleanup delay (Config::withContextTimeouts(cleanupDelayMs:))
-     * - the browser sends the session close beacon
-     * - no SSE stream attaches within the connect timeout (Config::withContextTimeouts(connectMs:))
-     *
-     * @param callable(Context): void $callback Function to call on disconnect
+     * @deprecated removed in 0.14; throws and names onCleanup()
      */
-    public function onDisconnect(callable $callback): void {
-        $this->lifecycle->addCleanupCallback($callback);
+    public function onDisconnect(callable $callback): never {
+        Removed::method('Context::onDisconnect()', 'Use $c->onCleanup($fn): it runs at the same moment, when the context is destroyed.');
     }
 
     /**

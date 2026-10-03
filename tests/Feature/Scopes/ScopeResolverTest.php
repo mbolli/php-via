@@ -70,8 +70,8 @@ describe('Context::scope()', function (): void {
         expect($a->getPrimaryScope())->toBe(Scope::sessionScope(RESOLVER_SID_A))
             ->and($b->getPrimaryScope())->toBe(Scope::sessionScope(RESOLVER_SID_B))
             ->and($a2->getPrimaryScope())->toBe($a->getPrimaryScope())
-            ->and($app->getContextsByScope(Scope::SESSION))->toBe([])
-            ->and(array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope(Scope::sessionScope(RESOLVER_SID_A))))->toBe(['A', 'A2'])
+            ->and($app->getLocalContexts(Scope::SESSION))->toBe([])
+            ->and(array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts(Scope::sessionScope(RESOLVER_SID_A))))->toBe(['A', 'A2'])
         ;
     });
 
@@ -92,17 +92,17 @@ describe('Context::addScope() and removeScope()', function (): void {
         $ctx->addScope(Scope::SESSION);
 
         expect($ctx->getScopes())->toBe([Scope::TAB, Scope::routeScope('/p'), Scope::sessionScope(RESOLVER_SID_A)])
-            ->and($app->getContextsByScope(Scope::routeScope('/p')))->toBe([$ctx])
-            ->and($app->getContextsByScope(Scope::ROUTE))->toBe([])
-            ->and($app->getContextsByScope(Scope::SESSION))->toBe([])
+            ->and($app->getLocalContexts(Scope::routeScope('/p')))->toBe([$ctx])
+            ->and($app->getLocalContexts(Scope::ROUTE))->toBe([])
+            ->and($app->getLocalContexts(Scope::SESSION))->toBe([])
         ;
 
         $ctx->removeScope(Scope::ROUTE);
         $ctx->removeScope(Scope::SESSION);
 
         expect($ctx->getScopes())->toBe([Scope::TAB])
-            ->and($app->getContextsByScope(Scope::routeScope('/p')))->toBe([])
-            ->and($app->getContextsByScope(Scope::sessionScope(RESOLVER_SID_A)))->toBe([])
+            ->and($app->getLocalContexts(Scope::routeScope('/p')))->toBe([])
+            ->and($app->getLocalContexts(Scope::sessionScope(RESOLVER_SID_A)))->toBe([])
         ;
     });
 });

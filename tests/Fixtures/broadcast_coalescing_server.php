@@ -33,7 +33,7 @@ $app = new Via(
 
 $app->page('/', fn () => null);
 
-$app->onStart(static function () use ($app, $out): void {
+$app->onWorkerStart(static function () use ($app, $out): void {
     $server = $app->getServer();
     if ($server === null) {
         return;

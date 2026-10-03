@@ -47,7 +47,7 @@ $app->page('/room', function (Context $c) use ($marker): void {
     $c->action(static function (Context $c): void {
         $c->execScript('window.viaWindow = "WINDOW-PATCH"');
     }, 'window');
-    $c->onDisconnect(static function (Context $c) use ($marker): void {
+    $c->onCleanup(static function (Context $c) use ($marker): void {
         file_put_contents($marker, "cleanup {$c->getId()}\n", FILE_APPEND | LOCK_EX);
     });
     $c->view(fn (): string => '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':END</div>');

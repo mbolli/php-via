@@ -34,7 +34,7 @@ final class PairingDemo {
         $this->app->page(self::ROUTE, $this->phonePage(...));
 
         $this->app->setInterval(function (): void {
-            $this->store->prune(fn (string $code): bool => $this->app->getContextsByScope(PairingStore::scope($code)) !== []);
+            $this->store->prune(fn (string $code): bool => $this->app->getLocalContexts(PairingStore::scope($code)) !== []);
         }, self::PRUNE_EVERY_MS);
     }
 

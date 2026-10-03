@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Context;
 
 // Methods removed or renamed in 0.14 stay one release as stubs that throw and name the replacement.
 
@@ -23,3 +24,39 @@ test('a removed Config method throws and names its replacement', function (Closu
     expect(fn () => $call(new Config()))->toThrow(BadMethodCallException::class, $replacement);
 })->with('removed config methods');
 
+dataset('removed via methods', [
+    'config' => ['config', [], 'getConfig()'],
+    'getContextsByScope' => ['getContextsByScope', ['room:1'], 'getLocalContexts($scope)'],
+    'onStart' => ['onStart', [static function (): void {}], 'onWorkerStart($fn)'],
+    'onShutdown' => ['onShutdown', [static function (): void {}], 'onWorkerStop($fn)'],
+    'getRenderStats' => ['getRenderStats', [], 'getStats()->getStats()'],
+]);
+
+test('a removed Via method throws and names its replacement', function (string $method, array $args, string $replacement): void {
+    $app = createVia();
+
+    expect(fn () => $app->{$method}(...$args))->toThrow(BadMethodCallException::class, "Via::{$method}() was removed in php-via 0.14. Use \$app->{$replacement}");
+})->with('removed via methods');
+
+test('Context::onDisconnect() throws and names onCleanup()', function (): void {
+    $c = new Context('ctx', '/', createVia());
+
+    expect(fn () => $c->onDisconnect(static function (): void {}))
+        ->toThrow(BadMethodCallException::class, 'Context::onDisconnect() was removed in php-via 0.14. Use $c->onCleanup($fn)')
+    ;
+});
+
+test('the Context::onDisconnect() stub registers nothing', function (): void {
+    $ran = false;
+    $c = new Context('ctx', '/', createVia());
+
+    try {
+        $c->onDisconnect(static function () use (&$ran): void {
+            $ran = true;
+        });
+    } catch (BadMethodCallException) {
+    }
+    $c->cleanup();
+
+    expect($ran)->toBeFalse();
+});

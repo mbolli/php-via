@@ -537,14 +537,13 @@ $app->page('/support', function (Context $c): void {
 
 // ─── Hot reload: load routes inside each worker ──────────────────────────────
 //
-// Including routes.php via onStart() means it runs inside onWorkerStart, AFTER
-// the worker is forked from master. Master never loads Example classes directly,
-// so each fresh worker autoloads them from disk, enabling USR1 hot reload.
-// The sitemap is also regenerated there with the full route set.
-// Via::onWorkerStart() calls setRoutes() after startCallbacks, so RequestHandler
-// always sees the up-to-date route table.
+// Including routes.php via onWorkerStart() means it runs AFTER the worker is
+// forked from master. Master never loads Example classes directly, so each
+// fresh worker autoloads them from disk, enabling USR1 hot reload. The sitemap
+// is also regenerated there with the full route set. Routes registered in an
+// onWorkerStart() callback reach the request handler.
 
-$app->onStart(function () use ($app): void {
+$app->onWorkerStart(function () use ($app): void {
     require __DIR__ . '/routes.php';
 });
 

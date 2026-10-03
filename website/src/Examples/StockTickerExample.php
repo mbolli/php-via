@@ -136,10 +136,10 @@ final class StockTickerExample {
 
     private static function tick(Via $app): void {
         // Skip if nobody is watching any stock ticker page
-        if ($app->getContextsByScope(Scope::routeScope('/examples/stock-ticker')) === []) {
+        if ($app->getLocalContexts(Scope::routeScope('/examples/stock-ticker')) === []) {
             $hasDetailViewers = false;
             foreach (array_keys(self::$stocks) as $symbol) {
-                if ($app->getContextsByScope(Scope::build('example:stock', $symbol)) !== []) {
+                if ($app->getLocalContexts(Scope::build('example:stock', $symbol)) !== []) {
                     $hasDetailViewers = true;
 
                     break;

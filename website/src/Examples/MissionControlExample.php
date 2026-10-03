@@ -123,7 +123,7 @@ final class MissionControlExample {
     // ── Registration ───────────────────────────────────────────────────────────
 
     public static function register(Via $app): void {
-        $app->onShutdown(static function (): void {
+        $app->onWorkerStop(static function (): void {
             self::cleanup();
         });
 

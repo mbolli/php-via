@@ -60,7 +60,7 @@ $app->page('/bump', function (Context $c) use ($app, &$bumps): void {
 
 $app->page('/count', function (Context $c) use ($app): void {
     $c->view(static fn (): string => 'CLIENTS:' . implode(',', array_column($app->getClients(), 'context_id'))
-        . ':SCOPE:' . implode(',', array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope('room:lobby')))
+        . ':SCOPE:' . implode(',', array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts('room:lobby')))
         . ':PID:' . getmypid() . ':END');
 });
 

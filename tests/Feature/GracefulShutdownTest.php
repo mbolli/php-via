@@ -8,15 +8,15 @@ use Mbolli\PhpVia\Context;
 use OpenSwoole\Coroutine\Http\Client;
 
 /*
- * onShutdown must run when the server is stopped the way deployments stop it.
+ * onWorkerStop must run when the server is stopped the way deployments stop it.
  *
  * OpenSwoole owns SIGTERM in server processes, so Process::signal(SIGTERM, ...) returned false in
  * the master and in every worker and the only callers of the shutdown callbacks never ran. Measured
  * before the fix with 2 workers and one open SSE stream:
  *
- *   kill -TERM <master>    no onShutdown, "processor has been registered" x3, scheduler deadlock
- *   kill -INT <master>     no onShutdown, scheduler deadlock
- *   SIGINT to the group    onShutdown ran, then "Uncaught OpenSwoole\ExitException" per worker
+ *   kill -TERM <master>    no onWorkerStop, "processor has been registered" x3, scheduler deadlock
+ *   kill -INT <master>     no onWorkerStop, scheduler deadlock
+ *   SIGINT to the group    onWorkerStop ran, then "Uncaught OpenSwoole\ExitException" per worker
  *
  * OpenSwoole's manager keeps the default SIGINT action, so once the worker SIGINT handler stopped
  * calling exit() a Ctrl-C killed the manager and left the workers running under init.
@@ -71,10 +71,10 @@ function expectCleanStop(array $r, int $workers, int $streams = 1): void {
     $shutdowns = array_values(array_filter($r['marker'], static fn (string $l): bool => str_starts_with($l, 'shutdown ')));
     $shutdownPids = array_map(static fn (string $line): string => explode(' ', $line)[1], $shutdowns);
     expect($shutdownPids)->toHaveCount($workers, $context);
-    expect(array_unique($shutdownPids))->toHaveCount($workers, 'onShutdown must run once in each worker');
+    expect(array_unique($shutdownPids))->toHaveCount($workers, 'onWorkerStop must run once in each worker');
 
     foreach ($shutdowns as $line) {
-        expect($line)->not->toEndWith('cid=-1', 'onShutdown must run inside a coroutine');
+        expect($line)->not->toEndWith('cid=-1', 'onWorkerStop must run inside a coroutine');
     }
 
     // The SSE loop left through its normal exit path rather than being cut off.
@@ -99,11 +99,11 @@ describe('stopping a real server', function (): void {
         }
     });
 
-    test('SIGTERM to the master runs onShutdown in every worker', function (int $workers): void {
+    test('SIGTERM to the master runs onWorkerStop in every worker', function (int $workers): void {
         expectCleanStop(runGracefulShutdownServer($workers, 'TERM'), $workers);
     })->with([1, 2]);
 
-    test('SIGINT to the master runs onShutdown in every worker', function (): void {
+    test('SIGINT to the master runs onWorkerStop in every worker', function (): void {
         expectCleanStop(runGracefulShutdownServer(2, 'INT'), 2);
     });
 
@@ -112,11 +112,11 @@ describe('stopping a real server', function (): void {
     });
 
     // max_wait_time is counted in whole seconds, so 1 left anywhere from 0 to 1 s for this.
-    test('an onShutdown callback that yields for 900 ms completes', function (): void {
+    test('an onWorkerStop callback that yields for 900 ms completes', function (): void {
         expectCleanStop(runGracefulShutdownServer(2, 'TERM', 'shutdownYieldMs=900'), 2);
     });
 
-    test('onClientDisconnect finishes before onShutdown runs, even when it yields', function (): void {
+    test('onClientDisconnect finishes before onWorkerStop runs, even when it yields', function (): void {
         $r = runGracefulShutdownServer(1, 'TERM', 'disconnectYieldMs=50');
         expectCleanStop($r, 1);
         expect(explode(' ', $r['marker'][0])[0])->toBe('disconnect', var_export($r['marker'], true));
@@ -128,11 +128,11 @@ describe('stopping a real server', function (): void {
         expectCleanStop(runGracefulShutdownServer(2, 'TERM', 'orphanContext=1'), 2);
     });
 
-    test('an idle worker with no timers still runs onShutdown in a coroutine', function (): void {
+    test('an idle worker with no timers still runs onWorkerStop in a coroutine', function (): void {
         expectCleanStop(runGracefulShutdownServer(1, 'IDLE', 'shutdownYieldMs=10'), 1, streams: 0);
     });
 
-    test('SIGUSR1 runs onShutdown in the old workers and the new ones keep serving', function (): void {
+    test('SIGUSR1 runs onWorkerStop in the old workers and the new ones keep serving', function (): void {
         $r = runGracefulShutdownServer(2, 'USR1');
         expect($r['out'])->toContain('served=ok');
         expectCleanStop($r, 4);
@@ -169,13 +169,13 @@ describe('runWorkerShutdown', function (): void {
         $ctx->execScript('console.log(1)');
 
         $calls = 0;
-        $app->onShutdown(static function () use (&$calls): void {
+        $app->onWorkerStop(static function () use (&$calls): void {
             ++$calls;
         });
-        $app->onShutdown(static function (): void {
+        $app->onWorkerStop(static function (): void {
             throw new RuntimeException('a failing callback must not stop the rest');
         });
-        $app->onShutdown(static function () use (&$calls): void {
+        $app->onWorkerStop(static function () use (&$calls): void {
             ++$calls;
         });
 

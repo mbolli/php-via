@@ -40,6 +40,7 @@ use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Support\Stats;
@@ -125,11 +126,14 @@ class Via {
 
     private ?Server $server = null;
 
-    /** @var array<callable> Callbacks to run when server starts */
+    /** @var list<callable(int): void> Callbacks from onWorkerStart() */
     private array $startCallbacks = [];
 
-    /** @var array<callable> Callbacks to run on graceful shutdown */
+    /** @var list<callable(int): void> Callbacks from onWorkerStop() */
     private array $shutdownCallbacks = [];
+
+    /** This process's worker id, set in workerStart */
+    private int $workerId = 0;
 
     /** @var list<array{callable, int, bool}> Server intervals from setInterval(): callback, period, every-worker flag */
     private array $serverIntervals = [];
@@ -331,10 +335,10 @@ class Via {
     }
 
     /**
-     * Get the configuration instance for fluent configuration.
+     * @deprecated removed in 0.14; throws and names getConfig()
      */
-    public function config(): Config {
-        return $this->config;
+    public function config(): never {
+        Removed::method('Via::config()', 'Use $app->getConfig(); the Config is frozen once new Via() has it.');
     }
 
     /**
@@ -709,12 +713,22 @@ class Via {
     }
 
     /**
-     * Get all contexts registered under a specific scope.
+     * The contexts of this worker in $scope.
+     *
+     * With more than one worker, contexts in the same scope on other workers are not in the list, so an empty
+     * list does not mean nobody is in the scope.
      *
      * @return array<Context>
      */
-    public function getContextsByScope(string $scope): array {
+    public function getLocalContexts(string $scope): array {
         return $this->scopeRegistry->getContextsByScope($scope);
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names getLocalContexts()
+     */
+    public function getContextsByScope(string $scope): never {
+        Removed::method('Via::getContextsByScope()', 'Use $app->getLocalContexts($scope); it lists the contexts of this worker only.');
     }
 
     /**
@@ -1062,9 +1076,9 @@ class Via {
                     );
                 });
 
-                // Execute all registered start callbacks
+                $this->workerId = $workerId;
                 foreach ($this->startCallbacks as $callback) {
-                    $callback();
+                    $callback($workerId);
                 }
 
                 // Refresh route table: startCallbacks may have registered new routes (e.g. via
@@ -1238,15 +1252,21 @@ class Via {
     }
 
     /**
-     * Register a callback to run when the server starts.
-     * Use this to initialize timers or background tasks.
+     * Register a callback to run in every worker process when it starts, with the worker's id.
+     *
+     * It runs once per worker start, so with withWorkerNum(4) four times, and again when a worker restarts
+     * after a reload (SIGUSR1), a `max_request` recycle or a crash. Run work meant for one worker where
+     * $workerId === 0: worker 0 always exists, runs the setInterval() jobs, and restarts under the same id.
+     * Routes registered here are picked up, so a reload loads them from disk again.
+     *
+     * @param callable(int): void $callback receives the worker id
      */
-    public function onStart(callable $callback): void {
+    public function onWorkerStart(callable $callback): void {
         $this->startCallbacks[] = $callback;
     }
 
     /**
-     * Register a callback to run on graceful shutdown.
+     * Register a callback to run in every worker process when it stops, with the worker's id.
      *
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
@@ -1257,9 +1277,25 @@ class Via {
      *
      * End long-lived coroutines, sockets and `Event::add` fds here (or check isShuttingDown() in
      * the loop): anything still alive holds the worker until `max_wait_time`, then it is killed.
+     *
+     * @param callable(int): void $callback receives the worker id
      */
-    public function onShutdown(callable $callback): void {
+    public function onWorkerStop(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names onWorkerStart()
+     */
+    public function onStart(callable $callback): never {
+        Removed::method('Via::onStart()', 'Use $app->onWorkerStart($fn). It runs in every worker and passes the worker id: run work meant for one worker where $workerId === 0.');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names onWorkerStop()
+     */
+    public function onShutdown(callable $callback): never {
+        Removed::method('Via::onShutdown()', 'Use $app->onWorkerStop($fn). It runs in every worker and passes the worker id.');
     }
 
     /**
@@ -1391,12 +1427,10 @@ class Via {
     }
 
     /**
-     * Get render statistics.
-     *
-     * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
+     * @deprecated removed in 0.14; throws and names getStats()
      */
-    public function getRenderStats(): array {
-        return $this->app->getRenderStats();
+    public function getRenderStats(): never {
+        Removed::method('Via::getRenderStats()', 'Use $app->getStats()->getStats().');
     }
 
     /**
@@ -1826,7 +1860,7 @@ class Via {
             'max_coroutine' => 100000,
             'worker_num' => $config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,
-            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onShutdown
+            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onWorkerStop callbacks
             'reload_async' => true,  // Enable async reload
             'enable_reuse_port' => true,  // Allow immediate rebind on restart
             'hook_flags' => self::defaultHookFlags(),  // Sockets, sleep and processes yield; file and stdio I/O go through the AIO thread pool
@@ -2056,8 +2090,8 @@ class Via {
 
         // The leader flushes once more when it stops: a second SIGTERM to the master can end it
         // before its shutdown event, and then only this flush saves the last window.
-        $this->onShutdown(function () use ($flush): void {
-            if ($this->server?->getWorkerId() === self::LEADER_WORKER_ID) {
+        $this->onWorkerStop(function (int $workerId) use ($flush): void {
+            if ($workerId === self::LEADER_WORKER_ID) {
                 $flush();
             }
         });
@@ -2713,13 +2747,13 @@ class Via {
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
-                $callback();
+                $callback($this->workerId);
             } catch (\Throwable $e) {
                 $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
             }
         }
 
-        // Presence broadcasts from onClientDisconnect and onShutdown may still sit with a running publisher.
+        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $stopBudgetNs = max(0, (int) ($this->server?->setting['max_wait_time'] ?? 3) - 1) * 1_000_000_000;
         $this->drainBroadcasts(renderPending: false, publisherDeadlineNs: min(hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000, $stopStartNs + $stopBudgetNs));
 

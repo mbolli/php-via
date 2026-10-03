@@ -29,7 +29,7 @@ final class AllScopesExample {
 
     public static function register(Via $app): void {
         // Seed once, not on every call. register() runs from routes.php, which app.php pulls in
-        // via onStart(), so it re-runs on every worker start AND on every USR1 hot reload.
+        // via onWorkerStart(), so it re-runs on every worker start AND on every USR1 hot reload.
         // Unconditional writes here would wipe the persisted tally each time the server came up.
         if ($app->globalState('example:allscopes:status') === null) {
             $app->setGlobalState('example:allscopes:status', 'All systems operational');

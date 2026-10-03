@@ -225,7 +225,7 @@ final class TypeRaceExample {
                         continue;
                     }
                     $oldScope = Scope::build('example:typerace', $otherId);
-                    foreach ($app->getContextsByScope($oldScope) as $ctx) {
+                    foreach ($app->getLocalContexts($oldScope) as $ctx) {
                         $pid = $ctx->getId();
                         // Move racer data
                         self::$races[$raceId]['racers'][$pid] = self::newRacer($otherRace['racers'][$pid]['name'] ?? $pid);
@@ -243,7 +243,7 @@ final class TypeRaceExample {
 
             // ── Cleanup ───────────────────────────────────────────────────────
 
-            $c->onDisconnect(function () use ($contextId, $app): void {
+            $c->onCleanup(function () use ($contextId, $app): void {
                 $raceId = self::$contextRace[$contextId] ?? null;
                 unset(self::$contextRace[$contextId]);
                 if ($raceId === null || !isset(self::$races[$raceId])) {
@@ -375,7 +375,7 @@ final class TypeRaceExample {
                 }
                 // The browser keeps the last race's text: clear it before the textarea renders.
                 // The countdown shows no input, so no stale post can overwrite this.
-                foreach ($app->getContextsByScope($scope) as $ctx) {
+                foreach ($app->getLocalContexts($scope) as $ctx) {
                     $ctx->getSignal('typedText')?->setValue('');
                     $ctx->syncSignals();
                 }
