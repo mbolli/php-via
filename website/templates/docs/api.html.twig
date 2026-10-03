@@ -3,196 +3,349 @@
 {% block content %}
 <article>
     <h1>API Reference</h1>
-    <p>Complete reference for the php-via public API. Methods marked <code>@internal</code> may change between versions.</p>
+    <p>
+        Every public method of php-via 0.14 that an app calls, with its signature. Methods and classes
+        tagged <code>@internal</code> in the source are left out: php-via calls them itself, and they
+        change without notice. <code>Config</code>, <code>Signal</code>, <code>Action</code> and
+        <code>Scope</code> are final, and <code>Via</code> and <code>Context</code> are not meant to be
+        extended. The <a href="https://github.com/mbolli/php-via/blob/master/CHANGELOG.md" target="_blank" rel="noopener">changelog</a>
+        maps every name 0.14 renamed or removed to its replacement.
+    </p>
+    <ul>
+        <li><a href="#via">Via</a>: routes, the server, broadcasts, shared state and sessions</li>
+        <li><a href="#context">Context</a>: one per tab, with its signals, actions, view and request</li>
+        <li><a href="#signal">Signal</a>, <a href="#action">Action</a>, <a href="#scope">Scope</a>,
+            <a href="#patch-mode">PatchMode</a> and <a href="#error-phase">ErrorPhase</a></li>
+        <li><a href="#config">Config</a>: every setting, frozen by <code>new Via()</code></li>
+        <li><a href="#templates">Template engines</a>: <code>TemplateEngine</code>, <code>Html</code> and <code>TwigEngine</code></li>
+        <li><a href="#testing">Testing</a>: <code>TestApp</code> and <code>TestTab</code></li>
+        <li><a href="#attributes">Attributes</a> for class-based pages</li>
+    </ul>
+    <p>All classes live under <code>Mbolli\PhpVia\</code>.</p>
 
     <h2 id="via">Via</h2>
+    <p>
+        The application: routes, the OpenSwoole server, broadcasts and the state every tab can reach.
+        <code>Via::VERSION</code> holds the version string that <code>/_health</code> reports.
+    </p>
 
-    <h3 id="via-constructor"><code>new Via(Config $config)</code></h3>
+    <h3 id="via-setup">Construction</h3>
+
+    <h4 id="via-constructor"><code>__construct(Config $config)</code></h4>
+    <p>
+        Takes the configuration and freezes it: a <code>with*</code> call on that <code>Config</code>
+        afterwards throws a <code>LogicException</code>. It throws for a template setup that cannot work,
+        such as <code>withTemplateDir()</code> without <code>twig/twig</code> installed.
+    </p>
     {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Via;
+
 $app = new Via(
     (new Config())
         ->withHost('0.0.0.0')
         ->withPort(3000)
-        ->withTemplateDir(__DIR__ . '/templates')
+        ->withTemplateDir(__DIR__ . '/templates') // needs composer require twig/twig
 );
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-page"><code>page(string $route, callable $handler): RouteDefinition</code></h3>
-    <p>Register a page route. Path params use <code>{name}</code> syntax and are injected as typed arguments. Returns a <code>RouteDefinition</code> for fluent middleware registration.</p>
-    <p>A parameter matches one path segment as the browser sent it and arrives percent-decoded: <code>/users/caf%C3%A9</code> gives <code>café</code>. An encoded slash stays inside its parameter and arrives as <code>/</code>, so <code>/files/a%2Fb</code> gives <code>a/b</code>: check a parameter you build a file path from. <code>route()</code> passes its parameters the same way.</p>
+    <h4 id="via-get-config"><code>getConfig(): Config</code></h4>
+    <p>The frozen <code>Config</code> the app was built with. Its getters are listed under <a href="#config">Config</a>.</p>
+
+    <h3 id="via-routes">Routes</h3>
+
+    <h4 id="via-page"><code>page(string $route, callable $handler): RouteDefinition</code></h4>
+    <p>
+        Registers a page. The handler gets the tab's <code>Context</code> and each path parameter as an
+        argument of the same name, cast to the parameter's type. A parameter matches one path segment and
+        arrives percent-decoded: <code>/users/caf%C3%A9</code> gives <code>café</code>. An encoded slash
+        stays inside its parameter and arrives as <code>/</code>, so <code>/files/a%2Fb</code> gives
+        <code>a/b</code>: check a parameter you build a file path from. The handler runs once per page load,
+        and again when a tab that was away is rebuilt (see <a href="/docs/lifecycle#revival">Revival</a>).
+    </p>
     {% code 'php' %}{% verbatim %}
-$app->page('/', fn(Context $c) => $c->view('home.html.twig'));
+$app->page('/', fn (Context $c) => $c->view('home.html.twig'));
 
 $app->page('/users/{id}', function (Context $c, int $id): void {
     $c->view('user.html.twig', ['id' => $id]);
 });
 
-// With per-route middleware:
-$app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'))
+$app->page('/admin', fn (Context $c) => $c->view('admin.html.twig'))
     ->middleware(new AuthMiddleware());
     {% endverbatim %}{% endcode %}
-
-    <h3 id="via-mount"><code>mount(string $class, string $route, ?callable $factory = null): RouteDefinition</code></h3>
     <p>
-        Register a class as a page using the composition API. The class must have a public
-        <code>view(Context $ctx): void</code> method. Reactive properties are declared with
-        <code>#[Signal]</code> (optionally scoped, e.g. <code>#[Signal(Scope::SESSION)]</code>);
-        server-only state with <code>#[Persist]</code>; action methods with <code>#[Action]</code>.
-        Returns a <code>RouteDefinition</code> for fluent middleware chaining.
-        See <a href="/docs/composition">Composition</a>.
+        <code>RouteDefinition::middleware(MiddlewareInterface ...$middleware): RouteDefinition</code> adds
+        PSR-15 middleware to this route only. See <a href="/docs/middleware#route-middleware">Middleware</a>.
+    </p>
+
+    <h4 id="via-mount"><code>mount(string $class, string $route, ?callable $factory = null): RouteDefinition</code></h4>
+    <p>
+        Registers a class as a page. The class has a public <code>view(Context $ctx): void</code> method
+        and declares its state and actions with the <a href="#attributes">attributes</a>. The factory, when
+        given, builds the instance for each tab instead of <code>new $class()</code>, so the class can take
+        constructor dependencies. See <a href="/docs/composition">Composition</a>.
     </p>
     {% code 'php' %}{% verbatim %}
-// Zero-arg constructor (default):
 $app->mount(Counter::class, '/counter');
-
-// Factory (called once per connecting tab, receives no arguments):
-$app->mount(
-    ChatPage::class,
-    '/chat/{room}',
-    fn(): ChatPage => new ChatPage($db, $app)
-);
-
-// Middleware chain:
-$app->mount(Dashboard::class, '/dashboard')
-    ->middleware(new AuthMiddleware());
+$app->mount(ChatPage::class, '/chat/{room}', fn (): ChatPage => new ChatPage($db, $app));
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-middleware"><code>middleware(MiddlewareInterface ...$middleware): void</code></h3>
-    <p>Register global PSR-15 middleware that runs on every page and action request. See <a href="/docs/middleware">Middleware</a>.</p>
-    {% code 'php' %}{% verbatim %}
-$app->middleware(new CorsMiddleware([...]));
-    {% endverbatim %}{% endcode %}
-
-    <h3 id="via-regenerate-session"><code>regenerateSession(ServerRequestInterface $request): void</code></h3>
+    <h4 id="via-route"><code>route(array|string $methods, string $path, RequestHandlerInterface $handler): RouteDefinition</code></h4>
     <p>
-        <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the session rotates
-        at the call, and the response to <code>$request</code> sets the new cookie. Middleware calls it before
-        <code>$handler-&gt;handle()</code>, which sends the page or the action's response; afterwards it throws a
-        <code>LogicException</code>. Like the context's, it throws an <code>OverflowException</code> when the record
-        of rotated cookies is full, so call it before the login writes anything.
+        Registers a plain HTTP route for a PSR-15 handler, with no context, shell or template: a JSON
+        endpoint, a webhook, an MCP server. The request passes the global middleware and the route's own,
+        and the handler's response goes out as it is; a body of unknown size is sent as it is read.
     </p>
+    <ul>
+        <li><code>$methods</code> is one method, a list such as <code>['GET', 'POST', 'OPTIONS']</code>, or
+            <code>'*'</code> for every method the path has no route of its own for. A HEAD reaches a GET
+            route as GET and goes out without the body. Other methods get 405 on a path without a page.</li>
+        <li>The request carries each path parameter as an attribute of its name, the session id in
+            <code>via.session</code>, and uploaded files in <code>getUploadedFiles()</code>.</li>
+        <li>php-via checks no <code>Origin</code> header here: add CSRF or auth middleware where a route
+            changes state. The response sets no session cookie unless the handler or a middleware calls
+            <a href="#via-regenerate-session"><code>regenerateSession()</code></a>.</li>
+        <li>A throw from the handler, a middleware or the body answers 500, or closes a response that has
+            started, and reaches <a href="#via-on-error"><code>onError()</code></a> as
+            <code>ErrorPhase::Route</code>.</li>
+    </ul>
     {% code 'php' %}{% verbatim %}
-$app->route('POST', '/login', new class($app) implements RequestHandlerInterface {
-    public function __construct(private Via $app) {}
+use Nyholm\Psr7\Response;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 
+$app->route(['GET', 'POST'], '/api/items/{id}', new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface {
-        // ...check the credentials...
-        $this->app->regenerateSession($request);
-        $this->app->setSessionData($request->getAttribute('via.session'), 'user', $user);
-
-        return new Response(303, ['Location' => '/dashboard']);
+        return new Response(200, ['Content-Type' => 'application/json'], json_encode([
+            'id' => $request->getAttribute('id'),
+        ]));
     }
 });
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-broadcast"><code>broadcast(string $scope): void</code></h3>
-    <p>Push updates to all contexts in a scope. Use after modifying global state outside an action. A bare
-    <code>Scope::ROUTE</code> reaches every context on every route, like <code>Scope::GLOBAL</code>; pass
-    <code>Scope::routeScope('/path')</code> to target one route.</p>
+    <h4 id="via-group"><code>group(callable|string $prefixOrFn, ?callable $fn = null): RouteGroup</code></h4>
+    <p>
+        Registers the routes the closure registers, with an optional URL prefix for every
+        <code>page()</code> and <code>route()</code> inside it.
+        <code>RouteGroup::middleware(MiddlewareInterface ...$middleware): RouteGroup</code> adds middleware to
+        all of them.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->group('/admin', function (Via $app): void {
+    $app->page('/', fn (Context $c) => $c->view('admin.html.twig'));       // /admin
+    $app->page('/users', fn (Context $c) => $c->view('users.html.twig'));  // /admin/users
+})->middleware(new AuthMiddleware());
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="via-not-found"><code>notFound(callable $handler): Via</code></h4>
+    <p>
+        Handles requests no route and no static file matched. The handler gets the raw OpenSwoole
+        <code>Request</code> and <code>Response</code>, sets the status and ends the response. A Twig
+        template rendered there through <code>getTwig()</code> can use the site's layout:
+        <code>via_head()</code> and <code>via_foot()</code> write the import map and the Datastar script.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->notFound(function (Request $request, Response $response) use ($app): void {
+    $response->status(404);
+    $response->header('Content-Type', 'text/html; charset=utf-8');
+    $response->end($app->getTwig()->render('404.html.twig'));
+});
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="via-middleware"><code>middleware(MiddlewareInterface ...$middleware): void</code></h4>
+    <p>
+        Registers global PSR-15 middleware. It runs on page loads, actions and <code>route()</code>
+        requests, and on SSE connects when it implements <code>SseAwareMiddleware</code>. The request
+        carries the visitor's session id in <code>via.session</code>. Middleware instances live as long as
+        the worker, so keep per-request state in request attributes. See <a href="/docs/middleware">Middleware</a>.
+    </p>
+
+    <h3 id="via-server">Server and workers</h3>
+
+    <h4 id="via-start"><code>start(): void</code></h4>
+    <p>
+        Starts the OpenSwoole server. Call it last, after every route. It throws before it binds the port
+        for settings that cannot work, such as a <code>worker_num</code> in <code>withSwooleSettings()</code>
+        that differs from <code>withWorkerNum()</code>, or <code>hook_flags</code> with
+        <code>SWOOLE_HOOK_STDIO</code> and without <code>SWOOLE_HOOK_FILE</code>.
+    </p>
+
+    <h4 id="via-on-worker-start"><code>onWorkerStart(callable $callback): void</code></h4>
+    <p>
+        Runs the callback in every worker as it starts, with the worker's id: four times with
+        <code>withWorkerNum(4)</code>, and again when a worker restarts after a reload, a
+        <code>max_request</code> recycle or a crash. Run work meant for one worker where
+        <code>$workerId === 0</code>: worker 0 always exists and keeps its id across restarts. Routes
+        registered here are picked up.
+    </p>
+
+    <h4 id="via-on-worker-stop"><code>onWorkerStop(callable $callback): void</code></h4>
+    <p>
+        Runs the callback in every worker as it stops, with the worker's id: on <code>SIGTERM</code> or
+        <code>SIGINT</code>, and also on a reload (<code>SIGUSR1</code>) or a <code>max_request</code>
+        recycle, which a callback cannot tell apart. The worker first asks its tabs to reconnect, ends
+        their streams and waits up to half the stop budget for them and for
+        <a href="#context-spawn"><code>spawn()</code></a> tasks; then the callbacks run, each in its own
+        try/catch. OpenSwoole's <code>max_wait_time</code> (3 seconds by default, counted in whole seconds)
+        bounds the whole stop. End long-lived coroutines, sockets and <code>Event::add</code> fds here, or
+        let loops check <code>isShuttingDown()</code>: anything still alive at the end is killed.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use OpenSwoole\Timer;
+
+$timerId = null;
+$app->onWorkerStart(function (int $workerId) use ($app, &$timerId): void {
+    if ($workerId === 0) {
+        $timerId = Timer::tick(5000, fn () => $app->broadcast(Scope::GLOBAL));
+    }
+});
+$app->onWorkerStop(function (int $workerId) use (&$timerId): void {
+    if ($timerId !== null) {
+        Timer::clear($timerId);
+    }
+});
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="via-is-shutting-down"><code>isShuttingDown(): bool</code></h4>
+    <p>Whether this worker has begun to stop, reload or recycle. A background loop checks it to end before <code>max_wait_time</code> runs out.</p>
+
+    <h4 id="via-set-interval"><code>setInterval(callable $callback, int $ms, bool $everyWorker = false): void</code></h4>
+    <p>
+        A server timer that fires every <code>$ms</code> milliseconds, armed when the worker starts and
+        cleared when it stops. With several workers it runs on worker 0 only, so it fires once per interval
+        for the whole server; <code>everyWorker: true</code> arms it in each worker. That governs the
+        timer, not the state it touches: a PHP static it changes is still per worker. A throw is logged,
+        reaches <code>onError()</code> as <code>ErrorPhase::Timer</code>, and the timer keeps running.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->setInterval(function () use ($app): void {
+    if ($app->countClients(Scope::GLOBAL) > 0) {
+        $app->broadcast(Scope::GLOBAL);
+    }
+}, 5000);
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="via-hook-flags"><code>static defaultHookFlags(): int</code> and <code>static noFileIoHookFlags(): int</code></h4>
+    <p>
+        <code>defaultHookFlags()</code> returns the <code>hook_flags</code> php-via sets: <code>SWOOLE_HOOK_ALL</code>,
+        without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or newer, where OpenSwoole's
+        native curl hook crashes the worker. <code>noFileIoHookFlags()</code> returns the socket, stream,
+        sleep and <code>proc_open()</code> hooks, plus the native curl hook where libcurl is older than 8.20.
+        Without the file and stdio hooks, file I/O blocks the worker for the call instead of going through
+        the thread pool: use it only in apps that run no <code>exec()</code>, <code>system()</code> or
+        <code>popen()</code> and hold no <code>flock()</code> across a suspension. See
+        <a href="/docs/deployment#hooks">Deployment → Coroutine hooks</a>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="via-clients">Clients and errors</h3>
+
+    <h4 id="via-on-client-connect"><code>onClientConnect(callable $callback): void</code></h4>
+    <h4 id="via-on-client-disconnect"><code>onClientDisconnect(callable $callback): void</code></h4>
+    <p>
+        Run when a tab opens or closes its SSE stream, with the tab's <code>Context</code>. On disconnect the
+        tab has already left <code>getClients()</code>. A disconnect also fires for a short network blip;
+        <a href="#context-on-cleanup"><code>onCleanup()</code></a> runs when the tab is gone for good. See
+        <a href="/docs/lifecycle">Lifecycle</a>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->onClientConnect(fn (Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
+$app->onClientDisconnect(fn (Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="via-on-error"><code>onError(callable $callback): void</code></h4>
+    <p>
+        Sees each throw php-via catches from app code, for an error tracker, a metric or an error message
+        on the tab. The callback gets the throwable, the context or <code>null</code>, an
+        <a href="#error-phase"><code>ErrorPhase</code></a> and, for an action or a route, the action id or
+        the route's path as registered. It only observes: php-via still logs the throw, a failing action still
+        answers 500, and the signals the action changed still go to the tab, the ones the callback writes
+        included. Callbacks run in the coroutine that caught the throw, before the action answers, so send a
+        slow report from a coroutine of its own (<code>OpenSwoole\Coroutine::create()</code>). A throw inside a
+        callback, or in a coroutine it starts, is only logged. Throws from lifecycle
+        callbacks such as <code>onCleanup()</code> and php-via's own failures are only logged too.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\ErrorPhase;
+
+$app->onError(function (\Throwable $e, ?Context $c, ErrorPhase $phase, ?string $action) use ($tracker): void {
+    $tracker->capture($e, ['phase' => $phase->value, 'action' => $action]);
+    $c?->getSignal('error')?->setValue('Something went wrong. Try again.');
+});
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="via-get-clients"><code>getClients(): array</code></h4>
+    <p>
+        The connected tabs on every worker, keyed by context id, each with <code>id</code>,
+        <code>identicon</code>, <code>connected_at</code>, <code>ip</code> and <code>context_id</code>. A
+        broadcast reads the list once for all the views it renders.
+    </p>
+
+    <h4 id="via-count-clients"><code>countClients(string $scope): int</code></h4>
+    <p>
+        How many tabs with an open stream a broadcast of <code>$scope</code> reaches, on every worker:
+        whether anyone is watching. A tab counts from its SSE connect until its stream closes, so a page
+        that has not connected yet is left out. <code>Scope::GLOBAL</code> counts every connected tab, and a
+        wildcard such as <code>room:*</code> counts each matching tab once. Pass a resolved scope:
+        <code>Scope::routeScope('/path')</code>, not <code>Scope::ROUTE</code>.
+    </p>
+
+    <h4 id="via-get-local-contexts"><code>getLocalContexts(string $scope): array</code></h4>
+    <p>
+        The contexts of this worker in <code>$scope</code>, connected or not. With several workers the
+        contexts on other workers are missing, so an empty list does not mean the scope is empty: use
+        <code>countClients()</code> for that.
+    </p>
+
+    <h3 id="via-broadcasting">Broadcasting</h3>
+
+    <h4 id="via-broadcast"><code>broadcast(string $scope): void</code></h4>
+    <p>
+        Re-renders every tab in a scope and publishes the scope to the other workers and nodes. Pass a
+        resolved scope: <code>Scope::GLOBAL</code>, <code>Scope::routeScope('/path')</code>,
+        <code>Scope::sessionScope($id)</code>, a custom scope such as <code>room:lobby</code>, or a wildcard
+        such as <code>room:*</code>. A bare <code>Scope::TAB</code>, <code>Scope::ROUTE</code> or
+        <code>Scope::SESSION</code> throws an <code>InvalidArgumentException</code>, since outside a
+        context there is nothing to resolve it against.
+    </p>
     {% code 'php' %}{% verbatim %}
 $app->broadcast(Scope::GLOBAL);
 $app->broadcast(Scope::routeScope('/'));
 $app->broadcast('room:lobby');
     {% endverbatim %}{% endcode %}
-    <p>Inside a coroutine (actions, timers, SSE hooks, broker messages) the call only marks the scope. The
-    worker's next flush re-renders it once and publishes it to other workers and nodes once, however many times
-    it was broadcast in the meantime, so views show the state as it is then. That flush runs at the end of the
-    current event-loop turn when the worker's last flush started at least one broadcast tick (25&nbsp;ms by
-    default) ago and ended at least half a tick ago, otherwise as soon as both have passed. Outside a coroutine
-    and while the worker shuts down, the call renders before it returns. See <a
-    href="/docs/broadcasting#timing">Broadcasting → When the update is sent</a>.</p>
+    <p>
+        Inside a coroutine (actions, timers, SSE hooks, broker messages) the call only marks the scope.
+        The worker's next flush renders it once and publishes it once, however often it was broadcast,
+        so views show the state as it is then. That flush runs at the end of the current event-loop turn
+        when the last flush started at least one broadcast tick ago (25&nbsp;ms by default) and ended at
+        least half a tick ago. A scope with a <a href="#config-with-broadcast-throttle"><code>withBroadcastThrottle()</code></a>
+        renders at most once per its interval. Outside a coroutine and during shutdown the call renders
+        before it returns. See <a href="/docs/broadcasting#timing">Broadcasting → When the update is sent</a>.
+    </p>
 
-    <h3 id="via-flush-broadcasts"><code>flushBroadcasts(): void</code></h3>
-    <p>Run the broadcasts marked so far now, in the calling coroutine, without waiting for the tick. Use it when
-    the fan-out has to reach clients before something queued after it, or before shared state is changed back.
-    When another flush is rendering a scope this coroutine broadcast, it waits for that fan-out, at most one
-    second; past that it logs a warning and returns, and that scope's frame follows on a later flush.</p>
+    <h4 id="via-flush-broadcasts"><code>flushBroadcasts(): void</code></h4>
+    <p>
+        Renders the broadcasts marked so far now, in the calling coroutine, ignoring the tick and any
+        throttle. Use it when the fan-out has to reach the tabs before something queued after it, or
+        before shared state changes back. When another flush is rendering a scope this coroutine
+        broadcast, it waits for that fan-out, at most one second.
+    </p>
     {% code 'php' %}{% verbatim %}
 $app->broadcast('room:lobby');
 $app->flushBroadcasts();
 $c->execScript('scrollToBottom()'); // arrives after the new messages
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-global-state"><code>globalState(string $key, mixed $default = null): mixed</code></h3>
-    <h3 id="via-set-global-state"><code>setGlobalState(string $key, mixed $value): void</code></h3>
-    <p>Shared in-memory state across all contexts. Lives for the server lifetime and is cleared on restart,
-    unless <a href="#config"><code>withPersistentGlobalState()</code></a> is set.</p>
-    {% code 'php' %}{% verbatim %}
-$app->setGlobalState('counter', 0);
-$count = $app->globalState('counter', 0);
-    {% endverbatim %}{% endcode %}
+    <h4 id="via-get-scoped-signal-by-name"><code>getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal</code></h4>
     <p>
-        Keys are at most 63 characters once GlobalState is in shared memory (<code>worker_num &gt; 1</code> or
-        persistence on); a longer key throws <code>\InvalidArgumentException</code>.
-    </p>
-
-    <h3 id="via-increment-global-state"><code>incrementGlobalState(string $key, int $by = 1): int</code></h3>
-    <h3 id="via-mutate-global-state"><code>mutateGlobalState(string $key, callable $mutator): mixed</code></h3>
-    <p>
-        Read-modify-write without losing updates. <code>setGlobalState($k, globalState($k) + 1)</code> is two
-        steps, and with several workers two of them can read the same value: over 4 workers doing 500
-        increments each it kept 772 to 1238 of 2000. <code>incrementGlobalState()</code> is atomic and returns
-        the new value; it throws <code>\LogicException</code> if the key holds a non-integer.
-        <code>mutateGlobalState()</code> passes the current value (<code>null</code> if unset) to the callback
-        under a lock on the key and stores what it returns, so keep the callback short and non-blocking.
-    </p>
-    {% code 'php' %}{% verbatim %}
-$app->incrementGlobalState('visits');
-$app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?? [], $msg], -50));
-    {% endverbatim %}{% endcode %}
-
-    <h3 id="via-on-start"><code>onWorkerStart(callable $callback): void</code></h3>
-    <h3 id="via-on-shutdown"><code>onWorkerStop(callable $callback): void</code></h3>
-    <p>Server lifecycle hooks. Use <code>onWorkerStart</code> to create timers; <code>onWorkerStop</code> to clear them.
-    <code>onWorkerStart</code> callbacks run once in each worker process as it starts, so with <code>worker_num &gt; 1</code>
-    a timer created there fires in every worker. Use <a href="#via-set-interval"><code>setInterval()</code></a>
-    for a timer that should fire once per interval for the whole server.</p>
-    <p>
-        <code>onWorkerStop</code> callbacks run once in each worker process when that worker stops: on
-        <code>SIGTERM</code> or <code>SIGINT</code> (<code>docker stop</code>, <code>systemctl stop</code>,
-        Ctrl-C), and also when a worker is reloaded (<code>SIGUSR1</code>) or recycled after
-        <code>max_request</code>. A callback cannot tell a reload from a stop. They run inside a coroutine. Before
-        they run, the worker closes its SSE streams and waits up to half the stop budget for them to finish, so
-        <code>onClientDisconnect</code> has normally run for each client by then. With <code>max_wait_time</code>
-        below 2 there is no wait. A callback that throws is logged and the rest still run.
-        OpenSwoole's <code>max_wait_time</code> (3 seconds by default) bounds the whole stop, and because it counts
-        whole seconds the real budget is roughly <code>max_wait_time</code> minus up to one second.
-    </p>
-    <p>
-        End long-lived coroutines, sockets and <code>Event::add</code> fds from <code>onWorkerStop</code>, or have
-        background loops check <code>$app-&gt;isShuttingDown()</code>. Anything still alive holds the worker until
-        <code>max_wait_time</code>, and then OpenSwoole kills it. The worker logs a warning with the number of
-        coroutines left.
-    </p>
-    {% code 'php' %}{% verbatim %}
-$timerId = null;
-$app->onWorkerStart(function (int $workerId) use ($app, &$timerId): void {
-    $timerId = Timer::tick(5000, fn() => $app->broadcast(Scope::GLOBAL));
-});
-$app->onWorkerStop(function (int $workerId) use (&$timerId): void {
-    if ($timerId !== null) Timer::clear($timerId);
-});
-    {% endverbatim %}{% endcode %}
-
-    <h3 id="via-set-interval"><code>setInterval(callable $callback, int $ms, bool $everyWorker = false): void</code></h3>
-    <p>
-        Register a server-wide recurring timer that fires every <code>$ms</code> milliseconds.
-        It is armed when the worker starts and cleared when it stops, with no manual
-        <code>onWorkerStart</code>/<code>onWorkerStop</code> wiring. With <code>worker_num &gt; 1</code> it runs on one
-        worker only, so the callback fires once per interval for the whole server. Pass
-        <code>everyWorker: true</code> for work that has to happen in each process.
-    </p>
-    {% code 'php' %}{% verbatim %}
-// Broadcast global state every 5 seconds
-$app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000);
-    {% endverbatim %}{% endcode %}
-
-    <h3 id="via-get-scoped-signal-by-name"><code>getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal</code></h3>
-    <p>
-        Find a scoped signal from code that runs outside a context, such as a timer. Pass the name the signal
-        was declared with, not its browser id, and a resolved scope: <code>Scope::routeScope('/path')</code>
-        rather than <code>Scope::ROUTE</code>. For a signal declared inside a component, also pass the
-        component's namespace. It returns <code>null</code> until a context on this worker has declared the signal.
+        Finds a scoped signal from code outside a context, such as a timer, by the name it was declared
+        with. Pass a resolved scope, and for a signal declared inside a component the component's
+        namespace. It returns <code>null</code> when no worker declared the signal. On a worker where no
+        context declared it but another worker did, it returns a handle on the shared value, whose writes
+        always broadcast the scope.
     </p>
     {% code 'php' %}{% verbatim %}
 $app->setInterval(function () use ($app): void {
@@ -200,280 +353,439 @@ $app->setInterval(function () use ($app): void {
 }, 5000);
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-group"><code>group(callable $fn): RouteGroup</code></h3>
+    <h3 id="via-global-state">Global state</h3>
+
+    <h4 id="via-global-state-get"><code>globalState(string $key, mixed $default = null): mixed</code></h4>
+    <h4 id="via-set-global-state"><code>setGlobalState(string $key, mixed $value): void</code></h4>
     <p>
-        Register multiple routes inside a closure and attach shared middleware to all of them in one call.
-        Returns a <code>RouteGroup</code> with a fluent <code>middleware()</code> method.
-        Only routes registered <em>inside</em> the closure are included.
+        Server-side values every tab can read, for the life of the server or across restarts with
+        <a href="#config-with-persistent-global-state"><code>withPersistentGlobalState()</code></a>. With
+        several workers, or with persistence, they live in shared memory: keys are at most 63 characters,
+        and values are serialized copies. <code>setGlobalState()</code> is last-write-wins.
+    </p>
+
+    <h4 id="via-increment-global-state"><code>incrementGlobalState(string $key, int $by = 1): int</code></h4>
+    <h4 id="via-mutate-global-state"><code>mutateGlobalState(string $key, callable $mutator): mixed</code></h4>
+    <p>
+        Read-modify-write without lost updates. <code>setGlobalState($k, globalState($k) + 1)</code> is two
+        steps, and with several workers two of them read the same value: over 4 workers doing 500
+        increments each it kept 772 to 1238 of 2000. <code>incrementGlobalState()</code> is atomic, returns
+        the new value and throws a <code>LogicException</code> when the key holds a non-integer.
+        <code>mutateGlobalState()</code> passes the current value (<code>null</code> if unset) to the
+        callback under a lock on the key and stores what it returns, so keep the callback short.
     </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Http\RouteGroup;
-
-$app->group(function (Via $app): void {
-    $app->page('/admin', fn(Context $c) => ...);
-    $app->page('/admin/users', fn(Context $c) => ...);
-})->middleware(new AuthMiddleware());
+$app->incrementGlobalState('visits');
+$app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?? [], $msg], -50));
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-on-client-connect"><code>onClientConnect(callable $callback): void</code></h3>
-    <h3 id="via-on-client-disconnect"><code>onClientDisconnect(callable $callback): void</code></h3>
+    <h3 id="via-sessions">Sessions</h3>
+
+    <h4 id="via-get-session-data"><code>getSessionData(string $sessionId, string $key, mixed $default = null): mixed</code></h4>
+    <h4 id="via-set-session-data"><code>setSessionData(string $sessionId, string $key, mixed $value): void</code></h4>
+    <h4 id="via-clear-session-data"><code>clearSessionData(string $sessionId, ?string $key = null): void</code></h4>
     <p>
-        Fire when a client opens or closes an SSE connection. The callback receives the client's <code>Context</code>.
-        On disconnect, the client has already been removed from <code>getClients()</code>.
-        See <a href="/docs/lifecycle">Lifecycle</a> for usage.
+        Session data from outside a context, such as in middleware or a <code>route()</code> handler. The
+        session id is the <code>via.session</code> request attribute or <code>$c-&gt;getSessionId()</code>.
+        The rules are those of the <a href="#context-session-data">context's methods</a>.
+    </p>
+
+    <h4 id="via-regenerate-session"><code>regenerateSession(ServerRequestInterface $request): void</code></h4>
+    <p>
+        <a href="#context-regenerate-session"><code>$c-&gt;regenerateSession()</code></a> for middleware and
+        <code>route()</code> handlers: the session rotates at the call, and the response to
+        <code>$request</code> sets the new cookie. Middleware calls it before
+        <code>$handler-&gt;handle()</code>; afterwards it throws a <code>LogicException</code>, and so it does
+        for a request php-via did not hand over. It throws an <code>OverflowException</code> when the record
+        of rotated cookies is full, so call it before the login writes anything.
     </p>
     {% code 'php' %}{% verbatim %}
-$app->onClientConnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
-$app->onClientDisconnect(fn(Context $c) => $app->broadcast(Scope::routeScope($c->getRoute())));
+$app->route('POST', '/login', new class($app, $users) implements RequestHandlerInterface {
+    public function __construct(private Via $app, private Users $users) {}
+
+    public function handle(ServerRequestInterface $request): ResponseInterface {
+        $form = (array) $request->getParsedBody();
+        $user = $this->users->check((string) ($form['email'] ?? ''), (string) ($form['password'] ?? ''));
+        if ($user === null) {
+            return new Response(303, ['Location' => '/login?failed=1']);
+        }
+        $this->app->regenerateSession($request);
+        $this->app->setSessionData($request->getAttribute('via.session'), 'user', $user->id);
+
+        return new Response(303, ['Location' => '/dashboard']);
+    }
+});
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-get-clients"><code>getClients(): array</code></h3>
-    <p>
-        With several workers the list covers every worker. A broadcast reads it once for all the views it renders,
-        unless a client connects or leaves on this worker, or other code on this worker reads the list while a view
-        waits on I/O.
-    </p>
-    {% code 'php' %}{% verbatim %}
-$clients = $app->getClients();
-// ['contextId' => ['id' => '...', 'identicon' => '<svg ...>', 'connected_at' => 1234567890, 'ip' => '...', 'context_id' => 'contextId']]
-$count = count($app->getClients());
-    {% endverbatim %}{% endcode %}
+    <h3 id="via-pages">Markup on every page</h3>
 
-    <h3 id="via-append-to-head"><code>appendToHead(string ...$elements): void</code></h3>
-    {% code 'php' %}{% verbatim %}
-$c->appendToHead(
-    '<title>My Page</title>',
-    '<meta name="description" content="...">'
-);
-    {% endverbatim %}{% endcode %}
+    <h4 id="via-append-to-head"><code>appendToHead(string ...$elements): void</code></h4>
+    <h4 id="via-append-to-foot"><code>appendToFoot(string ...$elements): void</code></h4>
     <p>
-        <code>$app-&gt;appendToHead()</code> adds to every page, <code>$c-&gt;appendToHead()</code> to one
-        context; <code>appendToFoot()</code> works the same before <code>&lt;/body&gt;</code>. With a shell
-        they fill <code>{% verbatim %}{{ head_content }}{% endverbatim %}</code> and
-        <code>{% verbatim %}{{ foot_content }}{% endverbatim %}</code>. A view that renders a full
+        Add markup to every page: to <code>&lt;head&gt;</code> and before <code>&lt;/body&gt;</code>. A shell
+        writes them at <code>{% verbatim %}{{ head_content }}{% endverbatim %}</code> and
+        <code>{% verbatim %}{{ foot_content }}{% endverbatim %}</code>. A view that renders a whole
         <code>&lt;html&gt;</code> document gets them before its first <code>&lt;/head&gt;</code> and last
-        <code>&lt;/body&gt;</code>, on the initial render and on every SSE update, unless the exact markup
-        is already there. Such a document also gets, right after its opening <code>&lt;head&gt;</code>,
-        a <code>via_ctx</code> meta when it has none and a <code>data-signals__ifmissing</code> seed of
-        the initial signal values, but never the SSE
-        bootstrap or <code>datastar.js</code>: the layout has to carry those. A <code>&lt;title&gt;</code>
-        appended here lands next to the layout's own. See <a href="/docs/twig#twig-shell">Templates</a>.
+        <code>&lt;/body&gt;</code>, on the page load and on every update, unless the exact markup is already
+        there. <a href="#context-append-to-head"><code>$c-&gt;appendToHead()</code></a> does the same for one page.
     </p>
 
-    <h3 id="via-get-twig"><code>getTwig(): Twig\Environment</code></h3>
+    <h4 id="via-get-twig"><code>getTwig(): Environment</code></h4>
+    <p>
+        The <code>Twig\Environment</code> of the app's <a href="#twig-engine"><code>TwigEngine</code></a>, for
+        extensions, globals, runtime loaders and templates held as strings. It throws a
+        <code>LogicException</code> when the app has no template engine or another engine than Twig.
+    </p>
     {% code 'php' %}{% verbatim %}
 $app->getTwig()->addExtension(new MyExtension());
+$html = $app->getTwig()->createTemplate('<p>{{ greeting }}</p>')->render(['greeting' => 'Hello']);
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-log"><code>log(string $level, string $message, ?Context $context = null): void</code></h3>
+    <h3 id="via-diagnostics">Logs and statistics</h3>
+
+    <h4 id="via-log"><code>log(string $level, string $message, ?Context $context = null): void</code></h4>
+    <p>
+        Writes to php-via's log at <code>debug</code>, <code>info</code>, <code>warn</code> or
+        <code>error</code>, filtered by <a href="#config-with-log-level"><code>withLogLevel()</code></a>. The
+        Dev Bar's Logs panel shows these lines.
+    </p>
     {% code 'php' %}{% verbatim %}
 $app->log('info', 'Server ready');
 $app->log('debug', 'Action fired', $c);
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-start"><code>start(): void</code></h3>
-    <p>Start the OpenSwoole server. Call this last, after all routes are registered.</p>
-
-    <h3 id="via-hook-flags"><code>Via::defaultHookFlags(): int</code> and <code>Via::noFileIoHookFlags(): int</code></h3>
+    <h4 id="via-get-stats"><code>getStats(): Stats</code></h4>
     <p>
-        <code>defaultHookFlags()</code> returns the <code>hook_flags</code> php-via sets:
-        <code>SWOOLE_HOOK_ALL</code>, without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or
-        newer. <code>HOOK_FLAGS_NO_FILE_IO</code> is the socket, stream, sleep and <code>proc_open()</code>
-        hooks, without file and stdio I/O and without native curl, 1790 on OpenSwoole 26.2, for apps that run
-        no shell commands and hold no file lock across a suspension. See
-        <a href="/docs/deployment#hooks-narrow">Deployment → Coroutine hooks</a>.
+        This worker's statistics. <code>getStats()-&gt;getStats()</code> returns the render timings
+        (<code>render_count</code>, <code>total_time</code>, <code>min_time</code>, <code>max_time</code>,
+        <code>avg_time</code>), and <code>getStats()-&gt;getBroadcastStats()</code> the broadcast flushes
+        (<code>scheduled</code>, <code>coalesced</code>, <code>flushes</code>, <code>flush_overruns</code>
+        and their durations in milliseconds). In dev mode <code>GET /_stats</code> serves them as JSON.
     </p>
-    {% code 'php' %}{% verbatim %}
-$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
-    {% endverbatim %}{% endcode %}
-
-    ---
 
     <h2 id="context">Context</h2>
-    <p>One context per connected browser tab. Holds signals, actions, and view definition for that client.</p>
-
-    <h3 id="context-signal"><code>signal(mixed $initial, string $name, ?string $scope, bool $autoBroadcast, ?bool $clientWritable)</code></h3>
-    {% code 'php' %}{% verbatim %}
-$count  = $c->signal(0, 'count');                   // TAB scope
-$shared = $c->signal(0, 'count', Scope::ROUTE);     // shared across route
-$pref   = $c->signal('light', 'theme', Scope::SESSION);
-$room   = $c->signal('', 'note', 'room:lobby');     // custom scope
-
-// Collaborative: allow clients to write to a scoped signal
-$input  = $c->signal('', 'note', Scope::ROUTE, clientWritable: true);
-
-// Server-owned TAB signal: the value the browser posts is ignored
-$status = $c->signal('idle', 'status', clientWritable: false);
-    {% endverbatim %}{% endcode %}
     <p>
-        Datastar posts every signal the browser holds with each action, and php-via writes the
-        values into the signals before the action runs. <code>clientWritable</code> decides which
-        signals take them:
+        One context per browser tab, passed to the page handler, to actions and to views. A component
+        gets a context of its own; <a href="#context-get-page-context"><code>getPageContext()</code></a>
+        leads from it to the page's.
     </p>
+
+    <h3 id="context-signals-actions">Signals and actions</h3>
+
+    <h4 id="context-signal"><code>signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null, bool $clientSeeded = false): Signal</code></h4>
+    <p>
+        Declares a signal: a value the server and the browser both hold. The name is required and unique
+        per context; an empty name throws. Without a scope the signal is private to the tab. With a scope
+        (<code>Scope::ROUTE</code>, <code>Scope::SESSION</code>, <code>Scope::GLOBAL</code> or a custom
+        scope) every context that declares the same name in that scope shares one value, and the signal joins
+        its context to the scope, so writes from other tabs reach this one. <code>Scope::ROUTE</code> is this
+        route's scope, one per route pattern, and <code>Scope::SESSION</code> this session's. The primary
+        scope set by <a href="#context-scope"><code>scope()</code></a> is not a default: after
+        <code>scope()</code> set a shared scope, a signal without a scope throws a <code>LogicException</code>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$count  = $c->signal(0, 'count');                    // private to the tab
+$shared = $c->signal(0, 'count', Scope::ROUTE);      // shared by every tab on this route
+$theme  = $c->signal('light', 'theme', Scope::SESSION);
+$topic  = $c->signal('', 'topic', 'room:lobby');     // custom scope
+
+$note   = $c->signal('', 'note', Scope::ROUTE, clientWritable: true); // tabs may write it
+$status = $c->signal('idle', 'status', clientWritable: false);        // the server owns it
+    {% endverbatim %}{% endcode %}
     <ul>
-        <li><code>null</code> (default): TAB signals take the client value, scoped signals are
-            <strong>server-authoritative</strong>, so clients cannot overwrite shared state.</li>
-        <li><code>true</code>: the signal takes the client value in any scope. Use it for
-            collaborative inputs where several clients push values, e.g. a shared text field with
-            <code>data-bind</code>.</li>
-        <li><code>false</code>: the signal ignores the client value in any scope. When the posted
-            value differs, the server value is sent back with the next sync.</li>
+        <li><code>$autoBroadcast</code>: a scoped signal broadcasts its scope when a write changes it.
+            With <code>false</code>, call <code>broadcast()</code> or <code>syncSignals()</code> yourself.</li>
+        <li><code>$clientWritable</code>: Datastar posts every signal the browser holds with each action, and
+            php-via writes the values into the signals before the action runs. <code>null</code> lets TAB
+            signals take them and keeps scoped ones server-owned; <code>true</code> or <code>false</code>
+            applies to any scope. <a href="#config-with-strict-tab-signals"><code>withStrictTabSignals()</code></a>
+            makes TAB signals server-owned by default. A value must have the type of the initial value: a
+            lossless form such as <code>'5'</code> for an int or <code>'false'</code> for a bool is converted,
+            and any other value is refused. A signal declared with <code>null</code> takes any type.</li>
+        <li><code>$clientSeeded</code>: the browser holds the initial value, such as one the page's own
+            script reads from the URL, and <code>$initialValue</code> is only the fallback. The page seed and
+            the first sync leave the signal out, and every SSE connect gives it the browser's value before
+            the view renders, until the server writes it. Declare the value on <code>&lt;html&gt;</code> or in
+            <code>&lt;head&gt;</code> before <code>via_head</code>. TAB signals only.</li>
     </ul>
     <p>
-        <code>Config::withStrictTabSignals()</code> turns the TAB default into server-owned, so only
-        TAB signals declared <code>clientWritable: true</code> take client values. Before switching it
-        on, check which signals the page binds or assigns in the browser. The composition API takes
-        the same argument: <code>#[Signal(clientWritable: false)]</code>. Signals declared inside a
-        component follow the same rules.
-    </p>
-    <p>
-        A server-owned TAB signal lives in the worker that holds the context. With
-        <code>worker_num &gt; 1</code>, actions that land on another worker are passed to that one, and
-        when the tab's stream reconnects to another worker, the context is rebuilt there with the value the
-        old worker hands over. When that worker stopped or crashed, the signal starts from its initial value:
-        keep a value that has to survive that in a scoped signal or in <code>tabState()</code>, or use
-        <code>worker_num = 1</code>.
-    </p>
-    <p>
-        Every signal gets an id that is unique per tab: the browser uses it in <code>data-bind</code>,
-        <code>$name</code> expressions and the patches it receives. A scoped signal outside a component
-        whose name is letters and digits, in a scope of letters and digits joined by <code>:</code> or a
-        route path of letters and digits, keeps a readable id such as <code>global_count</code> or
-        <code>route__examples_counter_count</code>. Every other id, which includes all TAB and component
-        signals, ends in <code>____</code> plus one code per <code>_</code> saying what it stands for, so
-        two names that differ only in punctuation never share an id. Use <code>$signal-&gt;id()</code>,
-        <code>bind()</code> and <code>ref()</code> in templates instead of writing ids by hand, and
-        <code>$app-&gt;getScopedSignalByName()</code> to find a scoped signal from code outside a context.
-    </p>
-    <p>
-        Declaring a TAB signal again with the same name returns the existing signal and sets it to the
-        new initial value. When that changes the live value, or the declaration asks for a different
-        <code>clientWritable</code> (the first one is kept), php-via logs a warning once per name. The
-        warning gives the type and size of both values, not their content.
+        Declaring a TAB signal again with the same name returns the existing signal and sets it to the new
+        initial value, with a warning when that changes the live value. Each signal has a browser id that is
+        unique per tab; write it with <a href="#signal"><code>id()</code>, <code>bind()</code> and
+        <code>ref()</code></a>, never by hand. A server-owned TAB signal lives on the worker that holds the
+        tab: when that worker stops or crashes, it starts over from its initial value, so keep a value that
+        must survive in a scoped signal or in <a href="#context-tab-state"><code>tabState()</code></a>.
     </p>
 
-    <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>
+    <h4 id="context-get-signal"><code>getSignal(string $name): ?Signal</code></h4>
+    <p>The signal declared under <code>$name</code> in this context, TAB or scoped, or <code>null</code>.</p>
+
+    <h4 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h4>
     <p>
-        The action is the context's own and runs for the tab that posts it, whatever scope the context
-        joined. A third argument throws: the <code>$scope</code> parameter was removed in 0.14. Inside a
-        component, the action reads the page's request through <code>$c->input()</code>,
-        <code>$c->file()</code> and <code>$c->cookie()</code>.
+        Registers an action, which runs for the tab, or the component, that posts to its URL. The callable
+        gets the <code>Context</code>. After the action, the signals it changed go to the tab, also when it
+        throws, so a trailing <code>syncSignals()</code> is not needed; a scoped signal declared with
+        <code>autoBroadcast: false</code> still needs one. Call <code>sync()</code> when the view has to
+        render again. Registering a name twice keeps the later callback and logs a warning. A third
+        argument throws an <code>ArgumentCountError</code>: a scoped action is a class method with
+        <a href="#attr-action"><code>#[Action(scope: ...)]</code></a>.
     </p>
     {% code 'php' %}{% verbatim %}
 $inc = $c->action(function (Context $c) use ($count): void {
     $count->setValue($count->int() + 1);
-    $c->sync();
 }, 'increment');
 
-// In Twig: data-on:click="@post('/_action/increment')"
+// In Twig: data-on:click="@post('{{ increment.url }}')"
     {% endverbatim %}{% endcode %}
     <p>
-        Registering an action with the same name again replaces the earlier callback, and php-via
-        logs a warning once per action id.
+        Each action reads its own request through <code>input()</code>, <code>file()</code>,
+        <code>cookie()</code> and <code>getRequestAttribute()</code>, also while another action of the tab
+        runs. Datastar 1.0.4 cancels a request still in flight when any element sends another one to the
+        same URL: see <a href="/docs/actions#cancellation">Actions → Cancellation</a>.
     </p>
 
-    <h3 id="context-view"><code>view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void</code></h3>
+    <h4 id="context-get-action"><code>getAction(string $name): ?Action</code></h4>
+    <p>The action registered under <code>$name</code>, or <code>null</code>. Unnamed actions are not found.</p>
+
+    <h3 id="context-views">Views and templates</h3>
+
+    <h4 id="context-view"><code>view(callable|string $view, callable|array $data = [], ?string $block = null, bool $shareRender = false): void</code></h4>
     <p>
-        Signals and actions registered on the context are <strong>auto-injected</strong> into every Twig render
-        as named variables (signal baseName, action camelCase name). Entries in <code>$data</code> take priority.
+        Defines what the tab shows: a callable that returns HTML, or a template name rendered by the
+        <a href="#templates">template engine</a>. A template gets the context's named signals and actions
+        as variables, plus <code>$data</code>, which wins. <code>$data</code> can be a callable that runs
+        on every render, for views that read state from elsewhere; an array is built once, when the page
+        handler runs. <code>$block</code> sends only that block on updates, while the page load renders the
+        whole template. <code>$data</code> and <code>$block</code> go with a template name only, and a
+        string of HTML throws: return it from a callable.
     </p>
     {% code 'php' %}{% verbatim %}
-// count and increment are auto-injected: no explicit passing needed
-$c->view('counter.html.twig');
+$c->view(fn (): string => "<p id=\"count\">{$count->int()}</p>");
 
-// Only pass data that isn't a signal/action:
-$c->view('todo.html.twig', ['todos' => $todos]);
-
-$c->view(fn() => "<p>Count: {$count->int()}</p>");
-
-// Send only {% block demo %} on SSE updates (full template on initial load):
-$c->view('todo.html.twig', ['todos' => $todos], block: 'demo');
-
-// Data read again on every render, for views that read external state:
-$c->view('presence.html.twig', fn (): array => ['n' => count($app->getClients())]);
-
-// One render per broadcast for every tab in the primary scope (the view must be the same for all of them):
+$c->view('counter.html.twig');                          // count and increment come in by name
+$c->view('todo.html.twig', ['todos' => $todos]);        // built once
+$c->view('presence.html.twig', fn (): array => ['n' => $app->countClients(Scope::routeScope('/'))]);
+$c->view('page.html.twig', fn (): array => ['items' => $repo->all()], block: 'list');
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>shareRender: true</code> renders each update once for every tab of this view (same primary
+        scope, route and component) instead of once per tab. Use it only for views that are the same for
+        every tab: a TAB signal, per-user data or a component inside the view makes the shared HTML wrong for
+        the others. It needs a shared primary scope from <code>scope()</code> and throws on a TAB one, and a
+        view that renders a whole document never shares its render. See <a href="/docs/views">Views</a>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->scope(Scope::routeScope('/board'));
 $c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], shareRender: true);
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-component"><code>component(callable|string $fn, string $namespace): callable</code></h3>
+    <h4 id="context-render"><code>render(string $template, array $data = [], ?string $block = null): string</code></h4>
     <p>
-        Create a reusable sub-context. Pass a callable for the closure API or a class name string for
-        the composition API: the class is analyzed once and its setup closure built automatically.
-        See <a href="/docs/components">Components</a> and <a href="/docs/composition">Composition</a>.
+        Renders a template with the data a template view gets: the named signals and actions,
+        <code>_via</code>, <code>contextId</code>, <code>currentRoute</code>, <code>basePath</code>,
+        <code>via_head</code> and <code>via_foot</code>, then <code>$data</code>, which wins. Use it inside a
+        view callable to combine templates and components. It throws a <code>LogicException</code> without a
+        template engine.
     </p>
     {% code 'php' %}{% verbatim %}
-// Closure form:
-$counter = $c->component(function (Context $c): void {
-    $n   = $c->signal(0, 'n');
-    $inc = $c->action(fn() => $n->setValue($n->int() + 1), 'inc');
-    $c->view('counter.html.twig');
-}, 'counter');
-
-// Class form (composition API):
-$counter = $c->component(Counter::class, 'counter');
-
-$c->view(fn (): string => $c->render('page.html.twig', ['counter' => $counter()]));
+$c->view(fn (): string => $c->render('page.html.twig', ['cart' => $cart()]));
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-get-signal"><code>getSignal(string $name): ?Signal</code></h3>
-    <h3 id="context-get-action"><code>getAction(string $name): ?Action</code></h3>
-    <p>Retrieve a registered signal or action by name after registration. Useful in actions that need to look up signals by name rather than via a captured variable.</p>
+    <h4 id="context-via-head"><code>viaHead(): string</code></h4>
+    <h4 id="context-via-foot"><code>viaFoot(): string</code></h4>
+    <p>
+        The tags that connect a page to php-via. <code>viaHead()</code> goes right after
+        <code>&lt;meta charset&gt;</code>: the <code>via_ctx</code> signal, the import map when there is one,
+        the SSE connect with its reconnect, and the beacon that closes the context when the tab goes.
+        <code>viaFoot()</code> goes before <code>&lt;/body&gt;</code>: the Datastar module script from
+        <a href="#config-get-datastar-url"><code>getDatastarUrl()</code></a>. Every tag carries the nonce from
+        the page request's <code>via.csp_nonce</code> attribute. A shell writes them with
+        <code>{% verbatim %}{{ via_head }}{% endverbatim %}</code> and
+        <code>{% verbatim %}{{ via_foot }}{% endverbatim %}</code>, a Twig layout with
+        <code>{% verbatim %}{{ via_head() }}{% endverbatim %}</code> and
+        <code>{% verbatim %}{{ via_foot() }}{% endverbatim %}</code>, and a callable that returns a whole
+        document with these methods. php-via warns once per shell or route without <code>via_head</code>. See
+        <a href="/docs/twig#bootstrap">Templates → The page bootstrap</a>.
+    </p>
     {% code 'php' %}{% verbatim %}
-$c->getSignal('count');    // returns the Signal registered as 'count', or null
-$c->getAction('increment'); // returns the Action registered as 'increment', or null
+$c->view(fn (): string => '<!DOCTYPE html><html><head><meta charset="UTF-8">' . $c->viaHead()
+    . '<title>Report</title></head><body><main id="report">...</main>' . $c->viaFoot() . '</body></html>');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-scope"><code>scope(string $scope): void</code></h3>
-    <h3 id="context-add-scope"><code>addScope(string $scope): void</code></h3>
+    <h4 id="context-set-shell-template"><code>setShellTemplate(string $path): Context</code></h4>
+    <p>Uses another shell for this page than the one from <a href="#config-with-shell-template"><code>withShellTemplate()</code></a>.</p>
+
+    <h4 id="context-append-to-head"><code>appendToHead(string ...$elements): Context</code></h4>
+    <h4 id="context-append-to-foot"><code>appendToFoot(string ...$elements): Context</code></h4>
+    <p>Add markup to this page's <code>&lt;head&gt;</code> and before its <code>&lt;/body&gt;</code>, as <a href="#via-append-to-head"><code>$app-&gt;appendToHead()</code></a> does for every page.</p>
     {% code 'php' %}{% verbatim %}
-$c->scope(Scope::ROUTE);          // set primary scope
-$c->addScope('room:' . $roomId);  // add additional scope
+$c->appendToHead('<title>My Page</title>', '<meta name="description" content="...">');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-sync"><code>sync(): void</code></h3>
-    <h3 id="context-sync-signals"><code>syncSignals(): void</code></h3>
-    <p><code>sync()</code> re-renders the view and pushes signals. <code>syncSignals()</code> pushes only signals, skipping view re-render.</p>
+    <h3 id="context-sending">Sending to the browser</h3>
 
-    <h3 id="context-broadcast"><code>broadcast(): void</code></h3>
-    <p>Broadcast to all contexts in this context's primary scope. Same timing as
-    <a href="#via-broadcast"><code>$app-&gt;broadcast()</code></a>.</p>
+    <h4 id="context-sync"><code>sync(): void</code></h4>
+    <h4 id="context-sync-signals"><code>syncSignals(): void</code></h4>
+    <p>
+        <code>sync()</code> renders the view and sends it with the changed signals; <code>syncSignals()</code>
+        sends only the changed signals. While the tab has no open stream, both queue until it connects.
+        Both do nothing once the context is destroyed.
+    </p>
 
-    <h3 id="context-exec-script"><code>execScript(string $script): void</code></h3>
+    <h4 id="context-patch-elements"><code>patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void</code></h4>
+    <p>
+        Sends HTML to the page outside a view render, such as a modal, a toast or a chunk of streamed output.
+        Without a selector, <code>Outer</code> and <code>Replace</code> match the top-level elements of
+        <code>$html</code> by id; every other <a href="#patch-mode">mode</a> needs a selector, and
+        <code>Remove</code> needs no HTML. Patches queue until the stream is open, and none is dropped for a
+        client that falls behind, since no render sends it again. A component's patches go to its page.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\PatchMode;
+
+$c->patchElements('<li>' . htmlspecialchars($line) . '</li>', '#log', PatchMode::Append);
+$c->patchElements(selector: '#toast', mode: PatchMode::Remove);
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="context-exec-script"><code>execScript(string $script): void</code></h4>
+    <p>
+        Runs JavaScript in the tab. Like a patch, the script queues until the stream is open and is never
+        dropped. Under a Content-Security-Policy it needs the setup in
+        <a href="/docs/twig#csp">Templates → Content-Security-Policy</a>.
+    </p>
     {% code 'php' %}{% verbatim %}
 $c->execScript('document.querySelector(".flash").classList.add("show")');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-set-interval"><code>setInterval(callable $callback, int $ms): int</code></h3>
-    <p>Recurring timer, auto-cancelled when the context is destroyed.</p>
+    <h4 id="context-dispatch"><code>dispatch(string $event, mixed $detail = null): void</code></h4>
+    <p>
+        Fires a <code>CustomEvent</code> on the browser's <code>window</code>, with <code>$detail</code>
+        JSON-encoded as its detail, for toasts and the like. The name and the detail cannot break out of the
+        script, which a script built by hand for <code>execScript()</code> has to see to itself. Listen with
+        <code>data-on:toast__window</code>. An empty name, or a detail <code>json_encode()</code> cannot
+        encode, throws an <code>InvalidArgumentException</code>.
+    </p>
     {% code 'php' %}{% verbatim %}
-$c->setInterval(function () use ($count, $c): void {
-    $count->setValue($count->int() + 1);
-    $c->sync();
-}, 1000);
+$c->dispatch('toast', ['level' => 'error', 'text' => 'Save failed']);
+    {% endverbatim %}{% endcode %}
+    {% code 'html' %}{% verbatim %}
+<div data-on:toast__window="$toast = evt.detail.text" data-text="$toast"></div>
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-on-cleanup"><code>onCleanup(callable $callback): void</code></h3>
-    <p>Per-context disconnect hook for cleaning up resources. <code>onCleanup</code> is an alias. See <a href="/docs/lifecycle">Lifecycle</a>.</p>
+    <h4 id="context-download"><code>download(callable|string $source, string $filename, string $mimeType): string</code></h4>
+    <p>
+        Returns a one-shot URL that sends a file as a download over plain HTTP, for exports that do not
+        belong in the SSE stream. A string is the path of a file, which php-via does not delete. A callable
+        returns the content, or yields it in chunks, when the browser fetches the URL, so a generator streams
+        an export of any size. The URL works once, for this tab's session, while the context lives; a tab
+        keeps its newest 100 URLs. A source that throws reaches <code>onError()</code> as
+        <code>ErrorPhase::Render</code>, and the browser sees the download fail.
+    </p>
     {% code 'php' %}{% verbatim %}
-$c->onCleanup(function (Context $c) use ($room, $app): void {
-    unset(Room::$members[$room][$c->getId()]);
-    $app->broadcast('room:' . $room);
-});
+$c->action(function (Context $c) use ($rows): void {
+    $url = $c->download(function () use ($rows): \Generator {
+        foreach ($rows as $row) {
+            yield implode(',', $row) . "\n";
+        }
+    }, 'flows.csv', 'text/csv; charset=utf-8');
+    $c->execScript('window.location = ' . json_encode($url));
+}, 'export');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-cookies"><code>cookie(string $name): ?string</code></h3>
-    <h3><code>setCookie(string $name, string $value, int $expires = 0, string $path = '/', bool $httpOnly = true, bool $secure = true, string $sameSite = 'Lax'): void</code></h3>
-    <h3><code>deleteCookie(string $name, string $path = '/'): void</code></h3>
-    <p>Coroutine-safe cookie access. <code>cookie()</code> reads a cookie of the request the code serves (replaces <code>$_COOKIE</code>, which is unsafe in OpenSwoole). <code>setCookie()</code> queues a cookie for that request's response with secure defaults. <code>deleteCookie()</code> expires a cookie immediately. A cookie set in the page handler goes out with the page, one set in an action with that action's response, and one set outside a request, such as in a timer, with the tab's next action response. See <a href="/docs/actions#action-request">Each action reads its own request</a>.</p>
+    <h4 id="context-is-connected"><code>isConnected(): bool</code></h4>
+    <p>
+        Whether the tab's SSE stream is open on this worker. A component answers for its page. Syncs and
+        patches sent meanwhile queue for the next connect, so checking first only saves the render.
+    </p>
+
+    <h3 id="context-scopes">Scopes and broadcasting</h3>
+
+    <h4 id="context-scope"><code>scope(string $scope): void</code></h4>
+    <p>
+        Sets the primary scope: the target of <code>broadcast()</code> and the key of a shared render. It
+        replaces the primary scope set before and keeps the scopes joined with <code>addScope()</code> or a
+        scoped signal. <code>Scope::ROUTE</code> becomes this route's scope and <code>Scope::SESSION</code>
+        this session's. It is no default for later declarations: signals and actions stay per tab unless they
+        name a scope.
+    </p>
+
+    <h4 id="context-add-scope"><code>addScope(string $scope): void</code></h4>
+    <h4 id="context-remove-scope"><code>removeScope(string $scope): void</code></h4>
+    <p>
+        Join or leave a scope, so the tab does or no longer receives that scope's broadcasts.
+        <code>Scope::ROUTE</code> and <code>Scope::SESSION</code> resolve as in <code>scope()</code>. A tab
+        always keeps its TAB scope.
+    </p>
     {% code 'php' %}{% verbatim %}
-$theme = $c->cookie('theme');        // null if not set
-$c->setCookie('theme', 'dark');      // Secure, HttpOnly, SameSite=Lax by default
-$c->deleteCookie('theme');           // expires cookie immediately
+$c->scope(Scope::ROUTE);           // primary scope: every tab on this route
+$c->addScope('room:' . $roomId);   // also receives broadcasts to this room
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-file"><code>file(string $name): ?array</code></h3>
-    <p>Read a file from the multipart form upload of the action request. Returns the upload array (<code>name</code>, <code>type</code>, <code>tmp_name</code>, <code>size</code>) or <code>null</code> if the field is missing or errored, outside an action, and once the action has answered, because OpenSwoole then deletes the temporary file. Use Datastar's <code>contentType: 'form'</code> modifier to submit the form as a real multipart POST.</p>
+    <h4 id="context-broadcast"><code>broadcast(): void</code></h4>
+    <p>
+        Broadcasts this context's primary scope, with the timing of <a href="#via-broadcast"><code>$app-&gt;broadcast()</code></a>.
+        With the default primary scope, TAB, it syncs this tab only: reach the scopes the tab joined with
+        <code>$app-&gt;broadcast()</code>.
+    </p>
+
+    <h3 id="context-components">Components</h3>
+
+    <h4 id="context-component"><code>component(callable|string $fn, string $namespace): callable</code></h4>
+    <p>
+        Creates a component: a context of its own inside the page, with its own signals, actions and view.
+        Pass a setup callable or a class name for the <a href="/docs/composition">composition API</a>. The
+        namespace prefixes the component's signals and actions, is unique on its page and takes letters,
+        digits, <code>_</code> and <code>-</code> only; anything else, or a namespace already on the page,
+        throws an <code>InvalidArgumentException</code>. The returned callable renders the component: call it
+        inside the page's view callable, so each page render carries the component's current HTML.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$counter = $c->component(function (Context $c): void {
+    $n = $c->signal(0, 'n');
+    $c->action(fn () => $n->setValue($n->int() + 1), 'inc');
+    $c->view('counter.html.twig');
+}, 'counter');
+
+$cart = $c->component(Cart::class, 'cart');
+
+$c->view(fn (): string => $c->render('page.html.twig', ['counter' => $counter(), 'cart' => $cart()]));
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="context-get-page-context"><code>getPageContext(): Context</code></h4>
+    <p>The page a component sits on, or the page itself. Use it to tell which tab an action inside a component came from.</p>
+
+    <h4 id="context-get-namespace"><code>getNamespace(): ?string</code></h4>
+    <p>A component's namespace, or <code>null</code> for a page.</p>
+
+    <h3 id="context-request">The request</h3>
+    <p>
+        These methods read the request the running code serves. In an action, in the renders it runs and in
+        the coroutines it starts, that is the action's request, so two actions of one tab that run at once
+        each read their own. In a <a href="#context-spawn"><code>spawn()</code></a> task it is the request
+        that started the task. Anywhere else, such as the page handler, a timer or a broadcast render, it is
+        the page request. See <a href="/docs/actions#action-request">Actions → Each action reads its own request</a>.
+    </p>
+
+    <h4 id="context-input"><code>input(string $name, mixed $default = null): mixed</code></h4>
+    <p>
+        A parameter of the request: POST first, then the query string. On a page load it reads the page's
+        query. A context rebuilt after its tab was away, or on another worker, sees up to 512 bytes of the
+        page's query again; keep longer state in a path parameter, a signal or <code>tabState()</code>. Use it
+        instead of <code>$_GET</code> and <code>$_POST</code>, which are not safe under OpenSwoole.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$id  = $c->input('id');          // POST['id'] ?? GET['id'] ?? null
+$cat = $c->input('cat', 'all');  // with a default
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="context-file"><code>file(string $name): ?array</code></h4>
+    <p>
+        An uploaded file of the action's multipart request: <code>name</code>, <code>type</code>,
+        <code>tmp_name</code>, <code>error</code> and <code>size</code>. It is <code>null</code> when the
+        field is missing or failed, outside an action, and once the action has answered, since OpenSwoole then
+        deletes the temporary file: move the file before a <code>spawn()</code> task works on it. Post the
+        form with Datastar's <code>contentType: 'form'</code>.
+    </p>
     {% code 'php' %}{% verbatim %}
 $upload = $c->file('avatar');
 if ($upload !== null) {
@@ -481,63 +793,92 @@ if ($upload !== null) {
 }
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-getters">Getters</h3>
+    <h4 id="context-cookie"><code>cookie(string $name): ?string</code></h4>
+    <h4 id="context-set-cookie"><code>setCookie(string $name, string $value, int $expires = 0, string $path = '/', string $domain = '', bool $secure = true, bool $httpOnly = true, string $sameSite = 'Lax'): void</code></h4>
+    <h4 id="context-delete-cookie"><code>deleteCookie(string $name, string $path = '/'): void</code></h4>
+    <p>
+        Read a cookie of the request, queue one for its response, or expire one. A cookie set in the page
+        handler goes out with the page and one set in an action with that action's response, whatever its
+        status. One set outside a request, such as in a timer, waits for the tab's next action response; a
+        cookie cannot go out mid-stream.
+    </p>
     {% code 'php' %}{% verbatim %}
-$c->getId();              // unique context ID
-$c->getRoute();           // current route, e.g. '/chat/lobby'
-$c->getSessionId();       // session ID shared across tabs
-$c->getPathParam('id');   // path parameter by name
-$c->getNamespace();       // component namespace, or null
+$theme = $c->cookie('theme');    // null if not set
+$c->setCookie('theme', 'dark');  // Secure, HttpOnly, SameSite=Lax by default
+$c->deleteCookie('theme');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-session-data"><code>sessionData(string $key, mixed $default = null): mixed</code></h3>
-    <h3 id="context-set-session-data"><code>setSessionData(string $key, mixed $value): void</code></h3>
-    <h3 id="context-clear-session-data"><code>clearSessionData(?string $key = null): void</code></h3>
-    <p>Per-session server-side storage, keyed on the session id. Survives page refreshes, context destruction and <code>regenerateSession()</code>, unlike signals, which reset on refresh.</p>
+    <h4 id="context-request-attributes"><code>getRequestAttribute(string $name, mixed $default = null): mixed</code></h4>
+    <h4 id="context-get-request-attributes"><code>getRequestAttributes(): array</code></h4>
     <p>
-        With <code>worker_num &gt; 1</code> session data lives in shared memory, so every worker sees it.
-        Values are serialized there: they must be serializable (<code>setSessionData()</code> throws
-        <code>\InvalidArgumentException</code> otherwise), an object comes back as a copy, and one
-        session's data is capped at 16&nbsp;KB by default, past which <code>setSessionData()</code> throws
-        <code>\OverflowException</code>. <code>Config::withSessionTableSize()</code> raises the cap and the
-        number of sessions kept. Each key is last-write-wins, so reading a key and writing it back from two
-        workers at once can lose one of the writes.
+        Request attributes PSR-15 middleware set with <code>$request-&gt;withAttribute()</code>. In an action
+        they come from that action's request, where only global middleware runs; anywhere else from the page
+        request, behind the global and the route's middleware. See <a href="/docs/middleware#request-attributes">Middleware</a>.
+    </p>
+
+    <h4 id="context-get-path-param"><code>getPathParam(string $name): string</code></h4>
+    <p>A path parameter of the page's URL by name, percent-decoded, or <code>''</code>.</p>
+
+    <h4 id="context-get-route"><code>getRoute(): string</code></h4>
+    <p>The route pattern the page was registered with, such as <code>/users/{id}</code>, the same for every URL it matches.</p>
+
+    <h4 id="context-get-id"><code>getId(): string</code></h4>
+    <p>The context's id, which a revival keeps.</p>
+
+    <h4 id="context-get-config"><code>getConfig(): Config</code></h4>
+    <p>The app's frozen <code>Config</code>.</p>
+
+    <h3 id="context-session">Session</h3>
+
+    <h4 id="context-get-session-id"><code>getSessionId(): ?string</code></h4>
+    <p>
+        The session id that all tabs of one browser share: a hash of the session cookie, not the cookie, so
+        it survives <code>regenerateSession()</code>. Middleware reads the same id from the
+        <code>via.session</code> request attribute. Keep data you store elsewhere under the user's id, not
+        under the session id: the same user gets another session in another browser or once the cookie
+        expires.
+    </p>
+
+    <h4 id="context-session-data"><code>sessionData(string $key, mixed $default = null): mixed</code></h4>
+    <h4 id="context-set-session-data"><code>setSessionData(string $key, mixed $value): void</code></h4>
+    <h4 id="context-clear-session-data"><code>clearSessionData(?string $key = null): void</code></h4>
+    <p>
+        Server-side data of the session, shared by its tabs. It survives page reloads, the context and
+        <code>regenerateSession()</code>, and is gone after a restart. With several workers it lives in shared
+        memory: values must be serializable (<code>setSessionData()</code> throws an
+        <code>InvalidArgumentException</code> otherwise), an object comes back as a copy, and one session holds
+        16&nbsp;KB by default, past which it throws an <code>OverflowException</code>; see
+        <a href="#config-with-session-table-size"><code>withSessionTableSize()</code></a>. Each key is
+        last-write-wins.
     </p>
     {% code 'php' %}{% verbatim %}
 $c->setSessionData('auth', ['user' => 'ada', 'role' => 'Engineer']);
-
-$auth = $c->sessionData('auth');       // returns the array or null
-
-$c->clearSessionData('auth');          // clear one key
-$c->clearSessionData();                // clear entire session bucket
+$auth = $c->sessionData('auth');   // the array or null
+$c->clearSessionData('auth');      // one key
+$c->clearSessionData();            // everything
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-regenerate-session"><code>regenerateSession(): void</code></h3>
+    <h4 id="context-regenerate-session"><code>regenerateSession(): void</code></h4>
     <p>
-        Gives the session a new cookie with the response to the current action or page load. Call it at login, so a
-        cookie someone planted or read before stops reaching the session, and at logout with
-        <code>clearSessionData()</code>. The session keeps its id, its data, its SESSION signals and its other tabs.
-        Call it before the login writes anything: it throws an <code>OverflowException</code> when the record of
-        rotated cookies is full, and the visitor then stays logged out.
+        Gives the session a new cookie with the response to the current action or page load. Call it at login,
+        so a cookie someone planted or read before stops reaching the session, and at logout together with
+        <code>clearSessionData()</code>. The session keeps its id, its data, its SESSION signals and its tabs on
+        every worker. Call it after slow work such as a password check and before the login writes anything: it
+        throws an <code>OverflowException</code> when the record of rotated cookies is full, and the visitor
+        then stays logged out.
     </p>
     <p>
-        The rotation happens at the call, and the old cookie keeps working for 10 seconds from then, for the requests
-        other tabs sent before the browser had the new one; whoever holds it reaches the session until then. A login
-        that does slow work after the call should call it last. After that it starts a new session, and an SSE
-        stream opened with it ends: the tab is asked to reconnect, which a browser with the new cookie does at once,
-        and one with only the old cookie is refused. In an action, the new cookie goes out with that action's response, also
-        when another action of the tab runs at the same time. Called outside an action or a page handler, the
-        rotation waits for the tab's next action. Middleware and <code>route()</code> handlers use
-        <a href="#via-regenerate-session"><code>$app-&gt;regenerateSession($request)</code></a>.
+        The rotation happens at the call. The old cookie keeps working for 10 seconds, for requests other tabs
+        sent before the browser had the new one; after that it starts a new session, and the streams opened
+        with it end. A tab whose browser holds the new cookie reconnects at once; one with only the old cookie
+        is refused. In an action the new cookie goes out with that action's response, in a page handler with
+        the page, and called outside both, the rotation waits for the tab's next action.
     </p>
     <p>
-        The record of retired cookies lives in memory, one per server, with four rows per session of
-        <code>Config::withSessionTableSize()</code>. When it is full, the sessions without session data that were
-        seen least recently lose their rows, and their retired cookies reach them again; a login that keeps the
-        user in session data is not affected. After a restart the first cookie of a
-        rotated session names that session id again, and its current cookie names a new one. Session data is gone
-        after a restart anyway; data you keep elsewhere belongs under the user's id, not under
-        <code>getSessionId()</code>. Behind a load balancer, route by the balancer's own cookie, as the
+        The record of retired cookies lives in memory, four rows per session of <code>withSessionTableSize()</code>.
+        When it is full, sessions without session data that were seen least recently lose their rows, and their
+        retired cookies reach them again. After a restart the first cookie of a rotated session names that
+        session again. Behind a load balancer, route by the balancer's own cookie, as the
         <a href="/docs/deployment#independent-processes">deployment guide</a> does, since the session cookie changes.
     </p>
     {% code 'php' %}{% verbatim %}
@@ -551,345 +892,811 @@ $c->action(function (Context $c) use ($email, $password, $users): void {
 }, 'login');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-input"><code>input(string $name, mixed $default = null): mixed</code></h3>
-    <p>Read a query or POST parameter safely. Checks POST first, then query string. Replaces direct <code>$_GET</code>/<code>$_POST</code> access (which is coroutine-unsafe in OpenSwoole). In an action, and in the <code>spawn()</code> tasks it starts, it reads the action's request; anywhere else, such as the page handler or a timer, the page's query.</p>
+    <h3 id="context-tab-state">Tab state</h3>
+
+    <h4 id="context-tab-state-get"><code>tabState(string $key, mixed $default = null): mixed</code></h4>
+    <h4 id="context-set-tab-state"><code>setTabState(string $key, mixed $value): void</code></h4>
+    <p>
+        Server-side values of one tab that a revival brings back, such as the last query result or a cursor.
+        They never reach the browser. They live as long as the context and then for the revival window of
+        <a href="#config-with-context-timeouts"><code>withContextTimeouts()</code></a>. A component has keys of
+        its own, values are copies, and <code>null</code> removes a key. Values must be serializable; a closure
+        or a resource throws an <code>InvalidArgumentException</code>.
+    </p>
+    <p>
+        One worker keeps them in memory, and the revival records of destroyed tabs hold up to 64&nbsp;MiB of
+        them. With several workers every worker reads them from the shared context directory, up to 1024
+        serialized bytes per tab, past which <code>setTabState()</code> throws an <code>OverflowException</code>:
+        raise it with <code>withContextDirectorySize(maxTabStateBytes:)</code>. A write from a
+        <code>spawn()</code> task or an <code>onCleanup()</code> callback after the context was destroyed still
+        reaches the revived tab.
+    </p>
     {% code 'php' %}{% verbatim %}
-$id = $c->input('id');                  // POST['id'] ?? GET['id'] ?? null
-$cat = $c->input('cat', 'all');         // with default
+$results = $c->tabState('results', []);
+$c->action(function (Context $c) use ($search): void {
+    $c->setTabState('results', $search->run($c->input('q', '')));
+    $c->sync();
+}, 'search');
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-request-attributes"><code>getRequestAttribute(string $name, mixed $default = null): mixed</code></h3>
-    <p>Read a request attribute set by PSR-15 middleware: in an action, one the global middleware set on that action's request; anywhere else, one of the page request. See <a href="/docs/middleware#request-attributes">Middleware</a>.</p>
+    <h3 id="context-lifecycle">Timers, tasks and cleanup</h3>
+
+    <h4 id="context-on-cleanup"><code>onCleanup(callable $callback): void</code></h4>
+    <p>
+        Runs the callback, with the context, when the context is destroyed: its stream stayed closed for the
+        cleanup delay, the tab sent its close beacon, or no stream connected in time. See
+        <a href="/docs/lifecycle">Lifecycle</a>.
+    </p>
     {% code 'php' %}{% verbatim %}
-$user = $c->getRequestAttribute('user');  // set by AuthMiddleware
+$c->onCleanup(function (Context $c) use ($room, $app): void {
+    unset(Room::$members[$room][$c->getId()]);
+    $app->broadcast('room:' . $room);
+});
     {% endverbatim %}{% endcode %}
 
-    ---
+    <h4 id="context-set-interval"><code>setInterval(callable $callback, int $ms): int</code></h4>
+    <p>
+        A timer that ends with the context; it returns the timer id. A throw is logged, reaches
+        <code>onError()</code> as <code>ErrorPhase::Timer</code>, and the timer keeps running.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->setInterval(function () use ($clock, $c): void {
+    $clock->setValue(date('H:i:s'));
+    $c->syncSignals();
+}, 1000);
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="context-spawn"><code>spawn(callable $task): void</code></h4>
+    <p>
+        Runs a task, which gets the context, in a coroutine of its own, for work that outlives the action that
+        starts it, such as a long query that reports its progress. Call <code>sync()</code> or
+        <code>syncSignals()</code> to send what it changes: only an action sends its changed signals by itself.
+        A throw reaches <code>onError()</code> as <code>ErrorPhase::Task</code>. A task keeps running when its
+        context is destroyed; from then on <code>isDestroyed()</code> is true and its syncs, patches, scripts
+        and downloads do nothing. A stopping worker waits for its tasks within the stop budget.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use OpenSwoole\Coroutine;
+
+$c->action(function (Context $c) use ($progress): void {
+    $c->spawn(function (Context $c) use ($progress): void {
+        for ($i = 1; $i <= 10; ++$i) {
+            Coroutine::usleep(200_000); // stands for a slice of the work
+            if ($c->isDestroyed()) {
+                return;
+            }
+            $progress->setValue($i * 10);
+            $c->syncSignals();
+        }
+    });
+}, 'import');
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="context-is-destroyed"><code>isDestroyed(): bool</code></h4>
+    <p>Whether the tab is gone for good and the <code>onCleanup()</code> callbacks ran. A revival builds a new context under the same id, so this one stays destroyed.</p>
+
+    <h3 id="context-tracing">Dev Bar spans</h3>
+
+    <h4 id="context-span"><code>span(string $name, callable $fn, array $attributes = []): mixed</code></h4>
+    <h4 id="context-trace-attribute"><code>traceAttribute(string $key, mixed $value): void</code></h4>
+    <p>
+        <code>span()</code> times <code>$fn</code> as a span in the Dev Bar's current trace and returns what it
+        returns; the prefix before the first dot picks its colour. <code>traceAttribute()</code> annotates the
+        open span. Both cost nothing with the Dev Bar off. See <a href="/docs/dev-bar#spans">Dev Bar</a>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$issues = $c->span('db.list_issues', fn () => $repo->all(), ['limit' => 50]);
+$c->traceAttribute('cache.hit', false);
+    {% endverbatim %}{% endcode %}
 
     <h2 id="signal">Signal</h2>
+    <p>Returned by <code>$c-&gt;signal()</code>.</p>
+
+    <h3 id="signal-read">Reading</h3>
+    <h4 id="signal-get-value"><code>getValue(): mixed</code></h4>
+    <h4 id="signal-typed"><code>string(): string</code>, <code>int(): int</code>, <code>float(): float</code>, <code>bool(): bool</code>, <code>array(): array</code></h4>
+    <p>
+        The value, raw or cast. <code>bool()</code> reads the strings <code>'true'</code>, <code>'1'</code>,
+        <code>'yes'</code> and <code>'on'</code> as true in any case; other values follow PHP's truthiness, so
+        <code>2</code> is true.
+    </p>
+
+    <h3 id="signal-write">Writing</h3>
+    <h4 id="signal-set-value"><code>setValue(mixed $value): void</code></h4>
+    <p>
+        Sets the value and queues it for the next sync. A scoped signal also broadcasts its scope when the value
+        changed, unless it was declared with <code>autoBroadcast: false</code>. A second argument throws an
+        <code>ArgumentCountError</code>.
+    </p>
+
+    <h4 id="signal-increment"><code>increment(int $by = 1): int</code></h4>
+    <p>
+        Adds to an integer signal atomically across workers and returns the new value; it throws a
+        <code>LogicException</code> when the signal holds no integer. Use it for counters:
+        <code>setValue($s-&gt;int() + 1)</code> loses updates when two workers read the same value.
+    </p>
+
+    <h4 id="signal-mutate"><code>mutate(callable $mutator): mixed</code></h4>
+    <p>
+        Reads, transforms and writes the value as one step under a lock, for read-modify-write on a
+        non-integer scoped signal, and returns the value written. Keep the callback short: it holds up every
+        other writer of the signal. Calls on one key run in order within a worker and take turns across
+        workers; one waits up to 2&nbsp;s behind its own worker and up to 5&nbsp;s for its turn, then throws a
+        <code>RuntimeException</code>. Pick <code>increment()</code> or <code>mutate()</code> per signal, since
+        <code>increment()</code> skips the lock.
+    </p>
     {% code 'php' %}{% verbatim %}
-// Reading
-$s->getValue();   // raw mixed
-$s->int();        // cast to int
-$s->string();     // cast to string
-$s->bool();       // cast to bool
-
-// Writing
-$s->setValue(42); // triggers broadcast if scoped
-$s->increment();  // atomic across workers, returns the new value
-$s->mutate(fn (array $items) => [...$items, $item]); // read-modify-write under a lock
-
-// Template helpers
-$s->id();     // browser id, not the name: 'global_count' for a GLOBAL signal 'count'
-$s->bind();   // 'data-bind="global_count"'
-$s->bind('value');  // 'data-bind__prop.value="global_count"': binds a property, for web components
-$s->ref();    // '$global_count', for Datastar expressions: data-text="{$s->ref()}"
+$items->mutate(fn (array $list) => [...$list, $item]);
     {% endverbatim %}{% endcode %}
+
+    <h4 id="signal-mark-synced"><code>markSynced(): void</code></h4>
     <p>
-        <code>bind(?string $prop = null)</code> with a property name binds that element property
-        instead of the element's value. A camelCase name is written in kebab case
-        (<code>'selectedIndex'</code> becomes <code>data-bind__prop.selected-index</code>), and a name
-        that is not a property name throws <code>\InvalidArgumentException</code>. In Twig:
-        {% verbatim %}<code>{{ bind(volume, 'value') }}</code>{% endverbatim %}. See
-        <a href="/docs/web-components#binding">Web components</a>.
-    </p>
-    <p>
-        On a scoped signal with <code>worker_num &gt; 1</code>, <code>setValue($s-&gt;int() + 1)</code> loses
-        updates when two workers read the same value. Use <code>increment()</code> for counters and
-        <code>mutate()</code> for anything else. Pick one per signal: <code>increment()</code> skips the lock
-        that <code>mutate()</code> takes, so mixing them can overwrite an increment. A broadcast reads each scoped
-        signal once and reuses the value for every tab it renders, so this applies to views as well: a view that
-        computes a new value from a scoped signal computes it from the value the broadcast read.
-    </p>
-    <p>
-        Concurrent <code>mutate()</code> calls on one key run in order within a worker and take turns across
-        workers. A call waits up to 2&nbsp;s behind earlier calls of its own worker and up to 5&nbsp;s for
-        its turn, then throws <code>\RuntimeException</code>. A holder that keeps the lock longer than its
-        2&nbsp;s lease, or a worker that is next in line but cannot run for 2&nbsp;s, is skipped, and the
-        skipped write can overlap the next one. While calls queue, each waiting worker keeps one core busy
-        polling, so keep callbacks short. <code>mutateGlobalState()</code> uses the same lock.
+        Drops the signal's pending patch, so neither the page seed nor the next sync sends the current value.
+        It does not stop a scoped signal's broadcast. For a value the browser seeds itself, declare the signal
+        with <code>clientSeeded: true</code> instead.
     </p>
 
-    ---
+    <h3 id="signal-templates">In templates</h3>
+    <h4 id="signal-id"><code>id(): string</code></h4>
+    <h4 id="signal-bind"><code>bind(?string $prop = null): string</code></h4>
+    <h4 id="signal-ref"><code>ref(): string</code></h4>
+    <p>
+        <code>id()</code> is the browser id, not the name. <code>bind()</code> returns the
+        <code>data-bind</code> attribute; with a property name it binds that element property instead, as
+        <code>data-bind__prop.value</code>, the form for web components. A camelCase property is written in
+        kebab case, and a name that is no property name throws an <code>InvalidArgumentException</code>.
+        <code>ref()</code> is <code>$</code> plus the id, for Datastar expressions.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$s->id();           // 'global_count' for a GLOBAL signal 'count'
+$s->bind();         // 'data-bind="global_count"'
+$s->bind('value');  // 'data-bind__prop.value="global_count"'
+$s->ref();          // '$global_count', as in data-text="{$s->ref()}"
+    {% endverbatim %}{% endcode %}
+    <p>In Twig: <code>{% verbatim %}{{ bind(volume) }}{% endverbatim %}</code>, <code>{% verbatim %}{{ bind(volume, 'value') }}{% endverbatim %}</code> and <code>{% verbatim %}${{ volume.id }}{% endverbatim %}</code>.</p>
 
     <h2 id="action">Action</h2>
+    <p>Returned by <code>$c-&gt;action()</code>.</p>
+    <h4 id="action-id"><code>id(): string</code></h4>
+    <h4 id="action-url"><code>url(): string</code></h4>
+    <p>
+        The action's id and the URL to post to. A component's action id starts with its namespace and a dash.
+    </p>
     {% code 'php' %}{% verbatim %}
-$a->url();  // '/_action/increment'
 $a->id();   // 'increment'
+$a->url();  // '/_action/increment'
     {% endverbatim %}{% endcode %}
-
-    ---
 
     <h2 id="scope">Scope</h2>
+    <p>Scope names and the helpers that build resolved scopes. See <a href="/docs/scopes">Scopes</a>.</p>
     {% code 'php' %}{% verbatim %}
-Scope::TAB      // default, per browser tab
-Scope::ROUTE    // all clients on same URL
-Scope::SESSION  // all tabs of same user
-Scope::GLOBAL   // every connected client
-
-Scope::routeScope('/path')  // explicit: 'route:/path'
+Scope::TAB      // 'tab': one tab, the default
+Scope::ROUTE    // 'route': in a context, every tab on this route pattern
+Scope::SESSION  // 'session': in a context, every tab of this browser session
+Scope::GLOBAL   // 'global': every tab on every route
     {% endverbatim %}{% endcode %}
 
-    ---
+    <h4 id="scope-build"><code>static build(string ...$parts): string</code></h4>
+    <p>Joins the parts with <code>:</code>: <code>Scope::build('room', $id)</code> gives <code>room:42</code>.</p>
+
+    <h4 id="scope-route-scope"><code>static routeScope(string $route): string</code></h4>
+    <p>The scope of a route pattern, <code>route:/path</code>: what <code>Scope::ROUTE</code> resolves to on that route.</p>
+
+    <h4 id="scope-session-scope"><code>static sessionScope(string $sessionId): string</code></h4>
+    <p>
+        The scope of one browser session, what <code>Scope::SESSION</code> resolves to inside a context, for
+        <code>$app-&gt;broadcast()</code> outside one. Pass the id from <code>getSessionId()</code> or
+        <code>via.session</code>. It is derived from the id but never contains it, and its format may change,
+        so build it only with this method.
+    </p>
+
+    <h2 id="patch-mode">PatchMode</h2>
+    <p>A string enum of Datastar's patch modes, for <a href="#context-patch-elements"><code>patchElements()</code></a>.</p>
+    <ul>
+        <li><code>PatchMode::Outer</code>: morph the target element (the default)</li>
+        <li><code>PatchMode::Inner</code>: morph the target's children</li>
+        <li><code>PatchMode::Replace</code>: replace the target without morphing</li>
+        <li><code>PatchMode::Prepend</code> and <code>PatchMode::Append</code>: insert as the target's first or last child</li>
+        <li><code>PatchMode::Before</code> and <code>PatchMode::After</code>: insert before or after the target</li>
+        <li><code>PatchMode::Remove</code>: remove the target</li>
+    </ul>
+
+    <h2 id="error-phase">ErrorPhase</h2>
+    <p>A string enum that tells an <a href="#via-on-error"><code>onError()</code></a> callback where a throw came from.</p>
+    <ul>
+        <li><code>ErrorPhase::Action</code>: an action, or something it called, such as a <code>sync()</code>
+            whose view threw. The context is the tab's page, also for a component's action.</li>
+        <li><code>ErrorPhase::Render</code>: a page handler or view on page load or revival, a view on a
+            stream's first sync or in a broadcast, or a <code>download()</code> source.</li>
+        <li><code>ErrorPhase::Timer</code>: a <code>$c-&gt;setInterval()</code> or <code>$app-&gt;setInterval()</code> callback.</li>
+        <li><code>ErrorPhase::Task</code>: a <code>spawn()</code> task.</li>
+        <li><code>ErrorPhase::Route</code>: a <code>route()</code> handler or its middleware, with no context.</li>
+    </ul>
 
     <h2 id="config">Config</h2>
-    <p>All methods return <code>self</code> for chaining.</p>
+    <p>
+        Every setting of the app. The <code>with*</code> methods return the <code>Config</code> for chaining.
+        <code>new Via($config)</code> freezes it, and a <code>with*</code> call afterwards throws a
+        <code>LogicException</code>, so make every call before. <code>clone $config</code> gives a new Config
+        that is not frozen, also when the original is.
+    </p>
     {% code 'php' %}{% verbatim %}
-(new Config())
-    ->withHost('0.0.0.0')           // default: '0.0.0.0'
-    ->withPort(3000)                // default: 3000
-    ->withDevMode(true)             // enables debug logging
-    ->withLogLevel('info')          // 'debug' | 'info' | 'error'
+$config = (new Config())
+    ->withPort(3000)
+    ->withDevMode(getenv('APP_ENV') === 'dev')
     ->withTemplateDir(__DIR__ . '/templates')
-    ->withShellTemplate(__DIR__ . '/shell.html')
-    ->withStaticDir(__DIR__ . '/public')  // dot paths (but /.well-known/) and PHP sources (.php, .php5, .phtml, .inc, ...) answer 404
-    ->withStaticCacheControl('public, max-age=31536000, immutable')  // default: devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate'
-    // ...or a closure(string $filePath, string $mimeType): string to fine-tune per file (see Deployment → Static assets)
-    ->withBasePath('/')             // base path when mounted at a sub-path (see below)
-    ->withDatastarRocket()          // serve Datastar with Rocket for web components (see below)
-    ->withImportMap(['charts' => '/js/charts.js'], ['/js/charts.js' => 'sha384-...'])  // import map entries, merged across calls
-    ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
-    ->withContextTimeouts(connectMs: 30_000, reconnectMs: 60_000) // free a context whose SSE stream never connects; keep a tab whose stream is down after an action (defaults shown, see Lifecycle)
-    ->withSwooleSettings([...])     // raw OpenSwoole server settings, e.g. ['hook_flags' => Via::noFileIoHookFlags()]
-    // Security
-    ->withSecureCookie(true)        // __Host- prefix, Secure flag
-    ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
-    ->withAllowMissingOrigin()      // accept actions without an Origin header outside dev mode
-    ->withStrictTabSignals()        // TAB signals are server-owned unless clientWritable: true
-    ->withEmbeddable('https://parent.example')  // SameSite=None; Secure; Partitioned + frame-ancestors
-    ->withActionRateLimit(100, 60)  // max 100 actions per 60s per IP
-    // HTTPS / HTTP2 / Brotli compression (requires ext-brotli)
-    ->withCertificate('/path/to/cert.pem', '/path/to/key.pem') // direct TLS + HTTP/2
-    ->withH2c()                     // h2c (cleartext HTTP/2) for proxy scenarios
-    ->withBrotli()                  // Brotli for pages and SSE; withBrotli(dynamicLevel: 4, staticLevel: 11)
-    ->withBrotli(false)             // no Brotli at all; withBrotli(false, staticLevel: 11) for static files only
-    ->withSseMaxQueuedBytes(1048576) // drop element patches for a client this far behind; 0 disables
-    ->withBroadcastTickMs(25)       // minimum gap between two broadcast flushes of a worker; 0 = every event-loop turn
-    ->withBroadcastCoalescing(false) // render and publish on every broadcast() call; a fan-out re-run 8 times in a row leaves the rest to a flush paced by the tick (default: coalesced)
-    // Multi-worker (single machine)
-    ->withWorkerNum(swoole_cpu_num())   // default: 1; requires SwooleBroker/RedisBroker/NatsBroker when > 1
-    ->withGlobalStateTableSize(2048, 65536)   // GlobalState rows × value bytes (default 1024 × 32768; rows is a floor)
-    ->withScopedSignalTableSize(1024, 32768)  // shared values of scoped signals (defaults shown)
-    ->withContextDirectorySize(4096)          // contexts reachable from every worker; see Deployment for sizing
-    ->withSessionTableSize(1024, 16384)       // sessions × bytes per session of shared session data (defaults shown)
-    // GlobalState persistence
-    ->withPersistentGlobalState(__DIR__ . '/state.sqlite', flushMs: 1000) // write-behind to SQLite
-    // Multi-node broker (optional, required only for multi-worker / multi-server deployments)
-    ->withBroker(new SwooleBroker())    // same machine, no external deps
-    ->withBroker(new RedisBroker('127.0.0.1', 6379))  // or new NatsBroker(...)
-    ->onBrokerError(fn(\Throwable $e) => error_log($e->getMessage())) // called on reconnect
+    ->withStaticDir(__DIR__ . '/public')
+    ->withSecureCookie();
+
+$app = new Via($config);
     {% endverbatim %}{% endcode %}
 
+    <h3 id="config-server">Server</h3>
+
+    <h4 id="config-with-host"><code>withHost(string $host): Config</code></h4>
+    <h4 id="config-with-port"><code>withPort(int $port): Config</code></h4>
+    <p>The address and port the server listens on: <code>0.0.0.0</code> and <code>3000</code> by default.</p>
+
+    <h4 id="config-with-worker-num"><code>withWorkerNum(int $n): Config</code></h4>
     <p>
-        <code>withBrotli(bool $enabled = true, int $dynamicLevel = 4, ?int $staticLevel = null)</code>: <code>$enabled</code>
-        turns on Brotli for pages and the SSE stream at <code>$dynamicLevel</code>. That requires either
-        <code>withCertificate()</code> (direct HTTPS) or <code>withH2c()</code> (proxy with Caddy/Nginx handling TLS),
-        and <code>start()</code> throws if <code>ext-brotli</code> is missing or neither HTTPS mode is configured.
-        See <a href="/docs/deployment#brotli">Deployment → Brotli</a> for setup guides.
+        The number of OpenSwoole worker processes, 1 by default. With more than one, broadcasts cross workers
+        through <code>SwooleBroker</code> unless <a href="#config-with-broker"><code>withBroker()</code></a>
+        names another broker, and session data, global state and scoped signal values move to shared-memory
+        tables. A tab lives on the worker that holds its stream, and an action or a download that reaches
+        another worker is passed there. See <a href="/docs/deployment#same-machine">Deployment → Same machine</a>.
+    </p>
+
+    <h4 id="config-with-swoole-settings"><code>withSwooleSettings(array $settings): Config</code></h4>
+    <p>
+        Raw OpenSwoole server settings, merged over the ones php-via sets. <code>hook_flags</code> defaults to
+        <a href="#via-hook-flags"><code>Via::defaultHookFlags()</code></a>. Set the worker count with
+        <code>withWorkerNum()</code>: <code>start()</code> throws for a <code>worker_num</code> here that differs
+        from it. The thread pool limits (<code>aio_*</code>) are no server settings: set them with
+        <code>OpenSwoole\Util::setAio()</code>.
+    </p>
+
+    <h4 id="config-with-certificate"><code>withCertificate(string $certFile, string $keyFile): Config</code></h4>
+    <h4 id="config-is-https"><code>isHttps(): bool</code></h4>
+    <p>Serve HTTPS and HTTP/2 directly with a PEM certificate and key; <code>isHttps()</code> tells whether both are set.</p>
+
+    <h4 id="config-with-h2c"><code>withH2c(bool $enabled = true): Config</code></h4>
+    <p>
+        Cleartext HTTP/2 behind a proxy that terminates TLS, such as Caddy's
+        <code>reverse_proxy h2c://localhost:3000</code>. Never on a port exposed to untrusted traffic.
+    </p>
+
+    <h4 id="config-with-brotli"><code>withBrotli(bool $enabled = true, int $dynamicLevel = 4, ?int $staticLevel = null): Config</code></h4>
+    <p>
+        <code>$enabled</code> turns on Brotli for pages and the SSE stream at <code>$dynamicLevel</code>. That
+        needs <code>ext-brotli</code> and <code>withCertificate()</code> or <code>withH2c()</code>, and
+        <code>start()</code> throws without them. Each busy stream's encoder grows toward about 9&nbsp;MB at the
+        default level, so pick level 1 when the number of connections matters more than bandwidth. See
+        <a href="/docs/deployment#brotli">Deployment → Brotli</a>.
     </p>
     <p>
-        Static files get Brotli at level 11 whenever <code>ext-brotli</code> is loaded, also without a call to
-        <code>withBrotli()</code>: compressible <code>withStaticDir()</code> files, <code>/datastar.js</code>,
-        <code>/via.css</code> and the Dev Bar assets. A <code>.br</code> sidecar is sent even without the extension.
-        <code>$staticLevel</code> sets the level and <code>0</code> turns it off; left out, it is 11, or 0 for
-        <code>withBrotli(false)</code>. See
-        <a href="/docs/deployment#static-compression">Deployment → Static compression</a>.
+        Static files get Brotli at level 11 whenever <code>ext-brotli</code> is loaded, also without a call:
+        compressible <code>withStaticDir()</code> files, <code>/datastar.js</code>, <code>/via.css</code> and
+        the Dev Bar assets, compressed before the server listens or by a helper process, never in a worker. A
+        <code>foo.css.br</code> next to <code>foo.css</code>, at least as new, is sent as it is, even without the
+        extension. <code>$staticLevel</code> sets the level, 0 for none; left out it is 11, or 0 after
+        <code>withBrotli(false)</code>. <code>withBrotli(false, staticLevel: 11)</code> keeps it for static files
+        only. See <a href="/docs/deployment#static-compression">Deployment → Static compression</a>.
     </p>
+
+    <h3 id="config-mode">Dev mode and logging</h3>
+
+    <h4 id="config-with-dev-mode"><code>withDevMode(bool $devMode = true): Config</code></h4>
+    <h4 id="config-is-dev-mode"><code>isDevMode(): bool</code></h4>
     <p>
-        <code>withSwooleSettings(array $settings)</code> passes settings to OpenSwoole's
-        <code>Server::set()</code>, and they win over php-via's defaults. <code>hook_flags</code> defaults
-        to <a href="#via-hook-flags"><code>Via::defaultHookFlags()</code></a>. <code>start()</code> throws
-        <code>\RuntimeException</code> before it binds the port when <code>hook_flags</code> has
-        <code>SWOOLE_HOOK_STDIO</code> without <code>SWOOLE_HOOK_FILE</code>, or lacks the socket hook a
-        <code>RedisBroker</code> needs, or when <code>worker_num</code> differs from <code>withWorkerNum()</code>:
-        php-via sets up its shared tables for <code>withWorkerNum()</code>, so pass the worker count there. It logs a
-        warning when <code>hook_flags</code> keep <code>SWOOLE_HOOK_NATIVE_CURL</code>
-        on libcurl 8.20 or newer. The thread pool limits (<code>aio_*</code>) are not server settings: set
-        them with <code>OpenSwoole\Util::setAio()</code>. See
-        <a href="/docs/deployment#hooks">Deployment → Coroutine hooks</a>.
+        Dev mode turns on the Dev Bar and the default shell's Live Signals panel, shows an exception's class and
+        message on a failed page instead of "Internal Server Error", serves static files with
+        <code>no-cache</code>, reads an edited shell again, accepts actions without an <code>Origin</code>
+        header, serves <code>/_stats</code>, and logs extra warnings. Off by default.
     </p>
+
+    <h4 id="config-with-log-level"><code>withLogLevel(string $level): Config</code></h4>
     <p>
-        <code>withPersistentGlobalState(string $path, int $flushMs = 1000)</code> keeps GlobalState in a SQLite
-        file across restarts. Reads never touch SQLite: writes go to shared memory and mark the key dirty, and one
-        worker writes the dirty keys in a single transaction every <code>$flushMs</code>, about 1&nbsp;µs per key.
-        Anything written since the last flush is lost if the process dies, so lower <code>$flushMs</code> to
-        narrow that window. That worker also flushes when it stops, and the master writes a final flush after
-        every worker has stopped. Integers keep their type in the snapshot, so <code>incrementGlobalState()</code>
-        keeps working on a restored counter.
+        The lowest level logged: <code>debug</code>, <code>info</code> (the default), <code>warn</code> or
+        <code>error</code>, in any case. The PSR-3 names (<code>warning</code>, <code>notice</code>,
+        <code>critical</code>, <code>alert</code>, <code>emergency</code>) and the syslog short names
+        (<code>err</code>, <code>crit</code>, <code>emerg</code>) work too; any other name throws an
+        <code>InvalidArgumentException</code>.
     </p>
+
+    <h4 id="config-with-dev-bar"><code>withDevBar(bool $enabled): Config</code></h4>
     <p>
-        <code>withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true)</code> makes the
-        app safe to embed in a cross-origin <code>&lt;iframe&gt;</code>: it sets the session cookie to
-        <code>SameSite=None; Secure; Partitioned</code> (so the browser sends it inside a cross-site frame, which
-        the SSE session-auth gate needs) and emits <code>Content-Security-Policy: frame-ancestors</code> when given
-        origins. It implies <code>withSecureCookie(true)</code> and requires HTTPS or <code>withH2c()</code>;
-        <code>start()</code> hard-errors otherwise. It is unrelated to <code>withTrustedOrigins()</code>.
-        See <a href="/docs/deployment#security-embedding">Deployment → Embedding in a cross-origin iframe</a>.
+        Turns the <a href="/docs/dev-bar">Dev Bar</a> on or off. Without the call it is on in dev mode only.
+        <code>true</code> turns it on outside dev mode, read-only: every visitor then sees the traces, scopes,
+        context ids and signal values of all tabs on the worker.
     </p>
+
+    <h4 id="config-with-dev-bar-options"><code>withDevBarOptions(?bool $writes = null, ?int $traces = null, ?int $pollMs = null): Config</code></h4>
     <p>
-        <code>withBasePath(string $basePath)</code> sets the URL prefix when the app is mounted at a sub-path
-        (e.g. <code>example.com/myapp/</code>). The value must be a relative path such as <code>/</code>,
-        <code>/myapp</code>, or <code>/sub/path</code>. An <code>\InvalidArgumentException</code> is thrown
-        at startup for invalid inputs (absolute URLs, protocol-relative paths, etc.).
-        The basePath is exposed to every Twig template as <code>{% verbatim %}{{ basePath }}{% endverbatim %}</code>.
-        See <a href="/docs/deployment#sub-path">Deployment &rarr; Sub-path mounting</a> for a Caddy example.
+        Tunes the Dev Bar; <code>null</code> keeps a setting, so a second call changes only what it names.
+        <code>$writes</code> lets the Signals panel write values back, in dev mode only. <code>$traces</code> is
+        the number of traces kept per worker (100), and <code>$pollMs</code> how often its stream checks for new
+        records (100&nbsp;ms).
     </p>
+
+    <h3 id="config-templates">Templates and pages</h3>
+
+    <h4 id="config-with-template-engine"><code>withTemplateEngine(TemplateEngine $engine): Config</code></h4>
     <p>
-        <code>withDatastarRocket(bool $enabled = true)</code> serves Starbase's build of Datastar 1.0.4
-        with Rocket at <code>/datastar.js</code> instead of the plain Datastar 1.0.4 bundle, so Rocket web
-        components work on the page. It costs 22&nbsp;KB with Brotli against 12&nbsp;KB.
-        <code>isDatastarRocketEnabled()</code> reports the setting. <code>getDatastarUrl()</code> returns
-        the URL pages load Datastar from: the base path, <code>datastar.js</code> and the first 10 hex
-        digits of the served bundle's SHA-256 as <code>v</code>, such as
-        <code>/datastar.js?v=727844adfc</code>. Twig templates get it
-        as <code>{% verbatim %}{{ datastarUrl }}{% endverbatim %}</code> and custom shells as
-        <code>{% verbatim %}{{ datastar_url }}{% endverbatim %}</code>.
-        <code>getDatastarIntegrity(): string</code> returns the bundle's Subresource Integrity value
-        (sha384), for pinning Datastar in the import map; it throws <code>\RuntimeException</code> if the
-        bundle cannot be read.
+        The engine that renders template views and <code>render()</code>. Without one, views are callables that
+        return HTML, and a template view throws. See <a href="#templates">Template engines</a>.
     </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Twig\TwigEngine;
+
+$config->withTemplateEngine(new TwigEngine(__DIR__ . '/templates', cacheDir: '/tmp/twig'));
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="config-with-template-dir"><code>withTemplateDir(string $dir): Config</code></h4>
+    <h4 id="config-with-twig-cache-dir"><code>withTwigCacheDir(string $dir): Config</code></h4>
     <p>
-        <code>withImportMap(array $imports, array $integrity = [])</code> adds entries to the page's import
-        map: <code>$imports</code> maps module specifiers to URLs, <code>$integrity</code> module URLs to
-        Subresource Integrity values. Calls merge, and a later entry for the same key wins. A URL has to be
-        absolute or start with <code>/</code> (every page gets the same map, so <code>./</code> would
-        resolve differently per route), a specifier ending in
-        <code>/</code> needs a URL ending in <code>/</code>, and an integrity value is
-        <code>sha256-</code>, <code>sha384-</code> or <code>sha512-</code> with the base64 digest; anything
-        else throws <code>\InvalidArgumentException</code>, and so does an entry for
-        <code>datastar</code>, which php-via maps to <code>getDatastarUrl()</code> itself.
-        <code>getImportMap()</code> returns the whole map as an array, <code>datastar</code> first, and
-        <code>getImportMapTag()</code> the <code>&lt;script type="importmap"&gt;</code> tag. php-via writes
-        the map when <code>withDatastarRocket()</code> is on or <code>withImportMap()</code> added entries,
-        and the tag is empty otherwise. The default shell writes it, custom shells get it as
-        <code>{% verbatim %}{{ import_map }}{% endverbatim %}</code> and Twig templates as
-        <code>{% verbatim %}{{ importMap }}{% endverbatim %}</code>.
-        See <a href="/docs/web-components#own-modules">Web components</a>.
+        <code>withTemplateDir()</code> is short for <code>withTemplateEngine(new TwigEngine($dir))</code>, with
+        compiled templates in the directory from <code>withTwigCacheDir()</code>, or in memory without it. It
+        needs <code>composer require twig/twig</code>; <code>new Via()</code> throws without it.
     </p>
-    ---
+
+    <h4 id="config-with-shell-template"><code>withShellTemplate(string $path): Config</code></h4>
+    <p>A plain HTML shell around every view that is not a whole document. See <a href="/docs/twig#shell">Templates → Shells</a>.</p>
+
+    <h4 id="config-with-base-path"><code>withBasePath(string $basePath): Config</code></h4>
+    <h4 id="config-get-base-path"><code>getBasePath(): string</code></h4>
+    <p>
+        The URL prefix when the app is mounted at a sub-path, such as <code>/myapp</code>. It must be a relative
+        path; an absolute or protocol-relative URL throws an <code>InvalidArgumentException</code>. Templates get
+        it as <code>{% verbatim %}{{ basePath }}{% endverbatim %}</code> and shells as
+        <code>{% verbatim %}{{ base_path }}{% endverbatim %}</code>. See
+        <a href="/docs/deployment#sub-path">Deployment → Sub-path mounting</a>.
+    </p>
+
+    <h3 id="config-static">Static files</h3>
+
+    <h4 id="config-with-static-dir"><code>withStaticDir(string $dir): Config</code></h4>
+    <p>
+        Serves the files in <code>$dir</code>: a path with a file extension before routing, any other path once
+        no route matched, so <code>/about</code> serves the route of that name. Files are served from worker
+        memory and read again when they change. Paths with a dot segment (except <code>/.well-known/</code>),
+        PHP sources such as <code>.php</code>, <code>.phtml</code> and <code>.inc</code>, and links to them
+        answer 404. See <a href="/docs/deployment#static-assets">Deployment → Static assets</a>.
+    </p>
+
+    <h4 id="config-with-static-cache-control"><code>withStaticCacheControl(Closure|string|null $value): Config</code></h4>
+    <p>
+        The <code>Cache-Control</code> of static files, <code>/datastar.js</code> and <code>/via.css</code>, which
+        all answer conditional requests with 304. <code>null</code> (the default) is <code>no-cache</code> in dev
+        mode and <code>public, max-age=3600, must-revalidate</code> otherwise, and a year with
+        <code>immutable</code> for <code>/datastar.js?v=</code>. A string applies to every file. A closure gets
+        the file's path and MIME type and returns a value, or <code>null</code> to keep the default for that file.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withStaticCacheControl(function (string $filePath, string $mimeType): ?string {
+    if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
+        return 'public, max-age=31536000, immutable';
+    }
+
+    return null;
+});
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="config-datastar">Datastar and modules</h3>
+
+    <h4 id="config-with-datastar-rocket"><code>withDatastarRocket(bool $enabled = true): Config</code></h4>
+    <p>
+        Serves Starbase's build of Datastar 1.0.4 with Rocket at <code>/datastar.js</code> instead of the plain
+        Datastar 1.0.4 bundle, so Rocket web components work on the page: 22&nbsp;KB with Brotli against
+        12&nbsp;KB. See <a href="/docs/web-components">Web components</a>.
+    </p>
+
+    <h4 id="config-get-datastar-url"><code>getDatastarUrl(): string</code></h4>
+    <p>
+        The URL pages load Datastar from: the base path, <code>datastar.js</code> and the first 10 hex digits of
+        the served bundle's SHA-256, such as <code>/datastar.js?v=727844adfc</code>. A new bundle gets a new URL,
+        so browsers fetch it after an upgrade. <code>via_foot</code> loads it.
+    </p>
+
+    <h4 id="config-get-datastar-integrity"><code>getDatastarIntegrity(): string</code></h4>
+    <p>
+        The served bundle's Subresource Integrity value (sha384), for apps that pin Datastar. php-via does not
+        pin it by itself. Pin it after <code>withDatastarRocket()</code> and <code>withBasePath()</code>, which
+        change the URL; <code>new Via()</code> warns about a pin for another URL of the bundle. It throws a
+        <code>RuntimeException</code> when the bundle cannot be read.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="config-with-import-map"><code>withImportMap(array $imports, array $integrity = []): Config</code></h4>
+    <h4 id="config-get-import-map"><code>getImportMap(): array</code></h4>
+    <p>
+        Add entries to the import map that <code>via_head</code> writes: <code>$imports</code> maps module
+        specifiers to URLs, <code>$integrity</code> module URLs to Subresource Integrity values. Calls merge, and
+        a later entry for the same key wins. A URL is absolute or starts with <code>/</code>, a specifier ending
+        in <code>/</code> needs a URL ending in <code>/</code>, and an integrity value is <code>sha256-</code>,
+        <code>sha384-</code> or <code>sha512-</code> with the base64 digest; anything else throws an
+        <code>InvalidArgumentException</code>, and so does an entry for <code>datastar</code>, which php-via maps
+        to <code>getDatastarUrl()</code> itself. The map is written when this added entries or
+        <code>withDatastarRocket()</code> is on. <code>getImportMap()</code> returns it, <code>datastar</code>
+        first. See <a href="/docs/web-components#own-modules">Web components</a>.
+    </p>
+
+    <h3 id="config-sse">SSE and broadcasts</h3>
+
+    <h4 id="config-with-sse-keep-alive-ms"><code>withSseKeepAliveMs(int $ms): Config</code></h4>
+    <p>
+        How long a stream may stay silent before it sends an SSE comment, 15&nbsp;s by default, so a proxy's idle
+        timeout does not cut it. 0 sends none.
+    </p>
+
+    <h4 id="config-with-sse-max-queued-bytes"><code>withSseMaxQueuedBytes(int $bytes): Config</code></h4>
+    <p>
+        The unsent backlog, 1&nbsp;MiB by default, past which a stream drops view updates for a slow client
+        instead of waiting for it; the next render sends them again. Signals, scripts and
+        <code>patchElements()</code> patches are never dropped. 0 turns dropping off.
+    </p>
+
+    <h4 id="config-with-broadcast-tick-ms"><code>withBroadcastTickMs(int $ms): Config</code></h4>
+    <p>
+        The minimum gap between the starts of two broadcast flushes of a worker, 25&nbsp;ms by default. An idle
+        server flushes at the end of the event-loop turn; under load every broadcast in between shares the next
+        flush. 0 flushes every turn. See <a href="/docs/broadcasting#timing">Broadcasting → When the update is sent</a>.
+    </p>
+
+    <h4 id="config-with-broadcast-throttle"><code>withBroadcastThrottle(string $scope, int $minIntervalMs): Config</code></h4>
+    <p>
+        Renders the broadcasts of a scope at most once per interval, for a scope that changes more often than
+        its tabs need to see, such as the progress of an import. A broadcast within the interval waits for it to
+        end and the ones meanwhile join it, so the last state always arrives. A wildcard such as
+        <code>import:*</code> gives each matching scope an interval of its own, and
+        <code>$app-&gt;flushBroadcasts()</code> renders a waiting broadcast at once. 0 removes the throttle; a bare
+        <code>Scope::TAB</code>, <code>ROUTE</code> or <code>SESSION</code> throws.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config->withBroadcastThrottle('import:*', 250);
+    {% endverbatim %}{% endcode %}
+
+    <h4 id="config-with-broadcast-coalescing"><code>withBroadcastCoalescing(bool $enabled = true): Config</code></h4>
+    <p>
+        Deprecated, removed in 0.15. <code>false</code> renders and publishes on every <code>broadcast()</code>
+        call, and <code>new Via()</code> logs a warning. Call <code>$app-&gt;flushBroadcasts()</code> where a
+        broadcast has to land before the next step.
+    </p>
+
+    <h3 id="config-contexts">Contexts</h3>
+
+    <h4 id="config-with-context-timeouts"><code>withContextTimeouts(?int $cleanupDelayMs = null, ?int $connectMs = null, ?int $reconnectMs = null, ?int $revivalWindowMs = null, ?int $forwardMs = null): Config</code></h4>
+    <p>How long a context lives without an SSE stream. A timer left out keeps its value. See <a href="/docs/lifecycle">Lifecycle</a>.</p>
+    <ul>
+        <li><code>$cleanupDelayMs</code> (5&nbsp;s): after a stream closes, the context waits this long for a
+            reconnect before it is destroyed. 0 destroys it at once.</li>
+        <li><code>$connectMs</code> (30&nbsp;s): a page load whose stream never connects, such as a crawler's, is
+            destroyed after this long. 0 keeps it until the worker stops.</li>
+        <li><code>$reconnectMs</code> (60&nbsp;s): an action that reaches a context whose stream is down keeps it
+            this long, so the action's patches reach the tab when it reconnects. It must exceed Datastar's longest
+            wait between retries, 30&nbsp;s by default. 0 uses <code>$connectMs</code>.</li>
+        <li><code>$revivalWindowMs</code> (10&nbsp;min): for this long after a context is destroyed, a returning
+            tab gets an equivalent one (same id, handler run again, signals from the browser,
+            <code>tabState()</code> back) instead of a reload. 0 turns revival off.</li>
+        <li><code>$forwardMs</code> (60&nbsp;s): with several workers, the worker that passed an action or a
+            download to the tab's worker answers 504 when no answer came this long after the request. At least 1&nbsp;s.</li>
+    </ul>
+
+    <h4 id="config-get-context-revival-window-ms"><code>getContextRevivalWindowMs(): int</code></h4>
+    <p>The revival window in milliseconds, 0 when revival is off.</p>
+
+    <h4 id="config-with-gc-interval-ms"><code>withGcIntervalMs(int $ms): Config</code></h4>
+    <p>
+        How a worker runs PHP's cycle collector, whose every run walks all live objects. Above 0, php-via runs
+        it when the worker's memory has grown by half since the last run, and at least every <code>$ms</code>
+        while possible roots wait, with PHP's own runs off. 0 leaves the collector to PHP. Under php-via's runs,
+        a loop that creates cycles without ever waiting on I/O frees them only once it ends: call
+        <code>gc_collect_cycles()</code> in such a loop. <a href="/docs/performance#cycle-collector">Performance → Cycle collector</a>
+        gives the default and what each choice costs.
+    </p>
+
+    <h3 id="config-security">Security</h3>
+
+    <h4 id="config-with-secure-cookie"><code>withSecureCookie(bool $secure = true): Config</code></h4>
+    <p>
+        Names the session cookie <code>__Host-via_session_id</code> with the <code>Secure</code> flag, for any
+        site served over HTTPS. A plain <code>via_session_id</code> cookie is then ignored.
+    </p>
+
+    <h4 id="config-with-embeddable"><code>withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true): Config</code></h4>
+    <p>
+        Makes the app work in a cross-origin <code>&lt;iframe&gt;</code>: the session cookie gets
+        <code>SameSite=None; Secure</code> and, by default, <code>Partitioned</code>, and given origins become a
+        <code>Content-Security-Policy: frame-ancestors</code> header on pages. It implies
+        <code>withSecureCookie()</code> and needs HTTPS or <code>withH2c()</code>; <code>start()</code> throws
+        otherwise. See <a href="/docs/deployment#security-embedding">Deployment → Embedding in a cross-origin iframe</a>.
+    </p>
+
+    <h4 id="config-with-trusted-origins"><code>withTrustedOrigins(?array $origins): Config</code></h4>
+    <p>
+        The <code>Origin</code> values an action request may carry, such as <code>https://example.com</code>.
+        With <code>null</code> (the default) the origin's host must match the <code>Host</code> header.
+    </p>
+
+    <h4 id="config-with-allow-missing-origin"><code>withAllowMissingOrigin(bool $allow = true): Config</code></h4>
+    <p>
+        Accepts action requests without an <code>Origin</code> header outside dev mode, for non-browser clients
+        such as curl. Off by default: they get 403. It also applies to the Dev Bar's write endpoints.
+    </p>
+
+    <h4 id="config-with-strict-tab-signals"><code>withStrictTabSignals(bool $strict = true): Config</code></h4>
+    <p>
+        Makes TAB signals server-owned unless declared <code>clientWritable: true</code>. Check which signals
+        the page binds or assigns in the browser before you turn it on.
+    </p>
+
+    <h4 id="config-with-action-rate-limit"><code>withActionRateLimit(int $maxRequests, int $windowSeconds = 60): Config</code></h4>
+    <p>At most <code>$maxRequests</code> actions per IP per window, then 429. 0 is no limit, the default.</p>
+
+    <h3 id="config-shared-state">Brokers and shared state</h3>
+
+    <h4 id="config-with-broker"><code>withBroker(MessageBroker $broker): Config</code></h4>
+    <h4 id="config-on-broker-error"><code>onBrokerError(callable $handler): Config</code></h4>
+    <p>
+        The broker that carries broadcasts to other workers and nodes. One worker uses <code>InMemoryBroker</code>
+        and several <code>SwooleBroker</code> without the call; <code>RedisBroker</code> and
+        <code>NatsBroker</code> reach other servers. Passing <code>InMemoryBroker</code> with more than one worker
+        makes <code>start()</code> throw. <code>onBrokerError()</code> gets the <code>Throwable</code> each time
+        the broker loses its connection. See <a href="/docs/broker">Multi-node Broker</a>.
+    </p>
+
+    <h4 id="config-with-global-state-table-size"><code>withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 32768): Config</code></h4>
+    <h4 id="config-with-scoped-signal-table-size"><code>withScopedSignalTableSize(int $maxRows, int $maxValueBytes = 32768): Config</code></h4>
+    <p>
+        The shared-memory tables behind global state and scoped signal values with several workers: rows and
+        bytes per serialized value, 1024 rows by default. The row count is a floor, not a ceiling, and integers
+        ignore the byte cap. A write past either limit throws an <code>OverflowException</code>.
+    </p>
+
+    <h4 id="config-with-context-directory-size"><code>withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600, int $maxTabStateBytes = 1024): Config</code></h4>
+    <p>
+        The shared directory that tells every worker where a tab lives: one row per live or recently destroyed
+        context (4096 by default), so size it for the peak number of tabs. A tab that finds no room loses
+        cross-worker reachability, and a warning is logged. <code>$maxTabStateBytes</code> caps a tab's
+        <code>tabState()</code> values; each KB of it costs about 2&nbsp;KB × <code>$maxRows</code> of memory from
+        start-up.
+    </p>
+
+    <h4 id="config-with-session-table-size"><code>withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 16384): Config</code></h4>
+    <p>
+        The shared-memory table behind session data with several workers: 1024 sessions of 16&nbsp;KB by default.
+        Past <code>$maxSessions</code> the least recently used sessions are dropped with a warning. It reserves
+        about 2 × <code>$maxSessions</code> × <code>$maxBytesPerSession</code> of shared memory. The record of
+        rotated cookies has 4 × <code>$maxSessions</code> rows.
+    </p>
+
+    <h4 id="config-with-persistent-global-state"><code>withPersistentGlobalState(string $path, int $flushMs = 1000): Config</code></h4>
+    <p>
+        Keeps global state in a SQLite file across restarts. Reads never touch SQLite: writes go to shared memory,
+        and worker 0 writes the changed keys in one transaction every <code>$flushMs</code>, at about 1&nbsp;µs per
+        key. What was written since the last flush is lost if the process dies. Integers keep their type, so
+        <code>incrementGlobalState()</code> works on a restored counter.
+    </p>
+
+    <h2 id="templates">Template engines</h2>
+    <p>
+        php-via renders template views through a <code>TemplateEngine</code>. It ships one for Twig, which needs
+        <code>composer require twig/twig</code>. See <a href="/docs/twig">Templates</a>.
+    </p>
+
+    <h3 id="template-engine"><code>Rendering\TemplateEngine</code></h3>
+    <h4 id="template-engine-render"><code>render(string $template, array $data, ?string $block = null): string</code></h4>
+    <h4 id="template-engine-supports-blocks"><code>supportsBlocks(): bool</code></h4>
+    <p>
+        The interface an engine implements. <code>render()</code> gets the template name, the data a template view
+        gets (see <a href="#context-render"><code>render()</code></a>), and a block name only when
+        <code>supportsBlocks()</code> is true. <code>view(..., block:)</code> with an engine that renders no blocks
+        throws a <code>LogicException</code>.
+    </p>
+
+    <h3 id="html"><code>Rendering\Html</code></h3>
+    <h4 id="html-to-string"><code>__toString(): string</code></h4>
+    <p>
+        Trusted markup in the template data: <code>via_head</code> and <code>via_foot</code> arrive as
+        <code>Html</code>. An engine prints it unescaped, so an autoescaping engine marks the class safe, as
+        <code>TwigEngine</code> does. php-via builds these; apps only print them.
+    </p>
+
+    <h3 id="twig-engine"><code>Twig\TwigEngine</code></h3>
+    <h4 id="twig-engine-construct"><code>__construct(string $templateDir, string|false $cacheDir = false)</code></h4>
+    <h4 id="twig-engine-render"><code>render(string $template, array $data, ?string $block = null): string</code></h4>
+    <h4 id="twig-engine-supports-blocks"><code>supportsBlocks(): bool</code></h4>
+    <h4 id="twig-engine-environment"><code>environment(): Environment</code></h4>
+    <p>
+        Twig templates from <code>$templateDir</code>, compiled into <code>$cacheDir</code> or in memory. Templates
+        are autoescaped as HTML and strict about undefined variables, and get the functions
+        <code>bind()</code>, <code>dump()</code>, <code>via_head()</code> and <code>via_foot()</code> and the
+        <code>basePath</code> global. <code>environment()</code> is the <code>Twig\Environment</code>, which
+        <code>$app-&gt;getTwig()</code> returns too. The constructor throws a <code>LogicException</code> when
+        <code>twig/twig</code> is not installed.
+    </p>
+
+    <h2 id="testing">Testing</h2>
+    <p>
+        <code>Testing\TestApp</code> runs an app's pages in a test, with no server, no port and no
+        <code>VIA_TEST_MODE</code>, through php-via's own request, action and SSE handlers. Middleware, session
+        and origin checks, revival and the post-action signal send run as on a server. It does not simulate
+        several workers, real broadcast timing, an event loop outside <code>runTasks()</code>, the network, or a
+        browser past its signals: <code>html()</code> renders from server state, and actions post JSON.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Testing\TestApp;
+
+it('counts clicks', function (): void {
+    $app = new TestApp(new Config(), function (Via $via): void {
+        $via->page('/counter', function (Context $c): void {
+            $count = $c->signal(0, 'count');
+            $c->action(fn () => $count->setValue($count->int() + 1), 'increment');
+            $c->view(fn (): string => "<p id=\"count\">{$count->int()}</p>");
+        });
+    });
+
+    $tab = $app->open('/counter');
+    $tab->action('increment')->action('increment');
+
+    expect($tab->signal('count'))->toBe(2);
+    $app->shutdown();
+});
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="test-app"><code>Testing\TestApp</code></h3>
+    <h4 id="test-app-construct"><code>__construct(Config $config, callable $routes)</code></h4>
+    <p>Builds the app: <code>new Via($config)</code>, then <code>$routes</code> with the <code>Via</code>, then the <code>onWorkerStart</code> callbacks as worker 0.</p>
+    <h4 id="test-app-open"><code>open(string $path, array $query = [], bool $connect = true): TestTab</code></h4>
+    <p>Loads a page in a new browser with a session of its own and, by default, opens its SSE stream. It throws a <code>RuntimeException</code> for a status other than 200.</p>
+    <h4 id="test-app-request"><code>request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface</code></h4>
+    <p>A plain HTTP request from a client without cookies, such as an API client calling a <code>route()</code>.</p>
+    <h4 id="test-app-run-tasks"><code>runTasks(float $timeoutSeconds = 5.0): void</code></h4>
+    <p>
+        Runs the event loop until the <code>spawn()</code> tasks have ended and their broadcasts have rendered.
+        Timers fire meanwhile. A task otherwise runs only up to its first wait.
+    </p>
+    <h4 id="test-app-via"><code>via(): Via</code></h4>
+    <p>The app's <code>Via</code>, for <code>broadcast()</code>, <code>globalState()</code> and the like.</p>
+    <h4 id="test-app-broadcasts"><code>broadcasts(): array</code></h4>
+    <p>The scopes broadcast since the last call, one entry per call.</p>
+    <h4 id="test-app-logs"><code>logs(): array</code></h4>
+    <p>The lines php-via logged since the last call, kept instead of printed.</p>
+    <h4 id="test-app-shutdown"><code>shutdown(): void</code></h4>
+    <p>Stops as a worker stops: streams end, the <code>onWorkerStop</code> callbacks run and timers are cleared.</p>
+
+    <h3 id="test-tab"><code>Testing\TestTab</code></h3>
+    <p>
+        One tab of a <code>TestApp</code>. It holds the signal values a browser would and sends them with every
+        action and connect. Name a component's signal or action as <code>'namespace.name'</code>.
+    </p>
+    <h4 id="test-tab-open"><code>open(string $path, array $query = [], bool $connect = true): TestTab</code></h4>
+    <p>Another tab of the same browser: same cookies, same session.</p>
+    <h4 id="test-tab-action"><code>action(string $name, array $input = [], array $signals = []): TestTab</code></h4>
+    <p>
+        Posts an action with <code>$input</code> as the query string and the tab's signals, after
+        <code>$signals</code> changed them as a bound input would. It throws a <code>RuntimeException</code> when
+        the action answers with a status other than 200, as a throwing action answers 500.
+    </p>
+    <h4 id="test-tab-request"><code>request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface</code></h4>
+    <p>A plain HTTP request with this browser's cookies, such as a fetch of a <code>download()</code> URL.</p>
+    <h4 id="test-tab-patches"><code>patches(): array</code></h4>
+    <p>
+        The patches the stream sent since the last call. An element patch has <code>html</code>,
+        <code>selector</code> and <code>mode</code> (a <code>PatchMode</code>); a signal patch has
+        <code>signals</code> by name.
+    </p>
+    <h4 id="test-tab-html"><code>html(): string</code></h4>
+    <p>The page as a page load renders it now, from server state.</p>
+    <h4 id="test-tab-signal"><code>signal(string $name): mixed</code></h4>
+    <p>The value the browser holds for the signal, <code>null</code> when it holds none.</p>
+    <h4 id="test-tab-connect"><code>connect(): TestTab</code></h4>
+    <h4 id="test-tab-disconnect"><code>disconnect(bool $expire = false): TestTab</code></h4>
+    <p>
+        Open or end the SSE stream. <code>disconnect(expire: true)</code> also lets the cleanup delay pass, so the
+        context is destroyed, and the next <code>connect()</code> or <code>action()</code> revives it.
+    </p>
+    <h4 id="test-tab-context"><code>context(): Context</code></h4>
+    <p>The tab's page context on the server. It throws a <code>LogicException</code> while the context is destroyed.</p>
 
     <h2 id="attributes">Attributes</h2>
-    <p>PHP 8 attribute classes for the <a href="/docs/composition">composition API</a>. All live under
-    <code>Mbolli\PhpVia\Attributes\</code>.</p>
+    <p>
+        PHP attributes for the <a href="/docs/composition">composition API</a>, under
+        <code>Mbolli\PhpVia\Attributes\</code>.
+    </p>
 
-    <h3 id="attr-signal"><code>#[Signal(string $scope = Scope::TAB, bool $atomic = false, ?bool $clientWritable = null)]</code></h3>
-    <p>Target: property. Creates a reactive signal backed by the property's default value, synced to the
-    browser and auto-injected into Twig by name. The scope is the first argument:</p>
-    <ul>
-        <li><code>Scope::TAB</code> (default): isolated per tab, client-writable via <code>data-bind</code></li>
-        <li><code>Scope::ROUTE</code>: shared across all users on the same route</li>
-        <li><code>Scope::SESSION</code>: shared across all tabs of one browser session</li>
-        <li><code>Scope::GLOBAL</code>: shared across every connected user</li>
-        <li>custom string: shared across all contexts in that scope (e.g. <code>"room:lobby"</code>)</li>
-    </ul>
-    <p>Non-TAB scopes are server-authoritative (the client cannot write them) and auto-broadcast to every
-    context in the scope when the value changes. Component instances with the same property name get
-    independent signal IDs when a namespace is set (e.g. <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>).</p>
+    <h3 id="attr-signal"><code>#[Signal]</code></h3>
+    <p><code>#[Signal(string $scope = Scope::TAB, bool $atomic = false, ?bool $clientWritable = null)]</code></p>
+    <p>
+        On a property: a signal named after the property, with the property's default as its initial value.
+        TAB signals are private to the tab and client-writable; shared scopes are server-owned and broadcast
+        their scope when the value changes. <code>clientWritable</code> overrides that rule. Two components of
+        one class get distinct signal ids through their namespaces.
+    </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Attributes\Signal;
 use Mbolli\PhpVia\Scope;
 
-#[Signal]                       // TAB: private per tab, client-writable
+#[Signal]                    // private to the tab
 public int $count = 0;
 
-#[Signal(Scope::ROUTE)]         // shared across all users on this route
+#[Signal(Scope::ROUTE)]      // shared on this route
 public int $sharedCounter = 0;
 
-#[Signal(Scope::SESSION)]       // shared across the user's tabs
+#[Signal(Scope::SESSION)]    // shared by the session's tabs
 public string $username = 'Anonymous';
-
-#[Signal(Scope::GLOBAL)]        // shared across all users
-public int $totalClicks = 0;
     {% endverbatim %}{% endcode %}
     <p>
-        <code>atomic: true</code> makes a shared integer property safe to change from several workers at once.
-        The property is read before the action and written back after, so two workers running
-        <code>++$this-&gt;votes</code> together would both write back the same result. With
-        <code>atomic: true</code> the action's net change goes through <code>Signal::increment()</code>
-        instead. The catch: assignment becomes an adjustment, so <code>$this-&gt;votes = 0</code> subtracts
-        the current value rather than resetting it. To set a value, use
-        <code>$ctx-&gt;getSignal('votes')-&gt;setValue(0)</code>. Integer properties only.
+        <code>atomic: true</code> makes a shared integer property safe to change from several workers: the
+        action's net change goes through <code>Signal::increment()</code>. Assignment then becomes an adjustment,
+        so <code>$this-&gt;votes = 0</code> subtracts the current value; set a value with
+        <code>$ctx-&gt;getSignal('votes')-&gt;setValue(0)</code>.
     </p>
-    {% code 'php' %}{% verbatim %}
-#[Signal(Scope::GLOBAL, atomic: true)]
-public int $votes = 0;
-    {% endverbatim %}{% endcode %}
 
     <h3 id="attr-persist"><code>#[Persist]</code></h3>
-    <p>Target: property. Marks a plain server-only instance property. No signal is created; the value is
-    never sent to the browser. Because the class instance lives for the tab connection lifetime, the value
-    persists across all action calls. Use it for accumulators, flags, or route params stored in
-    <code>view()</code>.</p>
+    <p>
+        On a property: server-only state of the tab's instance, kept across actions and never sent to the browser.
+        A revival starts it over.
+    </p>
+
+    <h3 id="attr-broadcast"><code>#[Broadcast]</code></h3>
+    <p><code>#[Broadcast(string $scope)]</code></p>
+    <p>
+        On a class: sets the context's primary scope, the target of <code>$ctx-&gt;broadcast()</code>, for actions
+        that change state other than signals. It does not change the scope of the <code>#[Signal]</code>
+        properties.
+    </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\Persist;
-
-#[Persist]
-public int $multiplier = 1; // invisible to client, persists per tab
-    {% endverbatim %}{% endcode %}
-
-    <h3 id="attr-broadcast"><code>#[Broadcast(string $scope)]</code></h3>
-    <p>Target: class. Sets the context's primary scope, the target of <code>$ctx->broadcast()</code>
-    with no argument. Use it when an action mutates non-signal state (a static array, a DB row) and needs
-    to re-render for everyone in the scope. It does <strong>not</strong> change the scope of
-    <code>#[Signal]</code> properties: each signal keeps its own declared scope.</p>
-    {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\Broadcast;
-use Mbolli\PhpVia\Scope;
-
 #[Broadcast(Scope::ROUTE)]
 final class TodoList {
-    #[Signal]                  // still TAB-scoped, unaffected by #[Broadcast]
+    private static array $todos = [];
+
+    #[Signal]
     public string $draft = '';
 
     #[Action]
     public function add(Context $ctx): void {
         self::$todos[] = $this->draft;
-        $ctx->broadcast();     // reaches every context on this route
+        $ctx->broadcast(); // every tab on this route renders again
     }
+
+    public function view(Context $ctx): void { /* ... */ }
 }
     {% endverbatim %}{% endcode %}
 
-    <h3 id="attr-action"><code>#[Action(name?: string, scope?: string)]</code></h3>
-    <p>Target: method. Marks a public method as a client-callable action. The method must accept
-    <code>Context $ctx</code> as its only parameter. The resolved name (method name by default, or
-    <code>name:</code> if provided) is used as the action URL slug and Twig variable name.
-    With <code>scope:</code>, one action serves the whole scope, and it runs on the instance of the tab that posts it.</p>
+    <h3 id="attr-action"><code>#[Action]</code></h3>
+    <p><code>#[Action(?string $name = null, ?string $scope = null)]</code></p>
+    <p>
+        On a public method that takes <code>Context $ctx</code>: an action named after the method, or
+        <code>name:</code>, used in its URL and as its template variable. With <code>scope:</code> one action
+        serves the whole scope, and it still runs on the instance of the tab that posts it. A component's action
+        URL starts with its namespace.
+    </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\Action;
-
 #[Action]
-public function increment(Context $ctx): void { }       // /_action/increment
+public function increment(Context $ctx): void {}  // /_action/increment
 
 #[Action(name: 'reset-tab')]
-public function resetTab(Context $ctx): void { }        // /_action/reset-tab
+public function resetTab(Context $ctx): void {}   // /_action/reset-tab
 
 #[Action(scope: Scope::SESSION)]
-public function setTheme(Context $ctx): void { }        // session-scoped action
+public function setTheme(Context $ctx): void {}   // one action for the session's tabs
     {% endverbatim %}{% endcode %}
 
-    <h3 id="attr-lifecycle"><code>#[OnCleanup]</code></h3>
-    <p>Target: method. Registers the method as a cleanup handler (via <code>Context::onCleanup()</code>).
-    The method receives the <code>Context</code>. Several methods may carry it and run in declaration
-    order, after reactive properties are re-hydrated. <code>#[OnDisconnect]</code> was removed in 0.14
-    and throws at mount.</p>
+    <h3 id="attr-on-cleanup"><code>#[OnCleanup]</code></h3>
+    <p>
+        On a method that takes the <code>Context</code>: runs when the context is destroyed, as
+        <code>onCleanup()</code> does. Several methods may carry it and run in declaration order, after the
+        reactive properties are read back from their signals.
+    </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\OnCleanup;
-
 #[OnCleanup]
 public function leave(Context $ctx): void {
-    --Room::$members[$this->room];
-    $ctx->broadcast();
+    unset(self::$members[$this->room][$ctx->getId()]);
+    $this->app->broadcast('room:' . $this->room); // $app comes in through mount()'s factory
 }
     {% endverbatim %}{% endcode %}
-
-    <h2 id="next-steps">Next steps</h2>
-    <ul>
-        <li><a href="/docs/signals">Signals</a>: reactive state in depth</li>
-        <li><a href="/docs/actions">Actions</a>: server-side event handlers</li>
-        <li><a href="/docs/scopes">Scopes</a>: sharing state across clients</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, timers</li>
-        <li><a href="/docs/composition">Composition</a>: class-based pages with attributes</li>
-    </ul>
 </article>
 
 {% endblock %}

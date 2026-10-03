@@ -3,32 +3,104 @@
 {% block head %}
 {{ parent() }}
 <script type="application/ld+json">
-{
+{% verbatim %}{
     "@context": "https://schema.org",
     "@type": "FAQPage",
     "mainEntity": [
         {
             "@type": "Question",
-            "name": "Broadcast re-renders other clients with stale data",
+            "name": "The page renders but nothing reacts",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "When broadcast() fires, every context in the scope re-runs its view closure. If the view reads from a per-client signal, each client reads its own signal which was only updated for the client that triggered the action. Fix: read shared state from $app->globalState() inside the view closure instead of from a per-client signal."
+                "text": "The page has no via_head or no via_foot, so it never opens its SSE stream or never loads Datastar. php-via logs a warning for such a shell or route. Fix: write {{ via_head }} right after <meta charset> and {{ via_foot }} before </body> in a shell, {{ via_head() }} and {{ via_foot() }} in a Twig layout, or $c->viaHead() and $c->viaFoot() in a callable that returns a whole document."
             }
         },
         {
             "@type": "Question",
-            "name": "Shared counter uses globalState + manual broadcast instead of scoped signals",
+            "name": "signal() throws after scope()",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Scoped signals already are shared state. When a context has a non-TAB scope, every $c->signal() call for the same name returns the same Signal object across all contexts in that scope. Fix: declare it with $c->signal(0, 'count', Scope::ROUTE). The signal auto-broadcasts on setValue(). Drop globalState and the manual broadcast() call."
+                "text": "The primary scope set by scope() is no default for signals. After scope() set a shared scope, a signal without a scope throws a LogicException, because it would silently be private to the tab. Fix: pass the scope as the third argument, $c->signal(0, 'count', Scope::ROUTE), or leave it out on purpose for a value private to the tab before calling scope()."
             }
         },
         {
             "@type": "Question",
-            "name": "data-text uses the wrong signal ID",
+            "name": "$c->broadcast() updates only my own tab",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Signal IDs are namespaced by the component hierarchy. A TAB signal named 'votes' inside a component with namespace 'poll' gets an ID such as 'poll_votes____n', not 'votes'. Fix: always use $signal->id() in PHP and pass it to the template as a variable. Never hard-code signal IDs in HTML."
+                "text": "Context::broadcast() broadcasts the context's primary scope, and the default primary scope is TAB, so it syncs that one tab. Fix: set a shared primary scope with $c->scope(...), or broadcast the scope you mean with $app->broadcast('room:lobby'). A scoped signal broadcasts its scope by itself when a write changes it."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Other tabs show stale values after a broadcast",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "When broadcast() fires, every tab in the scope renders its view again. A view that reads a TAB signal shows each tab its own copy, which the action changed for the tab that posted it only. Fix: keep shared state in a scoped signal, $c->signal(0, 'votes', Scope::ROUTE), which every tab reads, or in $app->globalState()."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Shared state kept in globalState and a signal at once",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Every context that declares a signal with the same name and scope shares one value, and a write broadcasts the scope. Mirroring it into globalState and calling broadcast() by hand keeps two sources of truth. Fix: declare $c->signal(0, 'count', Scope::GLOBAL) and call $count->increment() in the action."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Every tab of a route pattern shares one ROUTE scope",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Scope::ROUTE resolves to the route pattern, so /chat/lobby and /chat/kitchen both share the scope of /chat/{room}. Fix: use a custom scope per room, such as 'room:' . $room, for signals and broadcasts."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A shared render shows one user's data to everyone",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "view(..., shareRender: true) renders each update once and sends the same HTML to every tab of the view. A view that reads a TAB signal, the session or a component renders the first tab's version for all of them. Fix: drop shareRender from views that differ per tab; keep it for views that are the same for everyone, such as a game board."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Two buttons that post the same action cancel each other",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Datastar cancels a request still in flight when any element sends another one with the same method and URL. A request cancelled before it reaches the server never runs its action. Fix: give each element a query of its own, @post('{{ send.url }}?from=button'), or pass {requestCancellation: 'disabled'} where every request counts."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A dialog opened with showModal() closes on the next update",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "A morph sets each element's attributes to those of the server's markup, and every update and reconnect renders the view again, so the open attribute that showModal() set goes. Fix: render the dialog with data-preserve-attr=\"open\"."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A checkbox set by a script does not update its signal",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Datastar 1.0.4 updates a signal bound to a checkbox or radio on the input event, not on change. Fix: dispatch an input event after setting checked, or bind with the __event.change modifier."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A value the browser posts is ignored",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Scoped signals are server-owned unless declared clientWritable: true, withStrictTabSignals() makes TAB signals server-owned, and a value of another type than the signal's initial value is refused unless it converts without loss. Dev mode warns once per signal. Fix: declare the signal clientWritable: true, give it an initial value of the type the browser sends, or declare it with null to take any type."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "data-text uses the wrong signal id",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "A signal's browser id is not its name: TAB and component signals get an id that is unique per tab, and the exact form is not part of the API. Fix: write $signal->ref() or $signal->id() in PHP, and {{ count.ref }} or {{ count.id }} in Twig. Never write an id by hand."
             }
         },
         {
@@ -36,7 +108,23 @@
             "name": "Full-page patch overwrites component updates",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "A page-level view re-renders the whole page on every broadcast that reaches it, and on a reconnect or a revival. Component HTML rendered once in the page handler goes out with each of those frames and puts the page-load HTML back over the components. Fix: call the component callables inside the view closure, so each page render carries their current HTML. A page without components can use the block: parameter on $c->view() to send only a named Twig block on updates."
+                "text": "A page view renders the whole page on every broadcast that reaches it, and on a reconnect or a revival. Component HTML rendered once in the page handler goes out with each of those frames and puts the page-load HTML back over the components. Fix: call the component callables inside the view callable, so each page render carries their current HTML."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A component in a loop throws about its namespace",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "A component namespace is unique on its page and takes letters, digits, _ and - only, since it prefixes the component's signals and action URLs. Fix: build it from a key, $c->component(Item::class, 'item-' . $item->id)."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "The view shows the values from page load",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "An array passed to $c->view() is built once, when the page handler runs, so every later render shows the values it held then. Fix: pass the data as a callable, which runs on every render: $c->view('t.html.twig', fn (): array => [...])."
             }
         },
         {
@@ -44,39 +132,31 @@
             "name": "Variable is null inside a view closure",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "PHP closures don't capture outer variables automatically. A variable available in the route handler is not available inside the view closure unless explicitly listed in its use clause. Fix: add the variable to both the route handler's use list and the inner view closure's use list."
+                "text": "A PHP closure declared with function () captures only the variables in its use clause, and the page handler's use clause and the view's are separate. Fix: add the variable to both, or write the view as an arrow function, which captures outer variables by itself."
             }
         },
         {
             "@type": "Question",
-            "name": "Scoped signals return stale values after broadcast",
+            "name": "PatchElementsNoTargetsFound on block updates",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "An array passed to $c->view() is built once, when the page handler runs, so every later render shows the values it held then. Fix: pass the data as a closure, which runs on every render: $c->view('t.html.twig', fn (): array => [...])."
+                "text": "An update without a selector morphs the element whose id matches the root element of the patch. A block without a single root element that has an id leaves Datastar nothing to match. Fix: give the block one root element with a unique id."
             }
         },
         {
             "@type": "Question",
-            "name": "PatchElementsNoTargetsFound on partial block rendering",
+            "name": "A block update replaces the whole page (duplicate id=\"content\")",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Datastar's merge-fragments mode reads the id from the root element in the fragment and looks for a matching element in the DOM. If the block content has no root element with an id, there is nothing to match against. Fix: ensure the block content has a single root element with a unique id attribute."
+                "text": "The default shell wraps the view in an element with id=\"content\". A block whose root element also uses id=\"content\" replaces that wrapper. Fix: give the block's root element an id the shell does not use."
             }
         },
         {
             "@type": "Question",
-            "name": "Partial update replaces the entire page due to duplicate id=\"content\"",
+            "name": "Timer keeps broadcasting when nobody is watching",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "If your fragment and the shell both use id=\"content\", Datastar replaces the outer main element, wiping out everything around the fragment. Fix: give the block's root element a unique ID that does not collide with the shell."
-            }
-        },
-        {
-            "@type": "Question",
-            "name": "Timer keeps firing after every client disconnects",
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "setInterval() runs for the lifetime of the server, not per client, with no built-in awareness of connected clients. Fix: guard broadcasts with if (empty($app->getClients())) return; or use onClientConnect and onClientDisconnect hooks instead of a timer."
+                "text": "$app->setInterval() runs for the life of the server and knows nothing about clients. Fix: skip the work when $app->countClients($scope) is 0, which counts the connected tabs a broadcast of the scope reaches on every worker."
             }
         },
         {
@@ -84,7 +164,31 @@
             "name": "Shell templates do not support Twig",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Shell templates are processed by HtmlBuilder using plain string replacement, not the Twig engine. Twig block tags are invisible to this processor. Fix: move layout into a proper Twig base template using Twig extends and block inheritance. Page templates fill in the content block. The key injected variable is contextId (not context_id or via_ctx which are the HtmlBuilder placeholders)."
+                "text": "A shell is plain HTML with placeholders that php-via replaces as strings, so Twig tags in it come out as text. Fix: move the layout into a Twig base template that renders the whole document with {{ via_head() }} and {{ via_foot() }}, and let page templates extend it."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A template view throws that the app has no template engine",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "twig/twig does not come with php-via. Fix: run composer require twig/twig and set withTemplateDir(), or return HTML from a callable view."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "A Config change after new Via() throws",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "new Via($config) freezes the Config, so a later with* call throws a LogicException instead of being ignored or half applied. Fix: make every with* call before new Via(), or work on clone $config, which is not frozen."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Datastar stops working under a Content-Security-Policy",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Datastar runs data-* expressions through the Function constructor, which needs 'unsafe-eval', and scripts the server sends need 'strict-dynamic'. Fix: set a nonce in the via.csp_nonce request attribute, which via_head and via_foot write, and allow 'nonce-…' 'strict-dynamic' 'unsafe-eval', or put data-nonce on the <html> element of a whole-document layout and allow the nonce alone."
             }
         },
         {
@@ -92,366 +196,504 @@
             "name": "Action returns HTTP 400 Bad Request",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "A 400 means the via_ctx signal ID is missing or does not match any active context. Common causes: server restart (all in-memory contexts gone), SSE connection dropped and context cleaned up, or via_ctx omitted from a custom @post() payload. Fix: refresh the page to create a new context, or include via_ctx explicitly in custom action payloads."
+                "text": "A 400 means the request carried no via_ctx, or one that names no context php-via holds or can rebuild. Common causes: the server restarted, the tab was away longer than the revival window, or a form posted with contentType: 'form' lacks a via_ctx field. Fix: reload the page, or add <input type=\"hidden\" name=\"via_ctx\" value=\"{{ contextId }}\"> to the form."
             }
         }
     ]
-}
+}{% endverbatim %}
 </script>
 {% endblock %}
 {% block content %}
 <article>
     <h1>Common Pitfalls</h1>
     <p>
-        A collection of bugs that are easy to hit and hard to diagnose. Each one describes what goes wrong,
-        why it happens, and how to fix it.
+        Bugs that are easy to hit and hard to diagnose. Each one describes what goes wrong, why it happens,
+        and how to fix it.
     </p>
 
+    <h2 id="connecting">Pages that do not connect</h2>
+
     <details open>
-        <summary><strong>Broadcast re-renders other clients with stale data</strong></summary>
+        <summary><strong>The page renders but nothing reacts</strong></summary>
         <p>
-            You call <code>$app->broadcast()</code> after an action, but other clients' views show outdated values.
+            The page loads, but clicks do nothing, <code>data-text</code> never changes and the browser opens
+            no request to <code>/_sse</code>.
         </p>
-        <p><strong>Why:</strong> When <code>broadcast()</code> fires, every context in the scope re-runs its view
-        closure. If the view reads from a per-client signal (e.g. <code>$votes->getValue()</code>), each client
-        reads its <em>own</em> signal, which was only updated for the client that triggered the action.
-        Clients that didn't trigger the action still have stale signal values.
-        </p>
-        <p><strong>Fix:</strong> Read shared state directly inside the view closure instead of from a
-        per-client signal. <code>$app->globalState()</code> is always correct for all clients:</p>
-        {% code 'php' %}{% verbatim %}
-// ❌ stale for other clients
-$c->view(function () use ($votes) {
-    $count = $votes->int(); // only correct for the client that called $votes->setValue()
-});
-
-// ✅ correct for everyone
-$c->view(function () use ($app) {
-    $count = (int) ($app->globalState('vote_count') ?? 0);
-});
-        {% endverbatim %}{% endcode %}
-    </details>
-
-    <details>
-        <summary><strong>Shared counter uses <code>globalState</code> + manual broadcast instead of scoped signals</strong></summary>
-        <p>
-            You track shared state with <code>$app->globalState()</code> <em>and</em> a Signal,
-            manually keeping both in sync and calling <code>$app->broadcast()</code> yourself.
-            The action is verbose and error-prone.
-        </p>
-        <p><strong>Why:</strong> Scoped signals already <em>are</em> shared state. When a context has
-        a non-TAB scope, every <code>$c->signal()</code> call for the same name returns the same
-        <code>Signal</code> object across all contexts in that scope. Calling <code>setValue()</code>
-        updates the single shared instance and auto-broadcasts by default. Mirroring the value into
-        <code>globalState</code> creates two sources of truth you must synchronize manually.
-        </p>
-        {% code 'php' %}{% verbatim %}
-// ❌ dual state: globalState + signal kept in sync manually
-$count = $c->signal($app->globalState('count'), 'count', Scope::GLOBAL);
-
-$increment = $c->action(function () use ($app, $count): void {
-    $newVal = $app->globalState('count') + 1;
-    $app->setGlobalState('count', $newVal);
-    $count->setValue($newVal);
-    $app->broadcast(Scope::GLOBAL);
-});
-
-// ✅ scoped signal is the single source of truth
-$count = $c->signal(0, 'count', Scope::GLOBAL);
-
-$increment = $c->action(
-    fn () => $count->increment()
-    // atomic across workers, auto-broadcasts because signal scope != TAB
-);
-        {% endverbatim %}{% endcode %}
-        <p><strong>When <em>is</em> <code>globalState</code> appropriate?</strong> For server-side values
-        that are not signals, e.g. a status string read inside a view closure, or data shared across
-        different routes that don't have a common scope. If the value drives a <code>data-text</code>
-        or <code>data-bind</code> in the browser, use a scoped signal instead.</p>
-    </details>
-
-    <details>
-        <summary><strong>data-text uses the wrong signal ID</strong></summary>
-        <p>
-            You write <code>data-text="$votes"</code> in your template, but the counter never updates
-            (or updates with empty/undefined).
-        </p>
-        <p><strong>Why:</strong> Signal IDs are namespaced. A TAB signal named <code>votes</code> inside a component
-        with namespace <code>poll</code> gets an ID such as <code>poll_votes____n</code>, and the exact form is not
-        part of the API. If you hardcode the ID you'll likely get it wrong.
-        </p>
-        <p><strong>Fix:</strong> Always use <code>$signal->id()</code> in PHP and pass it to the template.
-        Never hard-code signal IDs in HTML:</p>
-        {% code 'php' %}{% verbatim %}
-$c->view(function () use ($votes, $twig) {
-    return $twig->render('poll.html.twig', [
-        'votes_id' => $votes->id(), // e.g. "poll_votes____n"
-    ]);
-});
-        {% endverbatim %}{% endcode %}
+        <p><strong>Why:</strong> The page has no <code>via_head</code>, which opens the SSE stream, or no
+        <code>via_foot</code>, which loads Datastar. php-via logs a warning once for such a shell or route.</p>
+        <p><strong>Fix:</strong> Write the bootstrap where it belongs:</p>
         {% code 'html' %}{% verbatim %}
-<!-- ❌ hard-coded, will break if namespace changes -->
-<span data-text="$poll_votes">0</span>
+<!-- shell.html -->
+<head>
+    <meta charset="UTF-8">
+    {{ via_head }}
+    ...
+</head>
+<body>
+    ...
+    {{ via_foot }}
+</body>
+        {% endverbatim %}{% endcode %}
+        <p>In a Twig layout write <code>{% verbatim %}{{ via_head() }}{% endverbatim %}</code> and
+        <code>{% verbatim %}{{ via_foot() }}{% endverbatim %}</code>, and in a callable that returns a whole
+        document <code>$c-&gt;viaHead()</code> and <code>$c-&gt;viaFoot()</code>. See
+        <a href="/docs/twig#bootstrap">Templates → The page bootstrap</a>.</p>
+    </details>
 
-<!-- ✅ dynamic, always correct -->
-<span data-text="${{ votes_id }}">0</span>
+    <details>
+        <summary><strong>Datastar stops working under a Content-Security-Policy</strong></summary>
+        <p>
+            With a policy in place, the console shows <code>EvalError</code> or <code>GenerateExpression</code>
+            errors, or scripts sent with <code>execScript()</code> never run.
+        </p>
+        <p><strong>Why:</strong> Datastar runs every <code>data-*</code> expression through the
+        <code>Function</code> constructor, which needs <code>'unsafe-eval'</code>. Scripts the server sends are
+        created by Datastar and need <code>'strict-dynamic'</code> next to the nonce.</p>
+        <p><strong>Fix:</strong> Set a nonce in the <code>via.csp_nonce</code> request attribute, which
+        <code>via_head</code> and <code>via_foot</code> write on their tags, and allow
+        <code>'nonce-…' 'strict-dynamic' 'unsafe-eval'</code>. Without <code>'unsafe-eval'</code>, a layout that
+        renders the whole document puts <code>data-nonce</code> on its <code>&lt;html&gt;</code> element. See
+        <a href="/docs/twig#csp">Templates → Content-Security-Policy</a>.</p>
+    </details>
+
+    <details>
+        <summary><strong>Action returns HTTP 400 "Bad Request"</strong></summary>
+        <p>
+            A click posts to the action, the response is <code>400 Bad Request</code>, and nothing happens.
+        </p>
+        <p><strong>Why:</strong> Every action carries the <code>via_ctx</code> signal, which names the tab's
+        context. A 400 means it is missing, or names a context php-via neither holds nor can rebuild. A tab that
+        was away briefly is rebuilt (revival); these cases are not:</p>
+        <ul>
+            <li>The server restarted, and the records it rebuilds tabs from went with it.</li>
+            <li>The tab was away longer than the revival window, 10 minutes by default (see
+                <a href="/docs/api#config-with-context-timeouts"><code>withContextTimeouts()</code></a>).</li>
+            <li>A form posted with Datastar's <code>contentType: 'form'</code> sends its fields instead of the
+                signals, and has no <code>via_ctx</code> field.</li>
+        </ul>
+        <p><strong>Fix:</strong> After a restart or a long absence, reload the page; the tab's next stream
+        reconnect does so by itself. Give a form the field:</p>
+        {% code 'twig' %}{% verbatim %}
+<form enctype="multipart/form-data" data-on:submit__prevent="@post('{{ upload.url }}', {contentType: 'form'})">
+    <input type="hidden" name="via_ctx" value="{{ contextId }}">
+    <input type="file" name="avatar">
+    <button>Upload</button>
+</form>
         {% endverbatim %}{% endcode %}
     </details>
+
+    <h2 id="scopes">Scopes and broadcasts</h2>
+
+    <details>
+        <summary><strong><code>signal()</code> throws after <code>scope()</code></strong></summary>
+        <p>
+            <code>$c-&gt;signal(0, 'count')</code> throws a <code>LogicException</code> on a page that called
+            <code>$c-&gt;scope(Scope::ROUTE)</code>.
+        </p>
+        <p><strong>Why:</strong> The primary scope from <code>scope()</code> is the target of
+        <code>$c-&gt;broadcast()</code>, not a default for signals. A signal without a scope is private to the
+        tab, and php-via throws rather than let a page that meant to share it silently keep it per tab.</p>
+        <p><strong>Fix:</strong> Name the scope where the signal is declared:</p>
+        {% code 'php' %}{% verbatim %}
+$c->scope(Scope::ROUTE);
+$count = $c->signal(0, 'count', Scope::ROUTE);   // shared by every tab on this route
+        {% endverbatim %}{% endcode %}
+        <p>A value private to the tab can still be declared before <code>scope()</code> is called.</p>
+    </details>
+
+    <details>
+        <summary><strong><code>$c-&gt;broadcast()</code> updates only my own tab</strong></summary>
+        <p>
+            An action changes shared state and calls <code>$c-&gt;broadcast()</code>, but only the tab that posted
+            it renders again.
+        </p>
+        <p><strong>Why:</strong> <code>$c-&gt;broadcast()</code> broadcasts the context's primary scope, and the
+        default primary scope is TAB, so it syncs that one tab. Scopes the tab joined with
+        <code>addScope()</code> or a scoped signal are not its primary scope. Dev mode warns once when a tab
+        that joined other scopes broadcasts this way.</p>
+        <p><strong>Fix:</strong> Broadcast the scope you mean, or set a shared primary scope:</p>
+        {% code 'php' %}{% verbatim %}
+$app->broadcast('room:' . $room);   // every tab in the room
+
+// or, for the whole page:
+$c->scope(Scope::ROUTE);
+// ...
+$c->broadcast();                    // every tab on this route
+        {% endverbatim %}{% endcode %}
+        <p>A scoped signal needs neither: a write that changes it broadcasts its scope.</p>
+    </details>
+
+    <details>
+        <summary><strong>Other tabs show stale values after a broadcast</strong></summary>
+        <p>
+            You broadcast after an action, but the other tabs still show the old value.
+        </p>
+        <p><strong>Why:</strong> A broadcast renders every tab's view again. A view that reads a TAB signal
+        shows each tab its own copy, and the action changed only the copy of the tab that posted it.</p>
+        <p><strong>Fix:</strong> Keep the shared value where every tab reads the same one, in a scoped signal or
+        in global state:</p>
+        {% code 'php' %}{% verbatim %}
+// ❌ each tab reads its own copy
+$votes = $c->signal(0, 'votes');
+
+// ✅ every tab on the route reads one value, and a write broadcasts the route
+$votes = $c->signal(0, 'votes', Scope::ROUTE);
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>Shared state kept in <code>globalState</code> and a signal at once</strong></summary>
+        <p>
+            You track a shared value with <code>$app-&gt;globalState()</code> <em>and</em> a signal, keep both in
+            step by hand and call <code>$app-&gt;broadcast()</code> yourself.
+        </p>
+        <p><strong>Why:</strong> A scoped signal already is shared state: every context that declares a signal
+        with the same name and scope shares one value, and a write that changes it broadcasts the scope. A copy in
+        <code>globalState</code> is a second source of truth to keep in step.</p>
+        {% code 'php' %}{% verbatim %}
+// ❌ two sources of truth, kept in step by hand
+$count = $c->signal($app->globalState('count', 0), 'count', Scope::GLOBAL);
+$c->action(function () use ($app, $count): void {
+    $app->setGlobalState('count', $app->globalState('count', 0) + 1);
+    $count->setValue($app->globalState('count'));
+    $app->broadcast(Scope::GLOBAL);
+}, 'increment');
+
+// ✅ the scoped signal is the only source
+$count = $c->signal(0, 'count', Scope::GLOBAL);
+$c->action(fn () => $count->increment(), 'increment');   // atomic across workers, broadcasts
+        {% endverbatim %}{% endcode %}
+        <p><strong>When is <code>globalState</code> right?</strong> For server-side values that no
+        <code>data-text</code> or <code>data-bind</code> shows, such as a status a view reads, or data shared
+        between routes without a common scope.</p>
+    </details>
+
+    <details>
+        <summary><strong>Every tab of a route pattern shares one ROUTE scope</strong></summary>
+        <p>
+            On <code>/chat/{room}</code>, a message posted in <code>/chat/lobby</code> shows up in
+            <code>/chat/kitchen</code> too.
+        </p>
+        <p><strong>Why:</strong> <code>Scope::ROUTE</code> resolves to the route pattern,
+        <code>Scope::routeScope('/chat/{room}')</code>, the same for every URL it matches.</p>
+        <p><strong>Fix:</strong> Use a custom scope per room:</p>
+        {% code 'php' %}{% verbatim %}
+$app->page('/chat/{room}', function (Context $c, string $room): void {
+    $messages = $c->signal([], 'messages', 'room:' . $room);
+    // ...
+});
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>A shared render shows one user's data to everyone</strong></summary>
+        <p>
+            With <code>view(..., shareRender: true)</code>, every tab shows the name or the cart of one visitor.
+        </p>
+        <p><strong>Why:</strong> A shared render renders each update once and sends the same HTML to every tab
+        of the view. A view that reads a TAB signal, the session, per-user data or a component renders the
+        first tab's version for all of them.</p>
+        <p><strong>Fix:</strong> Leave <code>shareRender</code> out of views that differ per tab. Keep it for
+        views that are the same for everyone, such as a game board, and move what differs into a separate view
+        or into signals. See <a href="/docs/views">Views</a>.</p>
+    </details>
+
+    <details>
+        <summary><strong>Timer keeps broadcasting when nobody is watching</strong></summary>
+        <p>
+            A <code>$app-&gt;setInterval()</code> timer broadcasts to a route every second, also when nobody has
+            it open.
+        </p>
+        <p><strong>Why:</strong> The timer runs for the life of the server and knows nothing about clients.</p>
+        <p><strong>Fix:</strong> Skip the work when <code>countClients()</code> finds nobody. It counts the
+        connected tabs a broadcast of the scope reaches, on every worker:</p>
+        {% code 'php' %}{% verbatim %}
+$app->setInterval(function () use ($app): void {
+    if ($app->countClients(Scope::routeScope('/ticker')) === 0) {
+        return;
+    }
+    $app->broadcast(Scope::routeScope('/ticker'));
+}, 1000);
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <h2 id="browser">In the browser</h2>
+
+    <details>
+        <summary><strong>Two buttons that post the same action cancel each other</strong></summary>
+        <p>
+            Pressing Enter in a field and clicking Send at once runs the action only once, or a quick second
+            click drops the first.
+        </p>
+        <p><strong>Why:</strong> Datastar cancels a request still in flight when any element sends another one
+        with the same method and URL. A request cancelled before it reaches the server never runs its action.</p>
+        <p><strong>Fix:</strong> Tell the requests apart with a query, or turn cancellation off where every
+        request counts:</p>
+        {% code 'twig' %}{% verbatim %}
+<input data-bind="{{ message.id }}" data-on:keydown="evt.key === 'Enter' && @post('{{ send.url }}?from=enter')">
+<button data-on:click="@post('{{ send.url }}?from=button')">Send</button>
+
+<button data-on:click="@post('{{ paint.url }}', {requestCancellation: 'disabled'})">Paint</button>
+        {% endverbatim %}{% endcode %}
+        <p>See <a href="/docs/actions#cancellation">Actions → Cancellation</a>.</p>
+    </details>
+
+    <details>
+        <summary><strong>A dialog opened with <code>showModal()</code> closes on the next update</strong></summary>
+        <p>
+            A confirmation dialog closes by itself as soon as a broadcast or a reconnect renders the view.
+        </p>
+        <p><strong>Why:</strong> A morph sets each element's attributes to those of the server's markup, and
+        every update and every stream connect renders the view again. The <code>open</code> attribute that
+        <code>showModal()</code> set is not in the server's markup.</p>
+        <p><strong>Fix:</strong> List it in <code>data-preserve-attr</code>, in the markup the server renders:</p>
+        {% code 'html' %}{% verbatim %}
+<dialog id="confirm" data-preserve-attr="open">...</dialog>
+        {% endverbatim %}{% endcode %}
+        <p>See <a href="/docs/views#preserve-attr">Views → Attributes the browser sets</a>.</p>
+    </details>
+
+    <details>
+        <summary><strong>A checkbox set by a script does not update its signal</strong></summary>
+        <p>
+            A script ticks a checkbox and dispatches <code>change</code>, but the bound signal keeps its value.
+        </p>
+        <p><strong>Why:</strong> Datastar 1.0.4 updates a signal bound to a checkbox or a radio button on the
+        <code>input</code> event.</p>
+        <p><strong>Fix:</strong> Dispatch <code>input</code>, or bind with the <code>__event.change</code>
+        modifier:</p>
+        {% code 'js' %}{% verbatim %}
+box.checked = true;
+box.dispatchEvent(new Event('input', { bubbles: true }));
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>A value the browser posts is ignored</strong></summary>
+        <p>
+            The browser shows a new value in a bound input, but the action sees the old one, and the next sync
+            puts the old value back.
+        </p>
+        <p><strong>Why:</strong> php-via writes a posted value into a signal only when the signal takes client
+        values: TAB signals do unless <code>withStrictTabSignals()</code> is on, scoped signals only with
+        <code>clientWritable: true</code>. The value must also have the type of the signal's initial value; a
+        lossless form such as <code>'5'</code> for an int is converted, anything else is refused. Dev mode warns
+        once per signal.</p>
+        <p><strong>Fix:</strong> Declare the signal <code>clientWritable: true</code>, give it an initial value
+        of the type the browser sends, or declare it with <code>null</code> to take any type:</p>
+        {% code 'php' %}{% verbatim %}
+$note  = $c->signal('', 'note', Scope::ROUTE, clientWritable: true);
+$limit = $c->signal(10, 'limit');      // '25' from a text input arrives as 25
+$pick  = $c->signal(null, 'pick');     // any type
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>data-text uses the wrong signal id</strong></summary>
+        <p>
+            You write <code>data-text="$votes"</code>, and the element never updates or shows nothing.
+        </p>
+        <p><strong>Why:</strong> A signal's browser id is not its name. TAB and component signals get an id
+        that is unique per tab, and the exact form is not part of the API.</p>
+        <p><strong>Fix:</strong> Let php-via write it: <code>ref()</code> for expressions, <code>id()</code> or
+        <code>bind()</code> for bindings.</p>
+        {% code 'php' %}{% verbatim %}
+$c->view(fn (): string => "<span data-text=\"{$votes->ref()}\">{$votes->int()}</span>");
+        {% endverbatim %}{% endcode %}
+        {% code 'twig' %}{% verbatim %}
+<span data-text="{{ votes.ref }}">{{ votes.int }}</span>
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <h2 id="views">Views and components</h2>
 
     <details>
         <summary><strong>Full-page patch overwrites component updates</strong></summary>
         <p>
-            You use <code>$c->component()</code> to build isolated sub-contexts but on every broadcast
-            the entire page is replaced, wiping out or replacing the fresher component patches.
+            You use <code>$c-&gt;component()</code>, but every broadcast to the page puts the components back to
+            how they looked at page load.
         </p>
-        <p><strong>Why:</strong> A page-level <code>$c->view()</code> re-renders the whole page on every
-        broadcast that reaches it, and on a reconnect or a revival, and Datastar morphs the page with it.
-        Component HTML rendered once in the handler, such as <code>'counter' => $counter()</code> passed to
-        <code>$c->view('page.html.twig', [...])</code>, goes out with each of those frames and puts the
-        page-load HTML back over the components.
-        </p>
-        <p><strong>Fix:</strong> Call the component callables inside the view closure, so each page render
-        carries their current HTML. A component the page frame carries then sends only its signals:</p>
+        <p><strong>Why:</strong> A page view renders the whole page on every broadcast that reaches it, and on a
+        reconnect or a revival, and Datastar morphs the page with it. Component HTML rendered once in the
+        handler, such as <code>'counter' =&gt; $counter()</code> in an array passed to <code>view()</code>, goes
+        out with each of those frames.</p>
+        <p><strong>Fix:</strong> Call the component callables inside the view callable, so each page render
+        carries their current HTML:</p>
         {% code 'php' %}{% verbatim %}
-$c->view(fn (): string => $c->render('page.html.twig', $data + [
-    'counter' => $counter(),
-]));
+$c->view(fn (): string => $c->render('page.html.twig', ['counter' => $counter()]));
         {% endverbatim %}{% endcode %}
-        <p>A page without components whose template has a named block around the dynamic content can send
-        only that block on updates:</p>
+    </details>
+
+    <details>
+        <summary><strong>A component in a loop throws about its namespace</strong></summary>
+        <p>
+            <code>$c-&gt;component(Item::class, 'item')</code> in a loop throws an
+            <code>InvalidArgumentException</code> on the second pass.
+        </p>
+        <p><strong>Why:</strong> A namespace prefixes the component's signals and action URLs, so it is unique on
+        its page and takes letters, digits, <code>_</code> and <code>-</code> only.</p>
+        <p><strong>Fix:</strong> Build it from a key:</p>
         {% code 'php' %}{% verbatim %}
-$c->view('page.html.twig', $data, block: 'demo');
+foreach ($items as $item) {
+    $rows[] = $c->component(Item::class, 'item-' . $item->id);
+}
+        {% endverbatim %}{% endcode %}
+    </details>
+
+    <details>
+        <summary><strong>The view shows the values from page load</strong></summary>
+        <p>
+            Updates arrive, but the view keeps showing what it showed at page load.
+        </p>
+        <p><strong>Why:</strong> An array passed to <code>$c-&gt;view()</code> is built once, when the page
+        handler runs. Every later render shows the values it held then.</p>
+        <p><strong>Fix:</strong> Pass the data as a callable, which runs on every render:</p>
+        {% code 'php' %}{% verbatim %}
+$c->view('presence.html.twig', fn (): array => ['count' => $app->countClients(Scope::routeScope('/'))]);
         {% endverbatim %}{% endcode %}
     </details>
 
     <details>
         <summary><strong>Variable is null inside a view closure</strong></summary>
         <p>
-            You get a fatal "Call to a member function on null" inside a <code>$c->view()</code> closure.
+            A <code>$c-&gt;view()</code> closure fails with "Call to a member function on null" or an undefined
+            variable.
         </p>
-        <p><strong>Why:</strong> PHP closures don't capture outer variables automatically. The <code>use</code>
-        list on the outer page handler and the inner view closure are separate. A variable available in the
-        route handler (e.g. <code>$twig</code>, <code>$app</code>) is not available inside the view closure
-        unless explicitly listed in its <code>use</code>.
-        </p>
-        <p><strong>Fix:</strong> Add the variable to both the route handler's <code>use</code> and the inner
-        view closure's <code>use</code>:</p>
+        <p><strong>Why:</strong> A closure declared with <code>function ()</code> captures only the variables in
+        its <code>use</code> clause, and the page handler's clause and the view's are separate.</p>
+        <p><strong>Fix:</strong> Add the variable to both, or write the view as an arrow function, which captures
+        outer variables by itself:</p>
         {% code 'php' %}{% verbatim %}
-// ❌ $twig is null inside the view closure
-$app->page('/', function (Context $c) use ($shell): void {
-    $c->view(function () use ($twig) { // $twig was never captured by the outer closure
-        return $twig->render('home.html.twig');
+// ❌ $repo was never captured by the page handler
+$app->page('/', function (Context $c): void {
+    $c->view(function () use ($repo): string {
+        return '<ul id="list">' . $repo->listItems() . '</ul>';
     });
 });
 
 // ✅
-$app->page('/', function (Context $c) use ($shell, $twig): void {
-    $c->view(function () use ($twig): string {
-        return $twig->render('home.html.twig');
-    });
+$app->page('/', function (Context $c) use ($repo): void {
+    $c->view(fn (): string => '<ul id="list">' . $repo->listItems() . '</ul>');
 });
         {% endverbatim %}{% endcode %}
     </details>
 
     <details>
-        <summary><strong>Scoped signals return stale values after broadcast</strong></summary>
+        <summary><strong>PatchElementsNoTargetsFound on block updates</strong></summary>
         <p>
-            You create a signal with a non-TAB scope (e.g. <code>Scope::routeScope('/')</code>).
-            After calling <code>broadcast()</code>, some clients re-render with the old value.
+            You send only a Twig block on updates with <code>view(..., block: 'demo')</code>, the console shows
+            <code>PatchElementsNoTargetsFound</code>, and nothing updates.
         </p>
-        <p><strong>Why:</strong> An array passed to <code>$c->view()</code> is built once, when the page
-        handler runs. Every later render shows the values it held then.
-        </p>
-        <p><strong>Fix:</strong> Pass the data as a closure, which runs on every render:
-        </p>
-        {% code 'php' %}{% verbatim %}
-$c->view('presence.html.twig', fn (): array => ['count' => count($app->getClients())]);
-        {% endverbatim %}{% endcode %}
-    </details>
-
-    <details>
-        <summary><strong>PatchElementsNoTargetsFound on partial block rendering</strong></summary>
-        <p>
-            You use Twig block rendering to send only a fragment on updates
-            (e.g. <code>$c->render('page.html.twig', $data, 'content')</code>), but the browser
-            console shows <code>PatchElementsNoTargetsFound</code> and nothing updates.
-        </p>
-        <p><strong>Why:</strong> Datastar's merge-fragments mode reads the <code>id</code> from the
-        root element in the fragment and looks for a matching element in the DOM. If the block content
-        has no root element with an <code>id</code>, there's nothing to match against.
-        </p>
-        <p><strong>Fix:</strong> Make sure block content has a single root element with a unique <code>id</code>:</p>
+        <p><strong>Why:</strong> An update without a selector morphs the element whose <code>id</code> matches
+        the root element of the patch. A block without a single root element that has an <code>id</code>
+        leaves Datastar nothing to match.</p>
+        <p><strong>Fix:</strong> Give the block one root element with a unique <code>id</code>:</p>
         {% code 'twig' %}{% verbatim %}
-{# template.html.twig #}
 {% block demo %}
-<div id="todo-list">
-    {# ✅ Datastar reads id="todo-list" from the fragment and morphs that element #}
+<ul id="todo-list">
     {% for item in items %}
         <li>{{ item.text }}</li>
     {% endfor %}
-</div>
+</ul>
 {% endblock %}
-        {% endverbatim %}{% endcode %}
-        {% code 'php' %}{% verbatim %}
-$c->view('template.html.twig', $data, block: 'demo');
         {% endverbatim %}{% endcode %}
     </details>
 
     <details>
-        <summary><strong>Partial update replaces the entire page (duplicate <code>id="content"</code>)</strong></summary>
+        <summary><strong>A block update replaces the whole page (duplicate <code>id="content"</code>)</strong></summary>
         <p>
-            You render a block on update whose outermost element uses <code>id="content"</code>, but so
-            does the <code>&lt;main&gt;</code> wrapper in your shell template. After the first broadcast,
-            the entire page (header, source panel, layout) disappears and only the fragment remains.
+            After the first update, the page's layout disappears and only the block is left.
         </p>
-        <p><strong>Why:</strong> Datastar's merge-fragments mode looks for a DOM element matching the
-        root element's <code>id</code> in the patch. If your fragment and the shell both use
-        <code>id="content"</code>, Datastar replaces the outer <code>&lt;main&gt;</code>, wiping out
-        everything around the fragment.
-        </p>
-        <p><strong>Fix:</strong> Give the block's root element a unique ID that doesn't collide
-        with the shell:</p>
+        <p><strong>Why:</strong> The default shell wraps the view in an element with <code>id="content"</code>.
+        A block whose root element uses <code>id="content"</code> too replaces that wrapper.</p>
+        <p><strong>Fix:</strong> Give the block's root element an id the shell does not use:</p>
         {% code 'twig' %}{% verbatim %}
-{# ❌ collides with <main id="content"> in the shell #}
-{% block demo %}
-<div id="content">...</div>
-{% endblock %}
+{# ❌ collides with the shell's id="content" #}
+{% block demo %}<div id="content">...</div>{% endblock %}
 
-{# ✅ unique ID: Datastar morphs only this element #}
-{% block demo %}
-<div id="todo-list">...</div>
-{% endblock %}
+{# ✅ #}
+{% block demo %}<div id="todo-list">...</div>{% endblock %}
         {% endverbatim %}{% endcode %}
     </details>
 
+    <h2 id="setup">Setup</h2>
+
     <details>
-        <summary><strong>Timer keeps firing after every client disconnects</strong></summary>
+        <summary><strong>A template view throws that the app has no template engine</strong></summary>
         <p>
-            You set up a <code>$app->setInterval()</code> timer on server start that broadcasts to a route.
-            Even when no clients are on that route, the timer keeps running and broadcasts uselessly.
+            <code>$c-&gt;view('page.html.twig')</code> throws a <code>LogicException</code>, or
+            <code>new Via()</code> throws for <code>withTemplateDir()</code>.
         </p>
-        <p><strong>Why:</strong> <code>setInterval</code> runs for the lifetime of the server, not per client.
-        It has no built-in awareness of connected clients.
-        </p>
-        <p><strong>Fix:</strong> Guard broadcasts with a client check, or use <code>onClientConnect</code>
-        and <code>onClientDisconnect</code> hooks instead of a timer for presence-style updates:
-        </p>
-        {% code 'php' %}{% verbatim %}
-// Guard the timer
-$app->setInterval(function () use ($app): void {
-    if (empty($app->getClients())) {
-        return;
-    }
-    $app->broadcast(Scope::GLOBAL);
-}, 1000);
-
-// Or eliminate the timer entirely with connect/disconnect hooks
-$app->onClientConnect(function (Context $c) use ($app): void {
-    $app->broadcast(Scope::routeScope($c->getRoute()));
-});
-$app->onClientDisconnect(function (Context $c) use ($app): void {
-    $app->broadcast(Scope::routeScope($c->getRoute()));
-});
+        <p><strong>Why:</strong> <code>twig/twig</code> does not come with php-via.</p>
+        <p><strong>Fix:</strong> Install it, or return HTML from a callable view:</p>
+        {% code 'bash' %}{% verbatim %}
+composer require twig/twig
         {% endverbatim %}{% endcode %}
     </details>
 
     <details>
-        <summary><strong>Shell templates don't support Twig: use page-level inheritance instead</strong></summary>
-        {% verbatim %}<p>
-            You try to use <code>{% extends %}</code>, <code>{% block %}</code>, or other Twig tags inside
-            a shell template (the HTML file passed to <code>withShellTemplate()</code> or
-            <code>setShellTemplate()</code>), but nothing happens or you get a parse error.
+        <summary><strong>A Config change after <code>new Via()</code> throws</strong></summary>
+        <p>
+            <code>$config-&gt;withStaticDir(...)</code> after <code>new Via($config)</code> throws a
+            <code>LogicException</code>.
         </p>
-        <p><strong>Why:</strong> Shell templates are processed by <code>HtmlBuilder</code> using a plain
-        string replacement, not the Twig engine. They only understand literal
-        placeholders: <code>{{ signals_json }}</code>, <code>{{ context_id }}</code>,
-        <code>{{ base_path }}</code>, <code>{{ datastar_url }}</code>, <code>{{ import_map }}</code>,
-        <code>{{ head_content }}</code>, <code>{{ content }}</code>,
-        <code>{{ foot_content }}</code>, <code>{{ styles }}</code>, and <code>{{ name }}</code> and
-        <code>{{ name.id }}</code> for each signal by the name passed to <code>signal()</code>.
-        Twig tags are invisible to this processor and will be emitted as raw text.
+        <p><strong>Why:</strong> <code>new Via()</code> freezes the Config, so a later change throws instead of
+        being ignored or half applied.</p>
+        <p><strong>Fix:</strong> Make every <code>with*</code> call before <code>new Via()</code>. A test that
+        needs a variant works on <code>clone $config</code>, which is not frozen.</p>
+    </details>
+
+    <details>
+        <summary><strong>Shell templates do not support Twig</strong></summary>
+        <p>
+            Twig tags such as <code>{% verbatim %}{% extends %}{% endverbatim %}</code> or
+            <code>{% verbatim %}{% block %}{% endverbatim %}</code> in a shell (the file passed to
+            <code>withShellTemplate()</code> or <code>setShellTemplate()</code>) show up as text.
         </p>
-        <p><strong>Fix:</strong> Don't put Twig logic in shell templates. Instead, move the layout into
-        a proper Twig base template and have your page templates extend it. The full HTML document
-        (including <code>&lt;!DOCTYPE html&gt;</code>, nav, footer) lives in the base template;
-        page templates fill in <code>{% block content %}</code>. <code>HtmlBuilder</code> detects a
-        rendered <code>&lt;html&gt;</code> response and uses it instead of the shell. It only adds the
-        head and foot includes, a <code>via_ctx</code> meta if the document has none and a seed of the
-        initial signal values; the SSE bootstrap and <code>datastar.js</code> stay in your layout:</p>
-        <pre data-lang="twig"><code>{# templates/shells/base.html.twig #}
-&lt;!DOCTYPE html&gt;
-&lt;html&gt;
-&lt;head&gt;
-    &lt;meta charset="UTF-8"&gt;
+        <p><strong>Why:</strong> A shell is plain HTML with placeholders that php-via replaces as strings. See
+        <a href="/docs/twig#shell">Templates → Shells</a> for the placeholders.</p>
+        <p><strong>Fix:</strong> Move the layout into a Twig base template that renders the whole document, and
+        let page templates extend it. php-via then skips the shell:</p>
+        {% code 'twig' %}{% verbatim %}
+{# templates/shells/base.html.twig #}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
     {{ via_head() }}
-    &lt;title&gt;{% block title %}{% endblock %}&lt;/title&gt;
-&lt;/head&gt;
-&lt;body&gt;
-    &lt;nav&gt;...shared nav...&lt;/nav&gt;
-    &lt;main&gt;{% block content %}{% endblock %}&lt;/main&gt;
+    <title>{% block title %}{% endblock %}</title>
+</head>
+<body>
+    <main>{% block content %}{% endblock %}</main>
     {{ via_foot() }}
-&lt;/body&gt;
-&lt;/html&gt;
+</body>
+</html>
 
 {# templates/pages/home.html.twig #}
 {% extends 'shells/base.html.twig' %}
 {% block title %}Home{% endblock %}
-{% block content %}
-    &lt;h1&gt;Hello&lt;/h1&gt;
-{% endblock %}</code></pre>
-        <p>The key variable is <code>{{ contextId }}</code> (injected automatically by
-        <code>Context::render()</code>), not <code>{{ context_id }}</code> or
-        <code>{{ via_ctx }}</code> which are the <code>HtmlBuilder</code> placeholders.</p>{% endverbatim %}
-    </details>
-
-    <details>
-        <summary><strong>Action returns HTTP 400 "Bad Request"</strong></summary>
-        <p>
-            You click a button or trigger a keyboard shortcut and the action request returns
-            <code>400 Bad Request</code>. Nothing happens in the UI.
-        </p>
-        <p><strong>Why:</strong> Every action request includes a <code>via_ctx</code> signal that
-        identifies the server-side context. The server looks up this ID in its in-memory context
-        registry. A 400 means the ID is missing or doesn't match any active context. Common causes:</p>
-        <ul>
-            <li>The server was restarted: all contexts from the previous process are gone, but the
-                browser still has stale action URLs and signal values from the old session.</li>
-            <li>The SSE connection dropped and the context was cleaned up (<code>onCleanup</code> ran),
-                but the UI wasn't refreshed.</li>
-            <li>The <code>via_ctx</code> signal was omitted from the request body or query params.</li>
-        </ul>
-        <p><strong>Fix:</strong></p>
-        <ul>
-            <li><strong>Stale context after restart or disconnect:</strong> Refresh the page. This creates
-                a new context with a fresh ID. If this happens frequently, check that your SSE connection
-                is stable: a flaky connection causes repeated context creation and teardown.</li>
-            <li><strong>Custom payload in e.g. <code>@post()</code>:</strong> If you pass a custom object to
-                actions like <code>@post('/action', {some: 'payload'})</code>, the custom
-                object <em>replaces</em> the signal store: <code>via_ctx</code> and all other signals
-                are no longer included. Either omit the second argument and let Datastar send the full
-                store, or include <code>via_ctx</code> explicitly in your custom payload.</li>
-        </ul>
+{% block content %}<h1>Hello</h1>{% endblock %}
+        {% endverbatim %}{% endcode %}
     </details>
 
     <h2 id="debugging-tips">Debugging tips</h2>
     <ul>
-        <li>Add <code>&lt;pre data-json-signals&gt;&lt;/pre&gt;</code> to your template to see the live
-            Datastar signal store in the browser. Remove before deploying.</li>
-        <li>Check signal IDs with <code>var_dump($signal->id())</code>: namespace prefixing can produce
-            unexpected IDs.</li>
-        <li>Run the server with <code>LOG_LEVEL=debug</code> to see every render, cache hit, and broadcast
-            in the terminal output.</li>
-        <li>If the view closure is never called, confirm <code>$c->view()</code> is actually reached:
-            missing or mis-ordered <code>use</code> variables silently skip execution if a
-            required call throw for a null object.</li>
+        <li>Open the <a href="/docs/dev-bar">Dev Bar</a>, on in dev mode: its SSE panel shows every patch
+            that reached the page, and its Logs panel php-via's warnings.</li>
+        <li>Add <code>&lt;pre data-json-signals&gt;&lt;/pre&gt;</code> to a template to see the browser's
+            signals live. Remove it before you deploy.</li>
+        <li>Run with <code>withLogLevel('debug')</code> to see every render, shared render hit and broadcast
+            in the terminal.</li>
+        <li>In dev mode a failed page shows the exception's class and message instead of
+            "Internal Server Error".</li>
     </ul>
 
     <h2 id="more">See also</h2>
     <ul>
-        <li><a href="/docs/broadcasting">Broadcasting</a>: scope targets and update strategies</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, timers</li>
-        <li><a href="/docs/views">Views</a>: caching behaviour and update cycles</li>
-        <li><a href="/docs/signals">Signals</a>: scope types and sharing state</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: scope targets and update timing</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, revival and timers</li>
+        <li><a href="/docs/views">Views</a>: updates, blocks and shared renders</li>
+        <li><a href="/docs/signals">Signals</a>: scopes and client writes</li>
     </ul>
 </article>
 
