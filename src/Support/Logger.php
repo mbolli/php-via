@@ -42,8 +42,12 @@ class Logger {
     private ?RequestLogger $requestLogger = null;
     private ?LogBuffer $buffer = null;
 
+    /** Whether debug messages are written, so hot paths can skip building them. */
+    public readonly bool $debugEnabled;
+
     public function __construct(string $logLevel = 'info') {
         $this->minLevel = self::LEVELS[self::normalizeLevel($logLevel)] ?? self::LEVELS['info'];
+        $this->debugEnabled = $this->minLevel <= self::LEVELS['debug'];
     }
 
     /**

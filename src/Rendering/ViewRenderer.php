@@ -63,13 +63,17 @@ class ViewRenderer {
             $view = ViewCache::viewKey($context->getRoute(), $context->getNamespace());
             $cached = $this->cache->get($scope, true, $view);
             if ($cached !== null) {
-                $this->logger->debug("Using shared update render for scope: {$scope}", $context);
+                if ($this->logger->debugEnabled) {
+                    $this->logger->debug("Using shared update render for scope: {$scope}", $context);
+                }
                 $this->recordCacheHit($scope, $context);
 
                 return $cached;
             }
 
-            $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
+            if ($this->logger->debugEnabled) {
+                $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
+            }
 
             $generation = $this->cache->beginRender($scope);
 
@@ -87,7 +91,9 @@ class ViewRenderer {
             return $result;
         }
 
-        $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
+        if ($this->logger->debugEnabled) {
+            $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
+        }
         $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
         if ($isUpdate && $this->fanOuts !== []) {
             $this->noteFanOutRender($result, $scope, $context);
