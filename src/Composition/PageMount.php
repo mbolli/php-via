@@ -122,11 +122,12 @@ final class PageMount {
             // untouched property from a changed one and size an atomic delta.
             $before = self::snapshot($instance, $meta, $ctx);
 
-            $instance->{$method}($ctx);
-
-            // Sync changed values back to signals
-            // Signal::setValue() auto-broadcasts for scoped signals
-            self::syncBack($instance, $meta, $ctx, $before);
+            try {
+                $instance->{$method}($ctx);
+            } finally {
+                // A closure action's signal writes stay when it throws, so these do too.
+                self::syncBack($instance, $meta, $ctx, $before);
+            }
 
             // Flush TAB signal changes to the current client
             $ctx->syncSignals();

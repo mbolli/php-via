@@ -135,6 +135,22 @@ final class PmSessionWidget {
     }
 }
 
+final class PmThrowingAction {
+    #[Signal]
+    public int $n = 0;
+
+    public function view(Context $ctx): void {
+        $ctx->view(fn (): string => '');
+    }
+
+    #[Action]
+    public function fail(Context $ctx): void {
+        $this->n = 3;
+
+        throw new RuntimeException('validation failed');
+    }
+}
+
 /** @param class-string $class */
 function pageMountHandler(Via $app, string $class, ?callable $factory = null): Closure {
     return PageMount::buildClosure(ClassMetadata::analyze($class), $app, $factory);
@@ -246,6 +262,16 @@ describe('#[Action] runs on the calling context\'s instance', function (): void 
         ;
         $b->executeAction('bump');
         expect(PageMountLog::$calls)->toBe([['bump', 'B', 'B']]);
+    });
+
+    test('property changes made before an action throws still reach the signal', function (): void {
+        $app = pageMountApp();
+        $ctx = new Context('A', '/p', $app, null, 's1');
+        pageMountHandler($app, PmThrowingAction::class)($ctx);
+
+        expect(fn () => $ctx->executeAction('fail'))->toThrow(RuntimeException::class, 'validation failed')
+            ->and($ctx->getSignal('n')?->getValue())->toBe(3)
+        ;
     });
 });
 
