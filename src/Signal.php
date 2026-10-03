@@ -202,7 +202,7 @@ class Signal {
      * Set the signal value and queue it for the next sync.
      *
      * A scoped signal also broadcasts its scope when the value changed, unless it was declared
-     * with autoBroadcast: false; several writes in one action still render once per scope.
+     * with autoBroadcast: false. Broadcast coalescing renders several writes in one action once.
      *
      * @param mixed $value      The new value to set
      * @param mixed ...$removed The markChanged and broadcast flags removed in 0.14: any argument here throws
@@ -350,27 +350,6 @@ class Signal {
     }
 
     /**
-     * PHP silently drops extra positional arguments to a userland method, so the flags removed in
-     * 0.14 are caught here rather than left to mean nothing.
-     *
-     * @param array<int|string, mixed> $removed
-     */
-    private static function rejectRemovedFlags(string $method, string $kept, array $removed): never {
-        $named = array_filter(array_keys($removed), \is_string(...));
-        $positional = \count($removed) - \count($named);
-        $passed = array_map(static fn (string $name): string => $name . ':', $named);
-        if ($positional > 0) {
-            $passed[] = $positional . ' more positional argument' . ($positional > 1 ? 's' : '');
-        }
-
-        throw new \ArgumentCountError(
-            "Signal::{$method}() takes only {$kept} since php-via 0.14, but got " . implode(' and ', $passed) . '. '
-            . 'Delete the broadcast: and markChanged: arguments: a scoped signal broadcasts on write unless declared '
-            . "with autoBroadcast: false, and markSynced() drops a TAB signal's pending patch."
-        );
-    }
-
-    /**
      * Bind this signal to a form field or custom element. Returns the data-bind attribute.
      *
      * $prop binds that element property instead, as data-bind__prop.<prop> (Datastar's own modifier).
@@ -407,5 +386,26 @@ class Signal {
      */
     public function text(): never {
         Removed::method('Signal::text()', 'Use <span data-text="{$signal->ref()}">{$signal->string()}</span>, which also renders the current value.');
+    }
+
+    /**
+     * PHP silently drops extra positional arguments to a userland method, so the flags removed in
+     * 0.14 are caught here rather than left to mean nothing.
+     *
+     * @param array<int|string, mixed> $removed
+     */
+    private static function rejectRemovedFlags(string $method, string $kept, array $removed): never {
+        $named = array_filter(array_keys($removed), \is_string(...));
+        $positional = \count($removed) - \count($named);
+        $passed = array_map(static fn (string $name): string => $name . ':', $named);
+        if ($positional > 0) {
+            $passed[] = $positional . ' more positional argument' . ($positional > 1 ? 's' : '');
+        }
+
+        throw new \ArgumentCountError(
+            "Signal::{$method}() takes only {$kept} since php-via 0.14, but got " . implode(' and ', $passed) . '. '
+            . 'Delete the broadcast: and markChanged: arguments: a scoped signal broadcasts on write unless declared '
+            . "with autoBroadcast: false, and markSynced() drops a TAB signal's pending patch."
+        );
     }
 }

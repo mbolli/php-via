@@ -84,7 +84,7 @@ $app = $case === 'backlog'
     ? new BackloggedVia($config, new BackloggedServer('127.0.0.1', FixturePort::pick(4600, 150)))
     : new Via($config);
 
-Coroutine::run(static function () use ($app, $case): void {
+Coroutine::run(static function () use ($app): void {
     $context = new Context('tab', '/p', $app);
     $context->view(static fn (): string => '<main id="page">page</main>');
     $app->contexts['tab'] = $context;

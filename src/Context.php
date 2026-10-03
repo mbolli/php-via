@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
+use starfederation\datastar\enums\ElementPatchMode;
 use Twig\Markup;
 
 /**
@@ -1211,15 +1212,12 @@ class Context {
     }
 
     /**
-     * Get next patch from the queue.
+     * Get next patch from the queue, or null if none is available. Its `confirm` must be invoked
+     * only after the patch has actually been written.
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array{type: string, content: mixed, selector?: string, mode?: PatchMode|\starfederation\datastar\enums\ElementPatchMode, confirm?: callable(): void} Next patch data
-     *                                                                                                 or null if none available.
-     *                                                                                                 `confirm` must be invoked
-     *                                                                                                 only after the patch has
-     *                                                                                                 actually been written.
+     * @return null|array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void}
      */
     public function getPatch(): ?array {
         return $this->patchManager->getPatch();

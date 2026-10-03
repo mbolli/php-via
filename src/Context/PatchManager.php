@@ -402,6 +402,27 @@ class PatchManager {
     }
 
     /**
+     * Whether a patch takes effect once, so that dropping it or sending it twice changes the page: a
+     * script, or an element patch that inserts (Append, Prepend, Before, After).
+     *
+     * Other element patches morph, replace or remove a target, and a later sync renders it again.
+     *
+     * @internal read by the queue's eviction and by the SSE loop's backlog drop
+     *
+     * @param QueuedPatch $patch
+     */
+    public static function isOneShot(array $patch): bool {
+        if ($patch['type'] !== 'elements') {
+            return $patch['type'] === 'script';
+        }
+
+        $mode = $patch['mode'] ?? null;
+        $mode = $mode instanceof \BackedEnum ? $mode->value : $mode;
+
+        return \in_array($mode, ['append', 'prepend', 'before', 'after'], true);
+    }
+
+    /**
      * Whether the page this manager feeds waits for its SSE connect to seed it. Its signals still
      * hold the defaults a revival declared, and anything queued now reaches the tab before the seed.
      */
@@ -448,27 +469,6 @@ class PatchManager {
         }
 
         return $flat;
-    }
-
-    /**
-     * Whether a patch takes effect once, so that dropping it or sending it twice changes the page: a
-     * script, or an element patch that inserts (Append, Prepend, Before, After).
-     *
-     * Other element patches morph, replace or remove a target, and a later sync renders it again.
-     *
-     * @internal read by the queue's eviction and by the SSE loop's backlog drop
-     *
-     * @param array{type: string, mode?: mixed} $patch
-     */
-    public static function isOneShot(array $patch): bool {
-        if ($patch['type'] !== 'elements') {
-            return $patch['type'] === 'script';
-        }
-
-        $mode = $patch['mode'] ?? null;
-        $mode = $mode instanceof \BackedEnum ? $mode->value : $mode;
-
-        return \in_array($mode, ['append', 'prepend', 'before', 'after'], true);
     }
 
     /**
