@@ -939,7 +939,8 @@ class Context {
      */
     public function action(callable $fn, ?string $name = null, mixed ...$removed): Action {
         if ($removed !== []) {
-            Removed::method('The $scope argument of Context::action()', 'An action runs for the tab that posts it: drop the third argument, and give signal() a scope to share state.');
+            // ArgumentCountError, like Signal's removed flags: no catch (\Exception) block hides it.
+            throw new \ArgumentCountError('The $scope argument of Context::action() was removed in php-via 0.14. An action runs for the tab that posts it: drop the third argument, and give signal() a scope to share state.');
         }
 
         // Deterministic ID so a destroyed context that is later revived
