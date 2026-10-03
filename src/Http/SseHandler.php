@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Context\PatchManager;
+use Mbolli\PhpVia\PatchMode;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -228,7 +230,8 @@ class SseHandler {
      * where the latest supersedes the rest, so a backed-up client simply catches up on
      * the next broadcast. `signals` are deltas (self-healing only because delivery is
      * acknowledged), and `script` patches are one-shot side effects with no resend
-     * path, so neither is ever sacrificed here.
+     * path, so neither is ever sacrificed here. Nor are element patches that insert
+     * (PatchManager::isOneShot()), which the stream loop leaves out before asking.
      *
      * @param string $type           patch type
      * @param int    $queuedBytes    `send_queued_bytes` for the connection
@@ -431,7 +434,7 @@ class SseHandler {
 
                 // Drop this frame rather than parking in write() behind a client that
                 // is not draining its socket. See shouldDropFrame().
-                if ($this->isBackedUp($response, $patch['type'])) {
+                if (!PatchManager::isOneShot($patch) && $this->isBackedUp($response, $patch['type'])) {
                     ++$droppedFrames;
 
                     // Log the transition only. A stalled client can drop thousands of
@@ -626,13 +629,16 @@ class SseHandler {
     /**
      * Send SSE patch to client using Datastar SDK.
      *
-     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode, confirm?: callable(): void} $patch
+     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void} $patch
      */
     private function sendSSEPatch(SwooleSSEGenerator $sse, array $patch): string {
         $type = $patch['type'];
         $content = $patch['content'];
         $selector = $patch['selector'] ?? null;
         $mode = $patch['mode'] ?? null;
+        if ($mode instanceof PatchMode) {
+            $mode = ElementPatchMode::from($mode->value);
+        }
 
         return match ($type) {
             'elements' => $sse->patchElements($content, array_filter([

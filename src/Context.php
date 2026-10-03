@@ -1092,6 +1092,32 @@ class Context {
     }
 
     /**
+     * Patch HTML into this tab outside the view, such as a modal, a toast or a chunk of streamed output.
+     *
+     * Without $selector, Outer and Replace match the top-level elements of $html by id; the other modes
+     * need a selector. Remove needs no HTML: patchElements(selector: '#toast', mode: PatchMode::Remove).
+     * Patches queue until the tab's stream is open, like sync(). Append, Prepend, Before and After each
+     * count, so a full queue drops them last and a client that falls behind gets them all.
+     *
+     * @throws \InvalidArgumentException when there is neither HTML nor a selector, or the mode needs a selector
+     */
+    public function patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void {
+        if ($html === '' && ($selector ?? '') === '') {
+            throw new \InvalidArgumentException('patchElements() needs HTML, a selector, or both.');
+        }
+        if (($selector ?? '') === '' && $mode !== PatchMode::Outer && $mode !== PatchMode::Replace) {
+            throw new \InvalidArgumentException("PatchMode::{$mode->name} needs a selector: only Outer and Replace find their target by the element's id.");
+        }
+
+        $patch = ['type' => 'elements', 'content' => $html, 'mode' => $mode];
+        if ($selector !== null && $selector !== '') {
+            $patch['selector'] = $selector;
+        }
+
+        $this->patchManager->queuePatch($patch);
+    }
+
+    /**
      * Inject signals from the client.
      *
      * @internal Called by Via when processing requests
@@ -1170,7 +1196,7 @@ class Context {
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array{type: string, content: mixed, selector?: string, confirm?: callable(): void} Next patch data
+     * @return null|array{type: string, content: mixed, selector?: string, mode?: PatchMode|\starfederation\datastar\enums\ElementPatchMode, confirm?: callable(): void} Next patch data
      *                                                                                                 or null if none available.
      *                                                                                                 `confirm` must be invoked
      *                                                                                                 only after the patch has
