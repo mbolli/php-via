@@ -47,3 +47,32 @@ describe('ViewCache generations', function (): void {
         expect($cache->get('room:1', true))->toBeNull();
     });
 });
+
+describe('ViewCache views', function (): void {
+    test('two views of one scope keep separate entries', function (): void {
+        $cache = new ViewCache();
+        $cache->set('room:1', '<p>page</p>', true, ViewCache::viewKey('/lobby', null));
+        $cache->set('room:1', '<p>side</p>', true, ViewCache::viewKey('/dashboard', null));
+        $cache->set('room:1', '<p>comp</p>', true, ViewCache::viewKey('/lobby', 'chat'));
+
+        expect($cache->get('room:1', true, ViewCache::viewKey('/lobby', null)))->toBe('<p>page</p>')
+            ->and($cache->get('room:1', true, ViewCache::viewKey('/dashboard', null)))->toBe('<p>side</p>')
+            ->and($cache->get('room:1', true, ViewCache::viewKey('/lobby', 'chat')))->toBe('<p>comp</p>')
+            ->and($cache->getScopes())->toBe(['room:1'])
+        ;
+    });
+
+    test('invalidating a scope drops every view in it', function (): void {
+        $cache = new ViewCache();
+        $cache->set('room:1', '<p>page</p>', true, ViewCache::viewKey('/lobby', null));
+        $cache->set('room:1', '<p>comp</p>', true, ViewCache::viewKey('/lobby', 'chat'));
+        $cache->set('room:2', '<p>other</p>', true, ViewCache::viewKey('/lobby', null));
+
+        $cache->invalidate('room:1');
+
+        expect($cache->get('room:1', true, ViewCache::viewKey('/lobby', null)))->toBeNull()
+            ->and($cache->get('room:1', true, ViewCache::viewKey('/lobby', 'chat')))->toBeNull()
+            ->and($cache->get('room:2', true, ViewCache::viewKey('/lobby', null)))->toBe('<p>other</p>')
+        ;
+    });
+});

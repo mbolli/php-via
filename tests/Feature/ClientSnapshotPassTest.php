@@ -47,7 +47,7 @@ function presenceTabs(Via $via, int $tabs, ?Closure $onRender = null): ArrayObje
             }
 
             return "<div id=\"presence\">{$n}</div>";
-        }, cacheUpdates: false);
+        });
         $via->contexts["tab-{$i}"] = $ctx;
     }
 

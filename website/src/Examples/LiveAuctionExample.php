@@ -122,7 +122,7 @@ final class LiveAuctionExample {
 
             // ── View ──────────────────────────────────────────────────────────
 
-            $c->view(fn (): string => $c->render('examples/live_auction.html.twig', [
+            $c->view('examples/live_auction.html.twig', fn (): array => [
                 'title' => '🔨 Live Auction',
                 'description' => 'A timed auction with anti-snipe protection. Place a bid: the server clock, bid history, and winner banner update for every viewer in real time.',
                 'summary' => self::SUMMARY,
@@ -137,7 +137,7 @@ final class LiveAuctionExample {
                 'username' => $usernameSignal->getValue(),
                 'placeBidUrl' => $placeBid->url(),
                 'resetUrl' => $resetAuction->url(),
-            ]), block: 'demo', cacheUpdates: false);
+            ], block: 'demo');
 
             // Start timer lazily on first viewer
             self::maybeStartTimer($app);

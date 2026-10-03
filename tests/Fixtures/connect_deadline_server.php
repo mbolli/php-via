@@ -50,7 +50,7 @@ $app->page('/room', function (Context $c) use ($marker): void {
     $c->onDisconnect(static function (Context $c) use ($marker): void {
         file_put_contents($marker, "cleanup {$c->getId()}\n", FILE_APPEND | LOCK_EX);
     });
-    $c->view(fn (): string => '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':END</div>', cacheUpdates: false);
+    $c->view(fn (): string => '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':END</div>');
 });
 
 // The /room contexts the serving worker holds, and its pid.

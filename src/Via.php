@@ -2219,8 +2219,8 @@ class Via {
         // never saw the intervening frame at all.
         //
         // This cannot be solved by rendering once and pushing that value to every
-        // context: cacheUpdates=false exists precisely because those views may differ
-        // per context (LoginExample renders per-user session state), so sharing one
+        // context: a view that does not pass shareRender may differ per context
+        // (LoginExample renders per-user session state), so sharing one
         // render across contexts would leak one user's view to another.
         //
         // A broadcast that arrives mid-fan-out is therefore folded into a single
@@ -2380,15 +2380,10 @@ class Via {
      */
     private function invalidateForBroadcast(string $scope): void {
         if (Scope::isRouteBased($scope) && (Scope::parse($scope)[1] ?? null) === null) {
-            // Bare "route" reaches every route. Cache keys carry an :initial or :update
-            // suffix, so strip it to invalidate each route scope once.
-            $seenScopes = [];
-            foreach ($this->viewCache->getKeys() as $cacheKey) {
-                $baseScope = (string) preg_replace('/:(?:initial|update)$/', '', $cacheKey);
-
-                if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
-                    $this->invalidateViewCache($baseScope);
-                    $seenScopes[$baseScope] = true;
+            // Bare "route" reaches every route.
+            foreach ($this->viewCache->getScopes() as $cachedScope) {
+                if (Scope::isRouteBased($cachedScope)) {
+                    $this->invalidateViewCache($cachedScope);
                 }
             }
 
@@ -2892,6 +2887,24 @@ class Via {
      * @return int how many contexts it reached
      */
     private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
+        if ($this->config->getDevMode()) {
+            $this->viewRenderer->beginFanOut();
+
+            try {
+                return $this->doSyncContexts($contexts, $route, $scope, $rendered, $skipRenderedAfter);
+            } finally {
+                $this->viewRenderer->endFanOut($scope);
+            }
+        }
+
+        return $this->doSyncContexts($contexts, $route, $scope, $rendered, $skipRenderedAfter);
+    }
+
+    /**
+     * @param array<Context>       $contexts
+     * @param null|array<int, int> $rendered see syncLocally()
+     */
+    private function doSyncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
         $epochs = $this->readEpochs;
         $renewals = -1;
         $epoch = 0;

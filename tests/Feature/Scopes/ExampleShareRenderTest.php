@@ -9,19 +9,11 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
 /*
- * Shared-scope examples must declare how their updates are rendered.
+ * The website examples whose view is identical for every tab share their update render, and
+ * each of them has the shared primary scope that sharing needs (shareRender: true on a TAB-primary
+ * context throws at render). Every other example renders per tab, the default.
  *
- * A context that broadcasts to a shared scope while keeping TAB as its primary scope gets no
- * update caching, so every client in that scope re-renders. That is correct whenever the view
- * embeds per-client data — but nothing in the code says so, and the primary scope is one call
- * away from being "optimised" into a cross-client HTML leak (b0b8dda fixed exactly that once).
- *
- * `cacheUpdates: false` is the declaration. It is a no-op for a TAB-primary context today, which
- * is the point: it records the intent so promoting the scope later cannot silently start sharing
- * one client's HTML with another.
- *
- * Drives the REAL website handlers, so it fails if a new example picks up the idiom without the
- * declaration. Skips cleanly on a library-only checkout.
+ * Drives the REAL website handlers. Skips cleanly on a library-only checkout.
  */
 
 $cacheDeclAutoload = dirname(__DIR__, 3) . '/website/vendor/autoload.php';
@@ -93,10 +85,10 @@ afterAll(function (): void {
     }
 });
 
-test('every example that broadcasts from a TAB-primary context declares cacheUpdates: false', function (): void {
+test('the examples that share their update render are the ones with a view identical for every tab', function (): void {
     $app = cacheDeclBuildApp();
-    $offenders = [];
-    $checked = 0;
+    $sharing = [];
+    $tabPrimary = [];
 
     foreach ($app->getRouter()->getRoutes() as $route => $handler) {
         if (!str_starts_with($route, '/examples/')) {
@@ -116,37 +108,44 @@ test('every example that broadcasts from a TAB-primary context declares cacheUpd
         try {
             $app->invokeHandlerWithParams($handler, $ctx, $params);
         } catch (Throwable) {
-            // Handlers needing external infrastructure (NATS) or website-only Twig globals
-            // cannot mount in-process. Their scope wiring is out of reach here.
+            // Handlers needing external infrastructure (NATS) cannot mount in-process.
             $app->getApp()->destroyContext($contextId);
             unset($app->contexts[$contextId]);
 
             continue;
         }
 
-        // Read the scope wiring BEFORE teardown — destroyContext() unregisters every scope.
-        $shared = array_values(array_filter($ctx->getScopes(), static fn (string $s): bool => $s !== Scope::TAB));
-        $isTabPrimary = $ctx->getPrimaryScope() === Scope::TAB;
-        $cacheable = $ctx->shouldCacheUpdates();
-        $hasView = $ctx->hasView();
+        foreach (['' => $ctx] + array_combine(
+            array_map(static fn (Context $c): string => (string) $c->getNamespace(), array_values($ctx->getComponentRegistry())),
+            array_values($ctx->getComponentRegistry()),
+        ) as $namespace => $view) {
+            if (!$view->shouldShareRender()) {
+                continue;
+            }
+            $label = $namespace === '' ? $route : "{$route}#{$namespace}";
+            $sharing[] = $label;
+            if ($view->getPrimaryScope() === Scope::TAB) {
+                $tabPrimary[] = $label;
+            }
+        }
 
         $app->getApp()->destroyContext($contextId);
         unset($app->contexts[$contextId]);
-
-        if ($shared === [] || !$isTabPrimary || !$hasView) {
-            continue;
-        }
-
-        ++$checked;
-        if ($cacheable) {
-            $offenders[$route] = implode(', ', $shared);
-        }
     }
 
-    expect($checked)->toBeGreaterThan(0, 'no shared-scope example route was reachable — the guard is not running');
-    expect($offenders)->toBe(
-        [],
-        'TAB-primary routes broadcasting to a shared scope without cacheUpdates: false — '
-        . json_encode($offenders)
-    );
+    sort($sharing);
+
+    expect($tabPrimary)->toBe([])
+        ->and($sharing)->toBe([
+            '/examples/all-scopes#global',
+            '/examples/all-scopes#route',
+            '/examples/all-scopes/page-a#global',
+            '/examples/all-scopes/page-a#route',
+            '/examples/all-scopes/page-b#global',
+            '/examples/all-scopes/page-b#route',
+            '/examples/client-monitor',
+            '/examples/game-of-life',
+            '/examples/stock-ticker',
+        ])
+    ;
 });

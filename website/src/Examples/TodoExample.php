@@ -38,7 +38,7 @@ final class TodoExample {
     private static int $nextId = 4;
 
     public function view(Context $ctx): void {
-        $ctx->view(fn (): string => $ctx->render('examples/todo.html.twig', [
+        $ctx->view('examples/todo.html.twig', fn (): array => [
             'title' => '✓ Todo List',
             'description' => 'Composition API: a static shared list + a TAB-scoped <code>#[Signal]</code> draft. <code>#[Broadcast(Scope::ROUTE)]</code> makes every action fan out to all viewers.',
             'summary' => [
@@ -46,7 +46,7 @@ final class TodoExample {
                 '<strong>Mixed state</strong>: the todo list is a plain <code>static</code> array (shared across the worker, no attribute required), while the input is a TAB-scoped <code>#[Signal]</code> so your draft stays private.',
                 '<strong>#[Action] methods</strong> mutate the static array, then call <code>$ctx->broadcast()</code>. Adding clears the draft via <code>$this->newTodo = \'\'</code>, which syncs back to the input automatically.',
                 '<strong>Callable view</strong>: the view passes a closure so <code>self::$todos</code> is re-read on every render. A string-template view would freeze the data captured at setup.',
-                '<strong>cacheUpdates: false</strong> disables view caching so every broadcast re-renders the full list. Partial rendering sends only the <code>#todo-list</code> block, keeping SSE payloads small.',
+                '<strong>One render per tab</strong> (the default): every broadcast re-renders the full list. Partial rendering sends only the <code>#todo-list</code> block, keeping SSE payloads small.',
             ],
             'anatomy' => [
                 'signals' => [
@@ -66,7 +66,7 @@ final class TodoExample {
                 ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/todo.html.twig'],
             ],
             'todos' => self::$todos,
-        ]), block: 'demo', cacheUpdates: false);
+        ], block: 'demo');
     }
 
     #[Action]

@@ -263,10 +263,10 @@ final class TypeRaceExample {
 
             // ── View ──────────────────────────────────────────────────────────
 
-            $c->view(function () use ($c, $contextId, $username, $typedText, $updateProgress, $startRace, $newRace): string {
+            $c->view('examples/type_race.html.twig', function () use ($contextId, $username, $typedText, $updateProgress, $startRace, $newRace): array {
                 $raceId = self::$contextRace[$contextId] ?? '';
 
-                return $c->render('examples/type_race.html.twig', [
+                return [
                     'title' => '⌨️ Type Race',
                     'description' => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer, no client logic.',
                     'summary' => self::SUMMARY,
@@ -283,8 +283,8 @@ final class TypeRaceExample {
                     'updateUrl' => $updateProgress->url(),
                     'startRaceUrl' => $startRace->url(),
                     'newRaceUrl' => $newRace->url(),
-                ]);
-            }, block: 'demo', cacheUpdates: false);
+                ];
+            }, block: 'demo');
         });
     }
 

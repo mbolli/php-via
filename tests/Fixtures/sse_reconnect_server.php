@@ -49,7 +49,7 @@ $app->page('/room', function (Context $c) use (&$bumps): void {
     $hit = $c->action(static function (): void {}, 'hit');
     $c->view(function () use ($c, $hit, &$bumps): string {
         return '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':N:' . $bumps . ':END</div>';
-    }, cacheUpdates: false);
+    });
 });
 
 $app->page('/bump', function (Context $c) use ($app, &$bumps): void {

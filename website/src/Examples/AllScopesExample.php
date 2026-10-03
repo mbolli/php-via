@@ -64,7 +64,7 @@ final class AllScopesExample {
                     <p class="scope-card-hint">Shared across ALL pages and users. Changes propagate everywhere.</p>
                 </div>
                 HTML;
-            });
+            }, shareRender: true);
         };
 
         // ROUTE scope component
@@ -100,7 +100,7 @@ final class AllScopesExample {
                     <p class="scope-card-hint">Shared by all users on THIS page only. Different pages have different counters.</p>
                 </div>
                 HTML;
-            });
+            }, shareRender: true);
         };
 
         // TAB scope component

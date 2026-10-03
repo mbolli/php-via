@@ -18,18 +18,15 @@ final class CounterExample {
             $c->action(function (Context $ctx): void {
                 $count = $ctx->getSignal('count');
                 $count->setValue($count->int() + $ctx->getSignal('step')->int());
-                $ctx->syncSignals();
             }, 'increment');
 
             $c->action(function (Context $ctx): void {
                 $count = $ctx->getSignal('count');
                 $count->setValue($count->int() - $ctx->getSignal('step')->int());
-                $ctx->syncSignals();
             }, 'decrement');
 
             $c->action(function (Context $ctx): void {
                 $ctx->getSignal('count')->setValue(0);
-                $ctx->syncSignals();
             }, 'reset');
 
             $c->view('examples/counter.html.twig', [
@@ -41,7 +38,7 @@ final class CounterExample {
                     '<strong>Actions</strong> are server-side functions triggered by button clicks. Each action modifies the signal and pushes the new value to the browser.',
                     '<strong>No JavaScript authored</strong>: every interaction is a server round-trip. Datastar handles the SSE connection, the DOM patches and the signal store.',
                     '<strong>TAB scope</strong> (the default) means each browser tab has its own independent counter. Open two tabs: clicking in one will not affect the other.',
-                    '<strong>syncSignals()</strong> sends the changed signal values down the SSE stream without rendering the view again. A TAB signal reaches the browser only on a sync, so each action here ends with it.',
+                    '<strong>No sync call</strong>: after an action, php-via sends the signals it changed down the SSE stream without rendering the view again.',
                 ],
                 'anatomy' => [
                     'signals' => [
@@ -49,7 +46,7 @@ final class CounterExample {
                         ['name' => 'step', 'type' => 'int', 'scope' => 'TAB', 'default' => '1', 'desc' => 'Increment/decrement step size. Two-way bound to the input via data-bind.'],
                     ],
                     'actions' => [
-                        ['name' => 'increment', 'desc' => 'Adds step to count, then syncs the new value to the browser.'],
+                        ['name' => 'increment', 'desc' => 'Adds step to count; the new value goes to the browser after the action.'],
                         ['name' => 'decrement', 'desc' => 'Subtracts step from count.'],
                         ['name' => 'reset', 'desc' => 'Resets count back to 0, ignoring the current step value.'],
                     ],

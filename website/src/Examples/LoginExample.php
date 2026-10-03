@@ -107,7 +107,7 @@ final class LoginExample {
                 $ctx->execScript("window.location.href = '/examples/login/dashboard'");
             }, 'login');
 
-            $c->view(fn (): string => $c->render('examples/login.html.twig', [
+            $c->view('examples/login.html.twig', fn (): array => [
                 'title' => self::TITLE,
                 'description' => self::DESCRIPTION,
                 'summary' => self::SUMMARY,
@@ -129,7 +129,7 @@ final class LoginExample {
                     array_keys(self::USERS),
                     self::USERS,
                 ),
-            ]), block: 'demo', cacheUpdates: false);
+            ], block: 'demo');
         });
 
         // ── Protected routes (dashboard + profile) behind AuthMiddleware ──
@@ -143,7 +143,7 @@ final class LoginExample {
                     $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
-                $c->view(fn (): string => $c->render('examples/login_dashboard.html.twig', [
+                $c->view('examples/login_dashboard.html.twig', fn (): array => [
                     'title' => self::TITLE,
                     'description' => self::DESCRIPTION,
                     'summary' => self::SUMMARY,
@@ -157,7 +157,7 @@ final class LoginExample {
                     ],
                     'githubLinks' => self::GITHUB_LINKS,
                     'auth' => $auth,
-                ]), block: 'demo', cacheUpdates: false);
+                ], block: 'demo');
             });
 
             $app->page('/examples/login/profile', function (Context $c): void {
@@ -169,7 +169,7 @@ final class LoginExample {
                     $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
-                $c->view(fn (): string => $c->render('examples/login_profile.html.twig', [
+                $c->view('examples/login_profile.html.twig', fn (): array => [
                     'title' => self::TITLE,
                     'description' => self::DESCRIPTION,
                     'summary' => self::SUMMARY,
@@ -183,7 +183,7 @@ final class LoginExample {
                     ],
                     'githubLinks' => self::GITHUB_LINKS,
                     'auth' => $auth,
-                ]), block: 'demo', cacheUpdates: false);
+                ], block: 'demo');
             });
         })->middleware($authMiddleware);
     }

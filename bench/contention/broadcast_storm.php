@@ -7,7 +7,7 @@ declare(strict_types=1);
  *
  * Starts a real Via server (child process, VIA_TEST_MODE unset) with:
  *   GET /bench   the observed page. mode=tab: TAB-primary context that joins "bench:room" via
- *                addScope() and renders per context (cacheUpdates false). mode=route: ROUTE-primary
+ *                addScope() and renders per context. mode=route: ROUTE-primary
  *                context with a cacheable view.
  *   GET /actor   a TAB page whose "bump" action changes shared state and broadcasts the shared
  *                scope. state=global: incrementGlobalState() + broadcast(). state=signal: a scoped
@@ -291,7 +291,7 @@ function runServer(array $o): void {
             $v = $sig !== null ? $sig->int() : (int) $app->globalState('bench_v', 0);
 
             return '<div id="bench"><p>' . $label . '</p><p>v:' . $v . ':v</p><p>' . $pad . '</p></div>';
-        }, cacheUpdates: $mode === 'route');
+        }, shareRender: $mode === 'route');
     });
 
     $app->page('/actor', static function (Context $c) use ($app, $stats, &$wid, $state, $broadcastScope): void {

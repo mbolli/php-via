@@ -100,7 +100,7 @@ $app->page('/bench/counter', function (Context $c) use ($useRouteScope): void {
 
     $url = $action->url();
     $c->view(fn () => "<span data-text=\"\${$count->id()}\"></span>"
-        . "<button data-on:click=\"@post('{$url}')\">+1</button>");
+        . "<button data-on:click=\"@post('{$url}')\">+1</button>", shareRender: $useRouteScope);
 });
 
 // ── /bench/cpu ────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ $app->page('/bench/cpu', function (Context $c) use ($useRouteScope): void {
 
     $url = $action->url();
     $c->view(fn () => "<span data-text=\"\${$count->id()}\"></span>"
-        . "<button data-on:click=\"@post('{$url}')\">mandelbrot</button>");
+        . "<button data-on:click=\"@post('{$url}')\">mandelbrot</button>", shareRender: $useRouteScope);
 });
 
 // ── /bench/io ─────────────────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ $app->page('/bench/io', function (Context $c) use ($useRouteScope): void {
 
     $url = $action->url();
     $c->view(fn () => "<span data-text=\"\${$count->id()}\"></span>"
-        . "<button data-on:click=\"@post('{$url}')\">io+1</button>");
+        . "<button data-on:click=\"@post('{$url}')\">io+1</button>", shareRender: $useRouteScope);
 });
 
 // ── /bench/spreadsheet ────────────────────────────────────────────────────────
@@ -273,7 +273,7 @@ $app->page('/bench/spreadsheet', function (Context $c) use ($useRouteScope, $ben
     }, 'increment');
 
     $url = $action->url();
-    $c->view(fn () => "<div id=\"bench-sheet\"><button data-on:click=\"@post('{$url}')\">sheet+1</button></div>");
+    $c->view(fn () => "<div id=\"bench-sheet\"><button data-on:click=\"@post('{$url}')\">sheet+1</button></div>", shareRender: $useRouteScope);
 });
 
 $app->start();

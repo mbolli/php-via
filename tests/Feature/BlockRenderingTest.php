@@ -73,33 +73,32 @@ describe('SSE Update Render (isUpdate=true)', function (): void {
 });
 
 describe('Callable View with block:', function (): void {
-    test('callable view with block: renders block on update', function (): void {
+    test('a callable view with block: throws and names the template form', function (): void {
         $ctx = new Context('ctx1', '/test', $this->app);
-        $ctx->view(fn () => $ctx->render('page.html.twig'), block: 'main');
 
-        $full = $ctx->renderView(isUpdate: false);
-        $block = $ctx->renderView(isUpdate: true);
-
-        expect($full)->toBe('<page><block-content/></page>');
-        expect($block)->toBe('<block-content/>');
+        expect(fn () => $ctx->view(fn () => $ctx->render('page.html.twig'), block: 'main'))
+            ->toThrow(InvalidArgumentException::class, "view('template.html.twig', fn () => [...], block: 'main')")
+        ;
     });
 
-    test('plain HTML callable ignores block: (no Twig template involved)', function (): void {
+    test('a template view with a data callable renders the block on update', function (): void {
         $ctx = new Context('ctx1', '/test', $this->app);
-        // Callable returns raw HTML — block: has no effect on non-Twig callables
-        $ctx->view(fn () => '<div id="counter">0</div>', block: 'main');
+        $ctx->view('page.html.twig', fn (): array => [], block: 'main');
 
-        $full = $ctx->renderView(isUpdate: false);
-        $update = $ctx->renderView(isUpdate: true);
+        expect($ctx->renderView(isUpdate: false))->toBe('<page><block-content/></page>');
+        expect($ctx->renderView(isUpdate: true))->toBe('<block-content/>');
+    });
 
-        // Both return the same HTML — block: only applies when $c->render() is called
-        expect($full)->toBe('<div id="counter">0</div>');
-        expect($update)->toBe('<div id="counter">0</div>');
+    test('render() inside a callable view renders the whole template on update', function (): void {
+        $ctx = new Context('ctx1', '/test', $this->app);
+        $ctx->view(fn () => $ctx->render('page.html.twig'));
+
+        expect($ctx->renderView(isUpdate: true))->toBe('<page><block-content/></page>');
     });
 });
 
 describe('Block: does not bleed between renders', function (): void {
-    test('isUpdating flag is reset after render', function (): void {
+    test('an initial render after an update renders the whole template', function (): void {
         $ctx = new Context('ctx1', '/test', $this->app);
         $ctx->view('page.html.twig', [], block: 'main');
 

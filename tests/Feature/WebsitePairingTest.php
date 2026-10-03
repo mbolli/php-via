@@ -51,7 +51,7 @@ function pairingApp(PairingStore $store): array {
         $c->scope(Scope::routeScope('/'));
         $pairing = $c->component($demo->component(...), 'pairing');
         // Like StaticPage::view(): updates render nothing, and the component patches itself.
-        $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : '<main id="home">' . $pairing() . '</main>', cacheUpdates: false);
+        $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : '<main id="home">' . $pairing() . '</main>');
     });
 
     return [$app, $demo];

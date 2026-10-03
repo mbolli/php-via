@@ -96,7 +96,7 @@ final class WizardExample {
             }
         }
 
-        $ctx->view(function () use ($ctx): string {
+        $ctx->view('examples/wizard.html.twig', function () use ($ctx): array {
             // Build the stack signal map + the selected-label list from live signal values.
             $stack = [];
             $selectedStack = [];
@@ -108,7 +108,7 @@ final class WizardExample {
                 }
             }
 
-            return $ctx->render('examples/wizard.html.twig', [
+            return [
                 'title' => '🪄 Multi-step Form',
                 'description' => 'Composition API: client inputs are <code>#[Signal]</code>, while the step and validation error are <code>#[Persist]</code>, server-only state that survives between actions and drives the server-side re-render.',
                 'summary' => [
@@ -149,8 +149,8 @@ final class WizardExample {
                 'roles' => self::ROLES,
                 'editors' => self::EDITORS,
                 'selectedStack' => $selectedStack,
-            ]);
-        }, block: 'demo', cacheUpdates: false);
+            ];
+        }, block: 'demo');
     }
 
     #[Action]

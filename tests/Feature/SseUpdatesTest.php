@@ -77,7 +77,7 @@ describe('View Caching and Patches', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         $ctx2 = new Context('ctx2', '/game', $app);
         $ctx2->scope(Scope::ROUTE);
@@ -86,7 +86,7 @@ describe('View Caching and Patches', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Initial renders NOT cached
         $html1 = $ctx1->renderView(isUpdate: false);

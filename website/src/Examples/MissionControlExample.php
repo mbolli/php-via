@@ -208,7 +208,7 @@ final class MissionControlExample {
 
             // ── View ──────────────────────────────────────────────────────────
 
-            $c->view(function () use ($c, $killUrls, $reviveUrls): string {
+            $c->view('examples/mission_control.html.twig', function () use ($killUrls, $reviveUrls): array {
                 $now = microtime(true);
                 $serviceData = [];
 
@@ -258,7 +258,7 @@ final class MissionControlExample {
 
                 $anyEmitting = \count(array_filter($serviceData, fn (array $s) => $s['isEmitting'])) > 0;
 
-                return $c->render('examples/mission_control.html.twig', [
+                return [
                     'title' => '🛰 NATS Visualizer',
                     'description' => 'Four simulated microservices publish events over NATS. Watch Core pub/sub, JetStream persistence, and KV health heartbeats update in real time.',
                     'summary' => self::SUMMARY,
@@ -272,8 +272,8 @@ final class MissionControlExample {
                     'anyEmitting' => $anyEmitting,
                     'auditLog' => self::$auditLog,
                     'auditTotal' => self::$auditTotal,
-                ]);
-            }, block: 'demo', cacheUpdates: false);
+                ];
+            }, block: 'demo');
         });
     }
 

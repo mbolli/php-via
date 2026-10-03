@@ -249,14 +249,14 @@ describe('Cycle-free teardown', function (): void {
             '/components' => function (Context $c): void {
                 $widget = $c->component(function (Context $w): void {
                     $n = $w->signal(1, 'n');
-                    $inner = $w->component(fn (Context $x) => $x->view(fn (): string => 'inner'));
+                    $inner = $w->component(fn (Context $x) => $x->view(fn (): string => 'inner'), 'inner');
                     $w->action(fn () => $n->setValue(2), 'bump');
                     $w->view(fn (): string => 'widget ' . $n->int() . $inner());
                 }, 'widget');
                 $shared = $c->component(function (Context $w) use ($c): void {
                     $w->scope('widgets');
                     $w->view(fn (): string => 'shared on ' . $c->getId());
-                });
+                }, 'shared');
                 $c->view(fn (): string => '<div id="page">' . $widget() . $shared() . '</div>');
             },
             '/room' => function (Context $c): void {

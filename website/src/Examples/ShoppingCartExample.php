@@ -65,7 +65,7 @@ final class ShoppingCartExample {
                 $app->broadcast($cartScope);
             }, 'clearCart');
 
-            $c->view(fn (): string => $c->render('examples/shopping_cart.html.twig', [
+            $c->view('examples/shopping_cart.html.twig', fn (): array => [
                 'title' => '🛒 Shopping Cart',
                 'description' => 'Add items across browser tabs: the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
                 'summary' => [
@@ -97,7 +97,7 @@ final class ShoppingCartExample {
                     static fn (array $item): float => (float) $item['price'] * (int) $item['qty'],
                     $c->sessionData('cart', [])
                 )),
-            ]), block: 'cart', cacheUpdates: false);
+            ], block: 'cart');
         });
     }
 

@@ -131,7 +131,7 @@ final class ContactFormExample {
                 $c->sync();
             }, 'submit');
 
-            $c->view(function () use (
+            $c->view('examples/contact-form.html.twig', function () use (
                 $c,
                 &$nameError,
                 &$emailError,
@@ -141,8 +141,8 @@ final class ContactFormExample {
                 &$submittedFile,
                 &$submittedFileInfo,
                 $submit,
-            ): string {
-                return $c->render('examples/contact-form.html.twig', [
+            ): array {
+                return [
                     'title' => '📬 Contact Form',
                     'description' => 'Multipart file upload and server-side form validation. The form submits as <code>multipart/form-data</code>; text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>. Per-field error signals are pushed back via SSE.',
                     'summary' => [
@@ -174,8 +174,8 @@ final class ContactFormExample {
                     'submittedFileInfo' => $submittedFileInfo,
                     'ctxId' => $c->getId(),
                     'submit' => $submit,
-                ]);
-            }, block: 'demo', cacheUpdates: false);
+                ];
+            }, block: 'demo');
         });
     }
 }

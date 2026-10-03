@@ -98,10 +98,7 @@
     </ul>
     {% code 'php' %}{% verbatim %}
 $app->page('/docs/install', function (Context $c): void {
-    $c->view(
-        fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('docs/install.html.twig'),
-        cacheUpdates: false, // the update cache is keyed by scope; keep the empty render out of it
-    );
+    $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('docs/install.html.twig'));
 });
 {% endverbatim %}{% endcode %}
 

@@ -496,7 +496,16 @@ class RequestHandler {
         $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
         $this->logRequest($method, $path, 500, $requestStart);
         $response->status(500);
-        $response->end('Internal Server Error');
+        if (!$this->via->getConfig()->getDevMode()) {
+            $response->end('Internal Server Error');
+
+            return;
+        }
+
+        $response->header('Content-Type', 'text/html; charset=utf-8');
+        $response->end('<!DOCTYPE html><meta charset="utf-8"><title>Internal Server Error</title><h1>Internal Server Error</h1><pre>'
+            . htmlspecialchars($e::class . ': ' . $e->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            . '</pre><p>Shown because dev mode is on.</p>');
     }
 
     private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {

@@ -202,7 +202,7 @@ final class TodoList {
     private static array $todos = [];
 
     public function view(Context $ctx): void {
-        $ctx->view('todo.html.twig', ['todos' => self::$todos], cacheUpdates: false);
+        $ctx->view('todo.html.twig', fn (): array => ['todos' => self::$todos]);
     }
 
     #[Action]

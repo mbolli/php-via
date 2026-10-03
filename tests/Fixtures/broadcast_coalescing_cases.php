@@ -176,7 +176,7 @@ function observer(Via $app, string $id, string $scope, CoalesceState $state): Co
         $state->renders[$id] = ($state->renders[$id] ?? 0) + 1;
 
         return "<div id=\"{$id}\">v={$state->value}</div>";
-    }, cacheUpdates: false);
+    });
 
     return $ctx;
 }
@@ -219,7 +219,7 @@ function slowObservers(Via $app, string $scope, int $count, int $ioMs, CoalesceS
             $state->renders[$id] = ($state->renders[$id] ?? 0) + 1;
 
             return "<div id=\"{$id}\">x</div>";
-        }, cacheUpdates: false);
+        });
     }
 }
 
@@ -250,7 +250,7 @@ function timedObserver(Via $app, string $scope, array &$flushes, callable $rende
         }
 
         return '<div id="obs">x</div>';
-    }, cacheUpdates: false);
+    });
 
     // A first render loads classes, which would delay the first timed flush and shorten its gap.
     $app->broadcast($scope);
@@ -289,7 +289,7 @@ function writesDuringRenders(bool $coalescing, bool $selfBroadcast, int $writes 
         }
 
         return "<div id=\"load\">{$seen}</div>";
-    }, cacheUpdates: false);
+    });
 
     inCoroutine(static function () use ($app, $scope, $writes, $writerInAction, $shutdown, &$value, $rendering, $written): void {
         if ($shutdown) {
@@ -694,7 +694,7 @@ $cases = [
             $state->order[] = $state->value;
 
             return "<div id=\"obs\">v={$state->value}</div>";
-        }, cacheUpdates: false);
+        });
         // Runs after the channels close.
         $app->onShutdown(static function () use ($state): void {
             $state->order[] = 'callback';
@@ -733,7 +733,7 @@ $cases = [
             while (hrtime(true) - $start < 8_000_000);
 
             return '<div id="slow">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app): void {
             for ($i = 0; $i < 3; ++$i) {
@@ -862,7 +862,7 @@ $cases = [
                     }
 
                     return '<div id="ctx' . $i . '">x</div>';
-                }, cacheUpdates: false);
+                });
             }
 
             $other = new Context('other', '/split', $app);
@@ -871,7 +871,7 @@ $cases = [
                 $state->order[] = 'other';
 
                 return '<div id="other">x</div>';
-            }, cacheUpdates: false);
+            });
 
             inCoroutine(static function () use ($app, $scope, $trigger): void {
                 $app->broadcast($scope);
@@ -901,7 +901,7 @@ $cases = [
             $app->broadcast('room:self');
 
             return '<div id="self">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:self'));
 
@@ -920,7 +920,7 @@ $cases = [
             $app->broadcast('room:self');
 
             return '<div id="self">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:self'));
 
@@ -959,7 +959,7 @@ $cases = [
             }
 
             return '<div id="lazy">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:lazy'));
 
@@ -980,7 +980,7 @@ $cases = [
             }
 
             return '<div id="spawn">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:spawn'));
 
@@ -1012,7 +1012,7 @@ $cases = [
             $lastSeen = $seen;
 
             return "<div id=\"steps\">{$seen}</div>";
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app, $scope, &$value, $rendering, $written): void {
             Coroutine::create(static fn () => $app->broadcast($scope));
@@ -1047,7 +1047,7 @@ $cases = [
             }
 
             return "<div id=\"c\">{$seen}</div>";
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app, &$value, $waiting, $overtaken): void {
             Coroutine::create(static fn () => $app->broadcast('room:slow'));
@@ -1078,7 +1078,7 @@ $cases = [
                 $app->broadcast('room:' . $theirs);
 
                 return "<div id=\"{$mine}\">x</div>";
-            }, cacheUpdates: false);
+            });
         }
         observer($app, 'calm', 'room:calm', $state);
 
@@ -1221,7 +1221,7 @@ $cases = [
             }
 
             return "<div id=\"slow\">v={$state->value}</div>";
-        }, cacheUpdates: false);
+        });
         $obs = observer($app, 'obs', 'room:own', $state);
 
         inCoroutine(static function () use ($app, $state, $obs): void {
@@ -1259,7 +1259,7 @@ $cases = [
             }
 
             return '<div id="hung">x</div>';
-        }, cacheUpdates: false);
+        });
 
         $seen = inCoroutine(static function () use ($app, $reply, &$renders): array {
             Coroutine::create(static fn () => $app->broadcast('room:hung'));
@@ -1301,7 +1301,7 @@ $cases = [
                 $lastSeen[$i] = $seen;
 
                 return "<div id=\"y{$i}\">{$seen}</div>";
-            }, cacheUpdates: false);
+            });
         }
 
         inCoroutine(static function () use ($app, &$value): void {
@@ -1338,7 +1338,7 @@ $cases = [
             $app->broadcast('room:b');
 
             return "<div id=\"a\">{$value}</div>";
-        }, cacheUpdates: false);
+        });
 
         $b = new Context('b', '/b', $app);
         $b->scope('room:b');
@@ -1347,7 +1347,7 @@ $cases = [
             $bSeen[] = $value;
 
             return "<div id=\"b\">{$value}</div>";
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app, &$value): void {
             $until = hrtime(true) + 400_000_000;

@@ -52,8 +52,7 @@ $app->page('/', function (Context $c) use ($counterComponent): void {
     </p>
     <p>
         Each component's wrapper id is unique to its tab, so the HTML of a page that embeds components differs per tab
-        and must not come from the shared update cache: keep the page's primary scope at TAB, or pass
-        <code>cacheUpdates: false</code> to <code>view()</code>.
+        and must not be shared: leave <code>shareRender</code> off on that page's <code>view()</code>.
     </p>
 
     <h2 id="namespacing">Namespacing</h2>

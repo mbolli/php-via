@@ -93,7 +93,7 @@ function mountSignalWorker(SharedSignalStore $store, string $contextId, mixed $i
     $app->page('/bench', function (Context $c) use ($initial): void {
         $c->scope(Scope::ROUTE);
         $v = $c->signal($initial, SIGNAL_NAME);
-        $c->view(fn (): string => 'v=' . json_encode($v->getValue()));
+        $c->view(fn (): string => 'v=' . json_encode($v->getValue()), shareRender: true);
     });
 
     $ctx = new Context($contextId, '/bench', $app, null, 'sess');

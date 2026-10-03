@@ -12,7 +12,6 @@ use PhpVia\Website\StaticPage;
 /**
  * The phone-pairing demo in the homepage hero: the homepage component and the page at /pair/{code}
  * join the scope "pair:<code>", and a swatch picked on either one sets the pair's colour and broadcasts it.
- * Both views use cacheUpdates: false, because the update cache is keyed by scope and they render different HTML.
  */
 final class PairingDemo {
     public const string ROUTE = '/pair/{code}';
@@ -67,7 +66,7 @@ final class PairingDemo {
             $sentColour = $widget['colour'];
 
             return $c->render('components/pairing.html.twig', ['scope' => $scope, 'url' => $url, 'widget' => $widget]);
-        }, cacheUpdates: false);
+        });
     }
 
     private function phonePage(Context $c, string $code): void {
@@ -83,11 +82,11 @@ final class PairingDemo {
         $pick = $this->pickAction($c, $code);
 
         // Updates render only the widget block; Datastar morphs it by its id.
-        $c->view(fn (): string => $c->render('pages/pair.html.twig', [
+        $c->view('pages/pair.html.twig', fn (): array => [
             'found' => true,
             'scope' => $scope,
             'widget' => $this->widget($code, $pick),
-        ]), block: 'pair_widget', cacheUpdates: false);
+        ], block: 'pair_widget');
     }
 
     /**

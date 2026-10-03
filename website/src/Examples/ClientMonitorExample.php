@@ -18,7 +18,7 @@ final class ClientMonitorExample {
 
         $app->page('/examples/client-monitor', function (Context $c) use ($app): void {
             $c->scope(Scope::ROUTE);
-            $c->view(function () use ($app, $c): string {
+            $c->view('examples/client_monitor.html.twig', function () use ($app): array {
                 $clients = $app->getClients();
                 $clientCount = \count($clients);
 
@@ -37,7 +37,7 @@ final class ClientMonitorExample {
                     HTML;
                 }
 
-                return $c->render('examples/client_monitor.html.twig', [
+                return [
                     'title' => '👁️ Client Monitor',
                     'description' => 'Live dashboard of connected clients with identicons and IPs.',
                     'summary' => [
@@ -61,8 +61,8 @@ final class ClientMonitorExample {
                     ],
                     'clientCount' => $clientCount,
                     'clientsHtml' => $clientsHtml,
-                ]);
-            }, block: 'demo');
+                ];
+            }, block: 'demo', shareRender: true);
         });
     }
 
