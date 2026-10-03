@@ -562,7 +562,9 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
 - A context only accepts actions and streams from the session that created it.
 - `$c->regenerateSession()` at login (and logout) gives the session a new cookie with the
   response; `$app->regenerateSession($request)` does it in middleware or a `route()` handler.
-  The session id, session data and tabs stay, and the old cookie works for 10 more seconds.
+  The session id, session data and tabs stay. The old cookie works for 10 more seconds, then
+  its SSE streams end and the tabs reconnect with the new one. Call it before the login writes
+  anything: it throws an `OverflowException` when the rotation record is full.
   Middleware reads the session id from the `via.session` attribute, never from the cookie.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
 

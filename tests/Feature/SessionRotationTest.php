@@ -5,8 +5,10 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\Rendering\Bootstrap;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\SessionTokens;
+use Mbolli\PhpVia\Testing\CookieJar;
 use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Testing\TestRequest;
 use Mbolli\PhpVia\Testing\TestResponse;
@@ -67,12 +69,16 @@ function rotationApp(int &$now, ?RotatingMiddleware &$middleware = null, bool $g
     $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$middleware, $global): void {
         $via->page('/p', static function (Context $c): void {
             $who = $c->signal('anon', 'who', Scope::SESSION);
+            $secret = $c->signal('', 'secret', Scope::SESSION);
             $n = $c->signal(0, 'n');
             $c->action(static function (Context $c) use ($who): void {
                 $c->regenerateSession();
                 $c->setSessionData('user', 'ada');
                 $who->setValue('ada');
             }, 'login');
+            $c->action(static function () use ($secret): void {
+                $secret->setValue('CH93 0076 2011 6238 5295 7');
+            }, 'save');
             $c->action(static function () use ($n): void {
                 $n->setValue($n->int() + 1);
             }, 'bump');
@@ -86,6 +92,7 @@ function rotationApp(int &$now, ?RotatingMiddleware &$middleware = null, bool $g
 
         $via->route('POST', '/api/login', new RotationHandler(static function (ServerRequestInterface $r) use ($via): ResponseInterface {
             $via->regenerateSession($r);
+            $via->setSessionData((string) $r->getAttribute('via.session'), 'user', 'api');
 
             return new Psr7Response(204);
         }));
@@ -120,6 +127,16 @@ function rotationApp(int &$now, ?RotatingMiddleware &$middleware = null, bool $g
 function rotationWhoami(TestTab $tab): array {
     /** @var array{session: string, cookie: null|string} */
     return json_decode((string) $tab->request('GET', '/whoami')->getBody(), true);
+}
+
+/** A browser that holds $cookie as its session cookie, as one someone planted it in. */
+function rotationJar(string $cookie): CookieJar {
+    $response = new TestResponse();
+    $response->cookies = [SessionManager::SESSION_COOKIE_NAME => $cookie];
+    $jar = new CookieJar();
+    $jar->take($response);
+
+    return $jar;
 }
 
 /** Send a request with $cookie as the session cookie. */
@@ -291,7 +308,10 @@ describe('Context::regenerateSession()', function (): void {
             ->and($stream->statusCode)->toBe(403)
             ->and(rotationWhoami($tab)['session'])->toBe($session)
         ;
+        // The tab's stream connected with the old cookie, so its next patch asks it to reconnect with the new one.
         $tab->action('bump');
+        $tab->patches();
+        $tab->connect();
         expect($tab->signal('n'))->toBe(1);
     });
 
@@ -308,6 +328,73 @@ describe('Context::regenerateSession()', function (): void {
         expect($unchanged)->toBe($before)
             ->and(rotationWhoami($tab)['cookie'])->not->toBe($before['cookie'])
             ->and(rotationWhoami($tab)['session'])->toBe($before['session'])
+        ;
+    });
+});
+
+describe('the SSE streams of a rotated session', function (): void {
+    test('a stream opened with the old cookie gets nothing of the session after the grace period: it asks its tab to reconnect and ends', function (): void {
+        $now = 1_000_000;
+        $app = rotationApp($now);
+        $attackerJar = new CookieJar();
+        $attacker = new TestTab($app, $attackerJar, '/p', [], true);
+        $victim = new TestTab($app, rotationJar($attackerJar->all()[SessionManager::SESSION_COOKIE_NAME]), '/p', [], true);
+        $victim->action('login');
+        $attacker->patches();
+        $victim->patches();
+
+        $now += SessionTokens::GRACE_SECONDS;
+        $victim->action('save');
+        $toAttacker = $attacker->patches();
+        $toVictim = $victim->patches();
+
+        expect($toAttacker)->toHaveCount(1)
+            ->and($toAttacker[0]['type'])->toBe('signals')
+            ->and(array_keys($toAttacker[0]['type'] === 'signals' ? $toAttacker[0]['signals'] : []))->toBe([Bootstrap::RECONNECT_SIGNAL])
+            ->and(fn () => $attacker->connect())->toThrow(RuntimeException::class, 'answered 403')
+            ->and($toVictim)->toHaveCount(1)
+            ->and($toVictim[0]['type'] === 'signals' ? array_keys($toVictim[0]['signals']) : [])->toBe([Bootstrap::RECONNECT_SIGNAL])
+        ;
+        $victim->connect();
+        expect($victim->signal('secret'))->toBe('CH93 0076 2011 6238 5295 7');
+    });
+
+    test('an idle stream whose cookie was retired ends at its next keep-alive', function (): void {
+        $now = 1_000_000;
+        $app = rotationApp($now);
+        $tab = $app->open('/p');
+        $tab->action('login');
+        $tab->patches();
+
+        $now += SessionTokens::GRACE_SECONDS - 1;
+        $context = $tab->context();
+        $app->run(static fn () => $context->getPatchManager()->wakeConsumers());
+        $inGrace = $tab->patches();
+        ++$now;
+        $app->run(static fn () => $context->getPatchManager()->wakeConsumers());
+        $after = $tab->patches();
+
+        expect($inGrace)->toBe([])
+            ->and($after)->toHaveCount(1)
+            ->and($after[0]['type'] === 'signals' ? array_keys($after[0]['signals']) : [])->toBe([Bootstrap::RECONNECT_SIGNAL])
+        ;
+        $tab->connect()->action('save');
+        expect($tab->signal('secret'))->toBe('CH93 0076 2011 6238 5295 7');
+    });
+
+    test('a stream opened with the new cookie keeps streaming', function (): void {
+        $now = 1_000_000;
+        $app = rotationApp($now);
+        $tab = $app->open('/p');
+        $tab->action('login');
+        $next = $tab->open('/p');
+        $next->patches();
+
+        $now += SessionTokens::GRACE_SECONDS;
+        $next->action('save');
+
+        expect($next->signal('secret'))->toBe('CH93 0076 2011 6238 5295 7')
+            ->and(fn () => $next->connect())->toThrow(LogicException::class, 'connected already')
         ;
     });
 });
@@ -364,6 +451,27 @@ describe('Via::regenerateSession()', function (): void {
             ->and($middleware?->errors)->toHaveCount(1)
             ->and($after['cookie'])->not->toBe($before['cookie'])
             ->and($after['session'])->toBe($before['session'])
+        ;
+    });
+
+    test('throws while the rotation table is full, before the route logs the visitor in', function (): void {
+        $now = 1_000_000;
+        $app = rotationApp($now);
+        $via = $app->via();
+        $via->getSessionManager()->useTokens(new SessionTokens(8, static fn (string $key): bool => $via->getApp()->hasSessionData($key), clock: static function () use (&$now): int {
+            return $now;
+        }));
+        for ($i = 0; $i < 4; ++$i) {
+            $app->open('/p', connect: false)->action('login');
+        }
+        $tab = $app->open('/p', connect: false);
+        $planted = (string) rotationWhoami($tab)['cookie'];
+
+        $response = rotationSend($app, 'POST', '/api/login', $planted);
+
+        expect($response->statusCode)->toBe(500)
+            ->and($response->cookies)->toBe([])
+            ->and($via->getSessionData(SessionTokens::key($planted), 'user'))->toBeNull()
         ;
     });
 
@@ -466,6 +574,30 @@ describe('SessionTokens', function (): void {
         ;
     });
 
+    test('when full, a prune drops the least recently seen sessions without data, outside their grace period', function (): void {
+        [$tokens, $advance, $data] = rotationTokens();
+        $cookies = [];
+        $next = [];
+        for ($i = 0; $i < 4; ++$i) {
+            $cookies[$i] = str_pad((string) $i, 32, 'a');
+            $next[$i] = (string) $tokens->rotate($cookies[$i]);
+            $advance(1);
+        }
+        $data[SessionTokens::key($cookies[0])] = true;
+        expect(fn () => $tokens->rotate(str_repeat('ef', 16)))->toThrow(OverflowException::class);
+
+        $advance(SessionTokens::GRACE_SECONDS);
+        $rotated = $tokens->rotate(str_repeat('ef', 16));
+
+        expect($rotated)->toBeString()
+            ->and($tokens->lookup($cookies[0]))->toBe([SessionTokens::key($cookies[0]), SessionTokens::RETIRED])
+            ->and($tokens->lookup($next[0])[1])->toBe(SessionTokens::CURRENT)
+            ->and($tokens->lookup($next[1]))->toBe([SessionTokens::key($next[1]), SessionTokens::FRESH])
+            ->and($tokens->lookup($next[2])[1])->toBe(SessionTokens::CURRENT)
+            ->and($tokens->lookup($next[3])[1])->toBe(SessionTokens::CURRENT)
+        ;
+    });
+
     test('throws when every row belongs to a session that needs it', function (): void {
         [$tokens, , $data] = rotationTokens();
         for ($i = 0; $i < 4; ++$i) {
@@ -479,7 +611,7 @@ describe('SessionTokens', function (): void {
 });
 
 describe('with two workers', function (): void {
-    test('a rotation on one worker reaches the other: the new cookie works there, and the old one only for the grace period', function (): void {
+    test('a rotation on one worker reaches the other: the new cookie works there, and the old one and its stream only for the grace period', function (): void {
         $out = (string) shell_exec('timeout 60 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/session_rotation_workers.php') . ' 2>&1');
         preg_match_all('/^([a-z_]+)=(\S*)$/m', $out, $m);
         $r = array_combine($m[1], $m[2]);
@@ -502,7 +634,10 @@ describe('with two workers', function (): void {
             'a_bump_old' => '403',
             'a_bump_new' => '200',
             'a_new_same_session' => '1',
-            'stream_alive' => '1',
+            'b_bump_new_after_grace' => '200',
+            'stream_reconnect' => '1',
+            'stream_got_bump_after_grace' => '0',
+            'stream_ended' => '1',
         ], $out);
     });
 });

@@ -33,6 +33,9 @@ describe('Context::viaHead()', function (): void {
             ->and(offsetOf($head, "@get('/_sse')"))->toBeLessThan(offsetOf($head, "navigator.sendBeacon('/_session/close', '/_/head1')"))
             ->and($head)->toStartWith('<meta data-via-head data-signals=\'{"via_ctx":"/_/head1","_disconnected":false}\'>')
             ->and($head)->toContain('data-on:datastar-fetch="')
+            ->and($head)->toContain(<<<'HTML'
+                data-on-signal-patch="@get('/_sse')" data-on-signal-patch-filter="{include: /^_via_reconnect$/}"
+                HTML)
         ;
     });
 

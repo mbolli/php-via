@@ -202,13 +202,16 @@ class Context {
 
     /**
      * Give this session a new cookie with the response to the current action or page load, as a login should,
-     * so a cookie someone planted or read before it no longer reaches the session.
+     * so a cookie someone planted or read before it stops reaching the session.
      *
      * The session keeps its id, its data, its SESSION signals and its other tabs. The old cookie keeps working
-     * for 10 seconds, for the requests other tabs sent before the browser had the new one, and then starts a new
-     * session. In an action, and in the spawn() tasks it starts until it answers, the new cookie goes out with that
-     * action's response. Called later, or outside a request such as in a timer, it waits for the tab's next action.
-     * Pair it with clearSessionData() for a logout. Middleware and route() handlers use Via::regenerateSession().
+     * for 10 seconds, for the requests other tabs sent before the browser had the new one. Then it starts a new
+     * session, and a stream opened with it ends: a tab whose browser has the new cookie reconnects at once.
+     *
+     * In an action, and in the spawn() tasks it starts until it answers, the new cookie goes out with that action's
+     * response. Called later, or outside a request such as in a timer, it waits for the tab's next action. Call it
+     * before the login writes anything, so a throw leaves the visitor logged out. Pair it with clearSessionData()
+     * for a logout. Middleware and route() handlers use Via::regenerateSession().
      *
      * @throws \OverflowException when the rotation table is full of sessions that need their rows
      */

@@ -12,10 +12,11 @@ use OpenSwoole\Table;
  * A session's key is a hash of the first cookie it had, so a session that never rotated needs no row.
  * Rotation adds a row for the new cookie that names the key, and marks the old cookie's row retired
  * after a grace period. A cookie without a row hashes to its own key, so the first cookie's row is
- * what refuses it once retired: it lives as long as the session can hold anything, and goes only
- * when the table is over capacity and the session has no data, no rotation in its grace period and
- * no request for an hour. A retired later cookie's row can go at any time, since its hash names no
- * session.
+ * what refuses it once retired: it stays while the session holds data or has a rotation in its grace
+ * period. When the table is full, the rows of the other sessions go, those without a request for an
+ * hour and then the least recently seen, so a burst of logins cannot fill it with sessions whose data
+ * the session store has already evicted. A retired later cookie's row can go at any time, since its
+ * hash names no session.
  *
  * With more than one worker the rows live in a table allocated before the fork, which every worker
  * shares; with one they live in an array.
@@ -94,7 +95,15 @@ final class SessionTokens {
      * @return array{string, self::CURRENT|self::FRESH|self::GRACE|self::RETIRED}
      */
     public function lookup(string $token): array {
-        $hash = self::key($token);
+        return $this->lookupHash(self::key($token));
+    }
+
+    /**
+     * lookup() for a cookie given by its key(), as an SSE stream keeps the cookie it connected with.
+     *
+     * @return array{string, self::CURRENT|self::FRESH|self::GRACE|self::RETIRED}
+     */
+    public function lookupHash(string $hash): array {
         $row = $this->get($hash);
         // A claim creates a row with an empty key, which the rotation fills in right after.
         if ($row === null || $row['key'] === '') {
@@ -175,14 +184,16 @@ final class SessionTokens {
     }
 
     /**
-     * Drop the rows of retired later cookies, and the rows of sessions that can hold nothing any more.
+     * Drop the rows of retired later cookies and of sessions without data that saw no request for an hour,
+     * and, while the table stays full, those of the least recently seen sessions without data. A session
+     * with a rotation in its grace period keeps its rows.
      *
      * @return int rows removed
      */
     public function prune(): int {
         $now = $this->now();
 
-        /** @var array<string, array{rows: list<string>, live: bool}> $sessions */
+        /** @var array<string, array{rows: list<string>, seen: int, grace: bool}> $sessions */
         $sessions = [];
         $drop = [];
         foreach ($this->table ?? $this->rows as $hash => $row) {
@@ -195,15 +206,32 @@ final class SessionTokens {
                 continue;
             }
 
-            $sessions[$key] ??= ['rows' => [], 'live' => false];
+            $sessions[$key] ??= ['rows' => [], 'seen' => 0, 'grace' => false];
             $sessions[$key]['rows'][] = $hash;
-            $sessions[$key]['live'] = $sessions[$key]['live'] || $until > $now || (int) $row['seen'] > $now - self::IDLE_SECONDS;
+            $sessions[$key]['seen'] = max($sessions[$key]['seen'], (int) $row['seen']);
+            $sessions[$key]['grace'] = $sessions[$key]['grace'] || $until > $now;
         }
 
+        $seen = [];
         foreach ($sessions as $key => $session) {
-            if (!$session['live'] && !($this->hasData)($key)) {
-                array_push($drop, ...$session['rows']);
+            if (!$session['grace']) {
+                $seen[(string) $key] = $session['seen'];
             }
+        }
+        asort($seen);
+
+        // Down to 1% below capacity, so the rotations right after this one do not prune again.
+        $excess = $this->count() - \count($drop) - ($this->maxRows - max(1, intdiv($this->maxRows, 100)));
+        foreach ($seen as $key => $at) {
+            $idle = $at <= $now - self::IDLE_SECONDS;
+            if (!$idle && $excess <= 0) {
+                break;
+            }
+            if (($this->hasData)((string) $key)) {
+                continue;
+            }
+            array_push($drop, ...$sessions[$key]['rows']);
+            $excess -= \count($sessions[$key]['rows']);
         }
 
         foreach ($drop as $hash) {

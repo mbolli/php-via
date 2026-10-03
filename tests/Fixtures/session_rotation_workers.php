@@ -7,8 +7,8 @@ declare(strict_types=1);
  *
  * Two workers and a grace period of 2 s. A tab loads its page on worker A and streams from worker B.
  * Its login action on A rotates the session cookie. B then takes the new cookie and, until the grace
- * period ends, the old one; after it B and A refuse the old cookie, and the stream B opened before the
- * rotation still receives.
+ * period ends, the old one; after it B and A refuse the old cookie, and the stream B opened with it asks
+ * the tab to reconnect and ends instead of sending the next patch.
  *
  * Prints key=value lines.
  */
@@ -189,7 +189,11 @@ $app->setInterval(static function () use ($app, $port): void {
             echo 'a_bump_new=', rotationAction($onA, $port, $bump, $contextId, $new)[0], "\n";
             [$aNew] = rotationWhoami($onA, $new);
             echo 'a_new_same_session=', (int) ($aNew === $session), "\n";
-            echo 'stream_alive=', (int) !feof($stream), "\n";
+            echo 'b_bump_new_after_grace=', rotationAction($onB, $port, $bump, $contextId, $new)[0], "\n";
+            $tail = rotationDrain($stream, 0.5);
+            echo 'stream_reconnect=', (int) str_contains($tail, '_via_reconnect'), "\n";
+            echo 'stream_got_bump_after_grace=', (int) str_contains($tail, ':N:'), "\n";
+            echo 'stream_ended=', (int) str_ends_with($tail, "\r\n0\r\n\r\n"), "\n";
             fclose($stream);
         } catch (Throwable $e) {
             echo 'error=', str_replace("\n", ' ', $e->getMessage()), "\n";

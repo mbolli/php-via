@@ -33,7 +33,7 @@ final class LoginExample {
         '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code>: one call shields both.',
         '<strong>AuthMiddleware reads the session cookie</strong> from the PSR-7 request, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute.',
         '<strong>The handlers read <code>$c->getRequestAttribute(\'auth\')</code></strong>: the middleware-set attribute is automatically bridged from the PSR-7 request to the Via Context. No manual session checks needed.',
-        '<strong>Login and logout rotate the session cookie</strong> with <code>$c->regenerateSession()</code>, so a cookie someone planted or read before no longer reaches the account. Logout also clears <code>sessionData(\'auth\')</code>, and the middleware blocks protected pages until the next login.',
+        '<strong>Login and logout rotate the session cookie</strong> with <code>$c->regenerateSession()</code>, so a cookie someone planted or read before stops reaching the account 10 seconds later. Logout also clears <code>sessionData(\'auth\')</code>, and the middleware blocks protected pages until the next login.',
     ];
 
     private const array GITHUB_LINKS = [

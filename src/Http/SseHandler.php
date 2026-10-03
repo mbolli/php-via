@@ -8,6 +8,8 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\PatchMode;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -138,12 +140,15 @@ class SseHandler {
         $context = $this->via->contexts[$contextId];
 
         // Verify the caller's session owns this context to prevent unauthorized SSE attachment.
-        if (!$this->isSessionAuthorized($contextId, $this->via->getSessionId($request))) {
+        $session = $this->via->getRequestSession($request);
+        if (!$this->isSessionAuthorized($contextId, $session->key)) {
             $response->status(403);
             $response->end('Forbidden');
 
             return;
         }
+        $owner = $this->via->getContextSessionId($contextId);
+        $cookie = $owner !== null ? SessionTokens::key($session->token) : null;
 
         // If the context exists but its view was cleared (cleanup ran and removed it from Via::$contexts
         // but the callback hadn't fired yet), force a reload so the page re-initialises cleanly.
@@ -211,7 +216,7 @@ class SseHandler {
             // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
             $context->getPatchManager()->recreatePatchChannel();
 
-            $this->stream($context, $contextId, $response, $sse, $brotliWrite, $brotliFinish);
+            $this->stream(new SseStream($context, $contextId, $response, $cookie, $owner), $sse, $brotliWrite, $brotliFinish);
         } finally {
             // Runs even if the loop throws, or the count never drops to zero.
             $this->releaseStream($context, $contextId);
@@ -328,19 +333,18 @@ class SseHandler {
     /**
      * Run the SSE loop for an authorised context until the client, the context or the server goes away.
      */
-    private function stream(Context $context, string $contextId, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
-        $key = $this->openStream($context, $contextId, $response);
+    private function stream(SseStream $stream, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
+        $key = $this->openStream($stream);
 
         try {
-            $this->runStream($this->streams[$key], $response, $sse, $brotliWrite, $brotliFinish);
+            $this->runStream($stream, $stream->response, $sse, $brotliWrite, $brotliFinish);
         } finally {
             $this->closeStream($key);
         }
     }
 
-    private function openStream(Context $context, string $contextId, Response $response): int {
+    private function openStream(SseStream $stream): int {
         $key = ++$this->nextStreamId;
-        $stream = new SseStream($context, $contextId, $response);
         // A connection that closed before this point had no stream to tell.
         $stream->clientGone = $this->via->getServer()?->exists($stream->fd) === false;
 
@@ -436,6 +440,13 @@ class SseHandler {
                     break;
                 }
 
+                if ($this->cookieRetired($stream)) {
+                    $context->getPatchManager()->returnPatch($patch);
+                    $this->askToReconnect($stream, $sse, $brotliWrite);
+
+                    break;
+                }
+
                 // Drop this frame rather than parking in write() behind a client that
                 // is not draining its socket. See shouldDropFrame().
                 if (!PatchManager::isOneShot($patch) && $this->isBackedUp($response, $patch['type'])) {
@@ -509,6 +520,12 @@ class SseHandler {
                     break;
                 }
 
+                if ($this->cookieRetired($stream)) {
+                    $this->askToReconnect($stream, $sse, $brotliWrite);
+
+                    break;
+                }
+
                 // Skipped behind a backlog, so the comment never parks the loop in write().
                 if ($keepAliveNs > 0 && hrtime(true) - $lastWriteNs >= $keepAliveNs && !$this->isBackedUp($response, 'elements')) {
                     try {
@@ -576,6 +593,36 @@ class SseHandler {
             $this->via->scheduleContextCleanup($contextId);
         } else {
             $this->via->log('debug', "Old SSE coroutine exited; {$this->via->activeSseCount[$contextId]} still active, skipping cleanup: {$contextId}", $context);
+        }
+    }
+
+    /**
+     * Whether the session cookie the stream connected with no longer names its session: a rotation retired it.
+     * Whoever connected with a cookie planted or read before a login then gets nothing more of the session.
+     */
+    private function cookieRetired(SseStream $stream): bool {
+        if ($stream->cookie === null) {
+            return false;
+        }
+
+        [$session, $state] = $this->via->getSessionManager()->tokens()->lookupHash($stream->cookie);
+
+        return $state === SessionTokens::RETIRED || $session !== $stream->session;
+    }
+
+    /**
+     * End a stream whose cookie was retired, asking the tab to reconnect at once: a browser that took the new
+     * cookie keeps its context, and one that holds only the old cookie is refused.
+     *
+     * @param null|callable(string): (false|string) $brotliWrite
+     */
+    private function askToReconnect(SseStream $stream, SwooleSSEGenerator $sse, ?callable $brotliWrite): void {
+        $this->via->log('debug', 'The session cookie of this stream was retired, asking the tab to reconnect', $stream->context);
+
+        try {
+            $this->writeOutput($stream->response, $sse->patchSignals([Bootstrap::RECONNECT_SIGNAL => bin2hex(random_bytes(6))]), $brotliWrite);
+        } catch (\Throwable) {
+            // Client already gone.
         }
     }
 

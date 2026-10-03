@@ -1100,7 +1100,8 @@ final class Config {
      * second and logs a warning, and a write that finds the table full drops them on its own worker
      * first. Values must be serializable; one that is not throws \InvalidArgumentException. A single
      * worker keeps session data in a PHP array with no byte cap and drops the least recently used
-     * past 10,000 sessions.
+     * past 10,000 sessions. The record of the cookies regenerateSession() replaced has 4 × $maxSessions
+     * rows, at least 40,000 with a single worker.
      *
      * The table reserves about 2 × $maxSessions (rounded up to a power of two) × $maxBytesPerSession
      * of shared memory: 33 MB at the defaults, 260 MB for 5000 sessions. About 9 MB of it is

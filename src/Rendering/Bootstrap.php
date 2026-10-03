@@ -13,10 +13,14 @@ final class Bootstrap {
     /** Attribute that marks via_head's first tag, so HtmlBuilder can tell a page that has it */
     public const string MARKER = 'data-via-head';
 
+    /** The local signal a stream sets before it ends when its tab should open a new one at once, not at the next interval */
+    public const string RECONNECT_SIGNAL = '_via_reconnect';
+
     /**
-     * The via_ctx signal, the import map when there is one, the SSE connect with its reconnect and
-     * connection state, and the beacon that closes the context when the tab goes. In this order,
-     * because Datastar applies attributes in document order and the connect needs via_ctx.
+     * The via_ctx signal, the import map when there is one, the SSE connect with its reconnect (every 15 s
+     * without a stream, and at once when RECONNECT_SIGNAL changes) and connection state, and the beacon that
+     * closes the context when the tab goes. In this order, because Datastar applies attributes in document
+     * order and the connect needs via_ctx.
      *
      * @param string      $importMapTag the import map tag, '' for none
      * @param null|string $nonce        CSP nonce for every tag
@@ -30,6 +34,7 @@ final class Bootstrap {
         $sse = self::jsString($basePath . '_sse');
         $close = self::jsString($basePath . '_session/close');
         $id = self::jsString($contextId);
+        $reconnect = self::RECONNECT_SIGNAL;
 
         $tags = ['<meta ' . self::MARKER . " data-signals='{$signals}'{$nonceAttribute}>"];
         if ($importMapTag !== '') {
@@ -38,6 +43,7 @@ final class Bootstrap {
         $tags[] = <<<HTML
             <meta data-indicator="_connecting"
                 data-on-interval__duration.15s.leading="!\$_connecting && @get({$sse})"
+                data-on-signal-patch="@get({$sse})" data-on-signal-patch-filter="{include: /^{$reconnect}\$/}"
                 data-on:datastar-fetch="el === evt.detail.el &&
                                    ((evt.detail.type.startsWith('datastar') && (\$_disconnected = false)) ||
                                    (['retrying', 'error', 'finished'].includes(evt.detail.type) && (\$_disconnected = true)))"{$nonceAttribute}>
