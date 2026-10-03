@@ -144,10 +144,10 @@ message that names the new one.
 
 - `twig/twig` came with php-via → `composer require twig/twig` for `withTemplateDir()`,
   template views, `render()` and `getTwig()`
-- `{{ datastar_url }}`, `{{ import_map }}` and the copied bootstrap tags in a custom shell →
-  `{{ via_head }}` after `<meta charset>`, `{{ via_foot }}` before `</body>`
-- `{{ datastarUrl }}`, `{{ importMap }}` and the copied bootstrap tags in a Twig layout →
-  `{{ via_head() }}` and `{{ via_foot() }}`
+- the bootstrap a custom shell copied (the `{{ signals_json }}` meta, the SSE and beacon metas and
+  the `{{ base_path }}datastar.js` script) → `{{ via_head }}` after `<meta charset>`,
+  `{{ via_foot }}` before `</body>`
+- the same tags copied into a Twig layout → `{{ via_head() }}` and `{{ via_foot() }}`
 - `$c->renderString($src, $data)` → `$app->getTwig()->createTemplate($src)->render($data)`
 - `$app->onStart($fn)` → `$app->onWorkerStart($fn)`, which passes `int $workerId`
 - `$app->onShutdown($fn)` → `$app->onWorkerStop($fn)`

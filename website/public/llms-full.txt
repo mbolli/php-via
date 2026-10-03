@@ -1,7 +1,7 @@
 # php-via: Full LLM Reference
 
 **Version**: 0.13.0 (MIT) | **Requires**: PHP 8.4+, ext-openswoole 26
-**Install**: `composer require mbolli/php-via`
+**Install**: `composer require mbolli/php-via`, plus `composer require twig/twig` for Twig templates
 **Homepage**: https://via.zweiundeins.gmbh/
 **GitHub**: https://github.com/mbolli/php-via
 **Packagist**: https://packagist.org/packages/mbolli/php-via
@@ -57,6 +57,7 @@ Browser ──── POST /_action/:id ────────► ActionHandler
 
 ```bash
 composer require mbolli/php-via
+composer require twig/twig   # for Twig templates (withTemplateDir()); closure views need nothing more
 ```
 
 ### Minimal counter app (complete working example)
@@ -425,7 +426,7 @@ With shared memory in use (`worker_num > 1` or persistence), GlobalState keys ar
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort(3000)                          // default 3000
-    ->withTemplateDir(__DIR__ . '/templates')
+    ->withTemplateDir(__DIR__ . '/templates') // Twig templates; needs composer require twig/twig
     ->withStaticDir(__DIR__ . '/public')      // serves static files, see Static Files
     ->withDevMode(true)                       // verbose logging, no cache headers
     ->withLogLevel('info')                    // debug | info | warn | error
