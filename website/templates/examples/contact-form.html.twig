@@ -23,7 +23,7 @@
       data-on:submit__prevent="@post('{{ submit.url }}', {contentType: 'form'})">
     {# Datastar form mode sends raw FormData: signals are not included.
        via_ctx must be a hidden field so the server can route this request to the right context. #}
-    <input type="hidden" name="via_ctx" value="{{ ctxId }}">
+    <input type="hidden" name="via_ctx" value="{{ contextId }}">
     {# ── Name ─────────────────────────────────────────────────────── #}
     <div class="cf-field">
         <label for="cf-name">Full name <span class="cf-required">*</span></label>
@@ -69,12 +69,12 @@
                name="attachment"
                accept=".jpg,.jpeg,.png,.gif,.pdf,.txt"
                data-on:change="
-                 const f = $event.target.files[0];
+                 const f = evt.target.files[0];
                  const err = document.getElementById('cf-file-size-error');
                  if (f && f.size > 2097152) {
                    err.textContent = 'File is too large. Maximum size is 2 MB.';
                    err.style.display = '';
-                   $event.target.value = '';
+                   evt.target.value = '';
                  } else {
                    err.textContent = '';
                    err.style.display = 'none';
