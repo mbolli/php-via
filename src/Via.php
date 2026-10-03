@@ -67,14 +67,7 @@ use Twig\Environment;
 class Via {
     public const string VERSION = '0.13.1';
 
-    /**
-     * The socket, stream, sleep and proc_open() hooks, without FILE, STDIO and NATIVE_CURL (1790 on OpenSwoole 26.2).
-     *
-     * @deprecated removed in 0.15; use Via::noFileIoHookFlags(), which also keeps the native curl hook where it works
-     */
-    public const int HOOK_FLAGS_NO_FILE_IO = self::NO_FILE_IO_HOOKS;
-
-    /** See noFileIoHookFlags(). */
+    /** See noFileIoHookFlags(): 1790 on OpenSwoole 26.2. */
     private const int NO_FILE_IO_HOOKS = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
         | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
