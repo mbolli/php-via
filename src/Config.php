@@ -414,6 +414,8 @@ final class Config {
      * $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
      * ```
      *
+     * new Via() warns when a pin names another URL of the bundle, such as one built before those calls.
+     *
      * @throws \RuntimeException if the bundle cannot be read
      */
     public function getDatastarIntegrity(): string {

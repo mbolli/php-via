@@ -258,6 +258,9 @@ message that names the new one.
   sync leave it out, a second declaration keeps the live value, and every SSE connect gives it the
   browser's value before the view renders, until the server writes it. It replaces calling
   `markSynced()` right after `signal()`, which keeps working.
+- **`new Via()` warns about a stale Datastar pin:** an import map integrity entry for
+  `/datastar.js` at another URL than `getDatastarUrl()`, such as one built before `withBasePath()`
+  or `withDatastarRocket()` or copied from an earlier build, under which the browser checks no hash.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
 

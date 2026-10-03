@@ -284,6 +284,7 @@ class Via {
             $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
                 . '$app->flushBroadcasts() where a broadcast has to land before the next step.');
         }
+        $this->warnStaleDatastarPin();
 
         // Dev Bar tracing substrate. Allocated here (master process, before fork)
         // so the per-worker tracer + buffer are inherited cleanly. When tracing
@@ -2078,6 +2079,25 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Warn about an import map integrity entry for php-via's own Datastar bundle at another URL than the one
+     * pages load, which leaves Datastar unpinned: one built before withBasePath() or withDatastarRocket(),
+     * or copied from an earlier build.
+     */
+    private function warnStaleDatastarPin(): void {
+        $url = $this->settings->datastarUrl;
+        foreach ($this->config->getImportMap()['integrity'] ?? [] as $pinned => $_) {
+            $path = parse_url($pinned, PHP_URL_PATH);
+            if ($pinned === $url || !str_starts_with($pinned, '/') || !\is_string($path) || basename($path) !== 'datastar.js') {
+                continue;
+            }
+
+            $this->log('warn', "Config::withImportMap() pins '{$pinned}', but pages load Datastar from '{$url}', so the browser "
+                . 'checks no hash for it. Pin it with $config->withImportMap([], [$config->getDatastarUrl() => '
+                . '$config->getDatastarIntegrity()]) after withDatastarRocket() and withBasePath(), not with a URL from an earlier build.');
+        }
     }
 
     /**
