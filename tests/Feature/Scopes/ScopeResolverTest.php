@@ -152,8 +152,9 @@ describe('SESSION actions', function (): void {
         $a->executeAction('bump');
         $b->executeAction('bump');
 
-        expect(ResolverSessionActionPage::$ran)->toHaveCount(2)
+        expect(ResolverSessionActionPage::$ran)->toBe(['A@A', 'B@B'])
             ->and($app->getScopedActions(Scope::SESSION))->toBe([])
-            ->and($app->getScopedActions(Scope::sessionScope(RESOLVER_SID_A)))->toHaveKey('bump');
+            ->and($app->getScopedActions(Scope::sessionScope(RESOLVER_SID_A)))->toHaveKey('bump')
+        ;
     });
 });

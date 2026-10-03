@@ -700,7 +700,7 @@ php-via.
 2. **Broadcast shows stale data for other clients**: views that show shared state must read
    shared state (a scoped signal or `$app->globalState()`), not a per-client TAB signal.
 3. **Dual state (globalState + Signal)**: scoped signals are already shared; use
-   `$c->scope(Scope::ROUTE); $s = $c->signal(...)` instead of mirroring into GlobalState.
+   `$s = $c->signal(0, 'count', Scope::ROUTE)` instead of mirroring into GlobalState.
 4. **Lost updates with several workers**: `setValue($s->int() + 1)` or
    `setGlobalState($k, globalState($k) + 1)` lose writes; use `increment()`/`mutate()`.
 5. **Transient state never shown**: a value set, broadcast and reset in one action never

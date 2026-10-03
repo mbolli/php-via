@@ -49,27 +49,37 @@ class SignalFactory {
      * TAB scope (scope=null): Signal is private to this context, not shared
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
+     *
+     * A scoped signal joins the context to its scope, which its value reaches the tab through.
+     *
+     * @throws \LogicException without a scope, on a context whose primary scope is not TAB
      */
     public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         $baseName = $name ?? 'signal';
         $context = $this->context();
 
-        // If no explicit scope provided, inherit from context's primary scope
         if ($scope === null) {
-            $contextScope = $context->getPrimaryScope();
-            // Only inherit if context has a non-TAB scope
-            if ($contextScope !== Scope::TAB) {
-                $scope = $contextScope;
+            $primary = $context->getPrimaryScope();
+            // Before 0.14 the signal took the primary scope; failing beats silently turning a shared signal private.
+            if ($primary !== Scope::TAB) {
+                throw new \LogicException(\sprintf(
+                    "Context::signal() for '%s' has no scope, and this context's primary scope is '%s'. Since php-via 0.14 a signal "
+                    . 'no longer takes the primary scope: pass the scope given to scope() as the third argument to share it, '
+                    . 'or Scope::TAB to keep it private to the tab.',
+                    $baseName,
+                    $primary,
+                ));
             }
+            $scope = Scope::TAB;
         }
 
-        if ($scope !== null) {
-            $scope = Scope::resolve($scope, $context, 'Context::signal()');
-        }
+        $scope = Scope::resolve($scope, $context, 'Context::signal()');
 
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
         // For TAB signals, use context ID to make them unique per context
-        if ($scope !== null && $scope !== Scope::TAB) {
+        if ($scope !== Scope::TAB) {
+            $context->addScope($scope);
+
             // Scoped signal: shared across contexts in this scope. The component namespace is part
             // of the id, so sibling instances (cats, dogs) get independent but shared counters.
             $signalId = SignalId::scoped($scope, $context->getNamespace(), $baseName);

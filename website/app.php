@@ -178,14 +178,12 @@ const COUNTER_SCOPE = 'home:counter';
 $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
     $c->scope(COUNTER_SCOPE);
 
-    $counter = $c->signal(0, 'counter');
-    $lastClick = $c->signal('', 'lastClick');
-    $lastClickHue = $c->signal(0, 'lastClickHue');
+    $counter = $c->signal(0, 'counter', COUNTER_SCOPE);
+    $lastClick = $c->signal('', 'lastClick', COUNTER_SCOPE);
+    $lastClickHue = $c->signal(0, 'lastClickHue', COUNTER_SCOPE);
 
-    // A TAB action on the component: the page looks actions up, and it would not find one
-    // registered in COUNTER_SCOPE.
     $increment = $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
-        // Atomic: $counter inherits the shared COUNTER_SCOPE, so with more than one worker
+        // Atomic: $counter is shared in COUNTER_SCOPE, so with more than one worker
         // setValue($counter->int() + 1) would let two workers read the same value and each
         // write back the same result, dropping a click.
         $counter->increment(broadcast: false);
@@ -196,7 +194,7 @@ $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
         $lastClick->setValue('Visitor #' . strtoupper($visitorNum), broadcast: false);
         $lastClickHue->setValue(hexdec($visitorNum) % 360, broadcast: false);
         $app->broadcast(COUNTER_SCOPE);
-    }, 'increment', Scope::TAB);
+    }, 'increment');
 
     $c->view(fn () => $twig->render('components/shared-counter.html.twig', [
         'counter_id' => $counter->id(),
@@ -276,8 +274,9 @@ $tabScopeDemo = function (Context $c): void {
 
 $routeScopeDemo = function (Context $c) use ($app): void {
     // ROUTE-scoped: shared counter for all visitors on the same route
-    $c->scope(Scope::routeScope($c->getRoute()));
-    $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount');
+    $routeScope = Scope::routeScope($c->getRoute());
+    $c->scope($routeScope);
+    $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount', $routeScope);
     $incRoute = $c->action(function (Context $c) use ($app, $routeCount): void {
         // GlobalState is the counter of record: it is what survives a restart, and it
         // reseeds the signal above on first mount. Both stores are advanced atomically, so

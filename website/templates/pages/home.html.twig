@@ -149,18 +149,17 @@ use Mbolli\PhpVia\Via;
 $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
-{-    // TAB scope (default): each visitor has their own counter-}
+{-    // TAB scope (default): each visitor has their own counter
+    $count = $c->signal(0);-}
 {+    // GLOBAL scope: one shared counter for every visitor
-    $c->scope(Scope::GLOBAL);+}
-    $count = $c->signal(0);
+    $count = $c->signal(0, 'count', Scope::GLOBAL);+}
 
 {-    $increment = $c->action(function () use ($c, $count): void {
         $count->setValue($count->int() + 1);
         $c->syncSignals(); // push the new value to this tab-}
 {+    $increment = $c->action(function () use ($count): void {
         $count->increment(); // atomic, and broadcasts to the scope+}
-{-    });-}
-{+    }, 'increment'); // a scoped action needs a name+}
+    });
 
     $c->view(fn() => <<<HTML
         <p>Count: <strong data-text="\${$count->id()}">

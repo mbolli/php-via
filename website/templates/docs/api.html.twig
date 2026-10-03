@@ -329,11 +329,11 @@ $status = $c->signal('idle', 'status', clientWritable: false);
         warning gives the type and size of both values, not their content.
     </p>
 
-    <h3 id="context-action"><code>action(callable $fn, ?string $name = null, ?string $scope = null): Action</code></h3>
+    <h3 id="context-action"><code>action(callable $fn, ?string $name = null): Action</code></h3>
     <p>
-        The action belongs to <code>$scope</code>, or to the context's primary scope when it is null. A TAB
-        action is the context's own; a scoped action is shared by every context in its scope and needs a
-        name. Inside a component, the action reads the page's request through <code>$c->input()</code>,
+        The action is the context's own and runs for the tab that posts it, whatever scope the context
+        joined. A third argument throws: the <code>$scope</code> parameter was removed in 0.14. Inside a
+        component, the action reads the page's request through <code>$c->input()</code>,
         <code>$c->file()</code> and <code>$c->cookie()</code>.
     </p>
     {% code 'php' %}{% verbatim %}
@@ -345,9 +345,8 @@ $inc = $c->action(function (Context $c) use ($count): void {
 // In Twig: data-on:click="@post('/_action/increment')"
     {% endverbatim %}{% endcode %}
     <p>
-        Registering a TAB action with the same name again replaces the earlier callback, and php-via
-        logs a warning once per action id. A scoped action works the other way round: the first
-        callback registered in the scope wins and later registrations reuse it.
+        Registering an action with the same name again replaces the earlier callback, and php-via
+        logs a warning once per action id.
     </p>
 
     <h3 id="context-view"><code>view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void</code></h3>
@@ -791,7 +790,7 @@ final class TodoList {
     <p>Target: method. Marks a public method as a client-callable action. The method must accept
     <code>Context $ctx</code> as its only parameter. The resolved name (method name by default, or
     <code>name:</code> if provided) is used as the action URL slug and Twig variable name.
-    <code>scope:</code> is forwarded to <code>Context::action()</code>.</p>
+    With <code>scope:</code>, one action serves the whole scope, and it runs on the instance of the tab that posts it.</p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Attributes\Action;
 

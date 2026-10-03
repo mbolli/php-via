@@ -74,7 +74,7 @@ test('scoped view is NOT cached for SSE updates', function (): void {
 
             // Simulate signal updates
             $price = 100 + $renderCount;
-            $c->signal($price, 'price');
+            $c->signal($price, 'price', Scope::build('stock', $symbol));
 
             return $isUpdate ? '' : "<div>Stock: {$symbol}</div>";
         }, cacheUpdates: false); // Opt-out of update caching for this test
@@ -116,7 +116,7 @@ test('scoped view: update renders can use cache, initial loads do not', function
 
             // Update price on each render
             $lastPrice += 10;
-            $c->signal($lastPrice, 'price');
+            $c->signal($lastPrice, 'price', Scope::build('stock', $symbol));
 
             return $isUpdate ? '' : "<div>Stock: {$symbol} - Last render: {$renderCount}</div>";
         }, cacheUpdates: false); // Opt-out of update caching for this test

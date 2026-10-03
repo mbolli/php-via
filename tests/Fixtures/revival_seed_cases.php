@@ -343,6 +343,8 @@ $cases = [
         $g->scope('room:a');
         $app->contexts['g'] = $g;
         $gN = $g->signal(1, 'n', 'room:data');
+        // Declaring n joined g to room:data; leave it, so F2 does not reach g.
+        $g->removeScope('room:data');
         $gate = new SeedGate();
         $world->gatesAfterReads['g'] = $gate;
         $g->view(static function () use ($gN, $world): string {
