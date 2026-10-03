@@ -435,6 +435,8 @@ message that names the new one.
 - New [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression) and
   [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused) sections in
   Deployment.
+- [Views](https://via.zweiundeins.gmbh/docs/views#preserve-attr) shows how `data-preserve-attr`
+  keeps a `<dialog>` opened with `showModal()` open across updates and SSE reconnects.
 
 ## [0.13.1] - 2026-10-02
 

@@ -214,6 +214,15 @@ Pass changing data as a closure, as above. An array computed in the page handler
 such as `['count' => count($app->getClients())]` passed to `$c->view('tpl', [...])`, is frozen
 at page load.
 
+Every update, and every SSE connect and reconnect, morphs the view into the page, which sets
+each element's attributes to the server's markup. An attribute the browser set itself, such
+as the `open` that `showModal()` puts on a `<dialog>`, would go, so list it in
+`data-preserve-attr` in the rendered markup:
+
+```html
+<dialog id="confirm" data-preserve-attr="open">...</dialog>
+```
+
 ### 4. Scopes
 
 Scope controls which contexts share signals and receive broadcasts together.
