@@ -431,7 +431,7 @@ $config = (new Config())
     ->withDevMode(true)                       // verbose logging, no cache headers
     ->withLogLevel('info')                    // debug | info | warn | error
     ->withBrotli()                            // pages and SSE; requires ext-brotli and HTTPS or h2c
-    ->withBrotli(false, staticLevel: 0)       // also no Brotli for static files (default level 11)
+    ->withBrotli(false)                       // no Brotli at all, static files included (default 11)
     ->withH2c()                               // HTTP/2 cleartext (behind a TLS proxy)
     ->withCertificate($crt, $key)             // HTTPS directly
     ->withBasePath('/app/')                   // when mounted at a sub-path
@@ -467,22 +467,26 @@ only, so N workers started that way would each keep their own sessions and conte
 
 `withStaticDir()` serves a path with a file extension before routing and any other once no route
 matched. A path with a segment that starts with a dot (`/.env`, `/.git/config`, `%2e` included),
-except `/.well-known/`, and `.php`, `.phtml` and `.phar` files answer 404 without a look at the
-disk. Paths are percent-decoded, so `/my%20file.css` finds `my file.css`.
+except `/.well-known/`, and PHP sources (`.php`, `.php5` and other numbered forms, `.phps`, `.phpt`,
+`.pht`, `.phtml`, `.phar`, `.inc`) answer 404 without a look at the disk, and so does a link in the
+directory to such a file. Paths are percent-decoded, so `/my%20file.css` finds `my file.css`.
 
 Whenever ext-brotli is loaded, compressible files (css, js, mjs, json, map, webmanifest, wasm,
-svg, ico, ttf, otf, txt, md, csv, html, xml, rss, atom), `/datastar.js`, `/via.css` and the Dev
-Bar assets go out with Brotli level 11 to clients that accept it, with or without `withBrotli()`,
-with `Vary: Accept-Encoding` and one weak ETag for every encoding. woff2, woff and images are sent
-as they are. A worker never compresses at level 11 itself: files present at start are compressed
-in the master process before the port opens (at most 2 s, the website takes 0.4 s; not in dev
-mode) and shared by all workers; a file that changes later goes to a helper process, and until
-the result arrives workers send it at level 4 up to 256 KB, uncompressed above. A sidecar
-`foo.css.br` next to `foo.css`, at least as new, is sent as it is, even without ext-brotli: the
-way to ship large assets (`brotli --best app.js`). Memory: 32 MiB of Brotli forms from start,
-shared; per worker 16 MiB uncompressed and 16 MiB of Brotli forms, 2 MiB per file; files over
-8 MiB, or whose Brotli form exceeds 2 MiB, go out uncompressed without a sidecar.
-`withBrotli(false, staticLevel: 0)` turns static Brotli off.
+svg, ico, ttf, otf, txt, md, csv, html, htm, xml, rss, atom), `/datastar.js`, `/via.css` and the
+Dev Bar assets go out with Brotli level 11 to clients that accept it, with or without
+`withBrotli()`, with `Vary: Accept-Encoding` and one weak ETag for every encoding. woff2, woff,
+raster images (png, jpg, webp, gif, avif), pdf, audio and video are sent as they are. A worker
+never compresses at level 11 itself: files present at start are compressed in the master process
+before the port opens (about 2 s at most, the website takes 0.3 s; not in dev mode) and shared by
+all workers; a file that changes later goes to a helper process at the lowest CPU priority, and
+until the result arrives workers send it at level 4 up to 256 KB, uncompressed above, with
+`Cache-Control: no-store`. A sidecar `foo.css.br` next to `foo.css`, at least as new, is sent as
+it is, even without ext-brotli: the way to ship large assets (`brotli --best app.js`). Build
+sidecars in the deploy step and keep them out of git: after a fresh clone a stale sidecar has the
+same mtime as its file and counts as fresh. Memory: 32 MiB of Brotli forms from start, shared;
+per worker 16 MiB uncompressed and 16 MiB of Brotli forms, 2 MiB per file; files over 8 MiB, or
+whose Brotli form exceeds 2 MiB, go out uncompressed without a sidecar. `withBrotli(false)` turns
+static Brotli off too; `withBrotli(false, staticLevel: 11)` keeps it for static files only.
 
 ---
 

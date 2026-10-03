@@ -29,7 +29,7 @@ Real-time reactive web framework for PHP. Server-side reactive UIs with zero Jav
 - PHP 8.4+
 - OpenSwoole PHP extension 26+
 - Composer
-- Brotli PHP extension *(optional, required for `Config::withBrotli()`)*
+- Brotli PHP extension *(optional: static files get Brotli level 11 once it is loaded, pages and SSE with `Config::withBrotli()`)*
 
 ## Installation
 

@@ -100,7 +100,8 @@ example.com {
         It requires the <a href="https://github.com/kjdev/php-ext-brotli" target="_blank" rel="noopener">ext-brotli</a>
         PHP extension and HTTP/2 (needed for streaming compression to work in browsers).
         A hard error is thrown at startup if either requirement is missing. Static assets get Brotli whenever
-        ext-brotli is loaded, without <code>withBrotli()</code>: see <a href="#static-compression">Static compression</a>.
+        ext-brotli is loaded, without <code>withBrotli()</code> and unless <code>withBrotli(false)</code>: see
+        <a href="#static-compression">Static compression</a>.
     </p>
     <p>
         Each SSE stream holds its own Brotli encoder, which grows with the traffic it carries and never
@@ -699,13 +700,15 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
         deployment switches keeps serving the old target until the workers reload.
     </p>
 
-    <h3 id="static-allowlist">Paths never served</h3>
+    <h3 id="static-refused">Paths never served</h3>
     <p>
         php-via answers 404 without a look at the disk for a path with a segment that starts with a dot, such as
-        <code>/.env</code>, <code>/.git/config</code> or <code>/assets/.cache/app.js</code>, and for
-        <code>.php</code>, <code>.phtml</code> and <code>.phar</code> files. <code>/.well-known/</code> is the
-        exception, for ACME challenges and similar. The path is percent-decoded first, so <code>/%2eenv</code> is
-        refused too and <code>/my%20file.css</code> finds <code>my file.css</code>. A route with such a path still
+        <code>/.env</code>, <code>/.git/config</code> or <code>/assets/.cache/app.js</code>, and for PHP sources:
+        <code>.php</code> with or without a version digit (<code>.php5</code>), <code>.phps</code>,
+        <code>.phpt</code>, <code>.pht</code>, <code>.phtml</code>, <code>.phar</code> and <code>.inc</code>.
+        <code>/.well-known/</code> is the exception, for ACME challenges and similar. The path is percent-decoded
+        first, so <code>/%2eenv</code> is refused too and <code>/my%20file.css</code> finds <code>my file.css</code>.
+        A link inside the directory that points at such a file answers 404 as well. A route with such a path still
         works.
     </p>
 
@@ -719,25 +722,29 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
         form the client holds.
     </p>
     <ul>
-        <li><strong>Compressed</strong>: css, js, mjs, json, map, webmanifest, wasm, svg, ico, ttf, otf, txt, md, csv, html, xml, rss, atom.</li>
-        <li><strong>Sent as they are</strong>: woff2, woff, png, jpg, webp and other types, which are compressed already.</li>
+        <li><strong>Compressed</strong>: css, js, mjs, json, map, webmanifest, wasm, svg, ico, ttf, otf, txt, md, csv, html, htm, xml, rss, atom.</li>
+        <li><strong>Sent as they are</strong>: woff2, woff, png, jpg, webp, gif, avif, pdf, mp4, webm and mp3, which are compressed already, and any type php-via does not list.</li>
     </ul>
     <p>
-        Level 11 takes about 150&nbsp;ms per 100&nbsp;KB of JavaScript or CSS, so a worker never compresses at that
-        level itself:
+        Level 11 takes 90 to 140&nbsp;ms per 100&nbsp;KB of JavaScript or CSS, 2.1&nbsp;s for a 1.7&nbsp;MB library,
+        so a worker never compresses at that level itself:
     </p>
     <ul>
         <li>
             <strong>At start</strong>, php-via compresses the files that exist in the master process, so every
-            worker inherits them without a copy of its own. It stops after 2&nbsp;s and leaves the rest for later.
-            The port opens after this step, so a restart takes that much longer: the website (11 files, 300&nbsp;KB)
-            takes 0.4&nbsp;s. Dev mode skips it.
+            worker inherits them without a copy of its own. It skips any file it expects to push it past 2&nbsp;s and
+            leaves it for later, so the step takes about 2&nbsp;s at most. The port opens after this step, so a restart takes
+            that much longer, and readiness checks and rolling restarts have to allow for it: the website (11 files,
+            300&nbsp;KB compressed to 64&nbsp;KB) takes 0.3&nbsp;s. Dev mode skips it.
         </li>
         <li>
-            <strong>Later</strong>, a file that changed or did not fit into the 2&nbsp;s goes to a helper process,
-            which php-via starts with <code>withStaticDir()</code> or in dev mode. Until its result arrives, a worker
-            sends the file compressed at level 4 when it is up to 256&nbsp;KB, and uncompressed when it is bigger.
-            The helper compresses one file at a time, about 6&nbsp;s for a 4&nbsp;MB bundle.
+            <strong>Later</strong>, a file that changed or was left out at start goes to a helper process, which
+            php-via starts with <code>withStaticDir()</code> or in dev mode. Until its result arrives, a worker sends
+            the file at level 4 when it is up to 256&nbsp;KB and uncompressed when it is bigger, with
+            <code>Cache-Control: no-store</code>, so neither a browser nor a CDN keeps that stand-in. The helper
+            compresses one file at a time at the lowest CPU priority, so on a core a worker needs, the worker goes
+            first. An edited 91&nbsp;KB stylesheet got level 11 after 0.1&nbsp;s, a 546&nbsp;KB library after
+            0.9&nbsp;s and a 2.3&nbsp;MB bundle after 3&nbsp;s.
         </li>
     </ul>
     <p>
@@ -749,16 +756,25 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
 brotli --best public/js/app.js    # writes public/js/app.js.br; rerun after each build
     {% endverbatim %}{% endcode %}
     <p>
+        Build sidecars in the deploy step, after the files are in place, and keep them out of git. A fresh clone,
+        or a Docker <code>COPY</code> of one, gives a file and its sidecar the same modification time even when the
+        sidecar was not rebuilt after the file's last change. php-via then takes the stale sidecar for a fresh one,
+        and Brotli clients get the old content.
+    </p>
+    <p>
         Memory stays bounded: up to 32&nbsp;MiB of Brotli forms compressed at start, shared by all workers; per
         worker up to 16&nbsp;MiB of Brotli forms of files compressed later, 2&nbsp;MiB each; the helper keeps
         16&nbsp;MiB of results for the other workers and needs about 50&nbsp;MB more while it compresses. A file
         over 8&nbsp;MiB, or one whose Brotli form exceeds 2&nbsp;MiB, goes out uncompressed unless it has a sidecar,
-        and a sidecar over 2&nbsp;MiB goes out with <code>sendfile()</code>.
+        and a sidecar over 2&nbsp;MiB goes out with <code>sendfile()</code>. With the website's own files a server
+        uses about as much memory as before; with three large libraries added (2.3&nbsp;MB, 1.7&nbsp;MB and
+        546&nbsp;KB) it uses about 15&nbsp;MB more in all, for the helper and the forms compressed at start.
     </p>
     <p>
-        Turn static Brotli off with <code>withBrotli(false, staticLevel: 0)</code>, for example when a CDN
-        compresses. A proxy in front needs no change: Caddy's <code>encode</code> and nginx's <code>gzip</code>
-        leave a response alone that already carries a <code>Content-Encoding</code>.
+        Turn static Brotli off with <code>withBrotli(false)</code>, or keep Brotli for pages and SSE only with
+        <code>withBrotli(staticLevel: 0)</code>, for example when a CDN compresses. A proxy in front needs no
+        change: Caddy's <code>encode</code> and nginx's <code>gzip</code> leave a response alone that already
+        carries a <code>Content-Encoding</code>.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

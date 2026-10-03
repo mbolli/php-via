@@ -23,7 +23,8 @@ All notable changes to php-via will be documented in this file.
   longer reads the shell template or the file from disk on every request.
 - **Brotli level 11 for static files by default.** Static files and php-via's own bundles go out at
   level 11 whenever ext-brotli is loaded, compressed before the server listens or by a helper
-  process, never in a worker. A `.br` file next to an asset is sent as it is.
+  process, never in a worker: an app without `withBrotli()` now sends a 91 KB stylesheet as 14 KB.
+  A `.br` file next to an asset is sent as it is.
   See [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
 
 ### Breaking Changes
@@ -39,13 +40,14 @@ All notable changes to php-via will be documented in this file.
   - **`data-bind` on checkboxes and radios** updates the signal on `input` instead of `change`. A
     script that dispatches `change` has to dispatch `input`, or bind with `__event.change`.
   - **Deleting a signal,** by a patch or by assigning `null`, fires `data-on-signal-patch`.
-- **`Signal::bind()` and `Config::getStaticCacheControl()` take a new optional parameter.** A
-  subclass that overrides either has to declare it.
+- **`Signal::bind()` and `Config::getStaticCacheControl()` take a new optional parameter,** and
+  `Config::withBrotli()`'s `$staticLevel` is now `?int $staticLevel = null`. A subclass that
+  overrides one of them has to match.
 - **Static files get Brotli without `withBrotli()`.** Whenever ext-brotli is loaded, compressible
   static files go out at level 11 to clients that accept it, with `Vary: Accept-Encoding`, and the
-  server opens its port only after compressing the files present at start (at most 2 s, 0.4 s for
-  the website). `withBrotli(false, staticLevel: 0)` turns it off. `withBrotli()`'s `$enabled` covers
-  pages and SSE only, and a static level of 0 now means none instead of Brotli level 0.
+  server opens its port only after compressing the files present at start (about 2 s at most,
+  0.3 s for the website). `withBrotli(false)` turns it off, `withBrotli(false, staticLevel: 11)`
+  keeps it for static files only. A static level of 0 now means none instead of Brotli level 0.
 - **`worker_num` in `withSwooleSettings()` throws** at `start()` when it differs from
   `withWorkerNum()`. php-via set up shared state, tables and the broker check for one worker while
   N started. Pass the count to `withWorkerNum()`.
@@ -74,9 +76,11 @@ All notable changes to php-via will be documented in this file.
   on web components. The Twig `bind()` function takes the property as a second argument.
 - **`.mjs` files** from `withStaticDir()` are served as `application/javascript`, and `.map` files
   as `application/json`. `.webmanifest`, `.wasm`, `.ttf`, `.otf`, `.md`, `.csv`, `.rss` and `.atom`
-  get their content types too, and Brotli.
+  get their content types too, and Brotli. So do `.htm`, `.gif`, `.avif`, `.pdf`, `.mp4`, `.webm`
+  and `.mp3`, without Brotli.
 - **`.br` sidecars.** A `foo.css.br` at least as new as `foo.css` is sent to Brotli clients as it is,
-  even without ext-brotli, so large assets need no compression at run time.
+  even without ext-brotli, so large assets need no compression at run time. Build sidecars when
+  you deploy, not in git: see [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
 - **`Via::HOOK_FLAGS_NO_FILE_IO`** is the hook set without file, stdio and native curl hooks, for
   apps that run no shell commands and hold no `flock()` across a suspension.
   `Via::defaultHookFlags()` returns the default. See [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks-narrow).
@@ -96,10 +100,12 @@ All notable changes to php-via will be documented in this file.
   stylesheet costs 0.054 ms of CPU per request instead of 0.193 ms with Brotli, and 0.040 ms instead
   of 0.161 ms without. Each worker keeps files up to 2 MiB, 16 MiB per encoding. Bigger files go out
   with `sendfile()`. See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
-- **Level 11 never runs in a worker.** The first Brotli request for a 700 KB bundle held its worker
-  for 1.3 s. Files present at start are now compressed in the master process and shared by all
-  workers; a file that changes later goes to a helper process while workers send it at level 4, or
-  uncompressed above 256 KB. Files up to 8 MiB get level 11, where 2 MiB was the limit.
+- **Level 11 never runs in a worker.** The first Brotli request for a 91 KB stylesheet held its
+  worker for 79 ms, and for a 1.7 MB library for 2.1 s; now for about 2 ms. Files present at start
+  are compressed in the master process and shared by all workers. A file that changes later goes
+  to a low-priority helper process, and until it is done workers send it at level 4, or
+  uncompressed above 256 KB, with `Cache-Control: no-store`. Files up to 8 MiB get level 11, where
+  2 MiB was the limit: a 2.3 MB bundle goes out as 500 KB.
 - **Only paths with a file extension are looked up in `withStaticDir()` before routing,** and the
   directory's real path is resolved once per worker. That saves two `realpath()` calls per request,
   `/_sse` and actions included: on a FUSE mount, an action costs 0.047 ms of CPU instead of 0.091 ms.
@@ -111,9 +117,9 @@ All notable changes to php-via will be documented in this file.
 
 - `.json`, `.txt`, `.html` and `.xml` files from `withStaticDir()` were served as
   `application/octet-stream`, which breaks JSON module imports. They get their content types now.
-- `withStaticDir()` served dotfiles such as `.env` and `.git/config`, and the source of `.php` files.
-  Paths with a dot segment, except `/.well-known/`, and `.php`, `.phtml` and `.phar` files answer
-  404 now, before any look at the disk.
+- `withStaticDir()` served dotfiles such as `.env` and `.git/config`, and the source of PHP files.
+  Paths with a dot segment, except `/.well-known/`, PHP sources such as `.php`, `.php5`, `.phtml`
+  and `.inc`, and links to such files answer 404 now.
 - A percent-encoded path, such as a file name with a space, never found its file in `withStaticDir()`.
 - After the worker was busy, the contexts whose cleanup timers fired meanwhile were destroyed in one
   pass of the event loop, up to 160 ms after each GC pause in a 250,000-view burst. They are destroyed
@@ -139,7 +145,7 @@ All notable changes to php-via will be documented in this file.
   what each hook covers, what no hook covers, OpenSwoole 26.2 bugs and their workarounds, the
   narrow flag set and capping the thread pool.
 - New [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression) and
-  [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-allowlist) sections in
+  [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused) sections in
   Deployment.
 
 ## [0.13.1] - 2026-10-02
