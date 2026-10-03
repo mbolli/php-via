@@ -16,6 +16,7 @@ use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
 use Twig\Environment;
 use Twig\Loader\ArrayLoader;
@@ -685,7 +686,8 @@ class Application {
     }
 
     /**
-     * Destroy the contexts whose cleanup timer fired, giving the event loop back every DESTROY_SLICE_NS.
+     * Destroy the contexts whose cleanup timer fired, giving the event loop back every DESTROY_SLICE_NS. Each runs in
+     * its own coroutine, so a cleanup callback that waits on I/O holds up only its own context.
      */
     private function destroyExpired(): void {
         $this->destroyExpiredScheduled = false;
@@ -697,16 +699,8 @@ class Application {
                 [$delayMs, $isActiveCheck] = $this->expired[$contextId];
                 unset($this->expired[$contextId]);
 
-                try {
-                    if ($isActiveCheck !== null && $isActiveCheck()) {
-                        // SSE still connected: reschedule instead of destroying.
-                        $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
-                        $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
-                    } else {
-                        $this->destroyContext($contextId);
-                    }
-                } catch (\Throwable $e) {
-                    $this->logger->log('error', "Context cleanup failed for {$contextId}: " . Logger::describe($e));
+                if (Coroutine::getCid() <= 0 || Coroutine::create($this->expire(...), $contextId, $delayMs, $isActiveCheck) === false) {
+                    $this->expire($contextId, $delayMs, $isActiveCheck);
                 }
 
                 if ($this->expired !== [] && hrtime(true) >= $sliceEnd) {
@@ -718,6 +712,23 @@ class Application {
             }
         } finally {
             $this->destroyingExpired = false;
+        }
+    }
+
+    /**
+     * @param null|callable(): bool $isActiveCheck see scheduleContextCleanup()
+     */
+    private function expire(string $contextId, int $delayMs, ?callable $isActiveCheck): void {
+        try {
+            if ($isActiveCheck !== null && $isActiveCheck()) {
+                // SSE still connected: reschedule instead of destroying.
+                $this->logger->log('debug', "Context {$contextId} has active SSE, deferring cleanup");
+                $this->scheduleContextCleanup($contextId, $delayMs, $isActiveCheck);
+            } else {
+                $this->destroyContext($contextId);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->log('error', "Context cleanup failed for {$contextId}: " . Logger::describe($e));
         }
     }
 

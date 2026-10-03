@@ -103,3 +103,12 @@ test('the active check runs when the context gets its slice, not when its timer 
         ->and($app->getApp()->getAllContexts())->toBe([])
     ;
 });
+
+test('a cleanup that waits on I/O holds up only its own context', function (): void {
+    // Coroutines need a scheduler of their own, so this runs in a subprocess.
+    $out = (string) shell_exec('timeout 30 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/Fixtures/expired_cleanup_yield.php') . ' 2>&1');
+
+    expect($out)->toContain("alive_50ms=ctx0\n")
+        ->and($out)->toContain("alive_450ms=\n")
+    ;
+});
