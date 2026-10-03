@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\RequestSession;
 use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
@@ -453,8 +454,8 @@ class RequestHandler {
         $context->setPageInput($request->get ?? []);
 
         // Bridge PSR-7 request attributes from middleware into Context, minus the response's
-        // Brotli writers, which belong to this response and not to the tab.
-        $contextAttributes = array_diff_key($requestAttributes, ['brotli_write' => true, 'brotli_finish' => true]);
+        // Brotli writers and session, which belong to this response and not to the tab.
+        $contextAttributes = array_diff_key($requestAttributes, ['brotli_write' => true, 'brotli_finish' => true, RequestSession::class => true]);
         if ($contextAttributes !== []) {
             $context->setRequestAttributes($contextAttributes);
         }
@@ -490,8 +491,7 @@ class RequestHandler {
         // A page whose SSE stream never connects (a crawler, a prefetch) is freed after the connect timeout.
         $this->via->armConnectDeadline($contextId);
 
-        // Set session cookie
-        $this->via->setSessionCookie($response, $sessionId);
+        $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation(), refresh: true);
 
         // Apply any cookies queued by the page handler
         foreach ($context->flushPendingCookies() as $cookie) {
@@ -551,10 +551,12 @@ class RequestHandler {
     }
 
     /**
-     * The PSR-7 request middleware gets, with the session id in 'via.session'.
+     * The PSR-7 request middleware gets, with the session id in 'via.session' and the session Via::regenerateSession() takes.
      */
     private function psrRequest(Request $request, string $requestType): ServerRequestInterface {
-        return $this->psrRequestFactory->create($request, $requestType)->withAttribute('via.session', $this->via->getSessionId($request));
+        $session = $this->via->getRequestSession($request);
+
+        return $this->psrRequestFactory->create($request, $requestType)->withAttribute('via.session', $session->key)->withAttribute(RequestSession::class, $session);
     }
 
     private function logRequest(string $method, string $path, int $statusCode, int $hrtimeStart): void {
@@ -703,6 +705,7 @@ class RequestHandler {
 
         // If middleware short-circuited (core handler was never called), emit the PSR-7 response
         if (!$coreHandler->wasHandled()) {
+            $this->via->writeSessionCookie($request, $response);
             $this->psrResponseEmitter->emit($psrResponse, $response);
             $this->logRequest($method, $path, $psrResponse->getStatusCode(), $requestStart);
         }
@@ -750,6 +753,7 @@ class RequestHandler {
         $psrResponse = $dispatcher->handle($psrRequest);
 
         if (!$coreHandler->wasHandled()) {
+            $this->via->writeSessionCookie($request, $response);
             $this->psrResponseEmitter->emit($psrResponse, $response);
         }
     }
@@ -805,6 +809,7 @@ class RequestHandler {
         $psrResponse = $dispatcher->handle($psrRequest);
 
         if (!$coreHandler->wasHandled()) {
+            $this->via->writeSessionCookie($request, $response);
             $this->psrResponseEmitter->emit($psrResponse, $response);
         }
     }

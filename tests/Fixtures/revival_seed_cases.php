@@ -19,6 +19,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Via;
@@ -27,6 +28,14 @@ use OpenSwoole\Coroutine\Channel;
 use OpenSwoole\Http\Response;
 use Tests\Support\FakeActionRequest;
 use Tests\Support\FakeStaticResponse;
+
+/** The session cookie of the tab these cases revive. */
+const REVIVE_COOKIE = 'a11ce000a11ce000a11ce000a11ce000';
+
+/** The session that cookie names. */
+function reviveOwner(): string {
+    return SessionTokens::key(REVIVE_COOKIE);
+}
 
 final class SeedWorld {
     /** @var array<string, int> */
@@ -145,10 +154,10 @@ function captureWarnings(Via $app): ArrayObject {
 
 /** A page load of $route under $contextId, as RequestHandler::doHandlePage() registers it. */
 function mintPage(Via $app, callable $handler, string $route, string $contextId): Context {
-    $ctx = new Context($contextId, $route, $app, null, 'a11ce000a11ce000a11ce000a11ce000');
+    $ctx = new Context($contextId, $route, $app, null, reviveOwner());
     $app->contexts[$contextId] = $ctx;
     $app->getApp()->registerContext($ctx);
-    $app->getApp()->setContextSession($contextId, 'a11ce000a11ce000a11ce000a11ce000');
+    $app->getApp()->setContextSession($contextId, reviveOwner());
     $app->registerContextInScope($ctx, Scope::TAB);
     $app->invokeHandlerWithParams($handler, $ctx, []);
 
@@ -168,7 +177,7 @@ function dropPage(Via $app, string $contextId): void {
  */
 function postAction(Via $app, string $actionId, array $signals): int {
     $post = new FakeActionRequest($actionId, $signals);
-    $post->cookie = ['via_session_id' => 'a11ce000a11ce000a11ce000a11ce000'];
+    $post->cookie = ['via_session_id' => REVIVE_COOKIE];
     $response = new FakeStaticResponse();
     (new ActionHandler($app))->handleAction($post, $response, $actionId);
 
@@ -184,7 +193,7 @@ function openStream(Via $app, string $contextId, array $signals): SeedStream {
     $connect = new FakeActionRequest('unused', []);
     $connect->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
     $connect->get = ['datastar' => (string) json_encode(['via_ctx' => $contextId] + $signals)];
-    $connect->cookie = ['via_session_id' => 'a11ce000a11ce000a11ce000a11ce000'];
+    $connect->cookie = ['via_session_id' => REVIVE_COOKIE];
     $stream = new SeedStream();
 
     Coroutine::create(static function () use ($app, $connect, $stream, $contextId): void {

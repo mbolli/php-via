@@ -62,6 +62,26 @@ $app->mount(Dashboard::class, '/dashboard')
 $app->middleware(new CorsMiddleware([...]));
     {% endverbatim %}{% endcode %}
 
+    <h3 id="via-regenerate-session"><code>regenerateSession(ServerRequestInterface $request): void</code></h3>
+    <p>
+        <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the response to
+        <code>$request</code> sets a new session cookie. Middleware on a page calls it before
+        <code>$handler-&gt;handle()</code>, which sends the page; afterwards it throws a <code>LogicException</code>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->route('POST', '/login', new class($app) implements RequestHandlerInterface {
+    public function __construct(private Via $app) {}
+
+    public function handle(ServerRequestInterface $request): ResponseInterface {
+        // ...check the credentials...
+        $this->app->regenerateSession($request);
+        $this->app->setSessionData($request->getAttribute('via.session'), 'user', $user);
+
+        return new Response(303, ['Location' => '/dashboard']);
+    }
+});
+    {% endverbatim %}{% endcode %}
+
     <h3 id="via-broadcast"><code>broadcast(string $scope): void</code></h3>
     <p>Push updates to all contexts in a scope. Use after modifying global state outside an action. A bare
     <code>Scope::ROUTE</code> reaches every context on every route, like <code>Scope::GLOBAL</code>; pass
@@ -469,7 +489,7 @@ $c->getNamespace();       // component namespace, or null
     <h3 id="context-session-data"><code>sessionData(string $key, mixed $default = null): mixed</code></h3>
     <h3 id="context-set-session-data"><code>setSessionData(string $key, mixed $value): void</code></h3>
     <h3 id="context-clear-session-data"><code>clearSessionData(?string $key = null): void</code></h3>
-    <p>Per-session server-side storage, keyed on the session cookie. Survives page refreshes and context destruction, unlike signals, which reset on refresh.</p>
+    <p>Per-session server-side storage, keyed on the session id. Survives page refreshes, context destruction and <code>regenerateSession()</code>, unlike signals, which reset on refresh.</p>
     <p>
         With <code>worker_num &gt; 1</code> session data lives in shared memory, so every worker sees it.
         Values are serialized there: they must be serializable (<code>setSessionData()</code> throws
@@ -486,6 +506,36 @@ $auth = $c->sessionData('auth');       // returns the array or null
 
 $c->clearSessionData('auth');          // clear one key
 $c->clearSessionData();                // clear entire session bucket
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="context-regenerate-session"><code>regenerateSession(): void</code></h3>
+    <p>
+        Gives the session a new cookie with the response to the current action or page load. Call it at login, so a
+        cookie someone planted or read before no longer reaches the session, and at logout with
+        <code>clearSessionData()</code>. The session keeps its id, its data, its SESSION signals and its other tabs.
+    </p>
+    <p>
+        The old cookie keeps working for 10 seconds, for the requests other tabs sent before the browser had the new
+        one, and then starts a new session. Called outside an action or a page handler, the rotation waits for the
+        tab's next action. Middleware and <code>route()</code> handlers use
+        <a href="#via-regenerate-session"><code>$app-&gt;regenerateSession($request)</code></a>.
+    </p>
+    <p>
+        The record of retired cookies lives in memory, one per server. After a restart the first cookie of a
+        rotated session names that session id again, and its current cookie names a new one. Session data is gone
+        after a restart anyway; data you keep elsewhere belongs under the user's id, not under
+        <code>getSessionId()</code>. Behind a load balancer, route by the balancer's own cookie, as the
+        <a href="/docs/deployment#independent-processes">deployment guide</a> does, since the session cookie changes.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->action(function (Context $c) use ($email, $password, $users): void {
+    $user = $users->check($email->string(), $password->string());
+    if ($user === null) {
+        return;
+    }
+    $c->regenerateSession();
+    $c->setSessionData('user', $user->id);
+}, 'login');
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-input"><code>input(string $name, mixed $default = null): mixed</code></h3>

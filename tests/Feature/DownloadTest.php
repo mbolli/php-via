@@ -7,6 +7,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Core\SessionManager;
 use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine\Http\Client;
@@ -82,8 +83,11 @@ final class DownloadResponse extends Response {
     }
 }
 
+/**
+ * A page of the session whose cookie is $session.
+ */
 function downloadPage(Via $via, string $session = DOWNLOAD_SESSION): Context {
-    $page = new Context('/export_/' . bin2hex(random_bytes(6)), '/export', $via, null, $session);
+    $page = new Context('/export_/' . bin2hex(random_bytes(6)), '/export', $via, null, SessionTokens::key($session));
     $via->contexts[$page->getId()] = $page;
     $via->getApp()->registerContext($page);
 

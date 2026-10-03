@@ -11,6 +11,7 @@ use Mbolli\PhpVia\Broker\ServerAwareBroker;
 use Mbolli\PhpVia\Composition\ClassMetadata;
 use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Core\Application;
+use Mbolli\PhpVia\Core\RequestSession;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
 use Mbolli\PhpVia\Core\Settings;
@@ -32,6 +33,7 @@ use Mbolli\PhpVia\Rendering\ViewRenderer;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ReadEpochs;
 use Mbolli\PhpVia\State\ScopeRegistry;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\State\SharedClientRegistry;
 use Mbolli\PhpVia\State\SharedContextDirectory;
 use Mbolli\PhpVia\State\SharedSessionStore;
@@ -58,6 +60,7 @@ use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Twig\Environment;
@@ -343,7 +346,11 @@ class Via {
             $this->actionRegistry
         );
         $this->router = new Router();
-        $this->sessionManager = new SessionManager($this->logger);
+        // Four rows per session that can hold data: its first cookie, its current one and retired ones in their grace period.
+        $this->sessionManager = new SessionManager($this->logger, new SessionTokens(
+            4 * ($this->settings->workerNum > 1 ? $this->settings->sessionTableRows : max($this->settings->sessionTableRows, Application::MAX_SESSIONS)),
+            fn (string $key): bool => $this->app->hasSessionData($key),
+        ));
 
         // Initialize HTTP handlers
         $this->staticBrotli = new StaticBrotli($this->settings, $this->log(...));
@@ -536,14 +543,38 @@ class Via {
     }
 
     /**
+     * Give the visitor of $request a new session cookie with the response, for a login handled in middleware or
+     * a route() handler. The session keeps its id, its data and its tabs; the old cookie keeps working for
+     * 10 seconds, for requests the browser sent before the new one arrived, and then starts a new session.
+     * See Context::regenerateSession() for an action or a page handler.
+     *
+     * Middleware on a page calls it before $handler->handle(), which sends the page.
+     *
+     * @param ServerRequestInterface $request a request php-via handed to middleware or a route() handler
+     *
+     * @throws \LogicException when the request did not come from php-via, or its response went out already
+     */
+    public function regenerateSession(ServerRequestInterface $request): void {
+        $session = $request->getAttribute(RequestSession::class);
+        if (!$session instanceof RequestSession) {
+            throw new \LogicException('regenerateSession() needs the request php-via passed to the middleware or route() handler, or one made from it with withAttribute() and the like.');
+        }
+        if ($session->written) {
+            throw new \LogicException('regenerateSession() came after the response of this request went out. In middleware on a page, call it before $handler->handle().');
+        }
+
+        $session->rotate = true;
+    }
+
+    /**
      * Register global middleware applied to all page and action requests.
      *
      * Middleware implementing SseAwareMiddleware will additionally run on SSE
      * handshake requests.
      *
      * The request carries the visitor's session id in the 'via.session' attribute, for
-     * getSessionData() and the like. A request without the session cookie gets a new id,
-     * which a page then sets as the cookie.
+     * getSessionData() and the like. A request without the session cookie gets a new session,
+     * whose cookie a page then sets.
      *
      * WARNING: Middleware instances are long-lived in Swoole: they persist across
      * all requests in the worker process. Do NOT store per-request state on
@@ -637,10 +668,11 @@ class Via {
      * and its response goes out without the body; list OPTIONS for a CORS preflight. '*' takes every
      * method the path has no route of its own for, for a handler that answers each one itself, such as
      * 404 while it is switched off. php-via checks no Origin header here, as for pages: add CSRF or auth
-     * middleware where a route changes state. The response sets no session cookie. Plain routes go before
-     * pages, so a page on the same path answers the other methods; on a path with no page, the other
-     * methods get 405. A throw from the handler, a middleware or the response body answers 500, or closes
-     * the connection once the body has started, is logged and reaches onError() as ErrorPhase::Route.
+     * middleware where a route changes state. The response sets no session cookie unless the handler or a
+     * middleware calls regenerateSession(). Plain routes go before pages, so a page on the same path answers
+     * the other methods; on a path with no page, the other methods get 405. A throw from the handler, a
+     * middleware or the response body answers 500, or closes the connection once the body has started, is
+     * logged and reaches onError() as ErrorPhase::Route.
      *
      * ```php
      * $app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
@@ -1144,6 +1176,9 @@ class Via {
                     $this->settings->sessionTableRows,
                     $this->settings->sessionTableValueBytes,
                 ));
+
+                // And its cookie has to name the same session there after a rotation.
+                $this->sessionManager->tokens()->share();
             }
 
             // SwooleBroker receive path: decode inter-worker pipe messages and apply
@@ -1713,7 +1748,7 @@ class Via {
     }
 
     /**
-     * Get or create session ID from request cookies.
+     * The session id of a request: the key of the session its cookie names, or of a new session.
      *
      * @internal Used by HTTP handlers
      */
@@ -1722,18 +1757,47 @@ class Via {
     }
 
     /**
-     * Set session cookie in response.
+     * The session of a request, for the attribute middleware gets.
      *
      * @internal Used by HTTP handlers
      */
-    public function setSessionCookie(Response $response, string $sessionId): void {
-        $this->sessionManager->setSessionCookie(
-            $response,
-            $sessionId,
-            $this->settings->secureCookie,
-            $this->settings->sessionCookieSameSite,
-            $this->settings->sessionCookiePartitioned,
-        );
+    public function getRequestSession(Request $request): RequestSession {
+        return $this->sessionManager->resolve($request, $this->settings->secureCookie);
+    }
+
+    /**
+     * Set the session cookie the response to $request needs: a new one when the session rotates, and on a page
+     * load ($refresh) the cookie of a new session or the request's own for a fresh expiry.
+     *
+     * @param bool $rotate a new cookie, as Context::regenerateSession() asks; Via::regenerateSession() asks on the request
+     *
+     * @internal Used by HTTP handlers
+     */
+    public function writeSessionCookie(Request $request, Response $response, bool $rotate = false, bool $refresh = false): void {
+        try {
+            $token = $this->sessionManager->cookieFor($request, $this->settings->secureCookie, $rotate, $refresh);
+        } catch (\OverflowException $e) {
+            $this->log('error', 'Session rotation failed: ' . $e->getMessage());
+
+            return;
+        }
+
+        if ($token !== null) {
+            $this->sessionManager->setSessionCookie(
+                $response,
+                $token,
+                $this->settings->secureCookie,
+                $this->settings->sessionCookieSameSite,
+                $this->settings->sessionCookiePartitioned,
+            );
+        }
+    }
+
+    /**
+     * @internal used by Context::regenerateSession() and tests
+     */
+    public function getSessionManager(): SessionManager {
+        return $this->sessionManager;
     }
 
     /**

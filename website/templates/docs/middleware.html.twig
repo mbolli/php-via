@@ -69,7 +69,7 @@ class AuthMiddleware implements MiddlewareInterface
         ServerRequestInterface $request,
         RequestHandlerInterface $handler
     ): ResponseInterface {
-        $sessionId = $this->extractSessionId($request);
+        $sessionId = $request->getAttribute('via.session');
 
         if (!$this->isAuthenticated($sessionId)) {
             // Short-circuit: return 302 redirect to login
@@ -167,6 +167,16 @@ $config = (new Config())
 $config = (new Config())
     ->withSecureCookie(true);       // __Host-via_session_id; Secure; SameSite=Lax
     {% endverbatim %}{% endcode %}
+
+    <h3 id="session-rotation">Session rotation</h3>
+    <p>
+        A login should give the session a new cookie, so a cookie someone planted or read before it no longer
+        reaches the account. In an action, call <code>$c-&gt;regenerateSession()</code>; in middleware or a
+        <code>route()</code> handler, <code>$app-&gt;regenerateSession($request)</code>, before
+        <code>$handler-&gt;handle()</code> on a page. The session keeps its id, so <code>via.session</code>,
+        session data and the tabs of the session stay as they are, and the old cookie works for 10 more seconds.
+        See <a href="/docs/api#context-regenerate-session">regenerateSession()</a>.
+    </p>
 
     <h3 id="rate-limiting">Action rate limiting</h3>
     <p>

@@ -7,6 +7,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Core\SessionManager;
 use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Http\RequestHandler;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Via;
@@ -161,7 +162,7 @@ describe('Via::route()', function (): void {
 
         $request = $handler->requests[0];
         expect($request->getAttribute('id'))->toBe('7')
-            ->and($request->getAttribute('via.session'))->toBe(PLAIN_ROUTE_SESSION)
+            ->and($request->getAttribute('via.session'))->toBe(SessionTokens::key(PLAIN_ROUTE_SESSION))
             ->and($request->getAttribute('via.request_type'))->toBe('route')
             ->and($request->getQueryParams())->toBe(['full' => '1'])
         ;

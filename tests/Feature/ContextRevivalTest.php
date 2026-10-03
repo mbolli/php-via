@@ -7,10 +7,19 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Http\Response;
 use Tests\Support\FakeActionRequest;
 use Tests\Support\FakeStaticResponse;
+
+/** The session cookie of the tab these cases revive. */
+const REVIVE_COOKIE = 'a11ce000a11ce000a11ce000a11ce000';
+
+/** The session that cookie names. */
+function reviveOwner(): string {
+    return SessionTokens::key(REVIVE_COOKIE);
+}
 
 /*
  * Context Revival (end-to-end, in-process)
@@ -97,7 +106,7 @@ describe('Deterministic (revival-stable) action IDs', function (): void {
 describe('Context revival', function (): void {
     test('a returning tab revives to the same view with seeded state and a working button', function (): void {
         [$app, $handler] = reviveCounterApp();
-        $sessionId = 'a11ce000a11ce000a11ce000a11ce000';
+        $sessionId = reviveOwner();
         $contextId = '/counter_/init1';
 
         // Initial load.
@@ -136,13 +145,13 @@ describe('Context revival', function (): void {
         $app->page('/counter', $handler);
         $contextId = '/counter_/owned';
 
-        $ctx = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        $ctx = reviveMintContext($app, $handler, $contextId, reviveOwner());
         $signalId = $ctx->getSignal('count')->id();
         $ctx->getSignal('count')->setValue(42);
         $app->getApp()->destroyContext($contextId);
         unset($app->contexts[$contextId]);
 
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', [$signalId => 42]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), [$signalId => 42]);
 
         expect($revived)->not->toBeNull()
             ->and($revived->getSignal('count')->int())->toBe(0)
@@ -161,11 +170,11 @@ describe('Context revival', function (): void {
         $app->page('/counter', $handler);
         $contextId = '/counter_/component';
 
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        reviveMintContext($app, $handler, $contextId, reviveOwner());
         $app->getApp()->destroyContext($contextId);
         unset($app->contexts[$contextId]);
 
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['search_q____n' => 'typed']);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['search_q____n' => 'typed']);
         $component = array_values($revived->getComponentManager()->getComponents())[0];
 
         expect($component->getSignal('q')->id())->toBe('search_q____n')
@@ -177,7 +186,7 @@ describe('Context revival', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/init2';
 
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        reviveMintContext($app, $handler, $contextId, reviveOwner());
         $app->getApp()->destroyContext($contextId);
         unset($app->contexts[$contextId]);
 
@@ -188,17 +197,17 @@ describe('Context revival', function (): void {
         [$app, $handler] = reviveCounterApp((new Config())->withContextTimeouts(revivalWindowMs: 0));
         $contextId = '/counter_/init3';
 
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        reviveMintContext($app, $handler, $contextId, reviveOwner());
         $app->getApp()->destroyContext($contextId); // window 0 → no snapshot recorded
         unset($app->contexts[$contextId]);
 
-        expect($app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', []))->toBeNull();
+        expect($app->reviveContextFromClient($contextId, reviveOwner(), []))->toBeNull();
     });
 
     test('an unknown / never-recorded context ID cannot be revived', function (): void {
         [$app] = reviveCounterApp();
 
-        expect($app->reviveContextFromClient('/counter_/never', 'a11ce000a11ce000a11ce000a11ce000', []))->toBeNull();
+        expect($app->reviveContextFromClient('/counter_/never', reviveOwner(), []))->toBeNull();
     });
 });
 
@@ -220,7 +229,7 @@ function reviveConnect(Via $app, string $contextId, array $signals): string {
     $connect = new FakeActionRequest('unused', []);
     $connect->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
     $connect->get = ['datastar' => (string) json_encode(['via_ctx' => $contextId] + $signals)];
-    $connect->cookie = ['via_session_id' => 'a11ce000a11ce000a11ce000a11ce000'];
+    $connect->cookie = ['via_session_id' => REVIVE_COOKIE];
     $stream = new class extends Response {
         public string $written = '';
         private int $polls = 0;
@@ -276,10 +285,10 @@ describe('Revival from an action without signals', function (): void {
     test('a revival from via_ctx alone waits for a seed and holds the default', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/slim1';
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000')->getSignal('count')->setValue(42);
+        reviveMintContext($app, $handler, $contextId, reviveOwner())->getSignal('count')->setValue(42);
         reviveDropContext($app, $contextId);
 
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
 
         expect($revived->isAwaitingSeed())->toBeTrue()
             ->and($revived->getSignal('count')->int())->toBe(0)
@@ -289,9 +298,9 @@ describe('Revival from an action without signals', function (): void {
     test('a context waiting for a seed queues no sync, but an element patch still goes out', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/slim2';
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        reviveMintContext($app, $handler, $contextId, reviveOwner());
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
 
         $revived->sync();
         $revived->syncSignals();
@@ -304,9 +313,9 @@ describe('Revival from an action without signals', function (): void {
     test('the SSE connect seeds the waiting context and the next sync sends the client value', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/slim3';
-        $signalId = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000')->getSignal('count')->id();
+        $signalId = reviveMintContext($app, $handler, $contextId, reviveOwner())->getSignal('count')->id();
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
 
         $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 42]);
 
@@ -333,11 +342,11 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim4';
-        $ctx = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        $ctx = reviveMintContext($app, $handler, $contextId, reviveOwner());
         $countId = $ctx->getSignal('count')->id();
         $labelId = $ctx->getSignal('label')->id();
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
 
         // The slim POST that revived it: ActionHandler injects its body, then runs the action.
         $revived->injectSignals(['via_ctx' => $contextId]);
@@ -355,10 +364,10 @@ describe('Revival from an action without signals', function (): void {
     test('a revival with client signals does not wait and ignores the connect', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/slim5';
-        $signalId = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000')->getSignal('count')->id();
+        $signalId = reviveMintContext($app, $handler, $contextId, reviveOwner())->getSignal('count')->id();
         reviveDropContext($app, $contextId);
 
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId, $signalId => 42]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId, $signalId => 42]);
         expect($revived->isAwaitingSeed())->toBeFalse();
 
         $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 7]);
@@ -368,9 +377,9 @@ describe('Revival from an action without signals', function (): void {
     test('an action that posts a signal besides via_ctx ends the wait', function (): void {
         [$app, $handler] = reviveCounterApp();
         $contextId = '/counter_/slim6';
-        $signalId = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000')->getSignal('count')->id();
+        $signalId = reviveMintContext($app, $handler, $contextId, reviveOwner())->getSignal('count')->id();
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
 
         $revived->injectSignals(['via_ctx' => $contextId, $signalId => 5]);
         expect($revived->isAwaitingSeed())->toBeFalse();
@@ -387,9 +396,9 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim7';
-        $signalId = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000')->getSignal('count')->id();
+        $signalId = reviveMintContext($app, $handler, $contextId, reviveOwner())->getSignal('count')->id();
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
 
         $app->seedFromConnect($revived, ['via_ctx' => $contextId, $signalId => 42]);
 
@@ -409,9 +418,9 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim8';
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        reviveMintContext($app, $handler, $contextId, reviveOwner());
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
         $component = array_values($revived->getComponentManager()->getComponents())[0];
 
         $component->sync();
@@ -430,11 +439,11 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim9';
-        $signalId = reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000')->getSignal('count')->id();
+        $signalId = reviveMintContext($app, $handler, $contextId, reviveOwner())->getSignal('count')->id();
         reviveDropContext($app, $contextId);
 
         $post = new FakeActionRequest('window', ['via_ctx' => $contextId]);
-        $post->cookie = ['via_session_id' => 'a11ce000a11ce000a11ce000a11ce000'];
+        $post->cookie = ['via_session_id' => REVIVE_COOKIE];
         $posted = new FakeStaticResponse();
         (new ActionHandler($app))->handleAction($post, $posted, 'window');
         $revived = $app->contexts[$contextId];
@@ -461,7 +470,7 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim10';
-        reviveLogOutput(fn () => reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000'));
+        reviveLogOutput(fn () => reviveMintContext($app, $handler, $contextId, reviveOwner()));
         reviveDropContext($app, $contextId);
 
         $written = '';
@@ -484,12 +493,12 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim11';
-        reviveLogOutput(fn () => reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000'));
+        reviveLogOutput(fn () => reviveMintContext($app, $handler, $contextId, reviveOwner()));
         reviveDropContext($app, $contextId);
 
         $revived = null;
         $log = reviveLogOutput(function () use ($app, $contextId, &$revived): void {
-            $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+            $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
         });
         $revived->sync();
 
@@ -514,9 +523,9 @@ describe('Revival from an action without signals', function (): void {
         };
         $app->page('/counter', $handler);
         $contextId = '/counter_/slim12';
-        reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');
+        reviveMintContext($app, $handler, $contextId, reviveOwner());
         reviveDropContext($app, $contextId);
-        $revived = $app->reviveContextFromClient($contextId, 'a11ce000a11ce000a11ce000a11ce000', ['via_ctx' => $contextId]);
+        $revived = $app->reviveContextFromClient($contextId, reviveOwner(), ['via_ctx' => $contextId]);
         [$first, $second] = array_values($revived->getComponentManager()->getComponents());
 
         $first->getSignal('b_c')->setValue('action');

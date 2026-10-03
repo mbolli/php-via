@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Core;
 
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Support\Logger;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
@@ -11,22 +12,32 @@ use OpenSwoole\Http\Response;
 /**
  * SessionManager - Session and cookie handling.
  *
- * Manages:
- * - Session ID generation
- * - Cookie handling
- * - Session-to-context mapping
+ * The session cookie is a secret token; the session id php-via hands to apps, scopes and ownership
+ * checks is a key derived from it, which regenerateSession() keeps while it replaces the cookie.
  */
 class SessionManager {
     public const string SESSION_COOKIE_NAME = 'via_session_id';
     public const string SESSION_COOKIE_NAME_SECURE = '__Host-via_session_id';
 
-    /** @var \WeakMap<Request, string> The id issued to each request without a valid cookie */
-    private \WeakMap $issued;
+    /** @var \WeakMap<Request, RequestSession> */
+    private \WeakMap $sessions;
 
     public function __construct(
         private Logger $logger,
+        private SessionTokens $tokens,
     ) {
-        $this->issued = new \WeakMap();
+        $this->sessions = new \WeakMap();
+    }
+
+    public function tokens(): SessionTokens {
+        return $this->tokens;
+    }
+
+    /**
+     * @internal for tests that need a clock or a grace period of their own
+     */
+    public function useTokens(SessionTokens $tokens): void {
+        $this->tokens = $tokens;
     }
 
     /**
@@ -79,26 +90,76 @@ class SessionManager {
     }
 
     /**
-     * Get or create session ID from request cookies.
-     *
-     * Only an id in the form this class issues is taken; anything else starts a new session. With secure
-     * cookies only the __Host- cookie counts: a sibling subdomain or a plain-HTTP response can set the plain one.
-     * A request without a valid cookie gets the same new id on every call, so the 'via.session' attribute
-     * middleware reads is the id the page then sets.
+     * The session id of a request: the key of the session its cookie belongs to, or of a new session.
      */
     public function getOrCreateSessionId(Request $request, bool $secure = false): string {
-        $cookies = $request->cookie ?? [];
-        $sessionId = $cookies[$secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME] ?? null;
-
-        if (\is_string($sessionId) && self::isValidSessionId($sessionId)) {
-            return $sessionId;
-        }
-
-        return $this->issued[$request] ??= bin2hex(random_bytes(16));
+        return $this->resolve($request, $secure)->key;
     }
 
     /**
-     * Whether $sessionId has the form of an id this class issues: 32 lowercase hex characters.
+     * The session of a request, the same object on every call.
+     *
+     * Only a cookie in the form this class issues is taken, and not one a rotation retired past its grace
+     * period; anything else starts a new session. With secure cookies only the __Host- cookie counts: a
+     * sibling subdomain or a plain-HTTP response can set the plain one. A request without a valid cookie
+     * gets the same new session on every call, so the 'via.session' attribute middleware reads is the
+     * session the page then sets.
+     */
+    public function resolve(Request $request, bool $secure = false): RequestSession {
+        if (isset($this->sessions[$request])) {
+            return $this->sessions[$request];
+        }
+
+        $cookies = $request->cookie ?? [];
+        $token = $cookies[$secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME] ?? null;
+        if (\is_string($token) && self::isValidSessionId($token)) {
+            [$key, $state] = $this->tokens->lookup($token);
+            if ($state !== SessionTokens::RETIRED) {
+                return $this->sessions[$request] = new RequestSession($key, $token, $state);
+            }
+        }
+
+        $token = bin2hex(random_bytes(16));
+
+        return $this->sessions[$request] = new RequestSession(SessionTokens::key($token), $token, RequestSession::NEW);
+    }
+
+    /**
+     * The cookie value the response to $request sets, decided once per request: a new cookie when the
+     * session rotates, the cookie of a new session, and on page loads ($refresh) the request's cookie
+     * again for a fresh Max-Age. A cookie a rotation retired is never set again, so a page that loads
+     * with it during the grace period leaves the browser the new one.
+     *
+     * @param bool $rotate a new cookie for the session, as Context::regenerateSession() asks
+     *
+     * @throws \OverflowException when the session should rotate and the rotation table is full
+     */
+    public function cookieFor(Request $request, bool $secure, bool $rotate, bool $refresh): ?string {
+        $session = $this->resolve($request, $secure);
+        if ($session->written) {
+            return null;
+        }
+        $rotate = $rotate || $session->rotate;
+        if (!$rotate && !$refresh) {
+            return null;
+        }
+        $session->written = true;
+
+        if ($session->state === RequestSession::NEW) {
+            return $session->token;
+        }
+        if ($rotate) {
+            return $this->tokens->rotate($session->token);
+        }
+
+        // Looked up again: another tab's request may have rotated the cookie while this one ran.
+        $state = $this->tokens->lookup($session->token)[1];
+
+        return $state === SessionTokens::FRESH || $state === SessionTokens::CURRENT ? $session->token : null;
+    }
+
+    /**
+     * Whether a cookie value has the form this class issues: 32 lowercase hex characters.
      */
     public static function isValidSessionId(string $sessionId): bool {
         return \strlen($sessionId) === 32 && strspn($sessionId, '0123456789abcdef') === 32;

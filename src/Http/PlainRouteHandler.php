@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\Core\RequestSession;
 use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
 use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
@@ -72,7 +73,8 @@ final class PlainRouteHandler {
      * @return int the status sent, 500 for a response body that throws
      */
     public function serve(Request $request, Response $response, RequestHandlerInterface $handler, RouteDefinition $definition, array $params): int {
-        $psrRequest = $this->requestFactory->create($request, 'route')->withAttribute('via.session', $this->via->getSessionId($request));
+        $session = $this->via->getRequestSession($request);
+        $psrRequest = $this->requestFactory->create($request, 'route')->withAttribute('via.session', $session->key)->withAttribute(RequestSession::class, $session);
         $head = $psrRequest->getMethod() === 'HEAD';
         $byMethod = $this->via->getPlainRoutes()[$definition->getRoute()] ?? [];
         if ($head && !isset($byMethod['HEAD']) && isset($byMethod['GET'])) {
@@ -88,6 +90,8 @@ final class PlainRouteHandler {
         } catch (\Throwable $e) {
             return $this->fail($response, $definition, $e, 'Route handler exception on ');
         }
+
+        $this->via->writeSessionCookie($request, $response);
 
         try {
             $this->responseEmitter->emit($psrResponse, $response, withoutBody: $head);

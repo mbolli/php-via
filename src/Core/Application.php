@@ -32,7 +32,7 @@ class Application {
      * Maximum number of distinct session buckets kept in memory.
      * When this limit is reached the least-recently-used sessions are evicted.
      */
-    private const int MAX_SESSIONS = 10_000;
+    public const int MAX_SESSIONS = 10_000;
 
     /**
      * Maximum number of revival records kept in memory. Each is a few strings for a
@@ -515,7 +515,7 @@ class Application {
      * It is shared across all browser tabs that belong to the same session, and across
      * workers when worker_num > 1.
      *
-     * @param string $sessionId Session cookie ID
+     * @param string $sessionId Session id from $c->getSessionId()
      * @param string $key       Data key
      * @param mixed  $default   Value returned if key is not set
      */
@@ -527,6 +527,13 @@ class Application {
         $this->sessionLastAccess[$sessionId] = time();
 
         return $this->sessionData[$sessionId][$key] ?? $default;
+    }
+
+    /**
+     * Whether a session holds any session data.
+     */
+    public function hasSessionData(string $sessionId): bool {
+        return $this->sessionStore !== null ? $this->sessionStore->has($sessionId) : ($this->sessionData[$sessionId] ?? []) !== [];
     }
 
     /**
@@ -553,7 +560,7 @@ class Application {
     /**
      * Clear one key or all data for a session.
      *
-     * @param string      $sessionId Session cookie ID
+     * @param string      $sessionId Session id from $c->getSessionId()
      * @param null|string $key       Key to remove, or null to clear the entire session bucket
      *
      * @throws \RuntimeException with worker_num > 1, if the session's lock is not taken within about
