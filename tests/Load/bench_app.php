@@ -87,7 +87,7 @@ $app->page('/bench/counter', function (Context $c) use ($useRouteScope): void {
         $c->scope(Scope::ROUTE);
     }
 
-    $count = $c->signal(0, 'count');
+    $count = $c->signal(0, 'count', $useRouteScope ? Scope::ROUTE : Scope::TAB);
 
     $action = $c->action(function (Context $ctx): void {
         // increment(), not setValue($sig->int() + 1): the latter is a read-modify-write, so with
@@ -118,7 +118,7 @@ $app->page('/bench/cpu', function (Context $c) use ($useRouteScope): void {
         $c->scope(Scope::ROUTE);
     }
 
-    $count = $c->signal(0, 'count');
+    $count = $c->signal(0, 'count', $useRouteScope ? Scope::ROUTE : Scope::TAB);
 
     $action = $c->action(function (Context $ctx): void {
         $sum = 0;
@@ -162,7 +162,7 @@ $app->page('/bench/io', function (Context $c) use ($useRouteScope): void {
         $c->scope(Scope::ROUTE);
     }
 
-    $count = $c->signal(0, 'count');
+    $count = $c->signal(0, 'count', $useRouteScope ? Scope::ROUTE : Scope::TAB);
 
     $action = $c->action(function (Context $ctx): void {
         usleep(2_000); // 2 ms simulated IO — SWOOLE_HOOK_ALL makes this coroutine-safe
@@ -233,7 +233,7 @@ $app->page('/bench/spreadsheet', function (Context $c) use ($useRouteScope, $ben
         $c->scope(Scope::ROUTE);
     }
 
-    $c->signal(0, 'count');
+    $c->signal(0, 'count', $useRouteScope ? Scope::ROUTE : Scope::TAB);
     $c->signal(0, 'viewRow', Scope::TAB);
     $c->signal(0, 'viewCol', Scope::TAB);
     $c->signal(0, 'focusRow', Scope::TAB);
