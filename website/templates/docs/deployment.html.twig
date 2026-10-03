@@ -311,7 +311,7 @@ opcache.jit_buffer_size=32M
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Via;
 
-$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
+$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
     {% endverbatim %}{% endcode %}
     <p>
         It suits an app that runs no shell commands, holds no file lock across a suspension and reads only

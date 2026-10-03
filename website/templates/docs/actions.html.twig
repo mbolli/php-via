@@ -127,7 +127,7 @@ $reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->syn
         combine with <a href="/docs/lifecycle">lifecycle hooks</a>:
     </p>
     {% code 'php' %}{% verbatim %}
-$c->onDisconnect(function (Context $c) use ($room, $app): void {
+$c->onCleanup(function (Context $c) use ($room, $app): void {
     Room::$members[$room]--;
     $app->broadcast('room:' . $room);
 });

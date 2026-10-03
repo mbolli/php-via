@@ -126,7 +126,7 @@ $roomComponent = function (Context $c) use ($room, $app): void {
     $c->addScope('room:' . $room);
     // ... signals, view ...
 
-    $c->onDisconnect(function (Context $c) use ($room, $app): void {
+    $c->onCleanup(function (Context $c) use ($room, $app): void {
         Room::$members[$room]--;
         $app->broadcast('room:' . $room);
     });

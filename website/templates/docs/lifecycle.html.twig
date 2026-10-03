@@ -26,7 +26,7 @@
         immediately with no reconnect grace period:
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withContextCleanupDelay(60_000); // 60 seconds
+$config->withContextTimeouts(cleanupDelayMs: 60_000); // 60 seconds
 {% endverbatim %}{% endcode %}
     <h3 id="without-stream">Contexts without a stream</h3>
     <p>
@@ -45,7 +45,7 @@ $config->withContextCleanupDelay(60_000); // 60 seconds
         the stream comes back. If you raise <code>retryMaxWait</code>, raise the timeout above it:
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withContextReconnectTimeout(60_000); // default; 0 uses the connect timeout
+$config->withContextTimeouts(reconnectMs: 60_000); // default; 0 uses the connect timeout
 {% endverbatim %}{% endcode %}
     <p>
         Which timer frees a context without a stream:
@@ -125,7 +125,7 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
         window, or disable revival entirely (falling back to a reload on reconnect), with:
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withContextRevivalWindow(600_000); // 10 minutes (default); pass 0 to disable
+$config->withContextTimeouts(revivalWindowMs: 600_000); // 10 minutes (default); pass 0 to disable
 {% endverbatim %}{% endcode %}
 
     <h2 id="on-client-connect">onClientConnect (app-level)</h2>
@@ -160,14 +160,9 @@ $app->onClientDisconnect(function (Context $c) use ($app): void {
         specific to that user's session:
     </p>
     {% code 'php' %}{% verbatim %}
-$c->onDisconnect(function (Context $c) use ($room, $app): void {
+$c->onCleanup(function (Context $c) use ($room, $app): void {
     unset(Room::$members[$room][$c->getId()]);
     $app->broadcast('room:' . $room);
-});
-
-// onCleanup() is an alias:
-$c->onCleanup(function (Context $c): void {
-    // same thing
 });
 {% endverbatim %}{% endcode %}
 
@@ -210,7 +205,7 @@ $app->setInterval(function () use ($app): void {
     <ul>
         <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to multiple clients</li>
         <li><a href="/docs/components">Components</a>: component-level lifecycle hooks</li>
-        <li><a href="/docs/api#context-on-disconnect">API: onDisconnect()</a>: method signature</li>
+        <li><a href="/docs/api#context-on-cleanup">API: onCleanup()</a>: method signature</li>
         <li><a href="/docs/api#via-on-client-connect">API: onClientConnect()</a>: app-level hook signature</li>
     </ul>
 </article>

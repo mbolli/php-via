@@ -83,7 +83,7 @@ $app->middleware(/* ... */);
 $app->group('/docs', function (Via $app): void { /* ... */ });
 
 // Defer example route registration to worker startup
-$app->onStart(function () use ($app): void {
+$app->onWorkerStart(function () use ($app): void {
     require __DIR__ . '/routes.php';   // ← loaded fresh per worker
 });
 

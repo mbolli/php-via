@@ -118,8 +118,8 @@ $app->incrementGlobalState('visits');
 $app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?? [], $msg], -50));
     {% endverbatim %}{% endcode %}
 
-    <h3 id="via-on-start"><code>onStart(callable $callback): void</code></h3>
-    <h3 id="via-on-shutdown"><code>onShutdown(callable $callback): void</code></h3>
+    <h3 id="via-on-start"><code>onWorkerStart(callable $callback): void</code></h3>
+    <h3 id="via-on-shutdown"><code>onWorkerStop(callable $callback): void</code></h3>
     <p>Server lifecycle hooks. Use <code>onStart</code> to create timers; <code>onShutdown</code> to clear them.
     <code>onStart</code> callbacks run once in each worker process as it starts, so with <code>worker_num &gt; 1</code>
     a timer created there fires in every worker. Use <a href="#via-set-interval"><code>setInterval()</code></a>
@@ -143,10 +143,10 @@ $app->mutateGlobalState('messages', fn (?array $msgs) => array_slice([...$msgs ?
     </p>
     {% code 'php' %}{% verbatim %}
 $timerId = null;
-$app->onStart(function () use ($app, &$timerId): void {
+$app->onWorkerStart(function (int $workerId) use ($app, &$timerId): void {
     $timerId = Timer::tick(5000, fn() => $app->broadcast(Scope::GLOBAL));
 });
-$app->onShutdown(function () use (&$timerId): void {
+$app->onWorkerStop(function (int $workerId) use (&$timerId): void {
     if ($timerId !== null) Timer::clear($timerId);
 });
     {% endverbatim %}{% endcode %}
@@ -251,7 +251,7 @@ $app->log('debug', 'Action fired', $c);
     <h3 id="via-start"><code>start(): void</code></h3>
     <p>Start the OpenSwoole server. Call this last, after all routes are registered.</p>
 
-    <h3 id="via-hook-flags"><code>Via::defaultHookFlags(): int</code> and <code>Via::HOOK_FLAGS_NO_FILE_IO</code></h3>
+    <h3 id="via-hook-flags"><code>Via::defaultHookFlags(): int</code> and <code>Via::noFileIoHookFlags(): int</code></h3>
     <p>
         <code>defaultHookFlags()</code> returns the <code>hook_flags</code> php-via sets:
         <code>SWOOLE_HOOK_ALL</code>, without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or
@@ -261,7 +261,7 @@ $app->log('debug', 'Action fired', $c);
         <a href="/docs/deployment#hooks-narrow">Deployment → Coroutine hooks</a>.
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
+$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
     {% endverbatim %}{% endcode %}
 
     ---
@@ -429,11 +429,10 @@ $c->setInterval(function () use ($count, $c): void {
 }, 1000);
     {% endverbatim %}{% endcode %}
 
-    <h3 id="context-on-disconnect"><code>onDisconnect(callable $callback): void</code></h3>
     <h3 id="context-on-cleanup"><code>onCleanup(callable $callback): void</code></h3>
     <p>Per-context disconnect hook for cleaning up resources. <code>onCleanup</code> is an alias. See <a href="/docs/lifecycle">Lifecycle</a>.</p>
     {% code 'php' %}{% verbatim %}
-$c->onDisconnect(function (Context $c) use ($room, $app): void {
+$c->onCleanup(function (Context $c) use ($room, $app): void {
     unset(Room::$members[$room][$c->getId()]);
     $app->broadcast('room:' . $room);
 });
@@ -587,9 +586,8 @@ Scope::routeScope('/path')  // explicit: 'route:/path'
     ->withDatastarRocket()          // serve Datastar with Rocket for web components (see below)
     ->withImportMap(['charts' => '/js/charts.js'], ['/js/charts.js' => 'sha384-...'])  // import map entries, merged across calls
     ->withSseKeepAliveMs(15000)     // SSE comment on a stream silent this long; 0 = none (default 15000)
-    ->withContextConnectTimeout(30_000) // free a context whose SSE stream never connects; 0 = keep (default 30000)
-    ->withContextReconnectTimeout(60_000) // keep a tab whose stream is down this long after an action; 0 = connect timeout (default 60000)
-    ->withSwooleSettings([...])     // raw OpenSwoole server settings, e.g. ['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]
+    ->withContextTimeouts(connectMs: 30_000, reconnectMs: 60_000) // free a context whose SSE stream never connects; keep a tab whose stream is down after an action (defaults shown, see Lifecycle)
+    ->withSwooleSettings([...])     // raw OpenSwoole server settings, e.g. ['hook_flags' => Via::noFileIoHookFlags()]
     // Security
     ->withSecureCookie(true)        // __Host- prefix, Secure flag
     ->withTrustedOrigins(['https://example.com'])  // CSRF origin allowlist
