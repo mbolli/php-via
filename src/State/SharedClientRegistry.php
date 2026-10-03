@@ -65,7 +65,7 @@ final class SharedClientRegistry {
     /** @var array<string, array<string, true>> Scope => the connected context ids in it */
     private array $scopeIndex = [];
 
-    /** @var null|array{int, int} the version and the scope version was read at; null before the first read */
+    /** @var null|array{int, int} the version and the scope version the index was read at; null before the first read */
     private ?array $scopeIndexVersion = null;
 
     /** Read epoch that reuses $scopeIndex without checking the version; 0 for none. */
