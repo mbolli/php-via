@@ -25,22 +25,13 @@ putenv('VIA_TEST_MODE=');
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Via;
+use Tests\Support\FixturePort;
 
 $mode = (string) ($argv[1] ?? 'boot');
 
-// enable_reuse_port would let a second server share a busy port without an error.
-$port = 0;
-for ($i = 0; $i < 20; ++$i) {
-    $candidate = 4330 + ((getmypid() + $i) % 20);
-    $probe = @stream_socket_server("tcp://127.0.0.1:{$candidate}");
-    if ($probe !== false) {
-        fclose($probe);
-        $port = $candidate;
-
-        break;
-    }
-}
-if ($port === 0) {
+try {
+    $port = FixturePort::pick(4330, 20);
+} catch (RuntimeException $e) {
     echo "fixture_error=no_free_port\n";
 
     exit(1);

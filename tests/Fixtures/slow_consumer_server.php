@@ -16,9 +16,9 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
-// Derived from the PID rather than fixed: see client_registry_workers.php.
-$port = 3850 + (getmypid() % 140);
+$port = FixturePort::pick(3850, 140);
 $server = new Server('127.0.0.1', $port, Server::POOL_MODE);
 $server->set([
     'worker_num' => 1,

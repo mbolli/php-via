@@ -31,15 +31,14 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $workers = (int) ($argv[1] ?? 4);
 $connections = (int) ($argv[2] ?? 4);
 $probes = (int) ($argv[3] ?? 8);
 $close = (int) ($argv[4] ?? 0);
 
-// Derived from the PID rather than fixed: two runs overlapping on one port makes the second
-// fatal with "Address already in use" and the test read it as a product failure.
-$port = 3400 + (getmypid() % 150);
+$port = FixturePort::pick(3400, 150);
 $app = new Via(
     (new Config())
         ->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')->withDevMode(true)

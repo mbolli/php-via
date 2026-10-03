@@ -24,13 +24,13 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $workers = (int) ($argv[1] ?? 4);
 $actions = (int) ($argv[2] ?? 200);
 $mode = (string) ($argv[3] ?? 'increment');
 
-// Derived from the PID rather than fixed: see client_registry_workers.php.
-$port = 3550 + (getmypid() % 150);
+$port = FixturePort::pick(3550, 150);
 $app = new Via(
     (new Config())
         ->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')->withDevMode(true)

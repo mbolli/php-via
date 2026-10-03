@@ -24,6 +24,7 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $path = (string) ($argv[1] ?? '');
 $write = (string) ($argv[2] ?? '-');
@@ -36,7 +37,7 @@ $doubleTerm = ($argv[5] ?? '') === 'doubleterm';
 $app = new Via(
     (new Config())
         ->withHost('127.0.0.1')
-        ->withPort(3900 + (getmypid() % 90))
+        ->withPort(FixturePort::pick(3900, 90))
         ->withLogLevel('error')
         ->withWorkerNum($workers)
         ->withBroker($workers > 1 ? new SwooleBroker() : new InMemoryBroker())

@@ -20,6 +20,7 @@ use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $workers = (int) ($argv[1] ?? 4);
 $everyMs = (int) ($argv[2] ?? 100);
@@ -31,7 +32,7 @@ $app = new Via(
     (new Config())
         ->withLogLevel('error')
         ->withHost('127.0.0.1')
-        ->withPort(3700 + (getmypid() % 150))
+        ->withPort(FixturePort::pick(3700, 150))
         ->withWorkerNum($workers)
         ->withBroker(new SwooleBroker())
 );

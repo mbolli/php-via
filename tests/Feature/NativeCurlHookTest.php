@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Via;
+use Tests\Support\FixturePort;
 
 /*
  * OpenSwoole 26.2's native curl hook segfaults the process on a curl request to any hostname, resolvable
@@ -24,15 +25,7 @@ function curlUnderHookFlags(int $flags): array {
 
 /** Output of a Via server started with $settings, stopped by its first worker 50 ms after start. */
 function startViaOnce(?string $settings): string {
-    $port = 0;
-    for ($i = 0; $i < 30 && $port === 0; ++$i) {
-        $candidate = 4300 + ((getmypid() + $i) % 30);
-        $probe = @stream_socket_server("tcp://127.0.0.1:{$candidate}");
-        if ($probe !== false) {
-            fclose($probe);
-            $port = $candidate;
-        }
-    }
+    $port = FixturePort::pick(4300, 30);
 
     $code = 'require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';'
         . '$config = (new Mbolli\PhpVia\Config())->withHost("127.0.0.1")->withPort(' . $port . ')'

@@ -32,6 +32,7 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $workers = (int) ($argv[1] ?? 2);
 $mode = (string) ($argv[2] ?? 'TERM');
@@ -43,7 +44,7 @@ $orphanContext = (bool) ($options['orphanContext'] ?? false);
 $reloadFlag = $marker . '.reloaded';
 
 $config = (new Config())
-    ->withHost('127.0.0.1')->withPort(4000 + (getmypid() % 150))->withLogLevel('error')
+    ->withHost('127.0.0.1')->withPort(FixturePort::pick(4000, 150))->withLogLevel('error')
     ->withWorkerNum($workers)->withBroker(new SwooleBroker())
 ;
 if ($mode === 'IDLE') {

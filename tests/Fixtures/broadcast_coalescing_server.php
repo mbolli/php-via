@@ -21,12 +21,13 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $out = (string) ($argv[1] ?? sys_get_temp_dir() . '/via_coalescing_out');
 
 $app = new Via(
     (new Config())
-        ->withHost('127.0.0.1')->withPort(4200 + (getmypid() % 150))->withLogLevel('error')
+        ->withHost('127.0.0.1')->withPort(FixturePort::pick(4200, 150))->withLogLevel('error')
         ->withWorkerNum(2)->withBroker(new SwooleBroker())->withGcInterval(0)
 );
 

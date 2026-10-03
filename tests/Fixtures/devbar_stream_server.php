@@ -17,23 +17,14 @@ require dirname(__DIR__, 2) . '/vendor/autoload.php';
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
+use Tests\Support\FixturePort;
 
 $hookFlags = (int) ($argv[1] ?? Via::HOOK_FLAGS_NO_FILE_IO);
 $brotli = ($argv[2] ?? '') === 'br';
 
-// enable_reuse_port would let a second server share a busy port without an error.
-$port = 0;
-for ($i = 0; $i < 30; ++$i) {
-    $candidate = 4300 + ((getmypid() + $i) % 30);
-    $probe = @stream_socket_server("tcp://127.0.0.1:{$candidate}");
-    if ($probe !== false) {
-        fclose($probe);
-        $port = $candidate;
-
-        break;
-    }
-}
-if ($port === 0) {
+try {
+    $port = FixturePort::pick(4300, 30);
+} catch (RuntimeException $e) {
     echo "fixture_error=no_free_port\n";
 
     exit(1);

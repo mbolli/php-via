@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Via;
+use Tests\Support\FixturePort;
 
 /*
  * The Dev Bar stream polled with a bare usleep(), which yields only under SWOOLE_HOOK_SLEEP. Without
@@ -76,15 +77,7 @@ test('the Dev Bar script is sent as Brotli when withBrotli() is on and the clien
 });
 
 test('start() refuses hook_flags that break the server before it binds a socket', function (string $settings, string $broker, string $message): void {
-    $port = 0;
-    for ($i = 0; $i < 30 && $port === 0; ++$i) {
-        $candidate = 4300 + ((getmypid() + $i) % 30);
-        $probe = @stream_socket_server("tcp://127.0.0.1:{$candidate}");
-        if ($probe !== false) {
-            fclose($probe);
-            $port = $candidate;
-        }
-    }
+    $port = FixturePort::pick(4300, 30);
 
     $code = 'require ' . var_export(dirname(__DIR__, 3) . '/vendor/autoload.php', true) . ';'
         . '$config = (new Mbolli\PhpVia\Config())->withHost("127.0.0.1")->withPort(' . $port . ')->withLogLevel("error")'
