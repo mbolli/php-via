@@ -19,6 +19,7 @@ $app = new Via(
 
     <h3 id="via-page"><code>page(string $route, callable $handler): RouteDefinition</code></h3>
     <p>Register a page route. Path params use <code>{name}</code> syntax and are injected as typed arguments. Returns a <code>RouteDefinition</code> for fluent middleware registration.</p>
+    <p>A parameter matches one path segment as the browser sent it and arrives percent-decoded: <code>/users/caf%C3%A9</code> gives <code>café</code>. An encoded slash stays inside its parameter and arrives as <code>/</code>, so <code>/files/a%2Fb</code> gives <code>a/b</code>: check a parameter you build a file path from. <code>route()</code> passes its parameters the same way.</p>
     {% code 'php' %}{% verbatim %}
 $app->page('/', fn(Context $c) => $c->view('home.html.twig'));
 
