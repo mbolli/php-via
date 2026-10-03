@@ -239,7 +239,7 @@ $c->broadcast();
 $c->sync();
 ```
 
-A bare `Scope::ROUTE` passed to `broadcast()` reaches every route, like `Scope::GLOBAL`.
+A bare `Scope::ROUTE`, `Scope::SESSION` or `Scope::TAB` passed to `$app->broadcast()` throws.
 Use `Scope::routeScope('/path')` to target one route.
 
 ### 5. Components
