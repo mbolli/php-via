@@ -2231,6 +2231,25 @@ class Via {
     }
 
     /**
+     * Run the event loop until the Context::spawn() tasks have ended and the broadcasts they left for the tick
+     * or a throttle have rendered, up to $deadlineNs (hrtime).
+     *
+     * @internal for Testing\TestApp, after serveInProcess()
+     *
+     * @return bool whether they did
+     */
+    public function runTasksInProcess(int $deadlineNs): bool {
+        if (Coroutine::getCid() > 0) {
+            throw new \LogicException('Run the tasks from outside a coroutine: an app served in process runs its requests outside one.');
+        }
+
+        $busy = fn (): bool => $this->runningTasks > 0 || $this->flushScheduled || $this->dirtyScopes !== [];
+        $this->runEventLoopWhile($busy, $deadlineNs);
+
+        return !$busy();
+    }
+
+    /**
      * Resolve a running server's worker count.
      *
      * ext-openswoole 26 exposes this as `$server->setting['worker_num']` and has no
@@ -3038,18 +3057,50 @@ class Via {
     }
 
     /**
-     * Inside a coroutine, wait while $condition holds, up to $deadlineNs (hrtime) or FLUSH_WAIT_MS.
+     * Inside a coroutine, or in process (see serveInProcess()), wait while $condition holds, up to $deadlineNs
+     * (hrtime) or FLUSH_WAIT_MS.
      *
      * @param \Closure(): bool $condition
      */
     private function waitWhile(\Closure $condition, ?int $deadlineNs = null): void {
+        $deadlineNs ??= hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000;
         if (Coroutine::getCid() <= 0) {
+            if ($this->inProcess) {
+                $this->runEventLoopWhile($condition, $deadlineNs);
+            }
+
             return;
         }
 
-        $deadlineNs ??= hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000;
         while ($condition() && hrtime(true) < $deadlineNs) {
             Coroutine::usleep(1000);
+        }
+    }
+
+    /**
+     * Outside a coroutine, run the event loop while $condition holds, up to $deadlineNs (hrtime): coroutines waiting
+     * on a timer or I/O resume and timers fire, as on a server.
+     *
+     * @param \Closure(): bool $condition
+     */
+    private function runEventLoopWhile(\Closure $condition, int $deadlineNs): void {
+        $done = static fn (): bool => hrtime(true) >= $deadlineNs || !$condition();
+        if ($done()) {
+            return;
+        }
+
+        // One turn at a time: Event::exit() would leave the coroutines still waiting unable to resume.
+        // The tick ends each turn within 5 ms, also while every coroutine waits on I/O.
+        $tick = Timer::tick(5, static fn () => null);
+
+        try {
+            while (!$done()) {
+                Event::dispatch();
+            }
+        } finally {
+            if (\is_int($tick)) {
+                Timer::clear($tick);
+            }
         }
     }
 
@@ -3166,11 +3217,15 @@ class Via {
      * the callbacks and the broker go away, within half the stop budget so the callbacks keep the rest.
      */
     private function waitForStreamsAndTasks(): void {
+        $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
         if (Coroutine::getCid() <= 0) {
+            if ($this->inProcess) {
+                $this->runEventLoopWhile(fn (): bool => $this->runningTasks > 0, hrtime(true) + (int) (max(0, $maxWait - 1) / 2 * 1e9));
+            }
+
             return;
         }
 
-        $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
         $deadline = microtime(true) + max(0, $maxWait - 1) / 2;
         while (($this->runningSseStreams > 0 || $this->runningTasks > 0) && microtime(true) < $deadline) {
             Coroutine::usleep(10_000);

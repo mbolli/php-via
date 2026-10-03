@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Testing;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\PatchMode;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * A browser tab on a TestApp: one page load, its SSE stream and its actions.
@@ -126,6 +127,19 @@ final class TestTab {
         }
 
         return $this;
+    }
+
+    /**
+     * Send a plain HTTP request from this tab's browser, with its cookies, such as a fetch of a Context::download()
+     * URL or of a Via::route() behind session middleware.
+     *
+     * @param string                $path    the path, with its query string
+     * @param array<string, string> $headers by name
+     *
+     * @throws \RuntimeException when the response breaks off, as a download whose source throws midway does
+     */
+    public function request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface {
+        return $this->app->fetch($this->cookies, $method, $path, $body, $headers);
     }
 
     /**

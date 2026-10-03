@@ -24,6 +24,9 @@ final class TestResponse extends Response {
 
     public string $body = '';
 
+    /** The connection was closed before the response ended, as a download whose source throws midway closes it. */
+    public bool $closed = false;
+
     private bool $sent = false;
     private bool $ended = false;
     private bool $hungUp = false;
@@ -114,6 +117,15 @@ final class TestResponse extends Response {
             $this->write($data);
         }
         $this->sent = $this->ended = true;
+
+        return true;
+    }
+
+    public function close(): bool {
+        if ($this->ended) {
+            return false;
+        }
+        $this->closed = $this->ended = true;
 
         return true;
     }

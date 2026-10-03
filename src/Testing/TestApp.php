@@ -7,7 +7,9 @@ namespace Mbolli\PhpVia\Testing;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Via;
+use Nyholm\Psr7\Response as Psr7Response;
 use OpenSwoole\Timer;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * An app under test: php-via serving its pages in the test's process, with no server and no port.
@@ -29,15 +31,19 @@ use OpenSwoole\Timer;
  * It does not simulate:
  * - more than one worker: everything runs in one process as worker 0, without the tables that share
  *   state between workers, and no broker is connected, so leave withBroker() out of the Config
- * - real timing: a broadcast renders at once where a server renders it on the next broadcast tick, so
- *   two broadcasts in one action send two frames where a server may send one; setInterval() callbacks
- *   and timeouts never fire, and disconnect(expire: true) stands for the cleanup delay passing
- * - an event loop: a coroutine the app starts runs only up to its first wait
+ * - real timing: a broadcast from a page handler or an action renders at once where a server renders it
+ *   on the next broadcast tick, and no Config::withBroadcastThrottle() holds it back, so two broadcasts in
+ *   one action send two frames where a server may send one; disconnect(expire: true) stands for the
+ *   cleanup delay passing
+ * - an event loop, except in runTasks(): a coroutine the app starts, such as a Context::spawn() task,
+ *   runs only up to its first wait, and setInterval() callbacks and timeouts fire only in runTasks()
  * - the network: no slow clients or dropped frames, and no HTTP/2 stream resets
  * - the browser past its signals: html() renders the page from server state, no DOM applies patches,
  *   and actions post JSON, never a form or a file upload
  *
- * It needs no VIA_TEST_MODE. Call shutdown() when done, or let the TestApp go out of scope.
+ * It needs no VIA_TEST_MODE. Call shutdown() when done, or let the TestApp go out of scope; it waits for
+ * running tasks as a stopping worker does. Once a coroutine has run in a process, as a task does,
+ * OpenSwoole disables pcntl_fork() there for good.
  */
 final class TestApp {
     private RecordingVia $via;
@@ -57,6 +63,9 @@ final class TestApp {
     public function __construct(Config $config, callable $routes) {
         $this->capture(function () use ($config, $routes): void {
             $this->via = new RecordingVia($config);
+            // Weak, so the Via holds no TestApp and a dropped TestApp still reaches its destructor.
+            $app = \WeakReference::create($this);
+            $this->via->logCoroutinesTo(static fn (string $output) => $app->get()?->keep($output));
             $routes($this->via);
             $this->handler = $this->via->serveInProcess();
         });
@@ -76,6 +85,43 @@ final class TestApp {
      */
     public function open(string $path, array $query = [], bool $connect = true): TestTab {
         return new TestTab($this, new CookieJar(), $path, $query, $connect);
+    }
+
+    /**
+     * Send a plain HTTP request from a client without cookies, such as an API client calling a Via::route().
+     * TestTab::request() sends one with its browser's cookies, as a download link needs.
+     *
+     * @param string                $path    the path, with its query string
+     * @param array<string, string> $headers by name
+     *
+     * @throws \RuntimeException when the response breaks off, as a download whose source throws midway does
+     */
+    public function request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface {
+        return $this->fetch(new CookieJar(), $method, $path, $body, $headers);
+    }
+
+    /**
+     * Run the event loop until the Context::spawn() tasks have ended and the broadcasts they made have rendered.
+     *
+     * A task runs inside the action that starts it up to its first wait (a sleep, a Channel, socket I/O); this
+     * runs the rest, and the patches its sync() calls queue reach the tabs. Meanwhile time passes as on a
+     * server: timers fire, setInterval() callbacks included, and a task's broadcasts wait for the broadcast
+     * tick and any Config::withBroadcastThrottle().
+     *
+     * @throws \RuntimeException when tasks or their broadcasts are still pending after $timeoutSeconds
+     */
+    public function runTasks(float $timeoutSeconds = 5.0): void {
+        $via = $this->via;
+        $done = true;
+        $this->run(static function () use ($via, $timeoutSeconds, &$done): void {
+            $done = $via->runTasksInProcess(hrtime(true) + (int) ($timeoutSeconds * 1e9));
+        });
+
+        if (!$done) {
+            throw new \RuntimeException($via->runningTasks > 0
+                ? \sprintf('%d Context::spawn() task(s) still running after %.1f s.', $via->runningTasks, $timeoutSeconds)
+                : \sprintf('Broadcasts from tasks still pending after %.1f s.', $timeoutSeconds));
+        }
     }
 
     /**
@@ -135,6 +181,29 @@ final class TestApp {
      */
     public function send(TestRequest $request, TestResponse $response): string {
         return $this->run(fn () => $this->handler->handleRequest($request, $response));
+    }
+
+    /**
+     * Send a plain request with $cookies, and keep the cookies its response sets.
+     *
+     * @internal for TestTab
+     *
+     * @param array<string, string> $headers
+     *
+     * @throws \RuntimeException when the response breaks off
+     */
+    public function fetch(CookieJar $cookies, string $method, string $path, string $body, array $headers): ResponseInterface {
+        [$path, $queryString] = explode('?', $path, 2) + [1 => ''];
+        parse_str($queryString, $query);
+        $response = new TestResponse();
+        $this->send(new TestRequest(strtoupper($method), $path, $query, $cookies->all(), array_change_key_case($headers), $body), $response);
+        $cookies->take($response);
+
+        if ($response->closed) {
+            throw new \RuntimeException(\sprintf('%s %s broke off after %d bytes of its body.', strtoupper($method), $path, \strlen($response->body)));
+        }
+
+        return new Psr7Response($response->statusCode, $response->headers, $response->body);
     }
 
     /**
@@ -200,13 +269,17 @@ final class TestApp {
             $fn();
         } finally {
             $output = (string) ob_get_clean();
-            foreach (explode("\n", rtrim($output, "\n")) as $line) {
-                if ($line !== '') {
-                    $this->logged[] = $line;
-                }
-            }
+            $this->keep($output);
         }
 
         return $output;
+    }
+
+    private function keep(string $output): void {
+        foreach (explode("\n", rtrim($output, "\n")) as $line) {
+            if ($line !== '') {
+                $this->logged[] = $line;
+            }
+        }
     }
 }
