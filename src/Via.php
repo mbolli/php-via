@@ -246,7 +246,7 @@ class Via {
 
         // Initialize support classes
         $this->logger = new Logger($this->config->getLogLevel());
-        $this->requestLogger = new RequestLogger($this->config->getDevMode());
+        $this->requestLogger = new RequestLogger($this->config->isDevMode());
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
 
@@ -263,7 +263,7 @@ class Via {
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->getDevMode());
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->isDevMode());
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -1009,7 +1009,7 @@ class Via {
 
                 // Write master PID so external tools (e.g. scripts/dev.sh) can send
                 // SIGUSR1 to the correct process for hot worker reload.
-                if ($this->config->getDevMode()) {
+                if ($this->config->isDevMode()) {
                     $pidFile = sys_get_temp_dir() . '/php-via-master.pid';
                     file_put_contents($pidFile, (string) $server->master_pid);
                 }
@@ -1436,7 +1436,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * Called by the GC timer (configurable via Config::withGcInterval()) and
+     * Called by the GC timer (configurable via Config::withGcIntervalMs()) and
      * exposed publicly so it can be invoked directly in tests or from user code.
      */
     public function runGcCycle(): void {
@@ -2762,7 +2762,7 @@ class Via {
      * @return int how many contexts it reached
      */
     private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
-        if ($this->config->getDevMode()) {
+        if ($this->config->isDevMode()) {
             $this->viewRenderer->beginFanOut();
 
             try {

@@ -269,7 +269,7 @@ describe('full-document views: update render', function (): void {
     });
 
     test('update includes keep their place: head before </head>, foot before </body> and the Dev Bar', function (): void {
-        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via = createVia((new Config())->withDevMode()->withDevBar(true));
         $owned = '<link rel="stylesheet" href="/owned.css">';
         $via->appendToHead($owned);
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
@@ -293,7 +293,7 @@ describe('full-document views: update render', function (): void {
     });
 
     test('component updates are not decorated', function (): void {
-        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via = createVia((new Config())->withDevMode()->withDevBar(true));
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx = new Context('/_/doc16', '/doc', $via);
         $inner = null;
@@ -317,7 +317,7 @@ describe('full-document views: update render', function (): void {
     });
 
     test('an update with <body> but no <html> keeps the Dev Bar and gets no includes', function (): void {
-        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via = createVia((new Config())->withDevMode()->withDevBar(true));
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx = new Context('/_/doc18', '/doc', $via);
         $ctx->view(fn () => '<body><main id="app">x</main></body>');

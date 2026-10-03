@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /*
- * A context with no SSE stream on its worker is destroyed after Config::withContextConnectTimeout().
+ * A context with no SSE stream on its worker is destroyed after Config::withContextTimeouts(connectMs:).
  * Without it, a page whose stream never connected, and every copy an action rebuilt on a worker the
  * tab does not stream from, stayed in memory until the worker stopped.
  */

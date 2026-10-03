@@ -11,24 +11,24 @@ describe('Config GC interval', function (): void {
         expect($config->getGcIntervalMs())->toBe(30_000);
     });
 
-    test('withGcInterval() sets a custom interval', function (): void {
-        $config = (new Config())->withGcInterval(60_000);
+    test('withGcIntervalMs() sets a custom interval', function (): void {
+        $config = (new Config())->withGcIntervalMs(60_000);
         expect($config->getGcIntervalMs())->toBe(60_000);
     });
 
-    test('withGcInterval(0) disables the timer', function (): void {
-        $config = (new Config())->withGcInterval(0);
+    test('withGcIntervalMs(0) disables the timer', function (): void {
+        $config = (new Config())->withGcIntervalMs(0);
         expect($config->getGcIntervalMs())->toBe(0);
     });
 
-    test('withGcInterval() clamps negative values to 0', function (): void {
-        $config = (new Config())->withGcInterval(-500);
+    test('withGcIntervalMs() clamps negative values to 0', function (): void {
+        $config = (new Config())->withGcIntervalMs(-500);
         expect($config->getGcIntervalMs())->toBe(0);
     });
 
-    test('withGcInterval() is fluent', function (): void {
+    test('withGcIntervalMs() is fluent', function (): void {
         $config = new Config();
-        expect($config->withGcInterval(5_000))->toBeInstanceOf(Config::class);
+        expect($config->withGcIntervalMs(5_000))->toBeInstanceOf(Config::class);
     });
 });
 

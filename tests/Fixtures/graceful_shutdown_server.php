@@ -48,7 +48,7 @@ $config = (new Config())
     ->withWorkerNum($workers)->withBroker(new SwooleBroker())
 ;
 if ($mode === 'IDLE') {
-    $config = $config->withGcInterval(0);
+    $config = $config->withGcIntervalMs(0);
 }
 
 $port = $config->getPort();

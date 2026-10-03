@@ -410,7 +410,7 @@ class ViaDevBar extends HTMLElement {
     if (!this.signals.length) return `<div class="empty">No named signals on this context.</div>`;
     const note = this.writes
       ? `<div class="note">Editing enabled: values write back to the server.</div>`
-      : `<div class="note">Read-only. Enable Config::withTracingWrites() in devMode to edit.</div>`;
+      : `<div class="note">Read-only. Enable Config::withDevBarOptions(writes: true) in dev mode to edit.</div>`;
     const rows = this.signals.map((s) => {
       const editable = this.writes && s.clientWritable;
       const val = editable

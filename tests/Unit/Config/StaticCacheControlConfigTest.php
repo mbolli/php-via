@@ -10,7 +10,7 @@ function phpViaTestStaticCacheControlCallable(string $filePath, string $mimeType
 
 /*
  * Config::getStaticCacheControl() governs Cache-Control for /datastar.js, /via.css,
- * and withStaticDir() files. Default follows devMode (mirrors withTracing()'s
+ * and withStaticDir() files. Default follows devMode (mirrors withDevBar()'s
  * null = follow devMode pattern) so withStaticDir() edits are visible immediately
  * in local dev without waiting out a cached max-age. A callable can also be passed
  * to fine-tune the value per file path / MIME type.

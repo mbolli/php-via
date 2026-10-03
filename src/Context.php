@@ -437,9 +437,9 @@ class Context {
      *
      * This is an alias for onCleanup() with clearer semantics.
      * The callback is executed when:
-     * - the SSE connection closes and stays closed for the cleanup delay (Config::withContextCleanupDelay())
+     * - the SSE connection closes and stays closed for the cleanup delay (Config::withContextTimeouts(cleanupDelayMs:))
      * - the browser sends the session close beacon
-     * - no SSE stream attaches within the connect timeout (Config::withContextConnectTimeout())
+     * - no SSE stream attaches within the connect timeout (Config::withContextTimeouts(connectMs:))
      *
      * @param callable(Context): void $callback Function to call on disconnect
      */
@@ -668,7 +668,7 @@ class Context {
         }
 
         $joined = array_values(array_diff($this->scopes, [Scope::TAB]));
-        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->getDevMode()) {
+        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->isDevMode()) {
             $this->tabBroadcastWarned = true;
             $this->app->log('warn', \sprintf(
                 'Context::broadcast() syncs only this tab, since its primary scope is TAB; before php-via 0.14 it re-rendered '

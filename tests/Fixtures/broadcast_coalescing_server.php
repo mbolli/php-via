@@ -28,7 +28,7 @@ $out = (string) ($argv[1] ?? sys_get_temp_dir() . '/via_coalescing_out');
 $app = new Via(
     (new Config())
         ->withHost('127.0.0.1')->withPort(FixturePort::pick(4200, 150))->withLogLevel('error')
-        ->withWorkerNum(2)->withBroker(new SwooleBroker())->withGcInterval(0)
+        ->withWorkerNum(2)->withBroker(new SwooleBroker())->withGcIntervalMs(0)
 );
 
 $app->page('/', fn () => null);

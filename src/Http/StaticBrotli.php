@@ -190,7 +190,7 @@ final class StaticBrotli {
         }
 
         // Only files in the static dir, or edited in dev mode, change after start.
-        if ($staticDir !== null || $this->config->getDevMode()) {
+        if ($staticDir !== null || $this->config->isDevMode()) {
             $process = new Process(function (Process $process) use ($server): void {
                 $this->serveHelper($process, $server);
             });
@@ -202,7 +202,7 @@ final class StaticBrotli {
             };
         }
 
-        if ($this->config->getDevMode()) {
+        if ($this->config->isDevMode()) {
             return;
         }
 
@@ -363,7 +363,7 @@ final class StaticBrotli {
                 } else {
                     $this->warm = [];
                 }
-            } elseif (!$this->cache->put($path, $job['mtime'], $job['size'], $body, true, $this->config->getDevMode())) {
+            } elseif (!$this->cache->put($path, $job['mtime'], $job['size'], $body, true, $this->config->isDevMode())) {
                 $this->refuse($path, $job['mtime'], $job['size']);
             }
         } elseif ($head['status'] === self::REFUSED) {
@@ -557,7 +557,7 @@ final class StaticBrotli {
         if (!\is_string($body)) {
             return null;
         }
-        $this->cache->put($path, $mtime, $size, $body, $final, $this->config->getDevMode());
+        $this->cache->put($path, $mtime, $size, $body, $final, $this->config->isDevMode());
 
         return ['body' => $body];
     }
@@ -579,7 +579,7 @@ final class StaticBrotli {
         if (!\is_string($body)) {
             return null;
         }
-        $this->cache->put($path, $mtime, $size, $body, true, $this->config->getDevMode());
+        $this->cache->put($path, $mtime, $size, $body, true, $this->config->isDevMode());
 
         return ['body' => $body];
     }
@@ -589,7 +589,7 @@ final class StaticBrotli {
      */
     private function freshSidecar(string $path, int $mtime): ?string {
         $sidecar = $path . '.br';
-        if ($this->config->getDevMode()) {
+        if ($this->config->isDevMode()) {
             clearstatcache(true, $sidecar);
         }
         $sidecarMtime = self::stat($sidecar)[0] ?? null;

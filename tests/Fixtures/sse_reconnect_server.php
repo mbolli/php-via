@@ -38,7 +38,7 @@ if ($mode === 'h2') {
     $config = $config->withH2c();
 } else {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker())
-        ->withContextCleanupDelay(300)->withContextRevivalWindow(2000)->withContextDirectorySize(4096, 1024, 60)
+        ->withContextTimeouts(cleanupDelayMs: 300, revivalWindowMs: 2000)->withContextDirectorySize(4096, 1024, 60)
     ;
 }
 $app = new Via($config);

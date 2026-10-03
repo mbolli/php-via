@@ -22,9 +22,9 @@ afterEach(function (): void {
 });
 
 function devBarVia(bool $writes = false): Via {
-    $config = (new Config())->withLogLevel('error')->withDevMode()->withTracing(true);
+    $config = (new Config())->withLogLevel('error')->withDevMode()->withDevBar(true);
     if ($writes) {
-        $config->withTracingWrites(true);
+        $config->withDevBarOptions(writes: true);
     }
 
     return createVia($config);
@@ -175,7 +175,7 @@ describe('DevBarController::assetResponse()', function (): void {
     });
 
     test('serves the shipped assets with an ETag, Last-Modified and no-cache', function (): void {
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)));
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)));
 
         foreach (['devbar.js' => 'application/javascript', 'devbar.css' => 'text/css; charset=utf-8'] as $file => $type) {
             $r = $controller->assetResponse($file, $type, []);
@@ -191,7 +191,7 @@ describe('DevBarController::assetResponse()', function (): void {
     });
 
     test('answers a matching If-None-Match with an empty 304 and a stale one with the body', function (): void {
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)));
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)));
         $etag = $controller->assetResponse('devbar.js', 'application/javascript', [])['headers']['ETag'];
 
         foreach ([$etag, '"other", ' . $etag, substr($etag, 2)] as $ifNoneMatch) {
@@ -208,13 +208,13 @@ describe('DevBarController::assetResponse()', function (): void {
     });
 
     test('404s for a missing file', function (): void {
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)), $this->assetDir);
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)), $this->assetDir);
 
         expect($controller->assetResponse('missing.js', 'application/javascript', [])['status'])->toBe(404);
     });
 
     test('serves from memory outside dev mode, even after the file changes', function (): void {
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)), $this->assetDir);
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)), $this->assetDir);
         $first = $controller->assetResponse('devbar.js', 'application/javascript', []);
 
         file_put_contents($this->assetDir . '/devbar.js', 'console.log("version two");');
@@ -243,7 +243,7 @@ describe('DevBarController::assetResponse()', function (): void {
             $this->markTestSkipped('ext-brotli required');
         }
 
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)));
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)));
         $file = (string) file_get_contents(dirname(__DIR__, 3) . '/public/devbar.js');
 
         $br = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'gzip, deflate, br']);
@@ -259,7 +259,7 @@ describe('DevBarController::assetResponse()', function (): void {
     });
 
     test('never sends Brotli with a static level of 0', function (): void {
-        $controller = new DevBarController(createVia((new Config())->withTracing(true)->withBrotli(true, staticLevel: 0)));
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)->withBrotli(true, staticLevel: 0)));
         $r = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'br']);
 
         expect($r['headers'])->not->toHaveKey('Content-Encoding');

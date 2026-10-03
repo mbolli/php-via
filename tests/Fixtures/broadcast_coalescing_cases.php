@@ -1440,7 +1440,7 @@ $cases = [
     },
 
     'trace-schedule' => static function (): array {
-        $app = app((new Config())->withTracing(true));
+        $app = app((new Config())->withDevBar(true));
         $state = new CoalesceState();
         observer($app, 'obs', 'room:trace', $state);
 

@@ -36,7 +36,7 @@ $config = (new Config())
     // Force the Via Dev Bar on even in production so the live site demos it.
     // Signal editing stays hard-disabled here (devMode is off in prod); it is
     // re-enabled below for local dev only.
-    ->withTracing(true)
+    ->withDevBar(true)
 
     // GlobalState lives in shared memory, which dies with the process. The poll tallies
     // and the ROUTE-scope demo counter are visitor-contributed, so without this every
@@ -72,7 +72,7 @@ if (!$isDev) {
 
 if ($isDev) {
     // Local dev only: let the Dev Bar's Signals panel write values back.
-    $config->withTracingWrites(true);
+    $config->withDevBarOptions(writes: true);
 
     // Dev: self-signed cert for direct HTTPS/HTTP2 (no Caddy needed).
     // Skip SSL when VIA_DISABLE_HTTPS is set so the benchmark hammer can connect via plain HTTP.
@@ -92,7 +92,7 @@ $app = new Via($config);
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
-$corsLogger = $config->getDevMode()
+$corsLogger = $config->isDevMode()
     ? new class($app) extends AbstractLogger {
         public function __construct(private Via $app) {}
 

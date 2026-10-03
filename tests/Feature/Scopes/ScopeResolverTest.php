@@ -121,7 +121,7 @@ describe('SESSION signals', function (): void {
     });
 
     test('keep the session id out of the Dev Bar scope list and its traces', function (): void {
-        $app = createVia((new Config())->withDevMode(false)->withTracing(true)->withBroadcastCoalescing(false));
+        $app = createVia((new Config())->withDevMode(false)->withDevBar(true)->withBroadcastCoalescing(false));
         $app->mount(ResolverSessionSignalPage::class, '/demo');
         $ctx = new Context('ctx1', '/demo', $app, null, RESOLVER_SID_A);
         $app->contexts['ctx1'] = $ctx;

@@ -144,7 +144,7 @@ if ($pid === 0) {
 
 $config = (new Config())
     ->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
-    ->withTracing(true)->withSsePollIntervalMs(20)
+    ->withDevBar(true)->withDevBarOptions(pollMs: 20)
     ->withSwooleSettings(['hook_flags' => $hookFlags])
 ;
 if ($brotli) {

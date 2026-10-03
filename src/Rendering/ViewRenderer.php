@@ -246,7 +246,7 @@ class ViewRenderer {
         }
 
         $route = $context->getRoute();
-        if ($context->getConfig()->getDevMode() && !isset($this->documentShareWarned[$route])) {
+        if ($context->getConfig()->isDevMode() && !isset($this->documentShareWarned[$route])) {
             $this->documentShareWarned[$route] = true;
             $this->logger->warn("The view of {$route} renders a full document, which holds this tab's context id, so shareRender: true is ignored and every tab renders its own update. Pass block: to render updates without the document, or drop shareRender.", $context);
         }

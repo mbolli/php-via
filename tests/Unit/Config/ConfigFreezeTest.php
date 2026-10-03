@@ -21,7 +21,6 @@ function configSetterCalls(): array {
         'withImportMap' => fn (Config $c) => $c->withImportMap(['x' => '/x.js']),
         'withShellTemplate' => fn (Config $c) => $c->withShellTemplate(__FILE__),
         'withBasePath' => fn (Config $c) => $c->withBasePath('/app'),
-        'withSsePollIntervalMs' => fn (Config $c) => $c->withSsePollIntervalMs(10),
         'withSseKeepAliveMs' => fn (Config $c) => $c->withSseKeepAliveMs(1000),
         'withSseMaxQueuedBytes' => fn (Config $c) => $c->withSseMaxQueuedBytes(1),
         'withBroadcastCoalescing' => fn (Config $c) => $c->withBroadcastCoalescing(),
@@ -33,11 +32,8 @@ function configSetterCalls(): array {
         'withAllowMissingOrigin' => fn (Config $c) => $c->withAllowMissingOrigin(),
         'withStrictTabSignals' => fn (Config $c) => $c->withStrictTabSignals(),
         'withActionRateLimit' => fn (Config $c) => $c->withActionRateLimit(10),
-        'withGcInterval' => fn (Config $c) => $c->withGcInterval(0),
-        'withContextCleanupDelay' => fn (Config $c) => $c->withContextCleanupDelay(1),
-        'withContextConnectTimeout' => fn (Config $c) => $c->withContextConnectTimeout(1),
-        'withContextReconnectTimeout' => fn (Config $c) => $c->withContextReconnectTimeout(1),
-        'withContextRevivalWindow' => fn (Config $c) => $c->withContextRevivalWindow(1),
+        'withGcIntervalMs' => fn (Config $c) => $c->withGcIntervalMs(0),
+        'withContextTimeouts' => fn (Config $c) => $c->withContextTimeouts(cleanupDelayMs: 1),
         'withCertificate' => fn (Config $c) => $c->withCertificate('a.crt', 'a.key'),
         'withBrotli' => fn (Config $c) => $c->withBrotli(false),
         'withH2c' => fn (Config $c) => $c->withH2c(),
@@ -49,9 +45,8 @@ function configSetterCalls(): array {
         'withContextDirectorySize' => fn (Config $c) => $c->withContextDirectorySize(64),
         'withSessionTableSize' => fn (Config $c) => $c->withSessionTableSize(64),
         'withPersistentGlobalState' => fn (Config $c) => $c->withPersistentGlobalState(sys_get_temp_dir() . '/never.db'),
-        'withTracing' => fn (Config $c) => $c->withTracing(true),
-        'withTracingWrites' => fn (Config $c) => $c->withTracingWrites(true),
-        'withTraceBufferSize' => fn (Config $c) => $c->withTraceBufferSize(10),
+        'withDevBar' => fn (Config $c) => $c->withDevBar(true),
+        'withDevBarOptions' => fn (Config $c) => $c->withDevBarOptions(traces: 10),
     ];
 }
 
@@ -106,7 +101,7 @@ describe('Config freeze', function (): void {
         $first = new Via($config);
         $second = new Via($config);
 
-        expect($config->getDevMode())->toBeTrue()
+        expect($config->isDevMode())->toBeTrue()
             ->and($config->getBasePath())->toBe('/app/')
             ->and($second->getConfig())->toBe($first->getConfig())
         ;

@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\Removed;
 
 /**
  * Configuration class with fluent API.
@@ -220,20 +221,17 @@ final class Config {
      * Whether the Via Dev Bar (tracing overlay + /_via endpoints) is enabled.
      * null = follow devMode; true/false = explicit override.
      */
-    private ?bool $tracing = null;
+    private ?bool $devBar = null;
 
     /**
      * Whether the Dev Bar may write signal state back from the browser.
      * null = follow the VIA_DEVBAR_WRITES env var; true/false = explicit override.
      * Writes are ALWAYS gated behind devMode in addition to this flag.
      */
-    private ?bool $tracingWrites = null;
+    private ?bool $devBarWrites = null;
 
     /** Maximum number of traces retained in the in-process ring buffer. */
     private int $traceBufferSize = 100;
-
-    /** Soft cap on a single serialized trace's byte size (display guard). */
-    private int $traceMaxBytes = 16_384;
 
     /** Set by new Via(): from then on every with* call throws. */
     private bool $frozen = false;
@@ -546,18 +544,8 @@ final class Config {
     }
 
     /**
-     * How often the Dev Bar's trace and log stream checks for new records (default 100 ms).
-     *
-     * Page SSE streams do not poll: a stream wakes when a patch is queued for it, when its
-     * connection closes and when the worker stops. See withSseKeepAliveMs().
+     * @internal
      */
-    public function withSsePollIntervalMs(int $ms): self {
-        $this->assertMutable(__FUNCTION__);
-        $this->ssePollIntervalMs = max(1, $ms);
-
-        return $this;
-    }
-
     public function getSsePollIntervalMs(): int {
         return $this->ssePollIntervalMs;
     }
@@ -684,7 +672,7 @@ final class Config {
         return $this->port;
     }
 
-    public function getDevMode(): bool {
+    public function isDevMode(): bool {
         return $this->devMode;
     }
 
@@ -866,7 +854,7 @@ final class Config {
      *
      * @param int $ms Timer interval in milliseconds. Pass 0 to disable.
      */
-    public function withGcInterval(int $ms): self {
+    public function withGcIntervalMs(int $ms): self {
         $this->assertMutable(__FUNCTION__);
         $this->gcIntervalMs = max(0, $ms);
 
@@ -878,93 +866,67 @@ final class Config {
     }
 
     /**
-     * Configure the context cleanup grace period.
+     * Set how long a context lives without an SSE stream; null keeps a timer as it is.
      *
-     * When an SSE stream disconnects, php-via doesn't destroy the context immediately:
-     * it waits this long for a page navigation or reconnect before tearing it down. Longer
-     * delays tolerate flakier clients at the cost of holding idle contexts (and their
-     * in-memory view payloads) in memory for longer under concurrent disconnects.
+     * - $cleanupDelayMs (default 5 s): after a tab's stream disconnects, the context waits this long for a
+     *   reconnect or a page navigation before it is destroyed. 0 destroys it at once. Longer delays tolerate
+     *   flakier clients and hold idle contexts, with their view payloads, in memory longer.
+     * - $connectMs (default 30 s): a page load whose stream never connects (a crawler, a prefetch, a tab
+     *   closed early), and a context an action rebuilt on a worker the tab does not stream from, are destroyed
+     *   after this long. A connect cancels the timer, and every action on such a context starts it again. 0
+     *   keeps such contexts until the worker stops.
+     * - $reconnectMs (default 60 s): an action that reaches a context whose stream is down (it dropped, or the
+     *   action just revived the context) keeps it this long, so the patches the action queued reach the tab
+     *   when it reconnects. It must exceed the client's longest wait between reconnects: Datastar backs off to
+     *   30 s by default (retryMaxWait). 0 uses $connectMs.
+     * - $revivalWindowMs (default 10 min): for this long after a context is destroyed, a returning tab gets an
+     *   equivalent one (same id, handler run again, signals seeded from the browser) instead of a full reload.
+     *   Server-only state such as #[Persist] starts over, as on a reload. 0 turns revival off.
      *
-     * @param int $ms Grace period in milliseconds. Pass 0 to disable (cleanup is immediate).
+     * The context's onCleanup() callbacks run when it is destroyed, whichever timer did it.
      */
-    public function withContextCleanupDelay(int $ms): self {
+    public function withContextTimeouts(?int $cleanupDelayMs = null, ?int $connectMs = null, ?int $reconnectMs = null, ?int $revivalWindowMs = null): self {
         $this->assertMutable(__FUNCTION__);
-        $this->contextCleanupDelayMs = max(0, $ms);
+        if ($cleanupDelayMs !== null) {
+            $this->contextCleanupDelayMs = max(0, $cleanupDelayMs);
+        }
+        if ($connectMs !== null) {
+            $this->contextConnectTimeoutMs = max(0, $connectMs);
+        }
+        if ($reconnectMs !== null) {
+            $this->contextReconnectTimeoutMs = max(0, $reconnectMs);
+        }
+        if ($revivalWindowMs !== null) {
+            $this->contextRevivalWindowMs = max(0, $revivalWindowMs);
+        }
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getContextCleanupDelayMs(): int {
         return $this->contextCleanupDelayMs;
     }
 
     /**
-     * Configure how long a context may live without an SSE stream.
-     *
-     * A page load whose stream never connects (a crawler, a prefetch, a tab closed before it
-     * connected) and a context an action rebuilt on a worker the tab does not stream from are
-     * destroyed after this long, running their onCleanup/onDisconnect callbacks. An SSE connect
-     * cancels the timer, and every action on such a context starts it again. A tab that connects
-     * later than this is rebuilt by revival (see withContextRevivalWindow()). A tab whose stream
-     * dropped is freed after withContextCleanupDelay(), or after withContextReconnectTimeout()
-     * once an action reaches it.
-     *
-     * @param int $ms Lifetime in milliseconds. Pass 0 to keep such contexts until the worker stops.
+     * @internal
      */
-    public function withContextConnectTimeout(int $ms): self {
-        $this->assertMutable(__FUNCTION__);
-        $this->contextConnectTimeoutMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextConnectTimeoutMs(): int {
         return $this->contextConnectTimeoutMs;
     }
 
     /**
-     * Configure how long a tab whose stream is down waits for it to reconnect after an action.
-     *
-     * An action that reaches a context without a stream anywhere (its stream dropped, or the action
-     * just revived it) keeps it for this long, and each further action starts the timer again. The
-     * patches the action queued wait in the context, and a freed context takes them with it, so this
-     * must exceed the client's longest wait between reconnect attempts: Datastar backs off to 30 s
-     * by default (retryMaxWait). A copy rebuilt for an action on a worker the tab does not stream
-     * from keeps the connect timeout.
-     *
-     * @param int $ms Wait in milliseconds. Pass 0 to use withContextConnectTimeout().
+     * @internal
      */
-    public function withContextReconnectTimeout(int $ms): self {
-        $this->assertMutable(__FUNCTION__);
-        $this->contextReconnectTimeoutMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextReconnectTimeoutMs(): int {
         return $this->contextReconnectTimeoutMs;
     }
 
     /**
-     * Configure the context revival window.
-     *
-     * When a tab is backgrounded long enough that its context is destroyed (past
-     * {@see withContextCleanupDelay()}), a returning tab normally hard-reloads. With revival
-     * enabled, the server instead rebuilds an equivalent context (same ID, so the already-loaded
-     * DOM keeps working) by re-running the page handler and re-seeding signal values the client
-     * still holds. This preserves local (underscore) signals, scroll, and focus that a reload
-     * would destroy. Revival re-runs the page handler, so it is not lossless: server-only state
-     * (e.g. #[Persist]) resets and onDisconnect/connect hooks re-fire, exactly as on a reload.
-     *
-     * @param int $ms Window in milliseconds. Pass 0 to disable (reconnect falls back to a reload).
+     * How long after a context is destroyed a returning tab can still revive it, in milliseconds; 0 when revival is off.
      */
-    public function withContextRevivalWindow(int $ms): self {
-        $this->assertMutable(__FUNCTION__);
-        $this->contextRevivalWindowMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextRevivalWindowMs(): int {
         return $this->contextRevivalWindowMs;
     }
@@ -1362,58 +1324,64 @@ final class Config {
     }
 
     /**
-     * Enable the Via Dev Bar: a tabbed debug overlay (traces, signals, SSE
-     * patches, request, scopes, errors) injected into every page, plus the
-     * `/_via/*` endpoints and standalone console.
+     * Turn the Via Dev Bar on or off: a tabbed debug overlay (traces, signals, SSE patches, request, scopes,
+     * errors) injected into every page, plus the `/_via/*` endpoints and the standalone console.
      *
-     * Like `/_stats`, the Dev Bar exposes timings, routes, and live signal
-     * state: it is for development. It defaults to `getDevMode()`, but you may
-     * force it on (e.g. to demo it on a public site) by passing `true`, or off
-     * with `false`. Even when forced on, signal *editing* stays disabled unless
-     * devMode is also on (see {@see withTracingWrites()}).
-     *
-     * @param null|bool $enabled true/false to force, null to follow devMode
+     * Without this call it is on in dev mode only. false turns it off in dev mode, true turns it on outside dev
+     * mode, read-only, for an admin-only or demo deployment. Every visitor of such a deployment sees the traces,
+     * scopes, context ids and signal values of all tabs on the worker, like `/_stats`. Editing signals needs dev
+     * mode in any case, see withDevBarOptions().
      */
-    public function withTracing(?bool $enabled = true): self {
+    public function withDevBar(bool $enabled): self {
         $this->assertMutable(__FUNCTION__);
-        $this->tracing = $enabled;
+        $this->devBar = $enabled;
 
         return $this;
-    }
-
-    public function isTracingEnabled(): bool {
-        return $this->tracing ?? $this->devMode;
     }
 
     /**
-     * Allow the Dev Bar's Signals panel to write values back to the server.
+     * Tune the Dev Bar; null keeps a setting as it is, so a second call changes only what it names.
      *
-     * **Hard production guard:** writes require `devMode` *in addition to* this
-     * flag and tracing being enabled. The leading devMode check means an
-     * explicit `withTracingWrites(true)` is ignored when devMode is off, so
-     * `withTracing(true)` on a public site is always read-only. Editing is
-     * opt-in for local dev via this call or the `VIA_DEVBAR_WRITES=1` env var.
-     *
-     * The abuse surface is real: any visitor who can reach the page could
-     * mutate ROUTE/SESSION/GLOBAL scope state shared with other users. Never
-     * enable this on a deployment exposed to untrusted traffic.
-     *
-     * @param null|bool $enabled true/false to force, null to follow VIA_DEVBAR_WRITES
+     * @param null|bool $writes let the Signals panel write values back to the server. Writes need dev mode in
+     *                          addition, so a Dev Bar on outside dev mode stays read-only. Without this, the
+     *                          VIA_DEVBAR_WRITES=1 env var turns them on. Any visitor who can reach the page could
+     *                          then change ROUTE, SESSION and GLOBAL state shared with other users.
+     * @param null|int  $traces traces kept per worker (default 100)
+     * @param null|int  $pollMs how often the Dev Bar's trace and log stream checks for new records (default 100 ms)
      */
-    public function withTracingWrites(?bool $enabled = null): self {
+    public function withDevBarOptions(?bool $writes = null, ?int $traces = null, ?int $pollMs = null): self {
         $this->assertMutable(__FUNCTION__);
-        $this->tracingWrites = $enabled;
+        $this->devBarWrites = $writes ?? $this->devBarWrites;
+        if ($traces !== null) {
+            $this->traceBufferSize = max(1, $traces);
+        }
+        if ($pollMs !== null) {
+            $this->ssePollIntervalMs = max(1, $pollMs);
+        }
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
+    public function isTracingEnabled(): bool {
+        return $this->devBar ?? $this->devMode;
+    }
+
+    /**
+     * Whether the Dev Bar may write signals: dev mode, the Dev Bar on, and withDevBarOptions(writes: true) or
+     * VIA_DEVBAR_WRITES=1.
+     *
+     * @internal
+     */
     public function isTracingWritesEnabled(): bool {
         if (!$this->devMode || !$this->isTracingEnabled()) {
             return false;
         }
 
-        if ($this->tracingWrites !== null) {
-            return $this->tracingWrites;
+        if ($this->devBarWrites !== null) {
+            return $this->devBarWrites;
         }
 
         $env = getenv('VIA_DEVBAR_WRITES');
@@ -1422,25 +1390,80 @@ final class Config {
     }
 
     /**
-     * Tune the trace ring buffer.
-     *
-     * @param int $traces        Maximum traces retained (default 100)
-     * @param int $maxTraceBytes Soft cap on a serialized trace's size (default 16384)
+     * @internal
      */
-    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): self {
-        $this->assertMutable(__FUNCTION__);
-        $this->traceBufferSize = max(1, $traces);
-        $this->traceMaxBytes = max(1024, $maxTraceBytes);
-
-        return $this;
-    }
-
     public function getTraceBufferSize(): int {
         return $this->traceBufferSize;
     }
 
-    public function getTraceMaxBytes(): int {
-        return $this->traceMaxBytes;
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBar()
+     */
+    public function withTracing(?bool $enabled = true): never {
+        Removed::method('Config::withTracing()', 'Use ->withDevBar(true) or ->withDevBar(false).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withTracingWrites(?bool $enabled = null): never {
+        Removed::method('Config::withTracingWrites()', 'Use ->withDevBarOptions(writes: true).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): never {
+        Removed::method('Config::withTraceBufferSize()', 'Use ->withDevBarOptions(traces: $traces).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withSsePollIntervalMs(int $ms): never {
+        Removed::method('Config::withSsePollIntervalMs()', 'Use ->withDevBarOptions(pollMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names isDevMode()
+     */
+    public function getDevMode(): never {
+        Removed::method('Config::getDevMode()', 'Use ->isDevMode().');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withGcIntervalMs()
+     */
+    public function withGcInterval(int $ms): never {
+        Removed::method('Config::withGcInterval()', 'Use ->withGcIntervalMs($ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextCleanupDelay(int $ms): never {
+        Removed::method('Config::withContextCleanupDelay()', 'Use ->withContextTimeouts(cleanupDelayMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextConnectTimeout(int $ms): never {
+        Removed::method('Config::withContextConnectTimeout()', 'Use ->withContextTimeouts(connectMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextReconnectTimeout(int $ms): never {
+        Removed::method('Config::withContextReconnectTimeout()', 'Use ->withContextTimeouts(reconnectMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextRevivalWindow(int $ms): never {
+        Removed::method('Config::withContextRevivalWindow()', 'Use ->withContextTimeouts(revivalWindowMs: $ms).');
     }
 
     /**

@@ -57,7 +57,7 @@ describe('SharedContextDirectory', function (): void {
     });
 
     test('with revival off, registering a context writes no directory row', function (): void {
-        $app = createVia((new Config())->withContextRevivalWindow(0));
+        $app = createVia((new Config())->withContextTimeouts(revivalWindowMs: 0));
         $directory = new SharedContextDirectory(maxRows: 16);
         $app->getApp()->setContextDirectory($directory);
 
