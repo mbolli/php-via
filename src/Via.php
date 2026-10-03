@@ -257,6 +257,11 @@ class Via {
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
 
+        if (!$this->config->isBroadcastCoalescingEnabled()) {
+            $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
+                . '$app->flushBroadcasts() where a broadcast has to land before the next step.');
+        }
+
         // Dev Bar tracing substrate. Allocated here (master process, before fork)
         // so the per-worker tracer + buffer are inherited cleanly. When tracing
         // is off, Tracer::current() stays null and span call sites are no-ops.

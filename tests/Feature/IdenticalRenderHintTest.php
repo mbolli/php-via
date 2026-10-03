@@ -12,7 +12,7 @@ use Mbolli\PhpVia\Via;
  */
 
 function hintApp(bool $devMode = true): Via {
-    return new Via((new Config())->withDevMode($devMode)->withLogLevel('info')->withBroadcastCoalescing(false));
+    return new Via((new Config())->withDevMode($devMode)->withLogLevel('info'));
 }
 
 /**

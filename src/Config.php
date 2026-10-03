@@ -606,6 +606,10 @@ final class Config {
      * @param bool $enabled false renders and publishes synchronously on every call, as earlier releases did,
      *                      except that a fan-out stopped after 8 passes in a row leaves what it still owes to a
      *                      flush paced by the tick (see withBroadcastTickMs())
+     *
+     * @deprecated goes in php-via 0.15, and new Via() logs a warning when coalescing is off. Call
+     *             Via::flushBroadcasts() where a broadcast has to land before the next step. A composition
+     *             class's auto-broadcast and broadcasts received from the broker cannot be flushed that way.
      */
     public function withBroadcastCoalescing(bool $enabled = true): self {
         $this->assertMutable(__FUNCTION__);

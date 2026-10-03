@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Support\Stats;
+use Mbolli\PhpVia\Via;
 
 describe('Config broadcast coalescing', function (): void {
     test('coalescing is on by default with a 25 ms tick', function (): void {
@@ -16,6 +17,26 @@ describe('Config broadcast coalescing', function (): void {
     test('withBroadcastCoalescing(false) turns it off', function (): void {
         expect((new Config())->withBroadcastCoalescing(false)->isBroadcastCoalescingEnabled())->toBeFalse();
         expect((new Config())->withBroadcastCoalescing()->isBroadcastCoalescingEnabled())->toBeTrue();
+    });
+
+    test('new Via() warns that turning coalescing off is deprecated, and stays quiet with it on', function (): void {
+        $boot = static function (Config $config): string {
+            ob_start();
+
+            try {
+                new Via($config->withLogLevel('warn'));
+
+                return (string) ob_get_contents();
+            } finally {
+                ob_end_clean();
+            }
+        };
+
+        expect($boot((new Config())->withBroadcastCoalescing(false)))
+            ->toContain('Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15')
+            ->toContain('$app->flushBroadcasts()')
+            ->and($boot(new Config()))->not->toContain('withBroadcastCoalescing')
+        ;
     });
 
     test('withBroadcastTickMs() sets the tick, 0 keeps no gap and negatives clamp to 0', function (): void {
