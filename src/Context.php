@@ -1045,11 +1045,12 @@ class Context {
      * the setup closure from the class's #[Signal]/#[Action] metadata.
      *
      * @param callable|class-string $fn        Component setup function, or class name
-     * @param null|string           $namespace Optional namespace for component signals
+     * @param string                $namespace Name of the component, unique on its page: it prefixes the component's
+     *                                         signals and actions and keeps its id stable when the page is rebuilt
      *
      * @return callable Returns a function that renders the component
      */
-    public function component(callable|string $fn, ?string $namespace = null): callable {
+    public function component(callable|string $fn, string $namespace): callable {
         if (\is_string($fn)) {
             $fn = PageMount::buildClosure(ClassMetadata::analyze($fn), $this->app);
         }

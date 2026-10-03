@@ -72,6 +72,15 @@ describe('view() shapes', function (): void {
 
         expect($c->renderView(isUpdate: true))->toBe('<p id="n">1</p>');
     });
+
+    test('component() needs a namespace', function (): void {
+        $c = new Context('ctx1', '/p', viewShapeApp());
+
+        // @phpstan-ignore arguments.count
+        expect(fn () => $c->component(fn (Context $k) => $k->view(fn (): string => 'k')))
+            ->toThrow(ArgumentCountError::class)
+        ;
+    });
 });
 
 describe('shareRender', function (): void {
