@@ -38,6 +38,9 @@ class Application {
      */
     private const int MAX_REVIVABLE = 10_000;
 
+    /** Bytes of tab state the revival records of one worker keep; the soonest-expiring records are evicted past it. */
+    private const int MAX_REVIVABLE_TAB_STATE_BYTES = 64 * 1024 * 1024;
+
     /** Longest query string, as http_build_query() writes it, that a context record keeps for input(). */
     private const int MAX_RECORD_QUERY_BYTES = 512;
 
@@ -96,9 +99,17 @@ class Application {
      * instead of hard-reloading. Populated at cleanup time only, so this holds recently-gone
      * contexts, not live ones.
      *
-     * @var array<string, array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}>
+     * @var array<string, array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string, tabState?: array<string, array<string, string>>}>
      */
     private array $revivableContexts = [];
+
+    /** @var array<string, int> Bytes of tab state each revival record keeps, for those that keep any */
+    private array $revivableStateBytes = [];
+
+    private int $revivableStateTotal = 0;
+
+    /** MAX_REVIVABLE_TAB_STATE_BYTES, which tests lower. */
+    private int $revivableStateBudget = self::MAX_REVIVABLE_TAB_STATE_BYTES;
 
     /** Revival records evicted over the cap since the last warning, and when that was. */
     private int $revivableEvicted = 0;
@@ -572,7 +583,7 @@ class Application {
     /**
      * Look up a revival record by context ID, or null if absent or expired.
      *
-     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}
+     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string, tabState?: array<string, array<string, string>>}
      */
     public function getRevivable(string $contextId): ?array {
         if ($this->contextDirectory !== null) {
@@ -585,7 +596,7 @@ class Application {
         }
 
         if ($record['expiresAt'] <= time()) {
-            unset($this->revivableContexts[$contextId]);
+            $this->dropRevivable($contextId);
 
             return null;
         }
@@ -598,7 +609,7 @@ class Application {
      */
     public function forgetRevivable(string $contextId): void {
         $this->contextDirectory?->forget($contextId);
-        unset($this->revivableContexts[$contextId]);
+        $this->dropRevivable($contextId);
     }
 
     /**
@@ -611,7 +622,50 @@ class Application {
      * "400 Invalid context". registerContext() has already refreshed it with a live TTL.
      */
     public function forgetLocalRevivable(string $contextId): void {
-        unset($this->revivableContexts[$contextId]);
+        $this->dropRevivable($contextId);
+    }
+
+    /**
+     * The tab state the shared context directory holds for a context, null when the context has no row there
+     * and keeps its tab state itself.
+     *
+     * @internal read by Context::tabState()
+     *
+     * @return null|array<string, array<string, string>>
+     */
+    public function sharedTabState(string $contextId): ?array {
+        return $this->contextDirectory?->getState($contextId);
+    }
+
+    /**
+     * Change a context's tab state in the shared context directory.
+     *
+     * @internal called by Context::setTabState()
+     *
+     * @param \Closure(array<string, array<string, string>>): array<string, array<string, string>> $change
+     *
+     * @return bool false when the context has no row there and keeps its tab state itself
+     *
+     * @throws \OverflowException if the state would exceed Config::withContextDirectorySize(maxTabStateBytes:)
+     * @throws \RuntimeException  if the lock is not taken in time
+     */
+    public function changeSharedTabState(string $contextId, \Closure $change, string $name): bool {
+        return $this->contextDirectory?->changeState($contextId, $change, $name) ?? false;
+    }
+
+    /**
+     * Check that tab state a context keeps until its directory row exists fits the row.
+     *
+     * @internal called by Context::setTabState()
+     *
+     * @param array<string, array<string, string>> $state
+     *
+     * @throws \OverflowException if it exceeds Config::withContextDirectorySize(maxTabStateBytes:)
+     */
+    public function assertTabStateFits(array $state, string $name): void {
+        if ($this->contextDirectory !== null && $this->settings->contextRevivalWindowMs > 0) {
+            $this->contextDirectory->encodeState($state, $name);
+        }
     }
 
     /**
@@ -726,14 +780,39 @@ class Application {
                 $this->warnQueryDropped($context->getRoute(), 'the context record is over Config::withContextDirectorySize(maxRecordBytes:) with it');
             }
         } catch (\OverflowException $e) {
-            // Losing the entry costs cross-worker reachability for this one context, which
-            // degrades to the old 400. It must not take the page load down with it.
-            ++$this->directoryWriteFailures;
-            $now = time();
-            if ($now - $this->directoryWarnedAt >= 10) {
-                $this->directoryWarnedAt = $now;
-                $this->logger->log('warn', "Context directory write failed ({$this->directoryWriteFailures} times in this worker): " . $e->getMessage());
+            $this->warnDirectoryWriteFailed($e);
+
+            return;
+        }
+
+        // Tab state written before the row existed, by the page handler, moves into it for the other workers.
+        $local = $context->localTabState();
+        if ($local === []) {
+            return;
+        }
+
+        try {
+            $moved = $this->contextDirectory->changeState(
+                $context->getId(),
+                static fn (array $state): array => array_replace_recursive($state, $local),
+                'the values set before the context record existed',
+            );
+            if ($moved) {
+                $context->importTabState([]);
             }
+        } catch (\RuntimeException $e) {
+            $this->logger->log('warn', "Tab state of {$context->getId()} stays on this worker: " . $e->getMessage());
+        }
+    }
+
+    private function warnDirectoryWriteFailed(\OverflowException $e): void {
+        // Losing the entry costs cross-worker reachability for this one context, which
+        // degrades to the old 400. It must not take the page load down with it.
+        ++$this->directoryWriteFailures;
+        $now = time();
+        if ($now - $this->directoryWarnedAt >= 10) {
+            $this->directoryWarnedAt = $now;
+            $this->logger->log('warn', "Context directory write failed ({$this->directoryWriteFailures} times in this worker): " . $e->getMessage());
         }
     }
 
@@ -799,14 +878,28 @@ class Application {
         }
 
         // Assigning to an existing key keeps its old position, and pruning relies on expiry order.
-        unset($this->revivableContexts[$context->getId()]);
-        $this->revivableContexts[$context->getId()] = $this->contextRecord($context, time() + (int) ceil($windowMs / 1000));
+        $contextId = $context->getId();
+        $this->dropRevivable($contextId);
+        $record = $this->contextRecord($context, time() + (int) ceil($windowMs / 1000));
+        $state = $context->localTabState();
+        if ($state !== []) {
+            $record['tabState'] = $state;
+            $bytes = 0;
+            foreach ($state as $bucket => $values) {
+                foreach ($values as $name => $value) {
+                    $bytes += \strlen($bucket) + \strlen($name) + \strlen($value);
+                }
+            }
+            $this->revivableStateBytes[$contextId] = $bytes;
+            $this->revivableStateTotal += $bytes;
+        }
+        $this->revivableContexts[$contextId] = $record;
 
         $this->pruneRevivableIfNeeded();
     }
 
     /**
-     * Evict expired revival records, then the soonest-expiring ones while over the cap.
+     * Evict expired revival records, then the soonest-expiring ones while over the count or the tab state cap.
      *
      * Every record is appended with the same window, so the map is in expiry order and the
      * walk stops at the first record that stays. Called only from recordRevivable().
@@ -814,22 +907,24 @@ class Application {
     private function pruneRevivableIfNeeded(): void {
         $now = time();
         $excess = \count($this->revivableContexts) - self::MAX_REVIVABLE;
+        $stateExcess = $this->revivableStateTotal - $this->revivableStateBudget;
         $drop = [];
         $evicted = 0;
         foreach ($this->revivableContexts as $id => $record) {
             if ($record['expiresAt'] > $now) {
-                if ($excess <= 0) {
+                if ($excess <= 0 && $stateExcess <= 0) {
                     break;
                 }
                 ++$evicted;
             }
             $drop[] = $id;
             --$excess;
+            $stateExcess -= $this->revivableStateBytes[$id] ?? 0;
         }
 
         // Unset after the loop: writing to the map while foreach holds it would copy it.
         foreach ($drop as $id) {
-            unset($this->revivableContexts[$id]);
+            $this->dropRevivable($id);
         }
 
         if ($evicted === 0) {
@@ -838,10 +933,16 @@ class Application {
 
         $this->revivableEvicted += $evicted;
         if ($now - $this->revivableWarnedAt >= 10) {
-            $this->logger->log('warning', 'Revival records over the cap of ' . self::MAX_REVIVABLE . ": evicted {$this->revivableEvicted} since the last warning");
+            $this->logger->log('warning', 'Revival records over the cap of ' . self::MAX_REVIVABLE . ' records or '
+                . ($this->revivableStateBudget >> 20) . " MiB of tab state: evicted {$this->revivableEvicted} since the last warning");
             $this->revivableWarnedAt = $now;
             $this->revivableEvicted = 0;
         }
+    }
+
+    private function dropRevivable(string $contextId): void {
+        $this->revivableStateTotal -= $this->revivableStateBytes[$contextId] ?? 0;
+        unset($this->revivableContexts[$contextId], $this->revivableStateBytes[$contextId]);
     }
 
     /**

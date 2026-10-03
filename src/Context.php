@@ -82,6 +82,13 @@ class Context {
     /** @var array<string, mixed> Query of the page request, which the context record keeps for a rebuild */
     private array $pageInput = [];
 
+    /**
+     * Tab state this page keeps itself: with one worker, and with several until its directory row exists.
+     *
+     * @var array<string, array<string, string>> key bucket ('' for the page, the namespace for a component) => key => serialized value
+     */
+    private array $tabState = [];
+
     /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
     private array $requestFiles = [];
 
@@ -189,6 +196,89 @@ class Context {
         }
 
         $this->app->clearSessionData($this->sessionId, $key);
+    }
+
+    /**
+     * Get a server-side value of this tab, kept across a revival.
+     *
+     * Tab state is for what the page needs to rebuild the tab but the browser does not hold, such as
+     * the last query result or a cursor: it never reaches the browser, and the handler that runs again
+     * on a revival reads it back. It goes when the revival window ends (Config::withContextTimeouts()).
+     * A component has keys of its own. Values are copies: change one and write it again.
+     *
+     * @param string $key     Key
+     * @param mixed  $default Value returned if the key is not set
+     */
+    public function tabState(string $key, mixed $default = null): mixed {
+        $page = $this->getPageContext();
+        $state = $this->app->getApp()->sharedTabState($page->id) ?? $page->tabState;
+        $serialized = $state[$this->tabStateBucket()][$key] ?? null;
+
+        return $serialized === null ? $default : unserialize($serialized);
+    }
+
+    /**
+     * Set a server-side value of this tab, kept across a revival; null removes the key.
+     *
+     * With one worker, the values live in its memory, and the revival records of destroyed tabs keep
+     * up to 64 MiB of them, evicting the oldest past that. With more than one worker, every worker reads
+     * the same values from the shared context directory, which caps a tab's serialized values at
+     * Config::withContextDirectorySize(maxTabStateBytes:), 1024 bytes by default.
+     *
+     * @throws \InvalidArgumentException if the value cannot be serialized, such as a closure
+     * @throws \OverflowException        with worker_num > 1, if the tab's values would exceed maxTabStateBytes
+     * @throws \RuntimeException         with worker_num > 1, if the tab's lock is not taken within about 7 s
+     */
+    public function setTabState(string $key, mixed $value): void {
+        try {
+            $serialized = $value === null ? null : serialize($value);
+        } catch (\Throwable $e) {
+            throw new \InvalidArgumentException("Tab state \"{$key}\" cannot be serialized: {$e->getMessage()}", 0, $e);
+        }
+
+        $bucket = $this->tabStateBucket();
+        $change = static function (array $state) use ($bucket, $key, $serialized): array {
+            if ($serialized !== null) {
+                $state[$bucket][$key] = $serialized;
+            } elseif (isset($state[$bucket][$key])) {
+                unset($state[$bucket][$key]);
+                if ($state[$bucket] === []) {
+                    unset($state[$bucket]);
+                }
+            }
+
+            return $state;
+        };
+
+        $page = $this->getPageContext();
+        $app = $this->app->getApp();
+        if (!$app->changeSharedTabState($page->id, $change, "\"{$key}\"")) {
+            $state = $change($page->tabState);
+            $app->assertTabStateFits($state, "\"{$key}\"");
+            $page->tabState = $state;
+        }
+    }
+
+    /**
+     * The tab state this page keeps itself.
+     *
+     * @internal read by Application for the revival record and the directory row
+     *
+     * @return array<string, array<string, string>>
+     */
+    public function localTabState(): array {
+        return $this->tabState;
+    }
+
+    /**
+     * Replace the tab state this page keeps itself.
+     *
+     * @internal set by Via from a revival record, and by Application once the directory row holds it
+     *
+     * @param array<string, array<string, string>> $state
+     */
+    public function importTabState(array $state): void {
+        $this->tabState = $state;
     }
 
     /**
@@ -510,6 +600,7 @@ class Context {
         // Clear references to prevent memory leaks
         $this->signalFactory->clearSignals();
         $this->seedWait = null;
+        $this->tabState = [];
         $this->actionRegistry = [];
         // A component that joined a scope is registered there itself and would outlive the page.
         foreach ($this->componentManager->getComponents() as $component) {
@@ -1410,6 +1501,13 @@ class Context {
      */
     private function resolveViewData(array|callable $data): array {
         return \is_array($data) ? $data : $data();
+    }
+
+    /**
+     * The tab state keys of this context: the page's, or for a component, its namespace's.
+     */
+    private function tabStateBucket(): string {
+        return $this->componentManager->isComponent() ? 'component:' . $this->namespace : '';
     }
 
     /**

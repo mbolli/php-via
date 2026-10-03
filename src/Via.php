@@ -1017,6 +1017,7 @@ class Via {
                 $this->app->setContextDirectory(new SharedContextDirectory(
                     $this->settings->contextDirectoryRows,
                     $this->settings->contextDirectoryRecordBytes,
+                    $this->settings->contextDirectoryTabStateBytes,
                 ));
 
                 // So getClients() and the connect/disconnect hooks see the whole server rather
@@ -1715,6 +1716,7 @@ class Via {
             parse_str($record['query'], $query);
             $context->setPageInput($query);
         }
+        $context->importTabState($record['tabState'] ?? []);
 
         try {
             $this->invokeHandlerWithParams($handler, $context, $record['params']);

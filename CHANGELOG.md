@@ -242,6 +242,12 @@ message that names the new one.
 - **`$c->input()` on a page load** reads the page's query string, where it returned the default.
   The context record keeps up to 512 bytes of it, so a context rebuilt after its tab was away or on
   another worker reads the same input. A longer query is left out of the record with a warning.
+- **`$c->tabState($key)` and `$c->setTabState($key, $value)`** keep server-side values of a tab,
+  such as a query result the page shows, across a revival, where apps copied them into
+  `globalState`. One worker keeps them in memory, and the revival records of destroyed tabs hold up
+  to 64 MiB of them. With more than one worker every worker reads the same values from the context
+  directory, up to 1024 serialized bytes per tab: raise it with
+  `withContextDirectorySize(maxTabStateBytes:)`. Values must be serializable.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
 

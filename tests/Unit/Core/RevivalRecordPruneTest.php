@@ -124,13 +124,13 @@ describe('revival record pruning', function (): void {
         for ($i = 0; $i < 50; ++$i) {
             registerAndDestroy($app, 'burst' . $i);
         }
-        expect($warnings->getArrayCopy())->toBe(['Revival records over the cap of 10000: evicted 1 since the last warning']);
+        expect($warnings->getArrayCopy())->toBe(['Revival records over the cap of 10000 records or 64 MiB of tab state: evicted 1 since the last warning']);
 
         (new ReflectionProperty(Application::class, 'revivableWarnedAt'))->setValue($app->getApp(), time() - 10);
         registerAndDestroy($app, 'later');
 
         expect($warnings->getArrayCopy())->toHaveCount(2)
-            ->and($warnings[1])->toBe('Revival records over the cap of 10000: evicted 50 since the last warning')
+            ->and($warnings[1])->toBe('Revival records over the cap of 10000 records or 64 MiB of tab state: evicted 50 since the last warning')
             ->and(revivalRecords($app))->toHaveCount(PRUNE_CAP)
         ;
     });

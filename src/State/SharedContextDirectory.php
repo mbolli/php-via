@@ -29,9 +29,17 @@ use OpenSwoole\Table;
  *
  * Keys are hashed rather than used raw: a context ID is its route plus 18 characters, and
  * OpenSwoole's usable key length is 63, which would cap routes at 45 characters.
+ *
+ * Each row also holds the tab state of its context (Context::setTabState()) in a column that
+ * put() never writes, so a heartbeat rewriting the record keeps it and the row's expiry drops it.
  */
 final class SharedContextDirectory {
+    /** Lock rows for tab state writes; contexts hash onto them. */
+    private const int STATE_STRIPES = 256;
+
     private Table $table;
+
+    private TicketLock $stateLock;
 
     private int $pruneBlockedUntilNs = 0;
 
@@ -41,13 +49,30 @@ final class SharedContextDirectory {
      * @param int $maxRecordBytes Serialized byte cap per record. Measured real records run
      *                            92-341 bytes (route, params, session, expiry), plus a page
      *                            query of up to 512 bytes.
+     * @param int $maxStateBytes  Serialized byte cap of one context's tab state
      */
-    public function __construct(int $maxRows = 4096, private int $maxRecordBytes = 1024) {
+    public function __construct(int $maxRows = 4096, private int $maxRecordBytes = 1024, private int $maxStateBytes = 1024) {
         $table = new Table($maxRows);
         $table->column('record', Table::TYPE_STRING, $maxRecordBytes);
         $table->column('expires', Table::TYPE_INT, 8);
+        $table->column('state', Table::TYPE_STRING, $maxStateBytes);
         $table->create();
         $this->table = $table;
+
+        // Headroom: rows are placed by hash, and a set() that finds no free slot throws.
+        $locks = new Table(self::STATE_STRIPES * 2);
+        $locks->column('next', Table::TYPE_INT, 8);
+        $locks->column('serving', Table::TYPE_INT, 8);
+        $locks->column('lease', Table::TYPE_INT, 8);
+        $locks->create();
+        for ($stripe = 0; $stripe < self::STATE_STRIPES; ++$stripe) {
+            $locks->set((string) $stripe, ['next' => 0, 'serving' => 0, 'lease' => 0]);
+        }
+        $this->stateLock = new TicketLock(
+            $locks,
+            static fn (string $stripe): string => "Timed out waiting to write tab state (lock stripe {$stripe}). "
+                . 'A worker died holding the lock or its event loop is blocked.',
+        );
     }
 
     /**
@@ -111,6 +136,68 @@ final class SharedContextDirectory {
         }
 
         return self::decode((string) $row['record']);
+    }
+
+    /**
+     * The tab state of a context: key bucket => key => serialized value. Null when the context has
+     * no live row, so its state lives on the worker that holds it.
+     *
+     * @return null|array<string, array<string, string>>
+     */
+    public function getState(string $contextId): ?array {
+        $row = $this->table->get(self::key($contextId));
+        if (!\is_array($row) || (int) $row['expires'] <= time()) {
+            return null;
+        }
+
+        return self::decodeState((string) $row['state']);
+    }
+
+    /**
+     * Change the tab state of a context under its lock, so two workers writing one tab both land.
+     *
+     * @param \Closure(array<string, array<string, string>>): array<string, array<string, string>> $change
+     *
+     * @return bool false when the context has no live row
+     *
+     * @throws \OverflowException if the state would exceed the byte cap; $name names the write in the message
+     * @throws \RuntimeException  if the lock is not taken in time
+     */
+    public function changeState(string $contextId, \Closure $change, string $name): bool {
+        $key = self::key($contextId);
+
+        return $this->stateLock->run((string) (crc32($key) % self::STATE_STRIPES), function () use ($key, $change, $name): bool {
+            $row = $this->table->get($key);
+            if (!\is_array($row) || (int) $row['expires'] <= time()) {
+                return false;
+            }
+
+            $state = $change(self::decodeState((string) $row['state']));
+            // Only the state column, so a record put() in between stays.
+            $this->table->set($key, ['state' => $this->encodeState($state, $name)]);
+
+            return true;
+        });
+    }
+
+    /**
+     * Tab state as the state column holds it.
+     *
+     * @param array<string, array<string, string>> $state
+     *
+     * @throws \OverflowException if it exceeds the byte cap; $name names the write in the message
+     */
+    public function encodeState(array $state, string $name): string {
+        $serialized = $state === [] ? '' : serialize($state);
+        if (\strlen($serialized) > $this->maxStateBytes) {
+            throw new \OverflowException(
+                'The tab state would take ' . \strlen($serialized) . " bytes after writing {$name}, over the "
+                . "{$this->maxStateBytes} bytes per tab that more than one worker share. Raise it with "
+                . 'Config::withContextDirectorySize(maxTabStateBytes: ...), or keep large values out of tab state.'
+            );
+        }
+
+        return $serialized;
     }
 
     public function forget(string $contextId): void {
@@ -181,6 +268,34 @@ final class SharedContextDirectory {
         }
 
         return $decoded;
+    }
+
+    /**
+     * @return array<string, array<string, string>>
+     */
+    private static function decodeState(string $serialized): array {
+        if ($serialized === '') {
+            return [];
+        }
+
+        $state = unserialize($serialized, ['allowed_classes' => false]);
+        if (!\is_array($state)) {
+            return [];
+        }
+
+        $valid = [];
+        foreach ($state as $bucket => $values) {
+            if (!\is_array($values)) {
+                continue;
+            }
+            foreach ($values as $name => $value) {
+                if (\is_string($value)) {
+                    $valid[(string) $bucket][(string) $name] = $value;
+                }
+            }
+        }
+
+        return $valid;
     }
 
     /**
