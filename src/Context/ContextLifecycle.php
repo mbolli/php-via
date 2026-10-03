@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
 
 /**
@@ -15,6 +17,7 @@ use OpenSwoole\Timer;
  * Handles:
  * - Cleanup callbacks
  * - Timer management
+ * - Background tasks
  * - Disconnect handling
  * - Resource cleanup
  */
@@ -55,12 +58,43 @@ class ContextLifecycle {
             try {
                 $callback(...$args);
             } catch (\Throwable $e) {
-                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $this->context->get());
+                $context = $this->context->get();
+                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $context);
+                $this->via->reportError($e, $context, ErrorPhase::Timer);
             }
         });
         $this->timerIds[] = $timerId;
 
         return $timerId;
+    }
+
+    /**
+     * Run $task in a coroutine of its own and count it in Via::$runningTasks while it runs.
+     * A throw is logged and reported with ErrorPhase::Task.
+     *
+     * @param callable(Context): void $task
+     *
+     * @throws \RuntimeException when OpenSwoole creates no coroutine, at max_coroutine
+     */
+    public function spawn(callable $task): void {
+        $context = $this->context->get() ?? throw new \LogicException('spawn() on a freed context');
+
+        $cid = Coroutine::create(function () use ($task, $context): void {
+            ++$this->via->runningTasks;
+
+            try {
+                $task($context);
+            } catch (\Throwable $e) {
+                $this->via->log('error', 'Task failed: ' . Logger::describe($e), $context);
+                $this->via->reportError($e, $context, ErrorPhase::Task);
+            } finally {
+                --$this->via->runningTasks;
+            }
+        });
+
+        if ($cid === false) {
+            throw new \RuntimeException('Context::spawn() could not start a coroutine: the worker is at max_coroutine.');
+        }
     }
 
     /**

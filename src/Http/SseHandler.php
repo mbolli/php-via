@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context\PatchManager;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\PatchMode;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
@@ -389,6 +390,7 @@ class SseHandler {
             } catch (\Throwable) {
                 // Client already gone.
             }
+            $this->via->reportError($e, $context, ErrorPhase::Render);
         }
 
         // A tab whose sync fails never counts as connected, so a view that always throws

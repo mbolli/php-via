@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -152,6 +153,8 @@ class ActionHandler {
         } catch (\Throwable $e) {
             $this->via->log('error', "Action {$actionId} failed: " . Logger::describe($e));
             $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
+            // Before the send below, so that what the onError callbacks write reaches the tab with it.
+            $this->via->reportError($e, $context, ErrorPhase::Action, $actionId);
             // The values the action wrote before it threw are already the server's.
             $this->syncSignalsAfterAction($context, $actionId);
 
@@ -172,6 +175,7 @@ class ActionHandler {
             $context->getPatchManager()->syncSignalsAfterAction();
         } catch (\Throwable $e) {
             $this->via->log('error', "Sending the signals changed by action {$actionId} failed: " . Logger::describe($e));
+            $this->via->reportError($e, $context, ErrorPhase::Action, $actionId);
         }
     }
 

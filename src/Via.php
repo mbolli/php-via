@@ -38,6 +38,7 @@ use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\State\SqliteSnapshot;
 use Mbolli\PhpVia\Support\DatastarBundle;
+use Mbolli\PhpVia\Support\ErrorHooks;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
@@ -124,6 +125,11 @@ class Via {
     public int $runningSseStreams = 0;
 
     /**
+     * @internal Context::spawn() tasks still running in this worker
+     */
+    public int $runningTasks = 0;
+
+    /**
      * @internal use getClients()
      *
      * @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID
@@ -167,6 +173,8 @@ class Via {
 
     /** @var array<callable(Context): void> Callbacks to run when a client disconnects from SSE */
     private array $clientDisconnectCallbacks = [];
+
+    private ErrorHooks $errorHooks;
 
     /** @var null|callable(Request, Response): void Handler for unmatched routes (404) */
     private $notFoundHandler;
@@ -279,6 +287,7 @@ class Via {
         $this->requestLogger = new RequestLogger($this->settings->devMode);
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
+        $this->errorHooks = new ErrorHooks($this->log(...));
 
         if (!$this->settings->broadcastCoalescingEnabled) {
             $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
@@ -1135,6 +1144,7 @@ class Via {
                             $callback();
                         } catch (\Throwable $e) {
                             $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
+                            $this->reportError($e, null, ErrorPhase::Timer);
                         }
                     });
 
@@ -1304,8 +1314,9 @@ class Via {
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
      * recycle. A callback cannot tell a reload from a stop. They run inside a coroutine, each in its
-     * own try/catch, after waiting up to half the stop budget for open SSE streams to finish
-     * (no wait when `max_wait_time` is below 2). OpenSwoole counts `max_wait_time` in whole seconds,
+     * own try/catch, after waiting up to half the stop budget for open SSE streams and Context::spawn()
+     * tasks to finish (no wait when `max_wait_time` is below 2). Tasks still running after the
+     * callbacks get the rest of the budget. OpenSwoole counts `max_wait_time` in whole seconds,
      * so the budget for the stop is roughly `max_wait_time` minus up to one second.
      *
      * End long-lived coroutines, sockets and `Event::add` fds here (or check isShuttingDown() in
@@ -1404,6 +1415,45 @@ class Via {
      */
     public function onClientDisconnect(callable $callback): void {
         $this->clientDisconnectCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a callback that sees each throw php-via catches from app code, to report it: to an error
+     * tracker, as a metric, or in an error signal on the tab. It only observes. php-via still logs the
+     * throw and handles it as before, so a failing action still answers 500 and sends the signals it
+     * changed, the ones the callback writes included.
+     *
+     * $phase says where the throw came from:
+     * - Action: an action threw, or something it called, such as a sync() whose view threw. $c is the
+     *   tab's page context, also for a component's action, and $action the action's id: the name given
+     *   to action(), after the component's namespace and a dash, or action0, action1 for unnamed ones.
+     * - Render: a page handler or view threw on page load or revival ($c is the context being built,
+     *   which is discarded), a view on a stream's first sync, or a view in a broadcast. A broadcast
+     *   reports each distinct failure once per pass, with the first context it failed for.
+     * - Timer: a Context::setInterval() callback threw, or a Via::setInterval() one, with $c null.
+     * - Task: a Context::spawn() task threw.
+     * $action is null outside Action.
+     *
+     * Callbacks run in the order registered, in the coroutine that caught the throw; for an action
+     * before its changed signals are sent, so what they write goes out with them. A throw from a
+     * callback is logged and reaches no callback, and so is a throw caught while a callback runs in
+     * the same coroutine, such as a view failing in a broadcast the callback starts.
+     * php-via's own failures, such as a broker that cannot publish, and throws from lifecycle
+     * callbacks (onClientConnect(), onCleanup(), onWorkerStop() and the like) are only logged.
+     *
+     * @param callable(\Throwable, ?Context, ErrorPhase, ?string): void $callback receives the throwable, the context, the phase and the action id
+     */
+    public function onError(callable $callback): void {
+        $this->errorHooks->add($callback);
+    }
+
+    /**
+     * Pass a throw php-via caught, after handling it, to the onError() callbacks.
+     *
+     * @internal called where php-via catches a throw from an action, a render, a timer or a task
+     */
+    public function reportError(\Throwable $e, ?Context $context, ErrorPhase $phase, ?string $action = null): void {
+        $this->errorHooks->report($e, $context, $phase, $action);
     }
 
     /**
@@ -1722,6 +1772,7 @@ class Via {
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
+            $this->reportError($e, $context, ErrorPhase::Render);
 
             return null;
         }
@@ -2794,7 +2845,7 @@ class Via {
             $context->getPatchManager()->closePatchChannel();
         }
         $this->sseHandler->closeStreams();
-        $this->waitForSseStreams();
+        $this->waitForStreamsAndTasks();
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
@@ -2804,8 +2855,11 @@ class Via {
             }
         }
 
-        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $stopBudgetNs = max(0, (int) ($this->server?->setting['max_wait_time'] ?? 3) - 1) * 1_000_000_000;
+        // Tasks the callbacks told to stop, such as by killing the process they wait on.
+        $this->waitWhile(fn (): bool => $this->runningTasks > 0, $stopStartNs + $stopBudgetNs);
+
+        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $this->drainBroadcasts(renderPending: false, publisherDeadlineNs: min(hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000, $stopStartNs + $stopBudgetNs));
 
         try {
@@ -2816,22 +2870,23 @@ class Via {
 
         $others = (int) (Coroutine::stats()['coroutine_num'] ?? 0) - (Coroutine::getCid() > 0 ? 1 : 0);
         if ($others > 0) {
-            $this->log('warning', "{$others} coroutine(s) still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
+            $tasks = $this->runningTasks > 0 ? ", {$this->runningTasks} of them Context::spawn() tasks," : '';
+            $this->log('warning', "{$others} coroutine(s){$tasks} still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
         }
     }
 
     /**
-     * Let the SSE exit paths (onClientDisconnect included) finish before the callbacks and the
-     * broker go away, within half the stop budget so the callbacks keep the rest.
+     * Let the SSE exit paths (onClientDisconnect included) and the Context::spawn() tasks finish before
+     * the callbacks and the broker go away, within half the stop budget so the callbacks keep the rest.
      */
-    private function waitForSseStreams(): void {
+    private function waitForStreamsAndTasks(): void {
         if (Coroutine::getCid() <= 0) {
             return;
         }
 
         $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
         $deadline = microtime(true) + max(0, $maxWait - 1) / 2;
-        while ($this->runningSseStreams > 0 && microtime(true) < $deadline) {
+        while (($this->runningSseStreams > 0 || $this->runningTasks > 0) && microtime(true) < $deadline) {
             Coroutine::usleep(10_000);
         }
     }
@@ -2952,6 +3007,7 @@ class Via {
     private function logSyncFailures(string $scope): void {
         foreach ($this->syncFailures[$scope] ?? [] as [$e, $context, $count]) {
             $this->log('error', "Sync failed during broadcast of {$scope} for {$count} context(s): " . Logger::describe($e), $context);
+            $this->reportError($e, $context, ErrorPhase::Render);
         }
         $this->syncFailures[$scope] = [];
     }

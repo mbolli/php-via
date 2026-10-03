@@ -13,12 +13,18 @@ putenv('VIA_TEST_MODE=1');
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
 
 $via = new Via((new Config())->withLogLevel('error'));
 $ctx = new Context('ctx-interval', '/interval', $via);
+
+$reports = [];
+$via->onError(static function (Throwable $e, ?Context $c, ErrorPhase $phase, ?string $action) use (&$reports): void {
+    $reports[] = $phase->value . ' ' . ($c?->getId() ?? 'null') . ' ' . ($action ?? 'null') . ' ' . $e->getMessage();
+});
 
 $ticks = 0;
 Coroutine::run(static function () use ($ctx, &$ticks): void {
@@ -36,3 +42,4 @@ Coroutine::run(static function () use ($ctx, &$ticks): void {
 });
 
 echo "ticks={$ticks}\n";
+echo 'reports=' . count($reports) . ' ' . implode(' | ', array_unique($reports)) . "\n";
