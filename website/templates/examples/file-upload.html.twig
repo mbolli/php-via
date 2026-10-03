@@ -79,7 +79,7 @@
               class="fu-form"
               enctype="multipart/form-data"
               onsubmit="window.handleRealUpload(this); return false">
-            <input type="hidden" name="via_ctx" value="{{ ctxId }}">
+            <input type="hidden" name="via_ctx" value="{{ contextId }}">
 
             <div class="fu-field">
                 <label for="fu-file">Choose file <span class="fu-optional">(max {{ realMaxMb }} MB)</span></label>
@@ -147,7 +147,7 @@
         {% if uploadFileInfo.string != '' %}
         <p class="fu-file-meta">{{ uploadFileInfo.string|e }}</p>
         {% endif %}
-        <button class="fu-start-btn secondary" onclick="handleReset('{{ resetUpload.url }}', '{{ ctxId }}')">
+        <button class="fu-start-btn secondary" onclick="handleReset('{{ resetUpload.url }}', '{{ contextId }}')">
             ↺ Upload another file
         </button>
     </div>
@@ -158,7 +158,7 @@
     <div class="fu-status-panel">
         <div class="fu-status-icon">🚫</div>
         <h3>Upload cancelled</h3>
-        <button class="fu-start-btn" onclick="handleReset('{{ resetUpload.url }}', '{{ ctxId }}')">
+        <button class="fu-start-btn" onclick="handleReset('{{ resetUpload.url }}', '{{ contextId }}')">
             ↺ Start a new upload
         </button>
     </div>

@@ -2,7 +2,7 @@
 
 {% block demo %}
 <p class="greeter-display">
-    Greeting: <span class="text-brand font-bold" data-text="${{ greeting.id }}">{{ greeting.string }}</span>
+    Greeting: <span class="text-brand font-bold" data-text="{{ greeting.ref }}">{{ greeting.string }}</span>
 </p>
 
 <div class="flex gap-2 justify-center">

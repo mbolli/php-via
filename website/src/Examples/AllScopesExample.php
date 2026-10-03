@@ -14,9 +14,9 @@ final class AllScopesExample {
     /** @var string[] */
     private const array SUMMARY = [
         '<strong>Three scopes on one page</strong>: GLOBAL (status banner), ROUTE (shared page counter), and TAB (personal message). Each component lives in a different scope to show the contrast.',
-        '<strong>Navigate between sub-pages</strong> to see the difference: the GLOBAL banner stays identical everywhere, the ROUTE counter resets per page, and the TAB message is unique per browser tab.',
+        '<strong>Navigate between sub-pages</strong> to see the difference: the GLOBAL banner stays identical everywhere, each page has its own ROUTE counter, and the TAB message is unique per browser tab.',
         '<strong>Components</strong> encapsulate each scope layer. The same page factory mounts all three components, so adding a new sub-page is a single function call.',
-        '<strong>Scope hierarchy</strong> visualised: GLOBAL lives for the entire server lifetime, ROUTE resets when you change URL, and TAB is born and dies with each browser tab.',
+        '<strong>Scope hierarchy</strong> visualised: GLOBAL is one state for the whole server, ROUTE is one state per URL, and TAB is born and dies with each browser tab.',
         '<strong>Try it</strong>: open two tabs on the same sub-page and click the ROUTE counter. Both tabs update. Now open a tab on a different sub-page: its counter is independent.',
     ];
 
@@ -43,8 +43,7 @@ final class AllScopesExample {
             $updateStatus = $c->action(function () use ($app): void {
                 $statuses = ['All systems operational', 'Maintenance mode', 'High load detected', 'Everything is awesome!'];
                 $app->setGlobalState('example:allscopes:status', $statuses[array_rand($statuses)]);
-                $visitors = $app->globalState('example:allscopes:visitors', 0);
-                $app->setGlobalState('example:allscopes:visitors', $visitors + 1);
+                $app->incrementGlobalState('example:allscopes:visitors');
                 $app->broadcast(Scope::GLOBAL);
             }, 'updateStatus');
 
@@ -75,12 +74,12 @@ final class AllScopesExample {
             $increment = $c->action(function () use ($app, $route): void {
                 ++self::$counters[$route];
                 $app->broadcast(Scope::routeScope($route));
-            }, 'increment_' . str_replace('/', '_', $route));
+            }, 'increment');
 
             $reset = $c->action(function () use ($app, $route): void {
                 self::$counters[$route] = 0;
                 $app->broadcast(Scope::routeScope($route));
-            }, 'reset_' . str_replace('/', '_', $route));
+            }, 'reset');
 
             $c->view(function () use ($route, $increment, $reset): string {
                 $count = self::$counters[$route] ?? 0;
@@ -106,11 +105,11 @@ final class AllScopesExample {
         // TAB scope component
         $tabMessage = function (Context $c): void {
             $message = $c->signal('Hello from your personal tab!', 'personalMessage');
+            $h = htmlspecialchars(...);
 
-            $updateMessage = $c->action(function () use ($message, $c): void {
+            $updateMessage = $c->action(function () use ($message): void {
                 $messages = ['You are awesome!', 'Having a great day?', 'Keep coding!', 'This is YOUR personal message!', 'Tab scope is cool!'];
                 $message->setValue($messages[array_rand($messages)]);
-                $c->syncSignals();
             }, 'updateMessage');
 
             $c->view(fn (): string => <<<HTML
@@ -119,7 +118,7 @@ final class AllScopesExample {
                         <div style="flex: 1;">
                             <div class="scope-card-label">TAB: Your Personal Message</div>
                             <input type="text" {$message->bind()} style="width: 100%; margin-block: var(--size-1);">
-                            <div>Your message: <span data-text="\${$message->id()}"></span></div>
+                            <div>Your message: <span data-text="{$message->ref()}">{$h($message->string())}</span></div>
                         </div>
                         <button data-on:click="@post('{$updateMessage->url()}')">Random</button>
                     </div>
@@ -135,7 +134,7 @@ final class AllScopesExample {
                 $counter = $c->component($routeCounter, 'route');
                 $tab = $c->component($tabMessage, 'private');
 
-                $c->view(function (bool $isUpdate, string $basePath) use ($pageTitle, $content, $global, $counter, $tab, $c): string {
+                $c->view(function (bool $isUpdate) use ($pageTitle, $content, $global, $counter, $tab, $c): string {
                     if ($isUpdate) {
                         return "{$global()}{$counter()}{$tab()}";
                     }
@@ -149,10 +148,10 @@ final class AllScopesExample {
                                 ['name' => 'personalMessage', 'type' => 'string', 'scope' => 'TAB', 'default' => 'Hello...', 'desc' => 'Per-tab editable message. Private to each browser tab.'],
                             ],
                             'actions' => [
-                                ['name' => 'updateStatus', 'scope' => 'GLOBAL', 'desc' => 'Randomizes system status and increments global visitor count.'],
-                                ['name' => 'increment', 'scope' => 'ROUTE', 'desc' => 'Increments the page-specific shared counter.'],
-                                ['name' => 'reset', 'scope' => 'ROUTE', 'desc' => 'Resets the page-specific counter to 0.'],
-                                ['name' => 'updateMessage', 'scope' => 'TAB', 'desc' => 'Randomizes the personal tab message.'],
+                                ['name' => 'updateStatus', 'desc' => 'Randomizes the system status, counts the visit in GlobalState and broadcasts Scope::GLOBAL.'],
+                                ['name' => 'increment', 'desc' => 'Increments the page-specific shared counter and broadcasts the page\'s ROUTE scope.'],
+                                ['name' => 'reset', 'desc' => 'Resets the page-specific counter to 0 and broadcasts the page\'s ROUTE scope.'],
+                                ['name' => 'updateMessage', 'desc' => 'Randomizes the personal tab message. The new value goes to the tab after the action, with no broadcast.'],
                             ],
                             'views' => [
                                 ['name' => 'all_scopes.html.twig', 'desc' => 'Page shell with navigation between sub-pages.'],
@@ -170,7 +169,6 @@ final class AllScopesExample {
                         'globalBanner' => $global(),
                         'routeCounter' => $counter(),
                         'tabMessage' => $tab(),
-                        'basePath' => $basePath,
                     ]);
                 });
             });

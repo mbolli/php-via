@@ -30,7 +30,7 @@
             {% else %}
             <p class="auction-sold-winner">No bids placed. Item passed.</p>
             {% endif %}
-            <button class="auction-reset-btn" data-on:click="@post('{{ resetUrl }}')">
+            <button class="auction-reset-btn" data-on:click="@post('{{ resetAuction.url }}')">
                 🔄 Start New Auction
             </button>
         </div>
@@ -63,11 +63,11 @@
                        class="auction-bid-input"
                        min="{{ topBid + 1 }}"
                        step="5"
-                       data-bind="{{ bidInputId }}"
-                       data-on:keydown="evt.key === 'Enter' && @post('{{ placeBidUrl }}')"
+                       {{ bind(bidInput) }}
+                       data-on:keydown="evt.key === 'Enter' && @post('{{ placeBid.url }}')"
                        placeholder="{{ topBid + 10 }}">
                 <button class="auction-bid-btn"
-                        data-on:click="@post('{{ placeBidUrl }}')">
+                        data-on:click="@post('{{ placeBid.url }}')">
                     Place Bid
                 </button>
             </div>

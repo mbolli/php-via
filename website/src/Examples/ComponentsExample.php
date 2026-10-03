@@ -37,7 +37,7 @@ final class ComponentsExample {
             $counter3 = $c->component($counterComponent, 'counter3');
 
             // Rendered with the page, so a page re-render carries the counters' current HTML.
-            $c->view(fn (): string => $c->render('examples/components.html.twig', [
+            $c->view('examples/components.html.twig', fn (): array => [
                 'title' => '🧩 Components',
                 'description' => 'Three independent counters on one page. Each is an isolated component with its own signals.',
                 'summary' => [
@@ -69,7 +69,7 @@ final class ComponentsExample {
                 'counter1' => $counter1(),
                 'counter2' => $counter2(),
                 'counter3' => $counter3(),
-            ]));
+            ]);
         });
     }
 }

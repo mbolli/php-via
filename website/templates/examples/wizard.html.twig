@@ -25,12 +25,12 @@
                    type="text"
                    placeholder="Ada Lovelace"
                    autocomplete="off"
-                   data-bind="{{ name.id }}">
+                   {{ bind(name) }}>
         </div>
 
         <div class="wizard-field">
             <label for="wizard-role">Role</label>
-            <select id="wizard-role" data-bind="{{ role.id }}">
+            <select id="wizard-role" {{ bind(role) }}>
                 {% for r in roles %}
                 <option value="{{ r }}"{% if role.string == r %} selected{% endif %}>{{ r }}</option>
                 {% endfor %}
@@ -38,11 +38,11 @@
         </div>
 
         <div class="wizard-field">
-            <label for="wizard-years">Years of experience: <strong data-text="${{ years.id }}">{{ years.int }}</strong></label>
+            <label for="wizard-years">Years of experience: <strong data-text="{{ years.ref }}">{{ years.int }}</strong></label>
             <input id="wizard-years"
                    type="range"
                    min="0" max="30" step="1"
-                   data-bind="{{ years.id }}">
+                   {{ bind(years) }}>
         </div>
     </div>
 
@@ -55,7 +55,7 @@
             <div class="stack-grid">
                 {% for opt in stackOptions %}
                 <label class="stack-option">
-                    <input type="checkbox" data-bind="{{ stack[opt.key].id }}">
+                    <input type="checkbox" {{ bind(stack[opt.key]) }}>
                     <span>{{ opt.label }}</span>
                 </label>
                 {% endfor %}
@@ -64,7 +64,7 @@
 
         <div class="wizard-field">
             <label for="wizard-editor">Favourite editor</label>
-            <select id="wizard-editor" data-bind="{{ editor.id }}">
+            <select id="wizard-editor" {{ bind(editor) }}>
                 {% for e in editors %}
                 <option value="{{ e }}"{% if editor.string == e %} selected{% endif %}>{{ e }}</option>
                 {% endfor %}

@@ -29,11 +29,11 @@
 
                 {% if uploadStatus.string == 'uploading' %}
                 <button class="upload-cancel-btn" id="upload-cancel-btn" title="Cancel upload"
-                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ ctxId }}')">✕</button>
+                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ contextId }}')">✕</button>
                 {% endif %}
                 {% if uploadStatus.string == 'complete' or uploadStatus.string == 'cancelled' %}
                 <button class="upload-reset-btn" id="upload-reset-btn"
-                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ ctxId }}')">↺ Reset</button>
+                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ contextId }}')">↺ Reset</button>
                 {% endif %}
             </div>
         </div>
@@ -235,7 +235,7 @@ var _FU = {
     chunkUrl:       '{{ receiveChunk.url }}',
     uploadChunkUrl: '{{ uploadChunk.url }}',
     cancelUrl:      '{{ cancelUpload.url }}',
-    ctxId:          '{{ ctxId }}',
+    ctxId:          '{{ contextId }}',
 };
 
 function uploadCancelAction(url, ctxId) {

@@ -16,13 +16,12 @@ $app = new Via(new Config());
 $app->page('/', function (Context $c): void {
     $count = $c->signal(0, 'count');
 
-    $increment = $c->action(function () use ($c, $count): void {
+    $increment = $c->action(function () use ($count): void {
         $count->setValue($count->int() + 1);
-        $c->syncSignals(); // push the new value to this tab
     });
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="\${$count->id()}">
+        <p>Count: <strong data-text="{$count->ref()}">
             {$count->int()}
         </strong></p>
         <button data-on:click="@post('{$increment->url()}')">
@@ -38,9 +37,9 @@ $app->start();
         <div class="demo-box-label">Live result</div>
         <div class="code-result-body">
             <p class="code-result-count">
-                Count: <strong data-text="${{ count_id }}">{{ count_val }}</strong>
+                Count: <strong data-text="{{ count.ref }}">{{ count.int }}</strong>
             </p>
-            <button class="btn btn-primary" data-on:click="@post('{{ increment_url }}')">
+            <button class="btn btn-primary" data-on:click="@post('{{ increment.url }}')">
                 +1
             </button>
             <p class="counter-note">Only this tab sees this count.</p>

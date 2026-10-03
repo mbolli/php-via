@@ -16,7 +16,7 @@
                type="text"
                autocomplete="username"
                placeholder="ada"
-               data-bind="{{ username.id }}">
+               {{ bind(username) }}>
     </div>
 
     <div class="login-field">
@@ -25,7 +25,7 @@
                type="password"
                autocomplete="current-password"
                placeholder="········"
-               data-bind="{{ password.id }}">
+               {{ bind(password) }}>
     </div>
 
     <button class="login-submit-btn" data-on:click="@post('{{ login.url }}')">Log in</button>

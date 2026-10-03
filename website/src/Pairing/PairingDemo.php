@@ -53,8 +53,8 @@ final class PairingDemo {
         $c->scope($scope);
         $pick = $this->pickAction($c, $code);
 
-        // Only the colour changes in this view, so an update that would resend it unchanged (the
-        // SSE connect, a broadcast to the homepage's route) renders nothing and sends no patch.
+        // Only the colour changes in this view, so an update that would resend it unchanged, such
+        // as the one the SSE connect sends, renders nothing and sends no patch.
         $sent = false;
         $sentColour = null;
         $c->view(function (bool $isUpdate) use ($c, $code, $scope, $url, $pick, &$sent, &$sentColour): string {
@@ -90,8 +90,7 @@ final class PairingDemo {
     }
 
     /**
-     * A TAB action: the page finds actions through its own scopes, its route, GLOBAL and its
-     * components' TAB actions, never through a component's custom scope.
+     * Set the pair's colour from a swatch, and broadcast the pair's scope when it changed.
      */
     private function pickAction(Context $c, string $code): Action {
         return $c->action(function (Context $c) use ($code): void {

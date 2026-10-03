@@ -16,9 +16,9 @@ final class ChatRoomExample {
     private const array SUMMARY = [
         '<strong>Custom scopes</strong> isolate each room. Messages in "lobby" never leak to "general": each room has its own broadcast channel built with <code>Scope::build()</code>.',
         '<strong>Session-scoped usernames</strong> persist across tabs. Your username is stored in SESSION scope, so switching rooms or opening a new tab keeps the same identity.',
-        '<strong>Presence + typing</strong> indicators update in real time. When a user disconnects, the <code>onCleanup</code> hook removes them from the room\'s user list.',
-        '<strong>addScope()</strong> lets a context join a broadcast channel mid-flight. The room page starts in TAB scope for private input, then adds the room scope for shared messages.',
-        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code> and the last 50 are loaded on connect, no in-memory state required.',
+        '<strong>Presence + typing</strong> indicators update in real time. When a tab closes, the <code>onCleanup</code> hook removes its user from the room\'s list.',
+        '<strong>addScope()</strong> joins the room\'s scope, so the room\'s broadcasts re-render the page. The page itself stays in TAB scope, which keeps the message draft private.',
+        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code>, and the view loads the last 50 on every render.',
         '<strong>Multi-room architecture</strong>: open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
     ];
 
@@ -56,7 +56,7 @@ final class ChatRoomExample {
         'random' => ['name' => 'Random'],
     ];
 
-    /** @var array<string, array<string, string>> room => [sessionId => username] */
+    /** @var array<string, array<string, string>> room => [contextId => username] */
     private static array $roomUsers = [];
 
     /** @var array<string, string> room => contextId that typed there last on this worker */
@@ -106,12 +106,13 @@ final class ChatRoomExample {
         $wasNewUser = !isset(self::$roomUsers[$room][$contextId]);
         self::$roomUsers[$room][$contextId] = $username;
 
-        $messageInput = $c->signal('', 'messageInput');
+        $c->signal('', 'messageInput');
         $roomScope = Scope::build('example:chat', $room);
         $c->addScope($roomScope);
-        $typingIndicator = $c->signal(self::NOBODY_TYPING, 'typingIndicator', $roomScope, false);
+        // Broadcast by hand: mutate() broadcasts even when it keeps the value, and only a change needs one.
+        $c->signal(self::NOBODY_TYPING, 'typingIndicator', $roomScope, autoBroadcast: false);
 
-        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
+        $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
             $message = trim($ctx->getSignal('messageInput')->getValue());
             if ($message === '') {
                 return;
@@ -126,7 +127,7 @@ final class ChatRoomExample {
             self::$app?->broadcast($roomScope);
         }, 'sendMessage');
 
-        $updateTyping = $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
+        $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
             $draft = trim($ctx->getSignal('messageInput')->getValue());
             // A letter released after Enter posts a keyup carrying the sent text, or '' once the clear arrived.
             if ($draft === '' || $draft === (self::$lastSent[$contextId] ?? null)) {
@@ -172,13 +173,8 @@ final class ChatRoomExample {
             ),
             'roomName' => self::$rooms[$room]['name'],
             'username' => $username,
-            'contextId' => $contextId,
             'messages' => $c->span('db.select_messages', fn () => self::getMessages($room), ['room' => $room, 'limit' => 50]),
-            'messageInputId' => $messageInput->id(),
-            'typingIndicatorId' => $typingIndicator->id(),
             'users' => array_values(array_unique(self::$roomUsers[$room] ?? [])),
-            'sendMessageUrl' => $sendMessage->url(),
-            'updateTypingUrl' => $updateTyping->url(),
         ], block: 'demo');
 
         // The worker whose timer would clear the indicator may have restarted since.
