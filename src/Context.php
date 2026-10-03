@@ -1118,6 +1118,25 @@ class Context {
     }
 
     /**
+     * Whether this tab's SSE stream is open on this worker.
+     *
+     * sync() and patches sent while it is not are queued and delivered when the tab connects or
+     * reconnects, so checking it first only saves the render.
+     */
+    public function isConnected(): bool {
+        return ($this->app->activeSseCount[$this->getPageContext()->id] ?? 0) > 0;
+    }
+
+    /**
+     * The page this context belongs to: the page itself, or for a component the page it sits on.
+     *
+     * Use it to tell which visitor an action inside a component came from.
+     */
+    public function getPageContext(): self {
+        return $this->componentManager->getParentPageContext() ?? $this;
+    }
+
+    /**
      * Inject signals from the client.
      *
      * @internal Called by Via when processing requests

@@ -191,7 +191,7 @@ $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
         $counter->increment();
 
         // $c is this component; the visitor is the page it sits on.
-        $page = $c->getComponentManager()->getParentPageContext() ?? $c;
+        $page = $c->getPageContext();
         $visitorNum = substr($page->getId(), -4);
         $lastClick->setValue('Visitor #' . strtoupper($visitorNum));
         $lastClickHue->setValue(hexdec($visitorNum) % 360);
