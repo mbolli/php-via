@@ -71,8 +71,13 @@ class ViewRenderer {
 
             $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
 
-            $generation = $this->cache->generation($scope);
-            $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+            $generation = $this->cache->beginRender($scope);
+
+            try {
+                $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+            } finally {
+                $this->cache->endRender($scope);
+            }
 
             // Not stored when a broadcast invalidated the scope while the view rendered: the render saw the older state.
             if (!$this->isSharedDocument($result, $context)) {

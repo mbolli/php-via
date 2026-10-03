@@ -25,6 +25,9 @@ class ViewCache {
     /** Bumped by clear(), for the same reason */
     private int $epoch = 0;
 
+    /** @var array<string, int> Shared renders running per scope, between beginRender() and endRender() */
+    private array $rendering = [];
+
     /**
      * The view part of a cache key: the route pattern a context was created for and, for a
      * component, its namespace.
@@ -90,6 +93,28 @@ class ViewCache {
      */
     public function generation(string $scope): string {
         return $this->epoch . ':' . ($this->generations[$scope] ?? 0);
+    }
+
+    /**
+     * generation() for a shared render that starts now; endRender() must follow, also when it throws.
+     */
+    public function beginRender(string $scope): string {
+        $this->rendering[$scope] = ($this->rendering[$scope] ?? 0) + 1;
+
+        return $this->generation($scope);
+    }
+
+    public function endRender(string $scope): void {
+        if (--$this->rendering[$scope] <= 0) {
+            unset($this->rendering[$scope]);
+        }
+    }
+
+    /**
+     * Whether nothing is cached and no shared render runs, so no invalidation can change anything.
+     */
+    public function isIdle(): bool {
+        return $this->cache === [] && $this->rendering === [];
     }
 
     /**

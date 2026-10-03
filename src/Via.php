@@ -3460,9 +3460,23 @@ class Via {
 
             return;
         }
+        if ($this->viewCache->isIdle()) {
+            return;
+        }
         if (Scope::isRouteBased($scope)) {
             $route = Scope::parse($scope)[1] ?? null;
-            $this->invalidatePrimaryScopes($route === null ? $this->contexts : array_filter($this->contexts, static fn (Context $c): bool => $c->getRoute() === $route));
+            if ($route === null) {
+                $this->invalidatePrimaryScopes($this->contexts);
+
+                return;
+            }
+            $onRoute = [];
+            foreach ($this->contexts as $id => $context) {
+                if ($context->getRoute() === $route) {
+                    $onRoute[$id] = $context;
+                }
+            }
+            $this->invalidatePrimaryScopes($onRoute);
 
             return;
         }
