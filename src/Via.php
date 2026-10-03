@@ -24,6 +24,8 @@ use Mbolli\PhpVia\Http\RouteGroup;
 use Mbolli\PhpVia\Http\SignalParser;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Rendering\ViewRenderer;
@@ -342,8 +344,10 @@ class Via {
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
         if ($templateEngine instanceof TwigEngine) {
-            // For renders outside a context, such as notFound() pages; a context passes its own basePath.
+            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_head and via_foot.
             $templateEngine->environment()->addGlobal('basePath', $this->settings->basePath);
+            $templateEngine->environment()->addGlobal('via_head', new Html($this->settings->importMapTag()));
+            $templateEngine->environment()->addGlobal('via_foot', new Html(Bootstrap::foot($this->settings->datastarUrl, null)));
         }
         $this->viewRenderer = new ViewRenderer($this->settings, $this->viewCache, $this->stats, $this->logger);
 
