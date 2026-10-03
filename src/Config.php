@@ -55,7 +55,7 @@ final class Config {
     /**
      * Unsent backlog per SSE connection, in bytes, above which idempotent element
      * frames are dropped for that client instead of parking the coroutine in write().
-     * Matches the default socket_buffer_size. 0 disables dropping.
+     * Half the default socket_buffer_size. 0 disables dropping.
      */
     private int $sseMaxQueuedBytes = 1048576;
 
@@ -559,7 +559,12 @@ final class Config {
      * shutdown and disconnect. Element patches are idempotent, so a backed-up client
      * catches up on the next broadcast. Signals and scripts are never dropped.
      *
-     * @param int $bytes threshold in bytes; 0 or less disables dropping entirely
+     * Once a connection is past the threshold, its element frames are dropped until its
+     * backlog is empty, since OpenSwoole wakes a parked write only then. A threshold above
+     * half of socket_buffer_size acts as half of it: frames on their way to the backlog
+     * could otherwise fill the buffer before the backlog shows them.
+     *
+     * @param int $bytes threshold in bytes, 1 MiB by default; 0 or less disables dropping entirely
      */
     public function withSseMaxQueuedBytes(int $bytes): self {
         $this->assertMutable(__FUNCTION__);

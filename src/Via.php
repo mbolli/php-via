@@ -2402,12 +2402,11 @@ class Via {
         $defaults = [
             'open_http2_protocol' => $settings->https || $settings->h2c,
             'http_compression' => false,
-            // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
-            // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
-            // ERRNO 1203 on every send. 2MB is the OpenSwoole default; send_yield=true
-            // handles backpressure without stalling. SSE events are flushed per-chunk by
-            // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
-            'socket_buffer_size' => 1024 * 1024,
+            // Per-connection backlog in the master past which a write parks (send_yield) until the backlog is
+            // empty. Twice the default withSseMaxQueuedBytes(), so frames still in the worker pipe when a
+            // stream checks its backlog do not fill it. In POOL_MODE all sends go through the master reactor
+            // pipe, so 0 would cause ERRNO 1203 on every send.
+            'socket_buffer_size' => 2 * 1024 * 1024,
             'max_coroutine' => 100000,
             'worker_num' => $settings->workerNum,  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,

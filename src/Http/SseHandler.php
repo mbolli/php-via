@@ -65,6 +65,9 @@ class SseHandler {
 
     private bool $heartbeating = false;
 
+    /** See dropThreshold(), resolved with the first stream. */
+    private ?int $dropThreshold = null;
+
     public function __construct(Via $via) {
         $this->via = $via;
     }
@@ -246,16 +249,31 @@ class SseHandler {
      * path, so neither is ever sacrificed here. Nor are the element patches of
      * patchElements() (PatchManager::isOneShot()), which the stream loop leaves out before asking.
      *
+     * A connection stays backed up until its backlog is empty: once the backlog passes socket_buffer_size,
+     * OpenSwoole parks every write until it is empty, and the backlog can fall below the threshold before
+     * that as the kernel takes more of it.
+     *
      * @param string $type           patch type
      * @param int    $queuedBytes    `send_queued_bytes` for the connection
-     * @param int    $maxQueuedBytes threshold; 0 or less disables dropping
+     * @param int    $maxQueuedBytes threshold, see dropThreshold(); 0 or less disables dropping
+     * @param bool   $backedUp       whether the connection was backed up at the last check
      */
-    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes): bool {
+    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes, bool $backedUp = false): bool {
         if ($maxQueuedBytes <= 0 || $type !== 'elements') {
             return false;
         }
 
-        return $queuedBytes > $maxQueuedBytes;
+        return $queuedBytes > $maxQueuedBytes || ($backedUp && $queuedBytes > 0);
+    }
+
+    /**
+     * The backlog past which element frames are dropped: Config::withSseMaxQueuedBytes(), at most half of
+     * socket_buffer_size, so frames still in the worker pipe when a stream checks its backlog do not fill the buffer.
+     *
+     * @internal
+     */
+    public static function dropThreshold(int $maxQueuedBytes, int $socketBufferSize): int {
+        return $maxQueuedBytes <= 0 ? $maxQueuedBytes : min($maxQueuedBytes, max(1, intdiv($socketBufferSize, 2)));
     }
 
     /**
@@ -412,8 +430,8 @@ class SseHandler {
             $this->via->triggerClientConnect($context);
         }
 
-        // Slow-consumer bookkeeping: $backedUp tracks the stall episode so the log
-        // records transitions rather than every dropped frame.
+        // Slow-consumer bookkeeping: $backedUp holds from the backlog passing the threshold until it is
+        // empty (see shouldDropFrame()), and the log records its transitions rather than every dropped frame.
         $backedUp = false;
         $droppedFrames = 0;
 
@@ -454,20 +472,21 @@ class SseHandler {
 
                 // Drop this frame rather than parking in write() behind a client that
                 // is not draining its socket. See shouldDropFrame().
-                if (!PatchManager::isOneShot($patch) && $this->isBackedUp($response, $patch['type'])) {
-                    ++$droppedFrames;
+                if (!PatchManager::isOneShot($patch) && $patch['type'] === 'elements') {
+                    $wasBackedUp = $backedUp;
+                    $backedUp = $this->isBackedUp($response, $backedUp);
+                    if ($backedUp) {
+                        ++$droppedFrames;
 
-                    // Log the transition only. A stalled client can drop thousands of
-                    // frames, and one line per frame would bury everything else.
-                    if (!$backedUp) {
-                        $backedUp = true;
-                        $this->via->log('debug', "Client backlog exceeded, dropping element frames: {$contextId}", $context);
+                        // Log the transition only. A stalled client can drop thousands of
+                        // frames, and one line per frame would bury everything else.
+                        if (!$wasBackedUp) {
+                            $this->via->log('debug', "Client backlog exceeded, dropping element frames: {$contextId}", $context);
+                        }
+
+                        continue;
                     }
-
-                    continue;
                 }
-
-                $backedUp = false;
 
                 try {
                     if (!$this->writeOutput($response, $this->sendSSEPatch($sse, $patch), $brotliWrite)) {
@@ -531,16 +550,19 @@ class SseHandler {
                     break;
                 }
 
-                // Skipped behind a backlog, so the comment never parks the loop in write().
-                if ($keepAliveNs > 0 && hrtime(true) - $lastWriteNs >= $keepAliveNs && !$this->isBackedUp($response, 'elements')) {
-                    try {
-                        if (!$this->writeOutput($response, self::KEEP_ALIVE, $brotliWrite)) {
+                if ($keepAliveNs > 0 && hrtime(true) - $lastWriteNs >= $keepAliveNs) {
+                    // Skipped behind a backlog, so the comment never parks the loop in write().
+                    $backedUp = $this->isBackedUp($response, $backedUp);
+                    if (!$backedUp) {
+                        try {
+                            if (!$this->writeOutput($response, self::KEEP_ALIVE, $brotliWrite)) {
+                                break;
+                            }
+                        } catch (\Throwable) {
                             break;
                         }
-                    } catch (\Throwable) {
-                        break;
+                        $lastWriteNs = hrtime(true);
                     }
-                    $lastWriteNs = hrtime(true);
                 }
             }
         }
@@ -662,14 +684,17 @@ class SseHandler {
     }
 
     /**
-     * Check the connection's unsent backlog before writing.
+     * Whether the connection is backed up, from its unsent backlog, checked before writing an element frame.
      *
      * getClientInfo() costs ~0.32us, negligible against a patch write.
+     *
+     * @param bool $backedUp whether it was at the last check
      */
-    private function isBackedUp(Response $response, string $patchType): bool {
-        $maxQueued = $this->via->getSettings()->sseMaxQueuedBytes;
+    private function isBackedUp(Response $response, bool $backedUp): bool {
+        $settings = $this->via->getSettings();
+        $this->dropThreshold ??= self::dropThreshold($settings->sseMaxQueuedBytes, (int) (Via::serverSettings($settings)['socket_buffer_size'] ?? 0));
 
-        if ($maxQueued <= 0 || $patchType !== 'elements') {
+        if ($this->dropThreshold <= 0) {
             return false;
         }
 
@@ -683,7 +708,7 @@ class SseHandler {
             return false;
         }
 
-        return self::shouldDropFrame($patchType, (int) ($info['send_queued_bytes'] ?? 0), $maxQueued);
+        return self::shouldDropFrame('elements', (int) ($info['send_queued_bytes'] ?? 0), $this->dropThreshold, $backedUp);
     }
 
     /**

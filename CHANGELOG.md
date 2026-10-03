@@ -478,6 +478,12 @@ message that names the new one.
   `active_sse` and `active_contexts`. Page, static file and `route()` requests, actions and SSE
   connections now count for the whole server, and the active counts are read from the answering
   worker. `Stats::setActiveSse()` and `setActiveContexts()` are removed.
+- A client that read too slowly could park its SSE stream until it disconnected, also with
+  `withSseMaxQueuedBytes()` set. Once the backlog passed `socket_buffer_size`, OpenSwoole parked
+  every write until the backlog was empty, and element frames went out again as soon as it fell
+  below the threshold. They are now dropped until the backlog is empty, and the default
+  `socket_buffer_size` is 2 MiB, twice the default threshold. A threshold above half of
+  `socket_buffer_size` acts as half of it.
 
 ### Tests
 
