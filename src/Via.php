@@ -19,6 +19,7 @@ use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
 use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
+use Mbolli\PhpVia\Http\Forwarder;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
 use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\RequestHandler;
@@ -259,6 +260,9 @@ class Via {
     private RequestHandler $requestHandler;
     private SseHandler $sseHandler;
     private StaticBrotli $staticBrotli;
+
+    /** Passes requests of tabs another worker holds there; set in workerStart with more than one worker. */
+    private ?Forwarder $forwarder = null;
 
     /** Builds the request a route's middleware gets when a tab is rebuilt, created with the first. */
     private ?PsrRequestFactory $psrRequestFactory = null;
@@ -1071,20 +1075,23 @@ class Via {
                 );
             }
 
-            // Actions, scoped signal values and session data cross workers, but three things do not,
-            // and they fail quietly enough that an operator would not connect them to worker_num.
+            // Scoped signal values and session data cross workers, and actions reach the worker that holds
+            // their tab, but three things do not, and they fail quietly enough that an operator would not
+            // connect them to worker_num.
             if ($this->settings->workerNum > 1) {
                 $this->log(
                     'warn',
-                    'worker_num > 1: actions, scoped signal values, session data and the client list are '
-                    . 'shared across workers. Three things are not. (1) Mutating a scoped signal by reading '
+                    'worker_num > 1: scoped signal values, session data and the client list are shared across workers, '
+                    . 'and an action or a download that reaches another worker is passed to the one that holds its tab. '
+                    . 'Three things are not shared. (1) Mutating a scoped signal by reading '
                     . 'it and calling setValue() loses updates: use Signal::increment() for counters and '
                     . 'Signal::mutate() for anything else. Reading a session data key and writing it back '
                     . 'loses updates the same way and has no atomic form. (2) PHP statics in your own handlers are '
-                    . 'per-process, so a simulation kept in one diverges per worker. (3) A server-owned TAB '
-                    . 'signal (clientWritable: false, or any TAB signal without clientWritable: true under '
-                    . 'withStrictTabSignals()) lives in one worker: an action another worker takes rebuilds '
-                    . 'it from its initial value, so keep that state in a scoped signal or use worker_num = 1. '
+                    . 'per-process, so a simulation kept in one diverges per worker. (3) A tab lives on the worker of '
+                    . 'its SSE stream. When the stream reconnects to another worker, that worker rebuilds the tab as a '
+                    . 'revival does, so a server-owned TAB signal (clientWritable: false, or any TAB signal without '
+                    . 'clientWritable: true under withStrictTabSignals()) starts from its initial value: keep state that '
+                    . 'must survive in a scoped signal or tabState(), or use worker_num = 1. '
                     . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
                 );
             }
@@ -1198,6 +1205,11 @@ class Via {
             // in SwooleBroker::publish(), but kept as a belt-and-suspenders guard).
             $this->server->on('pipeMessage', function (Server $server, int $srcWorkerId, string $data): void {
                 try {
+                    if (str_starts_with($data, Forwarder::MESSAGE_PREFIX)) {
+                        $this->forwarder?->receive($srcWorkerId, $data);
+
+                        return;
+                    }
                     if (str_starts_with($data, StaticBrotli::MESSAGE_PREFIX)) {
                         $this->staticBrotli->receive($data);
 
@@ -1269,6 +1281,17 @@ class Via {
                 });
 
                 $this->workerId = $workerId;
+                if ($this->app->getContextDirectory() !== null) {
+                    $this->forwarder = new Forwarder(
+                        $this,
+                        $server,
+                        $workerId,
+                        self::resolveWorkerNum($server),
+                        $this->settings->contextForwardTimeoutMs,
+                        $this->requestHandler->serveForwarded(...),
+                    );
+                    $this->requestHandler->setForwarder($this->forwarder);
+                }
                 foreach ($this->startCallbacks as $callback) {
                     $callback($workerId);
                 }
@@ -2035,6 +2058,140 @@ class Via {
         $this->log('info', "Revived context {$contextId} on route {$route}", $context);
 
         return $context;
+    }
+
+    /**
+     * Make this worker the home of a tab whose stream connected here, and ask the worker that held it to give it up.
+     *
+     * @internal used by SseHandler
+     */
+    public function claimStream(string $contextId): void {
+        $directory = $this->app->getContextDirectory();
+        if ($this->forwarder === null || $directory === null || $directory->home($contextId) === $this->app->workerIdentity()) {
+            return;
+        }
+
+        [$claimed, $previous] = $this->app->claimHome($contextId, true, null, $this->forwarder->isLive(...));
+        if ($claimed && $previous !== null) {
+            $this->forwarder->handOver($contextId, $previous);
+        }
+    }
+
+    /**
+     * Give up this worker's copy of a tab whose stream connected to another worker: destroy it, which ends a stream
+     * it still has here, without touching its record, and return the patches no render sends again, for the new home.
+     *
+     * @internal called by Forwarder on a handover
+     *
+     * @return list<array{type: string, content: string, selector?: string, mode?: string}>
+     */
+    public function releaseHandedOver(string $contextId): array {
+        $context = $this->contexts[$contextId] ?? null;
+        $home = $this->app->getContextDirectory()?->home($contextId);
+        if ($context === null || $context->isDestroyed() || $home === null || $home === $this->app->workerIdentity()) {
+            return [];
+        }
+
+        $patches = $context->getPatchManager()->takeOneShotPatches();
+        $this->log('debug', "Handed context {$contextId} over to worker {$home[0]}, which its stream reached", $context);
+        $this->app->cancelContextCleanup($contextId);
+        unset($this->cleanupTimers[$contextId]);
+        $this->app->destroyContext($contextId, handedOver: true);
+        if (($this->contexts[$contextId] ?? null) === $context) {
+            unset($this->contexts[$contextId], $this->contextSessions[$contextId]);
+        }
+
+        return $patches;
+    }
+
+    /**
+     * Queue the patches the previous home of a tab handed over.
+     *
+     * @internal called by Forwarder
+     *
+     * @param array<mixed> $patches as releaseHandedOver() returns them
+     */
+    public function queueHandedOverPatches(string $contextId, array $patches): void {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null || $context->isDestroyed()) {
+            return;
+        }
+
+        foreach ($patches as $patch) {
+            if (!\is_array($patch) || !\in_array($patch['type'] ?? null, ['script', 'elements'], true) || !\is_string($patch['content'] ?? null)) {
+                continue;
+            }
+            $queued = ['type' => (string) $patch['type'], 'content' => $patch['content']];
+            if (\is_string($patch['selector'] ?? null)) {
+                $queued['selector'] = $patch['selector'];
+            }
+            $mode = \is_string($patch['mode'] ?? null) ? PatchMode::tryFrom($patch['mode']) : null;
+            if ($mode !== null) {
+                $queued['mode'] = $mode;
+            }
+            $context->getPatchManager()->queuePatch($queued);
+        }
+    }
+
+    /**
+     * Give the cookies of an action response that never reached the browser, because the worker that got the
+     * request stopped waiting for it, to the tab's next action response.
+     *
+     * @internal called by Forwarder
+     *
+     * @param array<mixed> $cookies cookie calls: method and arguments
+     * @param array<mixed> $headers header calls, for a session cookie written as a header
+     */
+    public function requeueResponseCookies(string $contextId, array $cookies, array $headers): void {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null || $context->isDestroyed()) {
+            return;
+        }
+
+        $sessionCookie = $this->settings->secureCookie ? SessionManager::SESSION_COOKIE_NAME_SECURE : SessionManager::SESSION_COOKIE_NAME;
+        $requeued = 0;
+        foreach ($cookies as $call) {
+            $args = \is_array($call) && \is_array($call[1] ?? null) ? array_values($call[1]) : [];
+            if (!\is_string($args[0] ?? null)) {
+                continue;
+            }
+            ++$requeued;
+            $value = (string) ($args[1] ?? '');
+            if ($args[0] === $sessionCookie) {
+                $context->requeueSessionCookie($value);
+
+                continue;
+            }
+            $context->queueCookieForNextResponse([
+                'name' => $args[0],
+                'value' => $value,
+                'expires' => (int) ($args[2] ?? 0),
+                'path' => (string) ($args[3] ?? '/'),
+                'domain' => (string) ($args[4] ?? ''),
+                'secure' => (bool) ($args[5] ?? true),
+                'httpOnly' => (bool) ($args[6] ?? true),
+                'sameSite' => (string) ($args[7] ?? 'Lax'),
+            ]);
+        }
+        foreach ($headers as $call) {
+            if (\is_array($call) && strtolower((string) ($call[0] ?? '')) === 'set-cookie'
+                && preg_match('/^' . preg_quote($sessionCookie, '/') . '=([0-9a-f]{32})/', (string) ($call[1] ?? ''), $m) === 1) {
+                ++$requeued;
+                $context->requeueSessionCookie($m[1]);
+            }
+        }
+        if ($requeued > 0) {
+            $this->log('warn', 'The response to an action of this tab never reached the browser, so its cookies go out with the next one', $context);
+        }
+    }
+
+    /**
+     * What a download URL starts with: with more than one worker this worker's id, so any worker passes it here.
+     *
+     * @internal used by Context::download()
+     */
+    public function downloadTokenPrefix(): string {
+        return $this->forwarder !== null ? $this->workerId . '-' : '';
     }
 
     /**

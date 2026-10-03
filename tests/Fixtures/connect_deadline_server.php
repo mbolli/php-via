@@ -5,7 +5,7 @@ declare(strict_types=1);
 /*
  * Real-server fixture for Config::withContextTimeouts(connectMs:): a context with no SSE stream on its
  * worker is destroyed after the timeout. Cases: page (one worker), off (timeout 0), xworker (two
- * workers, a copy an action rebuilt on the worker the tab does not stream from), revived and
+ * workers, actions on the worker the tab does not stream from, which pass them on), revived and
  * revived-late (a tab whose stream dropped, freed after the cleanup delay, then revived by an action
  * with only via_ctx that queues a script; the stream returns after the connect timeout, within the
  * reconnect timeout for revived and after it for revived-late).

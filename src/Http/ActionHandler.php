@@ -185,6 +185,10 @@ class ActionHandler {
      */
     private function sendCookies(Request $request, Response $response, Context $context, RequestScope $scope): void {
         $rotateQueued = $context->takeSessionRotation();
+        $pending = $context->takePendingSessionToken();
+        if ($pending !== null) {
+            $this->via->getSessionManager()->adoptIssued($request, $this->via->getSettings()->secureCookie, $pending);
+        }
         foreach ([...$context->flushPendingCookies(), ...$scope->answer()] as $cookie) {
             $response->cookie(
                 $cookie['name'],

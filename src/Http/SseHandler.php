@@ -181,6 +181,9 @@ class SseHandler {
             // A context an action revived without signals, and a clientSeeded signal, take the tab's values from this connect.
             $this->via->seedFromConnect($context, $signals);
 
+            // The stream's worker holds the tab: actions that reach another worker are passed here.
+            $this->via->claimStream($contextId);
+
             // Track client info when SSE connects (not at page load)
             if (!isset($this->via->clients[$contextId])) {
                 $clientId = $this->via->generateClientId();

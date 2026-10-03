@@ -101,6 +101,9 @@ class Context {
     /** The session of the page request while its handler runs and until its response goes out */
     private ?RequestSession $pageSession = null;
 
+    /** A session cookie a rotation issued for a response that never reached the browser, for the next one */
+    private ?string $pendingSessionToken = null;
+
     /** Whether broadcast() has warned that it no longer reaches the scopes this TAB-primary context joined */
     private bool $tabBroadcastWarned = false;
 
@@ -248,6 +251,39 @@ class Context {
      */
     public function bindPageSession(?RequestSession $session): void {
         $this->pageSession = $session;
+    }
+
+    /**
+     * Queue a cookie of a response that never reached the browser for the tab's next action response.
+     *
+     * @internal called by Via when the worker that passed an action here gave up waiting
+     *
+     * @param array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string} $cookie
+     */
+    public function queueCookieForNextResponse(array $cookie): void {
+        $this->requestOwner()->pendingCookies[] = $cookie;
+    }
+
+    /**
+     * Keep a session cookie a rotation issued for a response that never reached the browser, for the next one.
+     *
+     * @internal called by Via when the worker that passed an action here gave up waiting
+     */
+    public function requeueSessionCookie(string $token): void {
+        $this->requestOwner()->pendingSessionToken = $token;
+    }
+
+    /**
+     * The session cookie requeueSessionCookie() keeps, once.
+     *
+     * @internal called by the action handler
+     */
+    public function takePendingSessionToken(): ?string {
+        $owner = $this->requestOwner();
+        $token = $owner->pendingSessionToken;
+        $owner->pendingSessionToken = null;
+
+        return $token;
     }
 
     /**
@@ -1505,7 +1541,7 @@ class Context {
     public function download(callable|string $source, string $filename, string $mimeType): string {
         $token = $this->app->getApp()->downloads()->register($this->getPageContext(), $source, $filename, $mimeType);
 
-        return $this->app->getSettings()->basePath . DownloadHandler::PATH . $token;
+        return $this->app->getSettings()->basePath . DownloadHandler::PATH . $this->app->downloadTokenPrefix() . $token;
     }
 
     /**

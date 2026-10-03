@@ -28,6 +28,11 @@ All notable changes to php-via will be documented in this file.
   integrity hashes. See [Web components](https://via.zweiundeins.gmbh/docs/web-components).
 - **A versioned Datastar URL.** The default shell loads `/datastar.js?v=<hash>`, so browsers fetch
   the new bundle after an upgrade instead of reusing the cached one.
+- **Actions reach their tab with several workers.** With `withWorkerNum()` above 1, an action that
+  reached a worker other than the one holding the tab's stream answered 200, but its TAB signals,
+  `sync()` renders and scripts never reached the browser: in a browser, most of a tab's actions. The
+  worker that gets an action or a download now passes it to the tab's worker. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#tab-worker).
 - **Worker freezes and crashes.** A burst of page views that never opened a stream froze a worker
   for about a minute once their contexts expired, and on libcurl 8.20 or newer a curl request to any
   host name crashed the worker. Both are fixed. [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks)
@@ -275,6 +280,8 @@ message that names the new one.
   old cookie works for 10 more seconds, then the streams opened with it end and their tabs reconnect
   with the new one. See
   [the API reference](https://via.zweiundeins.gmbh/docs/api#context-regenerate-session).
+- **`Config::withContextTimeouts(forwardMs:)`** sets how long a worker waits for the tab's worker to
+  answer a request it passed there, 60 s by default; then it answers 504.
 - **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on
   every worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples
   use it to tell whether anyone is watching.
@@ -443,6 +450,9 @@ message that names the new one.
   [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
 - A tab rebuilt after it was away (revival) lost the attributes middleware set on the request that
   rebuilt it, so the login example's dashboard answered 500 on every reconnect.
+- With several workers, an action that reached another worker than the tab's ran on a copy of the
+  context that no stream read, so its TAB signals, `sync()`, scripts and `patchElements()` were lost.
+  It now runs on the tab's worker, as do uploads and `download()` URLs, and its cookies come back.
 - A stopping worker, on a deploy or a reload, ended its streams and the tabs waited up to 15 s to
   reconnect. It now asks them to reconnect at once.
 
@@ -465,6 +475,9 @@ message that names the new one.
   keeps a `<dialog>` opened with `showModal()` open across updates and SSE reconnects.
 - Deployment no longer says Caddy needs response buffering turned off for SSE: `reverse_proxy`
   flushes `text/event-stream` responses at once. It shows the live site's h2c setup instead.
+- [Same machine](https://via.zweiundeins.gmbh/docs/deployment#tab-worker) says which worker holds a tab,
+  what a request gets when that worker is slow or gone, and that behind an h2c proxy one worker takes
+  every client until the proxy's connection carries 1,280 streams.
 
 ## [0.13.1] - 2026-10-02
 

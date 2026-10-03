@@ -138,6 +138,9 @@ class Application {
     /** When this worker last swept expired context directory records (hrtime ns). */
     private int $directoryPrunedAtNs = 0;
 
+    /** This worker's id, set by claimWorker() */
+    private int $workerId = 0;
+
     /** @var array<string, true> Routes already warned about for a query too long for the context record */
     private array $queryDroppedRoutes = [];
 
@@ -155,14 +158,47 @@ class Application {
 
     /**
      * Register a context.
+     *
+     * @param bool $asHome make this worker its home, for a context no other worker knows yet: a page load
      */
-    public function registerContext(Context $context): void {
+    public function registerContext(Context $context, bool $asHome = false): void {
         $this->contexts[$context->getId()] = $context;
 
         // Publish how to rebuild it, so an action landing on any other worker can. Written at
         // creation rather than destruction: a context alive on another worker right now has no
         // revival record, which is exactly the case that returned HTTP 400.
-        $this->publishContextRecord($context, $this->settings->contextDirectoryTtlSeconds);
+        $this->publishContextRecord($context, $this->settings->contextDirectoryTtlSeconds, $asHome ? $this->workerIdentity() : null);
+    }
+
+    /**
+     * This worker's id and process id, as a context's home names them.
+     *
+     * @return array{int, int}
+     */
+    public function workerIdentity(): array {
+        return [$this->workerId, getmypid()];
+    }
+
+    /**
+     * Make this worker the home of a context, see SharedContextDirectory::claimHome().
+     *
+     * @param null|array{int, int}            $expected
+     * @param \Closure(array{int, int}): bool $isLive
+     *
+     * @return array{0: bool, 1: null|array{int, int}} whether it claimed, and the home it found
+     */
+    public function claimHome(string $contextId, bool $force, ?array $expected, \Closure $isLive): array {
+        if ($this->contextDirectory === null) {
+            return [false, null];
+        }
+
+        try {
+            return $this->contextDirectory->claimHome($contextId, $this->workerIdentity(), $force, $expected, $isLive);
+        } catch (\RuntimeException $e) {
+            $this->logger->log('warn', "Could not claim {$contextId} for this worker: " . $e->getMessage());
+
+            return [false, null];
+        }
     }
 
     /**
@@ -365,6 +401,7 @@ class Application {
      * @internal called at the start of workerStart
      */
     public function claimWorker(int $workerId): void {
+        $this->workerId = $workerId;
         $removed = $this->clientRegistry?->claimWorker($workerId) ?? 0;
 
         if ($removed > 0) {
@@ -626,15 +663,19 @@ class Application {
      * equivalent context (same ID) instead of hard-reloading.
      *
      * @internal invoked by the cleanup timer (and directly by tests, since timers don't fire under VIA_TEST_MODE)
+     *
+     * @param bool $handedOver another worker holds the tab now, so its record stays as that worker keeps it
      */
-    public function destroyContext(string $contextId): void {
+    public function destroyContext(string $contextId, bool $handedOver = false): void {
         $context = $this->contexts[$contextId] ?? null;
         if ($context === null) {
             return;
         }
 
         $this->logger->log('debug', "Cleaning up inactive context: {$contextId}");
-        $this->recordRevivable($context);
+        if (!$handedOver) {
+            $this->recordRevivable($context);
+        }
         $context->cleanup();
 
         // Cleanup callbacks can yield, and a returning tab may have revived this ID meanwhile,
@@ -946,8 +987,10 @@ class Application {
 
     /**
      * Write a context's rebuild record, expiring $ttlSeconds from now.
+     *
+     * @param null|array{int, int} $home see SharedContextDirectory::put()
      */
-    private function publishContextRecord(Context $context, int $ttlSeconds): void {
+    private function publishContextRecord(Context $context, int $ttlSeconds, ?array $home = null): void {
         // With revival off no worker rebuilds a context, so nothing would ever read the record.
         if ($this->contextDirectory === null || $this->settings->contextRevivalWindowMs <= 0) {
             return;
@@ -957,14 +1000,14 @@ class Application {
 
         try {
             try {
-                $this->contextDirectory->put($context->getId(), $record);
+                $this->contextDirectory->put($context->getId(), $record, $home);
             } catch (\OverflowException $e) {
                 // A record over the byte cap still rebuilds the context without the query.
                 if (!isset($record['query'])) {
                     throw $e;
                 }
                 unset($record['query']);
-                $this->contextDirectory->put($context->getId(), $record);
+                $this->contextDirectory->put($context->getId(), $record, $home);
                 $this->warnQueryDropped($context->getRoute(), 'the context record is over Config::withContextDirectorySize(maxRecordBytes:) with it');
             }
         } catch (\OverflowException $e) {

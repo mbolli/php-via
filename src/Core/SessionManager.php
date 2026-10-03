@@ -144,6 +144,22 @@ class SessionManager {
     }
 
     /**
+     * Let the response to $request set a cookie a rotation issued for an earlier response that never reached the
+     * browser, while it is still the session's current cookie.
+     */
+    public function adoptIssued(Request $request, bool $secure, string $token): void {
+        $session = $this->resolve($request, $secure);
+        if ($session->written || $session->issued !== null || !self::isValidSessionId($token)) {
+            return;
+        }
+
+        [$key, $state] = $this->tokens->lookup($token);
+        if ($key === $session->key && $state === SessionTokens::CURRENT) {
+            $session->issued = $token;
+        }
+    }
+
+    /**
      * The cookie value the response to $request sets, decided once per request: a new cookie when the
      * session rotates, the cookie of a new session, and on page loads ($refresh) the request's cookie
      * again for a fresh Max-Age. A cookie a rotation retired is never set again, so a page that loads

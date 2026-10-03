@@ -520,21 +520,45 @@ $config = (new Config())
     ->withWorkerNum(swoole_cpu_num())
     ->withBroker(new SwooleBroker());
     {% endverbatim %}{% endcode %}
+    <p id="tab-worker">
+        A tab lives on one worker: the one that holds its SSE stream, or until the stream connects the one
+        that rendered the page. A browser sends the stream and the actions over different connections, and a
+        proxy that speaks HTTP/2 to php-via does once its first connection is full, so they often reach
+        different workers. A worker that gets an action or a <code>download()</code> URL of a tab it does not
+        hold passes the request to the tab's worker over OpenSwoole's worker pipe and sends back that worker's
+        answer, with its cookies and a rotated session cookie. Middleware and the handler run on the tab's
+        worker only. Passing a request on adds about 0.05&nbsp;ms to it. An upload goes over as it arrived, so
+        <code>file()</code> and <code>move_uploaded_file()</code> work there.
+    </p>
     <p>
-        A tab's context lives on the worker that rendered the page. Every worker can still reach it:
-        contexts are recorded in a shared-memory directory, and an action or SSE reconnect that lands on
-        another worker rebuilds the context by re-running the route handler. Scoped signal values,
-        GlobalState, session data and the connected-client list are in shared memory as well, and
-        <code>withActionRateLimit()</code> counts across workers.
+        The stream is not passed on. When it reconnects to another worker, that worker rebuilds the context by
+        re-running the route handler, as a <a href="/docs/lifecycle#revival">revival</a> does, and the worker
+        that held the tab drops its copy and hands over the scripts and <code>patchElements()</code> patches
+        still queued. Scoped signal values, GlobalState, session data, tab state and the connected-client list
+        are in shared memory, and <code>withActionRateLimit()</code> counts across workers.
+    </p>
+    <p>
+        A worker waits up to <code>withContextTimeouts(forwardMs: ...)</code> (60&nbsp;s by default) for the tab's
+        worker to answer, and then answers 504; the action may still finish, and its cookies go out with the
+        tab's next action response. When the tab's worker stops or crashes after it got the request, the
+        worker that passed it answers 503 and does not run the action itself, since it may have run. The
+        next request of the tab finds no live worker for it, so the worker it reaches rebuilds the context
+        and takes the tab. A stopping worker asks its tabs to reconnect at once, so their streams move to the workers that
+        remain.
+    </p>
+    <p>
+        Behind a proxy that speaks h2c to php-via, such as Caddy, every client shares one upstream connection,
+        and with it one worker, until that connection carries 1&nbsp;280 streams at once, OpenSwoole's limit per
+        connection; OpenSwoole&nbsp;26.2 ignores a lower <code>http2_max_concurrent_streams</code>. Only then do
+        further workers take load. Over HTTP/1.1, connections spread across workers.
     </p>
     <p>
         Each worker rewrites the directory entries of its open streams every quarter of the directory TTL
         or of the revival window, whichever is shorter (150&nbsp;s by default). A context that does not fit
-        in the directory is logged, and its actions on other workers answer 400. A copy that an action
-        rebuilt on a worker the tab does not stream from is freed after the connect timeout
-        (<code>withContextTimeouts(connectMs: ...)</code>); every action on it starts the timeout again. A tab
-        that streams from no worker keeps the reconnect timeout instead
-        (<code>withContextTimeouts(reconnectMs: ...)</code>), see <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
+        in the directory is logged, and its actions on other workers answer 400. An action of a tab whose
+        context no running worker holds any more rebuilds it on the worker it reaches, which then holds the
+        tab for the reconnect timeout (<code>withContextTimeouts(reconnectMs: ...)</code>), see
+        <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
     </p>
     <p>
         Each worker keeps the <code>getClients()</code> list it built last, about 2.3&nbsp;KB per client,
@@ -565,8 +589,9 @@ $config = (new Config())
             per worker.
         </li>
         <li>
-            <strong>Server-owned TAB signals.</strong> A rebuilt context starts them from the handler's initial
-            value. Use a scoped signal for that state.
+            <strong>Server-owned TAB signals.</strong> When a tab's stream reconnects to another worker, the
+            context rebuilt there starts them from the handler's initial value. Keep state that has to survive in
+            a scoped signal or in <code>tabState()</code>.
         </li>
     </ul>
     <p>
@@ -583,8 +608,8 @@ $config = (new Config())
         per second &times; 630; the default 4&nbsp;096 rows (about 8&nbsp;000 in practice) covers about
         12 page views per second. When it is full, new contexts get no row and a warning is logged at most
         every 10&nbsp;s per worker; those tabs work, but their actions on other workers answer 400. With
-        <code>withContextTimeouts(revivalWindowMs: 0)</code> no worker rebuilds another worker's context, so no rows
-        are written.
+        <code>withContextTimeouts(revivalWindowMs: 0)</code> no rows are written, so no worker knows where a tab
+        lives: keep revival on with more than one worker.
     </p>
     <p>
         Session data takes one row per session that holds data, with all of its keys, and

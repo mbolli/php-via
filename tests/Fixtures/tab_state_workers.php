@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Fixture for TabStateWorkersTest: tab state and the page query on a real multi-worker server.
  *
  * Loads /tab?q=hello once, then posts actions that OpenSwoole's fd dispatch sends to every worker,
- * where each rebuilds the context from the shared directory:
+ * which pass them to the worker that rendered the page:
  *   - `bump` one at a time, in turn over one kept-alive connection per worker: reads tabState('n')
  *     and writes n + 1, so the final n counts every bump only if every worker reads what the one
  *     before wrote;

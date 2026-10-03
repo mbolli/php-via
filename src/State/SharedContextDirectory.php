@@ -32,6 +32,11 @@ use OpenSwoole\Table;
  *
  * Each row also holds the tab state of its context (Context::setTabState()) in a column that
  * put() never writes, so a heartbeat rewriting the record keeps it and the row's expiry drops it.
+ *
+ * And the context's home: the worker process that holds its SSE stream, or before one connects the one that
+ * rendered or rebuilt it. Requests of the tab that reach another worker are forwarded there (Http\Forwarder).
+ * A home is not released when its context is destroyed: the worker then answers that it does not hold the
+ * tab, and the next claim replaces it.
  */
 final class SharedContextDirectory {
     /** Lock rows for tab state writes; contexts hash onto them. */
@@ -56,6 +61,9 @@ final class SharedContextDirectory {
         $table->column('record', Table::TYPE_STRING, $maxRecordBytes);
         $table->column('expires', Table::TYPE_INT, 8);
         $table->column('state', Table::TYPE_STRING, $maxStateBytes);
+        // The home's worker id and process id; a process id of 0 means none.
+        $table->column('hwid', Table::TYPE_INT, 4);
+        $table->column('hpid', Table::TYPE_INT, 4);
         $table->create();
         $this->table = $table;
 
@@ -79,10 +87,11 @@ final class SharedContextDirectory {
      * Store or replace the record for a context.
      *
      * @param array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string} $record
+     * @param null|array{int, int}                                                                                        $home   worker id and process id that become its home, for a context no other worker knows yet; null keeps the home
      *
      * @throws \OverflowException if the serialized record exceeds the column, or the table is full
      */
-    public function put(string $contextId, array $record): void {
+    public function put(string $contextId, array $record, ?array $home = null): void {
         $serialized = serialize($record);
 
         if (\strlen($serialized) > $this->maxRecordBytes) {
@@ -95,6 +104,9 @@ final class SharedContextDirectory {
 
         $key = self::key($contextId);
         $row = ['record' => $serialized, 'expires' => $record['expiresAt']];
+        if ($home !== null) {
+            $row += ['hwid' => $home[0], 'hpid' => $home[1]];
+        }
 
         if ($this->trySet($key, $row)) {
             return;
@@ -200,6 +212,59 @@ final class SharedContextDirectory {
         return $serialized;
     }
 
+    /**
+     * The worker id and process id of a context's home, null when it has none or no live row.
+     *
+     * @return null|array{int, int}
+     */
+    public function home(string $contextId): ?array {
+        $row = $this->table->get(self::key($contextId));
+        if (!\is_array($row) || (int) $row['expires'] <= time() || (int) $row['hpid'] === 0) {
+            return null;
+        }
+
+        return [(int) $row['hwid'], (int) $row['hpid']];
+    }
+
+    /**
+     * Make a worker process the home of a context, under the context's lock.
+     *
+     * With $force it always does, as a stream that connects takes its tab. Otherwise only while the home is
+     * none, $expected, the claimant itself, or a process $isLive refuses, so a home that moved meanwhile stays.
+     *
+     * @param array{int, int}                 $claimant worker id and process id
+     * @param null|array{int, int}            $expected the home the claimant saw
+     * @param \Closure(array{int, int}): bool $isLive   whether a home's process still runs
+     *
+     * @return array{0: bool, 1: null|array{int, int}} whether it claimed, and the home it found; [false, null] when the context has no live row
+     *
+     * @throws \RuntimeException if the lock is not taken in time
+     */
+    public function claimHome(string $contextId, array $claimant, bool $force, ?array $expected, \Closure $isLive): array {
+        $key = self::key($contextId);
+        // Without a row there is nothing to claim, and no lock to take for it.
+        if (!$this->table->exists($key)) {
+            return [false, null];
+        }
+
+        return $this->stateLock->run((string) (crc32($key) % self::STATE_STRIPES), function () use ($key, $claimant, $force, $expected, $isLive): array {
+            $row = $this->table->get($key);
+            if (!\is_array($row) || (int) $row['expires'] <= time()) {
+                return [false, null];
+            }
+
+            $current = (int) $row['hpid'] === 0 ? null : [(int) $row['hwid'], (int) $row['hpid']];
+            if (!$force && $current !== null && $current !== $claimant && $current !== $expected && $isLive($current)) {
+                return [false, $current];
+            }
+            if ($current !== $claimant) {
+                $this->table->set($key, ['hwid' => $claimant[0], 'hpid' => $claimant[1]]);
+            }
+
+            return [true, $current];
+        });
+    }
+
     public function forget(string $contextId): void {
         $this->table->del(self::key($contextId));
     }
@@ -301,7 +366,7 @@ final class SharedContextDirectory {
     /**
      * Write a row, false when the table has no room for it.
      *
-     * @param array{record: string, expires: int} $row
+     * @param array{record: string, expires: int, hwid?: int, hpid?: int} $row
      *
      * @phpstan-impure
      */

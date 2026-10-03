@@ -222,6 +222,12 @@ final class Config {
     private int $contextRevivalWindowMs = 600_000;
 
     /**
+     * How long (milliseconds) a worker waits for the worker that holds a tab to answer a request of the tab it
+     * passed there, with more than one worker.
+     */
+    private int $contextForwardTimeoutMs = 60_000;
+
+    /**
      * Whether the Via Dev Bar (tracing overlay + /_via endpoints) is enabled.
      * null = follow devMode; true/false = explicit override.
      */
@@ -805,10 +811,13 @@ final class Config {
      *   equivalent one (same id, handler run again, signals seeded from the browser) instead of a full reload.
      *   Context::tabState() values come back; other server-only state such as #[Persist] starts over, as on a
      *   reload. 0 turns revival off.
+     * - $forwardMs (default 60 s): with more than one worker, an action or a download that reaches a worker other
+     *   than the one holding its tab is passed there, and the worker that got it answers 504 when no answer comes
+     *   this long after the request, or after the last chunk of a download. The action may still finish. Minimum 1 s.
      *
      * The context's onCleanup() callbacks run when it is destroyed, whichever timer did it.
      */
-    public function withContextTimeouts(?int $cleanupDelayMs = null, ?int $connectMs = null, ?int $reconnectMs = null, ?int $revivalWindowMs = null): self {
+    public function withContextTimeouts(?int $cleanupDelayMs = null, ?int $connectMs = null, ?int $reconnectMs = null, ?int $revivalWindowMs = null, ?int $forwardMs = null): self {
         $this->assertMutable(__FUNCTION__);
         if ($cleanupDelayMs !== null) {
             $this->contextCleanupDelayMs = max(0, $cleanupDelayMs);
@@ -821,6 +830,9 @@ final class Config {
         }
         if ($revivalWindowMs !== null) {
             $this->contextRevivalWindowMs = max(0, $revivalWindowMs);
+        }
+        if ($forwardMs !== null) {
+            $this->contextForwardTimeoutMs = max(1000, $forwardMs);
         }
 
         return $this;
@@ -1578,6 +1590,7 @@ final class Config {
             contextConnectTimeoutMs: $this->contextConnectTimeoutMs,
             contextReconnectTimeoutMs: $this->contextReconnectTimeoutMs,
             contextRevivalWindowMs: $this->contextRevivalWindowMs,
+            contextForwardTimeoutMs: $this->contextForwardTimeoutMs,
             sslCertFile: $this->sslCertFile,
             sslKeyFile: $this->sslKeyFile,
             https: $this->isHttps(),

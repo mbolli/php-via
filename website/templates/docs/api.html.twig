@@ -328,10 +328,10 @@ $status = $c->signal('idle', 'status', clientWritable: false);
     </p>
     <p>
         A server-owned TAB signal lives in the worker that holds the context. With
-        <code>worker_num &gt; 1</code>, an action that lands on another worker rebuilds the context
-        there, and the signal starts from its initial value, so each worker keeps its own copy. Use
-        <code>worker_num = 1</code> for such pages, or keep the value in a scoped signal, which is
-        shared across workers.
+        <code>worker_num &gt; 1</code>, actions that land on another worker are passed to that one, but
+        when the tab's stream reconnects to another worker, the context is rebuilt there and the signal
+        starts from its initial value. Keep a value that has to survive that in a scoped signal or in
+        <code>tabState()</code>, or use <code>worker_num = 1</code>.
     </p>
     <p>
         Every signal gets an id that is unique per tab: the browser uses it in <code>data-bind</code>,
