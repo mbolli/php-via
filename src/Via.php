@@ -334,7 +334,7 @@ class Via {
         $this->logger = new Logger($this->settings->logLevel);
         $this->requestLogger = new RequestLogger($this->settings->devMode);
         $this->logger->setRequestLogger($this->requestLogger);
-        $this->stats = new Stats();
+        $this->stats = new Stats(fn (): array => ['active_sse' => array_sum($this->activeSseCount), 'active_contexts' => \count($this->contexts)]);
         $this->errorHooks = new ErrorHooks($this->log(...));
 
         if (!$this->settings->broadcastCoalescingEnabled) {
@@ -1160,6 +1160,7 @@ class Via {
             $this->server->set($settings);
 
             $this->requestHandler->setRoutes($this->router->getRoutes());
+            $this->stats->share();
 
             // SharedTable: allocate in master process so it is mmap'd into all workers
             // on fork. Only needed when worker_num > 1 (single-worker uses a plain PHP array).

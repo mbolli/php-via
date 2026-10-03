@@ -201,6 +201,7 @@ class RequestHandler {
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+            $this->countRequest($requestStart);
         }
     }
 
@@ -285,6 +286,7 @@ class RequestHandler {
         if ($path === '/datastar.js') {
             $this->serveDatastarJs($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -293,6 +295,7 @@ class RequestHandler {
         if ($path === '/via.css') {
             $this->serveViaCss($request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -304,13 +307,14 @@ class RequestHandler {
         if ($staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
 
         // Anything else answers HEAD without rendering
         if ($method === 'HEAD') {
-            $this->handleHeadRequest($path, $request, $response, $staticDir !== null && !$staticFirst ? $staticDir : null);
+            $this->handleHeadRequest($path, $request, $response, $staticDir !== null && !$staticFirst ? $staticDir : null, $requestStart);
 
             return;
         }
@@ -438,6 +442,7 @@ class RequestHandler {
         if ($plain !== null) {
             $status = $this->plainRoutes->serve($request, $response, $plain[0], $plain[1], $params);
             $this->logRequest($method, $path, $status, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -467,6 +472,7 @@ class RequestHandler {
         if ($staticDir !== null && !$staticFirst && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
             $this->logRequest($method, $path, 200, $requestStart);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -626,11 +632,18 @@ class RequestHandler {
     }
 
     /**
+     * Count a page, static file or route() request in Via::getStats().
+     */
+    private function countRequest(int $hrtimeStart): void {
+        $this->via->getStats()->trackRequest((hrtime(true) - $hrtimeStart) / 1e6);
+    }
+
+    /**
      * Answer a HEAD request that no static file took: /_health, an action URL and a Dev Bar asset as GET would, any
      * other framework endpoint 404, a plain route that takes GET or HEAD through its handler, a page route with 200
      * and no body, an extension-less file in $staticDir as GET would, anything else 404.
      */
-    private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir): void {
+    private function handleHeadRequest(string $path, Request $request, Response $response, ?string $staticDir, int $requestStart): void {
         if ($path === '/_health') {
             $this->handleHealth($request, $response);
 
@@ -665,6 +678,7 @@ class RequestHandler {
         $plain = $this->plainRoutes->find('HEAD', $path, $params, $allowed);
         if ($plain !== null) {
             $this->plainRoutes->serve($request, $response, $plain[0], $plain[1], $params);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -674,6 +688,7 @@ class RequestHandler {
             $response->status(200);
             $response->header('Content-Type', 'text/html; charset=utf-8');
             $response->end();
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -686,6 +701,7 @@ class RequestHandler {
 
         if ($staticDir !== null && ($realFile = $this->resolveStaticFile($staticDir, $path)) !== null) {
             $this->serveStaticFile($realFile, $request, $response);
+            $this->countRequest($requestStart);
 
             return;
         }
@@ -769,6 +785,7 @@ class RequestHandler {
             $this->via->writeSessionCookie($request, $response);
             $this->psrResponseEmitter->emit($psrResponse, $response);
             $this->logRequest($method, $path, $psrResponse->getStatusCode(), $requestStart);
+            $this->countRequest($requestStart);
         }
     }
 

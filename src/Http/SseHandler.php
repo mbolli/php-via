@@ -176,6 +176,7 @@ class SseHandler {
         // context that is still parked, and that stream must not undo them as the last one.
         $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 0) + 1;
         ++$this->via->runningSseStreams;
+        $this->via->getStats()->trackSseConnection();
 
         try {
             // A context an action revived without signals, and a clientSeeded signal, take the tab's values from this connect.
