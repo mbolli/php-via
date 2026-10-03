@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\DevBar;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Core\Settings;
+use Mbolli\PhpVia\Rendering\Bootstrap;
 
 /**
  * Builds the Dev Bar overlay block and injects it into a rendered page.
@@ -44,12 +45,14 @@ final class Injector {
         }
 
         $attr = htmlspecialchars($config, ENT_QUOTES, 'UTF-8');
+        $nonce = $context->getRequestAttribute('via.csp_nonce');
+        $nonce = Bootstrap::nonceAttribute(\is_string($nonce) ? $nonce : null);
 
         // A stable id lets idiomorph match the overlay across full-page morphs
         // and preserve the element (and its live component) in place.
-        $block = "\n<link rel=\"stylesheet\" href=\"{$base}_via/devbar.css\">\n"
+        $block = "\n<link rel=\"stylesheet\" href=\"{$base}_via/devbar.css\"{$nonce}>\n"
             . "<via-dev-bar id=\"via-dev-bar\" via-config='{$attr}'></via-dev-bar>\n"
-            . "<script type=\"module\" src=\"{$base}_via/devbar.js\"></script>\n";
+            . "<script type=\"module\" src=\"{$base}_via/devbar.js\"{$nonce}></script>\n";
 
         $pos = strripos($html, '</body>');
         if ($pos === false) {

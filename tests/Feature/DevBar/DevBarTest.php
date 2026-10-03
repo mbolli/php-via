@@ -48,6 +48,23 @@ describe('overlay injection', function (): void {
         expect($html)->toContain('count');
     });
 
+    test('gives its stylesheet and script the nonce from via.csp_nonce, also on an update render', function (): void {
+        $app = devBarVia();
+        $ctx = new Context('nonce_/1', '/demo', $app);
+        $ctx->setRequestAttributes(['via.csp_nonce' => 'n0nce"<']);
+        $ctx->view(fn () => '<div id="x">hi</div>');
+
+        foreach ([$app->buildHtmlDocument($ctx), $app->decorateUpdate('<html><head></head><body></body></html>', $ctx)] as $html) {
+            expect($html)->toContain('href="/_via/devbar.css" nonce="n0nce&quot;&lt;">')
+                ->and($html)->toContain('src="/_via/devbar.js" nonce="n0nce&quot;&lt;"></script>')
+            ;
+        }
+
+        $plain = new Context('nonce_/2', '/demo', $app);
+        $plain->view(fn () => '<div id="x">hi</div>');
+        expect($app->buildHtmlDocument($plain))->not->toContain('nonce=');
+    });
+
     test('does not inject when tracing is disabled', function (): void {
         $app = createVia((new Config())->withLogLevel('error'));
         $ctx = new Context('noinj_/1', '/demo', $app);

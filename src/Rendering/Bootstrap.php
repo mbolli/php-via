@@ -7,7 +7,7 @@ namespace Mbolli\PhpVia\Rendering;
 /**
  * The tags behind via_head and via_foot, which connect a page to php-via.
  *
- * @internal used by Context::viaHead() and viaFoot()
+ * @internal used by Context::viaHead() and viaFoot(), and by the Dev Bar for the nonce
  */
 final class Bootstrap {
     /** Attribute that marks via_head's first tag, so HtmlBuilder can tell a page that has it */
