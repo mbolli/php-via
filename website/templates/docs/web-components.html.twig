@@ -9,7 +9,7 @@
         <a href="https://starbase.zweiundeins.gmbh" target="_blank" rel="noopener">Starbase</a> catalog.
         A Rocket component is a JavaScript module that imports Datastar, so the page needs a Datastar
         build that contains Rocket, and the component has to import the same copy of Datastar the page
-        runs. php-via serves that build when you ask for it, and its default shell adds the import map
+        runs. php-via serves that build when you ask for it, and <code>via_head</code> writes the import map
         that points the components at it.
     </p>
     <p>With the Rocket build on:</p>
@@ -62,10 +62,12 @@ $app = new Via(
         is in place when the first import resolves.
     </p>
     <p>
-        With <code>withDatastarRocket()</code>, or once <a href="#own-modules"><code>withImportMap()</code></a>
-        added entries, the default shell does both. It writes the map right after the viewport meta, ahead
-        of everything <code>appendToHead()</code> adds, and loads Datastar from the same URL at the end of
-        the body:
+        <code>via_head</code> and <code>via_foot</code>, which every page writes (see
+        <a href="/docs/twig#bootstrap">Templates → The page bootstrap</a>), take care of both. With
+        <code>withDatastarRocket()</code>, or once <a href="#own-modules"><code>withImportMap()</code></a> added
+        entries, <code>via_head</code> writes the map right after the <code>via_ctx</code> signal, ahead of
+        everything <code>appendToHead()</code> adds, and <code>via_foot</code> loads Datastar from the same URL
+        at the end of the body:
     </p>
     {% code 'html' %}{% verbatim %}
 <script type="importmap">{"imports":{"datastar":"/datastar.js?v=f602fbe19d"}}</script>
@@ -77,27 +79,24 @@ $app = new Via(
         new URL and browsers fetch it instead of using a cached copy. <code>Config::getDatastarUrl()</code>
         returns the URL, including the base path; in a page handler that is
         <code>$c-&gt;getConfig()-&gt;getDatastarUrl()</code>. With the plain bundle and no entries of your
-        own, the default shell loads Datastar from that URL and writes no import map.
+        own, <code>via_head</code> writes no import map.
     </p>
     <p id="csp">
-        The import map is an inline script. Under a <code>Content-Security-Policy</code> whose
-        <code>script-src</code> lacks <code>'unsafe-inline'</code>, the browser blocks it, and every
-        component then fails to import <code>datastar</code>. Allow the map by its SHA-256, which changes
-        with the bundle and with every entry, or write the tag yourself with your nonce in a
-        <a href="#own-shell">custom shell or Twig layout</a>.
-        <code>json_encode($config-&gt;getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)</code>
-        gives its content, byte for byte.
+        The import map is an inline script. Under a <code>Content-Security-Policy</code> without
+        <code>'unsafe-inline'</code>, the browser blocks it unless it carries the page's nonce, and every
+        component then fails to import <code>datastar</code>. Set the nonce in the <code>via.csp_nonce</code>
+        request attribute, and <code>via_head</code> writes it on the map and on its other tags.
+        <a href="/docs/twig#csp">Templates → Content-Security-Policy</a> shows a policy that Datastar runs under.
     </p>
 
     <h2 id="own-shell">The import map in a custom shell or Twig layout</h2>
     <h3 id="custom-shell">Custom shell</h3>
     <p>
-        A shell set with <code>withShellTemplate()</code> gets two placeholders:
-        {% verbatim %}<code>{{ import_map }}</code>{% endverbatim %} is the whole import map tag (empty
-        unless <code>withDatastarRocket()</code> is on or <code>withImportMap()</code> added entries), and
-        {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} is the URL. Put the map in the
-        head, before {% verbatim %}<code>{{ head_content }}</code>{% endverbatim %} and any module script
-        of your own:
+        A shell set with <code>withShellTemplate()</code> writes the map and Datastar with the same two
+        placeholders as the default shell. Put {% verbatim %}<code>{{ via_head }}</code>{% endverbatim %} right
+        after <code>&lt;meta charset&gt;</code>, before {% verbatim %}<code>{{ head_content }}</code>{% endverbatim %}
+        and any module script of your own, and {% verbatim %}<code>{{ via_foot }}</code>{% endverbatim %} before
+        <code>&lt;/body&gt;</code>:
     </p>
     {% code 'html' %}{% verbatim %}
 <!DOCTYPE html>
@@ -115,21 +114,18 @@ $app = new Via(
 </html>
     {% endverbatim %}{% endcode %}
     <p>
-        Load Datastar from {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %}. A shell that
-        keeps {% verbatim %}<code>{{ base_path }}datastar.js</code>{% endverbatim %} loads Datastar from
-        another URL than the map's, so the components start a second engine. php-via logs a warning
-        when a shell has the map placeholder without the URL one, and when a map is due but the shell
-        has neither the placeholder nor an import map of its own. A shell without any import map works
-        with the plain bundle but not with Rocket components, and an unversioned
-        <code>datastar.js</code> stays cached for up to an hour after an upgrade.
+        A shell that loads Datastar with a script of its own, such as
+        {% verbatim %}<code>{{ base_path }}datastar.js</code>{% endverbatim %}, loads it from another URL than
+        the map's, so the components start a second engine. php-via logs a warning for such a shell, and for a
+        shell without <code>via_head</code>. An unversioned <code>datastar.js</code> also stays cached for up
+        to an hour after an upgrade.
     </p>
 
     <h3 id="twig-layout">Twig layout</h3>
     <p>
-        php-via never adds the Datastar script or the import map to a view that renders its own
-        <code>&lt;html&gt;</code> document (see <a href="/docs/twig#twig-shell">Twig as the shell</a>), so
-        the layout writes the import map from the <code>importMap</code> variable and loads Datastar from
-        the <code>datastarUrl</code> variable:
+        A view that renders its own <code>&lt;html&gt;</code> document (see
+        <a href="/docs/twig#twig-shell">Layouts that render the whole document</a>) writes the same tags with
+        the Twig functions:
     </p>
     {% code 'twig' %}{% verbatim %}
 {# templates/base.html.twig #}
@@ -147,9 +143,8 @@ $app = new Via(
 </html>
     {% endverbatim %}{% endcode %}
     <p>
-        {% verbatim %}<code>{{ importMap }}</code>{% endverbatim %} is the tag the default shell writes,
-        and empty when php-via writes no map. When a map is due and a route's document has none, php-via
-        logs a warning the first time it renders that route.
+        php-via warns once per route whose document lacks <code>via_head</code> or loads a Datastar script of
+        its own next to the map, and in dev mode about a page with more than one import map.
     </p>
 
     <h2 id="own-modules">Adding modules to the import map</h2>
