@@ -44,7 +44,7 @@ final class CompositionMetaFixture {
     #[Action(name: 'reset-it', scope: Scope::SESSION)]
     public function reset(Context $ctx): void {}
 
-    #[OnDisconnect]
+    #[OnCleanup]
     public function leave(Context $ctx): void {}
 
     #[OnCleanup]
@@ -60,14 +60,11 @@ final class CompositionNoViewFixture {
     public int $count = 0;
 }
 
-final class CompositionDoubleDisconnectFixture {
+final class CompositionOnDisconnectFixture {
     public function view(Context $ctx): void {}
 
     #[OnDisconnect]
     public function a(Context $ctx): void {}
-
-    #[OnDisconnect]
-    public function b(Context $ctx): void {}
 }
 
 describe('ClassMetadata signal scopes', function (): void {
@@ -141,10 +138,8 @@ describe('ClassMetadata actions and lifecycle', function (): void {
         expect($meta->broadcastScope)->toBe(Scope::ROUTE);
     });
 
-    test('lifecycle hooks are captured', function () use ($meta): void {
-        expect($meta->onDisconnect)->toBe('leave')
-            ->and($meta->onCleanup)->toBe('dispose')
-        ;
+    test('every #[OnCleanup] method is captured in declaration order', function () use ($meta): void {
+        expect($meta->onCleanup)->toBe(['leave', 'dispose']);
     });
 
     test('view route params beyond Context are captured', function () use ($meta): void {
@@ -159,9 +154,9 @@ describe('ClassMetadata validation', function (): void {
         ;
     });
 
-    test('duplicate lifecycle hook throws', function (): void {
-        expect(fn () => ClassMetadata::analyze(CompositionDoubleDisconnectFixture::class))
-            ->toThrow(InvalidArgumentException::class)
+    test('the removed #[OnDisconnect] throws and names #[OnCleanup]', function (): void {
+        expect(fn () => ClassMetadata::analyze(CompositionOnDisconnectFixture::class))
+            ->toThrow(LogicException::class, 'Use #[OnCleanup]')
         ;
     });
 });

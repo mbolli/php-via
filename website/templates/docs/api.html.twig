@@ -804,15 +804,15 @@ public function resetTab(Context $ctx): void { }        // /_action/reset-tab
 public function setTheme(Context $ctx): void { }        // session-scoped action
     {% endverbatim %}{% endcode %}
 
-    <h3 id="attr-lifecycle"><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></h3>
-    <p>Target: method. Registers the method as a disconnect/cleanup handler (via
-    <code>Context::onDisconnect()</code> / <code>Context::onCleanup()</code>). The method receives the
-    <code>Context</code>. At most one method per class may carry each attribute. Handlers are not
-    re-hydrated before running: they do cleanup rather than read live signals.</p>
+    <h3 id="attr-lifecycle"><code>#[OnCleanup]</code></h3>
+    <p>Target: method. Registers the method as a cleanup handler (via <code>Context::onCleanup()</code>).
+    The method receives the <code>Context</code>. Several methods may carry it and run in declaration
+    order, after reactive properties are re-hydrated. <code>#[OnDisconnect]</code> was removed in 0.14
+    and throws at mount.</p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\OnDisconnect;
+use Mbolli\PhpVia\Attributes\OnCleanup;
 
-#[OnDisconnect]
+#[OnCleanup]
 public function leave(Context $ctx): void {
     --Room::$members[$this->room];
     $ctx->broadcast();
