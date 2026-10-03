@@ -18,7 +18,9 @@ use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
+use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
+use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\RouteGroup;
@@ -53,6 +55,8 @@ use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
 use Mbolli\PhpVia\Twig\TwigEngine;
+use Nyholm\Psr7\Response as Psr7Response;
+use Nyholm\Psr7\Stream;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
@@ -60,6 +64,7 @@ use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
@@ -254,6 +259,9 @@ class Via {
     private RequestHandler $requestHandler;
     private SseHandler $sseHandler;
     private StaticBrotli $staticBrotli;
+
+    /** Builds the request a route's middleware gets when a tab is rebuilt, created with the first. */
+    private ?PsrRequestFactory $psrRequestFactory = null;
     private Settings $settings;
     private Logger $logger;
     private RequestLogger $requestLogger;
@@ -1884,17 +1892,18 @@ class Via {
      *
      * When an SSE reconnect names a context that was already cleaned up, this re-creates it with
      * the *same* ID (so signal IDs regenerate byte-identical and the already-loaded DOM (bindings,
-     * action URLs, via_ctx) keeps working), re-runs the page handler, and re-seeds TAB signal
-     * values from what the client still holds (sent with the reconnect). Returns null (and the
-     * caller falls back to a full reload) when revival is disabled, no record exists, it expired,
-     * the requester's session doesn't own the context, or the route is no longer registered.
+     * action URLs, via_ctx) keeps working), re-runs the page handler behind the route's own middleware,
+     * and re-seeds TAB signal values from what the client still holds (sent with the reconnect). Returns
+     * null (and the caller falls back to a full reload) when revival is disabled, no record exists, it
+     * expired, the requester's session doesn't own the context, the route is no longer registered, or
+     * the route's middleware answered instead of running the handler, which $refused then holds.
      *
      * @param bool                 $byConnect  Whether an SSE connect revives it, which seeds the context itself
      * @param array<string, mixed> $attributes PSR-7 request attributes the middleware of the reviving request set
      *
      * @internal used by SseHandler on reconnect to a missing context
      */
-    public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = []): ?Context {
+    public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = [], ?ResponseInterface &$refused = null): ?Context {
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
@@ -1902,6 +1911,8 @@ class Via {
             $request->cookie ?? [],
             $byConnect,
             $attributes,
+            fn (string $route, array $params, string $query): ServerRequestInterface => $this->revivalRequest($request, $route, $params, $query, $attributes),
+            $refused,
         );
     }
 
@@ -1909,16 +1920,18 @@ class Via {
      * Testable core of {@see reviveContext()}, free of OpenSwoole Request types, so it can be exercised
      * without a live server.
      *
-     * @param string                $requesterSession Session ID of the reconnecting client
-     * @param array<string, mixed>  $clientSignals    Signal values the client still holds
-     * @param array<string, string> $cookies          Request cookies (forwarded to the context)
-     * @param bool                  $byConnect        Whether an SSE connect revives it, which seeds the context itself
-     * @param array<string, mixed>  $attributes       PSR-7 request attributes the middleware of the reviving request set,
-     *                                                which the page handler reads as on a page load
+     * @param string                                                                       $requesterSession Session ID of the reconnecting client
+     * @param array<string, mixed>                                                         $clientSignals    Signal values the client still holds
+     * @param array<string, string>                                                        $cookies          Request cookies (forwarded to the context)
+     * @param bool                                                                         $byConnect        Whether an SSE connect revives it, which seeds the context itself
+     * @param array<string, mixed>                                                         $attributes       PSR-7 request attributes the middleware of the reviving request set,
+     *                                                                                                       which the page handler reads as on a page load
+     * @param null|\Closure(string, array<string, string>, string): ServerRequestInterface $routeRequest     the request the route's middleware gets, from route, parameters and query; without it the middleware is skipped
+     * @param null|ResponseInterface                                                       $refused          set to what the route's middleware answered when it did not run the handler
      *
      * @internal
      */
-    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false, array $attributes = []): ?Context {
+    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false, array $attributes = [], ?\Closure $routeRequest = null, ?ResponseInterface &$refused = null): ?Context {
         if ($this->settings->contextRevivalWindowMs <= 0) {
             return null;
         }
@@ -1961,7 +1974,7 @@ class Via {
         $context->importTabState($record['tabState'] ?? []);
 
         try {
-            $this->invokeHandlerWithParams($handler, $context, $record['params']);
+            $refusal = $this->runRevivedHandler($handler, $context, $route, $record['params'], $record['query'] ?? '', $routeRequest);
         } catch (\Throwable $e) {
             $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
             // The half-built context may already have joined scopes and started timers.
@@ -1971,6 +1984,17 @@ class Via {
                 unset($this->contextSessions[$contextId]);
             }
             $this->reportError($e, $context, ErrorPhase::Render);
+
+            return null;
+        }
+        if ($refusal !== null) {
+            $this->log('info', "The middleware of {$route} answered {$refusal->getStatusCode()} instead of rebuilding context {$contextId}");
+            $context->cleanup();
+            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            if (!isset($this->contexts[$contextId])) {
+                unset($this->contextSessions[$contextId]);
+            }
+            $refused = $refusal;
 
             return null;
         }
@@ -2382,6 +2406,72 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Run the page handler of a context being rebuilt behind its route's middleware, as a page load runs it, so
+     * an auth gate applies again and its attributes reach the handler.
+     *
+     * @param array<string, string>                                                        $params
+     * @param null|\Closure(string, array<string, string>, string): ServerRequestInterface $routeRequest
+     *
+     * @return null|ResponseInterface what the middleware answered when it did not run the handler
+     */
+    private function runRevivedHandler(callable $handler, Context $context, string $route, array $params, string $query, ?\Closure $routeRequest): ?ResponseInterface {
+        $middleware = $this->getRouteMiddleware($route);
+        if ($middleware === [] || $routeRequest === null) {
+            $this->invokeHandlerWithParams($handler, $context, $params);
+
+            return null;
+        }
+
+        $core = new class($this, $handler, $context, $params) implements RequestHandlerInterface {
+            public bool $handled = false;
+
+            /**
+             * @param callable              $pageHandler
+             * @param array<string, string> $params
+             */
+            public function __construct(private Via $via, private mixed $pageHandler, private Context $context, private array $params) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $this->handled = true;
+                $this->context->setRequestAttributes(RequestHandler::contextAttributes($request->getAttributes()));
+                $this->via->invokeHandlerWithParams($this->pageHandler, $this->context, $this->params);
+
+                return new Psr7Response(200);
+            }
+        };
+        $response = (new MiddlewareDispatcher($middleware, $core))->handle($routeRequest($route, $params, $query));
+
+        return $core->handled ? null : $response;
+    }
+
+    /**
+     * The request the route's middleware gets when a tab is rebuilt: a GET of the page's URL, with the headers,
+     * cookies and session of the request that rebuilds it and the attributes its middleware set.
+     *
+     * @param array<string, string> $params
+     * @param array<string, mixed>  $attributes
+     */
+    private function revivalRequest(Request $request, string $route, array $params, string $query, array $attributes): ServerRequestInterface {
+        $path = (string) preg_replace_callback('/\{([a-zA-Z_]\w*)\}/', static fn (array $m): string => rawurlencode($params[$m[1]] ?? ''), $route);
+        parse_str($query, $queryParams);
+
+        $psr = ($this->psrRequestFactory ??= new PsrRequestFactory())->create($request, 'page');
+        $psr = $psr->withMethod('GET')
+            ->withUri($psr->getUri()->withPath($path)->withQuery($query))
+            ->withQueryParams($queryParams)
+            ->withParsedBody(null)
+            ->withUploadedFiles([])
+            ->withBody(Stream::create(''))
+            ->withAttribute('via.session', $this->getRequestSession($request)->key)
+        ;
+        foreach ($attributes as $name => $value) {
+            $psr = $psr->withAttribute($name, $value);
+        }
+
+        return $psr;
     }
 
     /**

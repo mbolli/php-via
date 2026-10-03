@@ -129,7 +129,7 @@ $app->page('/dashboard', function (Context $c): void {
         In an action, <code>getRequestAttribute()</code> returns what the middleware set on that action's
         request. Only global middleware runs on actions, so an attribute that per-route middleware sets is
         there in the page handler only: read it there and pass it to the action's closure. A page handler
-        that runs again to rebuild a tab that was away gets no per-route attributes either; see
+        that runs again to rebuild a tab that was away runs behind the per-route middleware again; see
         <a href="/docs/lifecycle#revival">Revival</a>.
     </p>
 

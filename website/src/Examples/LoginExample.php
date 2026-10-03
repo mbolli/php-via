@@ -200,14 +200,13 @@ final class LoginExample {
     }
 
     /**
-     * The auth record AuthMiddleware set on the page request. A tab rebuilt after it was away runs no per-route
-     * middleware, so it reads the session, and after a logout in another tab it goes to the login form.
+     * The auth record AuthMiddleware set on the page request, or on the request that rebuilt a tab that was away.
      *
      * @return null|array{user: string, name: string, role: string, at: int}
      */
     private static function auth(Context $c): ?array {
         /** @var null|array{user: string, name: string, role: string, at: int} $auth */
-        $auth = $c->getRequestAttribute('auth') ?? $c->sessionData('auth');
+        $auth = $c->getRequestAttribute('auth');
         if ($auth === null) {
             $c->execScript("window.location.href = '/examples/login'");
         }

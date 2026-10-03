@@ -137,11 +137,12 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
 $config->withContextTimeouts(revivalWindowMs: 600_000); // 10 minutes (default); pass 0 to disable
 {% endverbatim %}{% endcode %}
     <p>
-        The page handler of a revived tab reads the request attributes of the request that revived it: what
-        global middleware set on an action, or <code>SseAwareMiddleware</code> on an SSE reconnect.
-        Per-route middleware runs on page loads only, so an attribute it sets is null after a revival. Read
-        what the page needs from the session there, as the
-        <a href="/examples/login">login example</a>'s dashboard does.
+        The page handler of a revived tab runs behind the route's own middleware again, as on a page load, so
+        an auth gate applies and the attributes it sets reach the handler. The middleware gets a GET of the
+        page's URL with the cookies of the request that revives the tab, and the attributes global middleware
+        set on that request: on an action, or <code>SseAwareMiddleware</code> on an SSE reconnect. When it
+        answers instead of calling the handler, the tab is not revived: an SSE reconnect reloads the page, and
+        an action gets the middleware's response.
     </p>
 
     <h2 id="on-client-connect">onClientConnect (app-level)</h2>
