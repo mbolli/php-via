@@ -1124,7 +1124,8 @@ final class Config {
      * withBroker() makes start() throw.
      *
      * Session data, GlobalState and scoped signal values move to shared-memory tables sized
-     * at start-up; see withSessionTableSize() and the other with*TableSize() methods.
+     * at start-up; see withSessionTableSize() and the other with*TableSize() methods. Values
+     * there are copied, so a live object kept in globalState() only works with one worker.
      *
      * Example:
      * ```php
