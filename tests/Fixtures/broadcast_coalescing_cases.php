@@ -426,12 +426,14 @@ $cases = [
         $app = app((new Config())->withBroker($broker));
         $state = new CoalesceState();
         observer($app, 'obs', 'room:many', $state);
+        $tab = new Context('tab', '/t', $app);
+        $tab->view(static fn (): string => '<p>tab</p>');
 
-        inCoroutine(static function () use ($app): void {
+        inCoroutine(static function () use ($app, $tab): void {
             for ($i = 0; $i < 5; ++$i) {
                 Coroutine::create(static fn () => $app->broadcast('room:many'));
             }
-            $app->broadcast(Scope::TAB);
+            $tab->broadcast();
         });
 
         return ['renders' => $state->renders, 'published' => $broker->published()];

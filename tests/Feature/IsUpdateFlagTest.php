@@ -123,7 +123,7 @@ test('cached view should not be empty string from update render', function (): v
 
             // Simulate what stock ticker does
             $price = 100.0;
-            $c->signal($price, 'price');
+            $c->signal($price, 'price', Scope::build('stock', $symbol));
 
             if ($isUpdate) {
                 return '';  // Don't re-render HTML on updates

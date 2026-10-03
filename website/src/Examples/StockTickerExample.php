@@ -75,9 +75,10 @@ final class StockTickerExample {
 
         // Individual stock page
         $app->page('/examples/stock-ticker/stock/{symbol}', function (Context $c, string $symbol): void {
-            $c->scope(Scope::build('example:stock', $symbol));
+            $stockScope = Scope::build('example:stock', $symbol);
+            $c->scope($stockScope);
 
-            $c->view(function (bool $isUpdate, string $basePath) use ($symbol, $c): string {
+            $c->view(function (bool $isUpdate, string $basePath) use ($symbol, $c, $stockScope): string {
                 $stock = self::$stocks[$symbol] ?? null;
 
                 if (!$stock) {
@@ -96,9 +97,9 @@ final class StockTickerExample {
                 $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
                 $prices = array_map(fn (array $h) => $h['price'], $history);
 
-                $priceSignal = $c->signal(number_format($price, 2), 'price');
-                $timesSignal = $c->signal($times, 'times');
-                $pricesSignal = $c->signal($prices, 'prices');
+                $priceSignal = $c->signal(number_format($price, 2), 'price', $stockScope);
+                $timesSignal = $c->signal($times, 'times', $stockScope);
+                $pricesSignal = $c->signal($prices, 'prices', $stockScope);
 
                 if ($isUpdate) {
                     return '';

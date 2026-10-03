@@ -6,7 +6,6 @@ namespace PhpVia\Website\Pairing;
 
 use Mbolli\PhpVia\Action;
 use Mbolli\PhpVia\Context;
-use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use PhpVia\Website\StaticPage;
 
@@ -102,7 +101,7 @@ final class PairingDemo {
             if (\is_string($colour) && $this->store->setColour($code, $colour) && $colour !== $before) {
                 $this->app->broadcast(PairingStore::scope($code));
             }
-        }, 'pick', Scope::TAB);
+        }, 'pick');
     }
 
     /**

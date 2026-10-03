@@ -54,7 +54,7 @@ $private = $c->signal(0, 'count');
 
 // Everyone on this URL sees the same value
 $shared = $c->signal(0, 'count', Scope::routeScope('/'));
-$c->scope(Scope::ROUTE);  // equivalent shorthand
+$shared = $c->signal(0, 'count', Scope::ROUTE);  // the same, for the current route
     {% endverbatim %}{% endcode %}
 
     <div class="docs-demo">

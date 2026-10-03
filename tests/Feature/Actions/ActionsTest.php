@@ -45,94 +45,57 @@ describe('Action Creation', function (): void {
     });
 });
 
-describe('Route-Scoped Actions', function (): void {
-    test('route-scoped actions require a name', function (): void {
+describe('Actions after scope()', function (): void {
+    test('an action declared after scope() is a TAB action, and needs no name', function (): void {
         $app = createVia();
         $context = new Context(testContextId(), '/game', $app);
         $context->scope(Scope::ROUTE);
 
-        expect(function () use ($context): void {
-            $context->action(function (): void {}); // No name provided
-        })->toThrow(InvalidArgumentException::class);
+        $anonymous = $context->action(function (): void {});
+        $named = $context->action(function (): void {}, 'toggle');
+
+        expect($anonymous->id())->toBe('action0')
+            ->and($named->id())->toBe('toggle')
+            ->and($app->getScopedActions(Scope::routeScope('/game')))->toBe([])
+        ;
     });
 
-    test('can create named route-scoped action', function (): void {
+    test('each tab of a shared scope runs its own callback', function (string $scope): void {
         $app = createVia();
-        $context = new Context(testContextId(), '/game', $app);
-        $context->scope(Scope::ROUTE);
+        $ran = [];
 
-        $action = $context->action(function (): void {}, 'toggle');
+        $tabs = [];
+        foreach (['ctx1', 'ctx2'] as $id) {
+            $tab = new Context($id, '/game', $app);
+            $tab->scope($scope);
+            $tab->action(function (Context $c) use ($id, &$ran): void {
+                $ran[] = $id . '@' . $c->getId();
+            }, 'reset');
+            $tabs[] = $tab;
+        }
 
-        expect($action->id())->toBe('toggle');
-    });
+        $tabs[1]->executeAction('reset');
+        $tabs[0]->executeAction('reset');
 
-    test('route-scoped actions are reused across contexts', function (): void {
-        $app = createVia();
-
-        $ctx1 = new Context('ctx1', '/game', $app);
-        $ctx1->scope(Scope::ROUTE);
-        $action1 = $ctx1->action(function (): void {}, 'reset');
-
-        $ctx2 = new Context('ctx2', '/game', $app);
-        $ctx2->scope(Scope::ROUTE);
-        $action2 = $ctx2->action(function (): void {}, 'reset');
-
-        // Same action ID means they're the same action
-        expect($action1->id())->toBe($action2->id());
-    });
+        expect($ran)->toBe(['ctx2@ctx2', 'ctx1@ctx1']);
+    })->with([Scope::ROUTE, Scope::GLOBAL, 'room:lobby']);
 });
 
-describe('Global-Scoped Actions', function (): void {
-    test('global-scoped actions require a name', function (): void {
-        $app = createVia();
-        $context = new Context(testContextId(), '/test', $app);
-        $context->scope(Scope::GLOBAL);
+describe('The removed $scope argument', function (): void {
+    test('a third argument throws and names the fix', function (): void {
+        $context = new Context(testContextId(), '/test', createVia());
 
-        expect(function () use ($context): void {
-            $context->action(function (): void {}); // No name provided
-        })->toThrow(InvalidArgumentException::class);
+        expect(fn () => $context->action(function (): void {}, 'globalAction', Scope::GLOBAL))
+            ->toThrow(BadMethodCallException::class, 'The $scope argument of Context::action() was removed in php-via 0.14. An action runs for the tab that posts it: drop the third argument')
+        ;
     });
 
-    test('can create named global-scoped action', function (): void {
-        $app = createVia();
-        $context = new Context(testContextId(), '/notifications', $app);
-        $context->scope(Scope::GLOBAL);
+    test('a named scope argument throws too', function (): void {
+        $context = new Context(testContextId(), '/test', createVia());
 
-        $action = $context->action(function (): void {}, 'add');
-
-        expect($action->id())->toBe('add');
-    });
-
-    test('global actions are shared across all routes', function (): void {
-        $app = createVia();
-
-        $ctx1 = new Context('ctx1', '/page1', $app);
-        $ctx1->scope(Scope::GLOBAL);
-        $action1 = $ctx1->action(function (): void {}, 'notify');
-
-        $ctx2 = new Context('ctx2', '/page2', $app);
-        $ctx2->scope(Scope::GLOBAL);
-        $action2 = $ctx2->action(function (): void {}, 'notify');
-
-        // Same action ID across different routes
-        expect($action1->id())->toBe($action2->id());
-    });
-});
-
-describe('Explicit Scope Override', function (): void {
-    test('can explicitly set action scope', function (): void {
-        $app = createVia();
-        $context = new Context(testContextId(), '/test', $app);
-        // Context is TAB scope by default
-
-        // But we can create a GLOBAL scoped action
-        $action = $context->action(
-            function (): void {},
-            'globalAction',
-            Scope::GLOBAL
-        );
-
-        expect($action->id())->toBe('globalAction');
+        expect(fn () => $context->action(function (): void {}, 'tabAction', scope: Scope::TAB))
+            ->toThrow(BadMethodCallException::class, 'drop the third argument')
+        ;
     });
 });
 
@@ -195,7 +158,7 @@ describe('Component actions and the request', function (): void {
             $actionId = $w->action(function (Context $c) use (&$seen): void {
                 $seen = $c->input('q');
                 $c->setCookie('picked', 'yes');
-            }, 'pick', Scope::TAB)->id();
+            }, 'pick')->id();
             $w->view(fn (): string => 'widget');
         }, 'w');
         $page->setRequestInput(['q' => 'needle'], []);
@@ -214,16 +177,17 @@ describe('Actions of components', function (): void {
         $page = new Context(testContextId(), '/test', $app);
         $ran = null;
         $component = null;
-        $page->component(function (Context $w) use (&$ran, &$component): void {
+        $actionId = null;
+        $page->component(function (Context $w) use (&$ran, &$component, &$actionId): void {
             $component = $w;
             $w->scope('widgets');
-            $w->action(function (Context $c) use (&$ran): void {
+            $actionId = $w->action(function (Context $c) use (&$ran): void {
                 $ran = $c;
-            }, 'hit');
+            }, 'hit')->id();
             $w->view(fn (): string => 'widget');
         }, 'w');
 
-        $page->executeAction('hit');
+        $page->executeAction((string) $actionId);
 
         expect($ran)->toBe($component);
     });
@@ -260,6 +224,6 @@ describe('Actions of components', function (): void {
         }, 'w');
         $other = new Context(testContextId(), '/test', $app);
 
-        expect(fn () => $other->executeAction('hit'))->toThrow(RuntimeException::class, 'Action not found: hit');
+        expect(fn () => $other->executeAction('w-hit'))->toThrow(RuntimeException::class, 'Action not found: w-hit');
     });
 });

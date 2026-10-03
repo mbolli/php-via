@@ -25,7 +25,8 @@ final class ShoppingCartExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/shopping-cart', function (Context $c) use ($app): void {
-            $cartScope = Scope::build('cart', $c->getSessionId() ?? $c->getId());
+            // Keyed by the hashed session scope: the raw id is the HttpOnly cookie, and scopes reach the Dev Bar.
+            $cartScope = Scope::build('cart', Scope::sessionScope($c->getSessionId() ?? $c->getId()));
             $c->addScope($cartScope);
 
             $c->action(function (Context $ctx) use ($cartScope, $app): void {

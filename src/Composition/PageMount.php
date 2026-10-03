@@ -18,6 +18,13 @@ use Mbolli\PhpVia\Via;
  */
 final class PageMount {
     /**
+     * The instance mounted on each context, for scoped actions: one callback serves a whole scope.
+     *
+     * @var null|\WeakMap<Context, object>
+     */
+    private static ?\WeakMap $instances = null;
+
+    /**
      * Build a setup closure for the given class metadata.
      *
      * @param ClassMetadata             $meta    Reflection metadata for the page/component class
@@ -29,34 +36,21 @@ final class PageMount {
             // 1. Create instance (factory or zero-arg constructor)
             $class = $meta->class;
             $instance = $factory !== null ? ($factory)() : new $class();
+            self::$instances ??= new \WeakMap();
+            self::$instances[$ctx] = $instance;
 
             // 2. Register signals. #[Signal] (TAB) is created with an explicit TAB
             //    scope so it never inherits a non-TAB primary scope set by #[Broadcast].
             foreach ($meta->signals as $prop) {
                 $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB, clientWritable: $meta->clientWritable[$prop] ?? null);
             }
-            // 3. Register scoped #[Signal(Scope::X)] signals. ROUTE is expanded to the
-            //    per-route scope here (SignalFactory resolves SESSION on its own).
+            // 3. Register scoped #[Signal(Scope::X)] signals.
             foreach ($meta->scopedSignals as ['prop' => $prop, 'scope' => $scope]) {
-                $ctx->signal($meta->defaults[$prop], $prop, self::resolveScope($scope, $ctx), clientWritable: $meta->clientWritable[$prop] ?? null);
+                $ctx->signal($meta->defaults[$prop], $prop, $scope, clientWritable: $meta->clientWritable[$prop] ?? null);
             }
             // #[Persist] → no signal, pure instance property
 
-            // 4. Register context in every scope used by its scoped signals so that:
-            //    - syncScopedSignals() includes these signals in patches
-            //    - broadcast() reaches this context via the scope registry
-            $addedScopes = [];
-            foreach ($meta->scopedSignals as ['prop' => $prop]) {
-                $signal = $ctx->getSignal($prop);
-                if ($signal === null) {
-                    continue;
-                }
-                $signalScope = $signal->getScope();
-                if ($signalScope !== null && !\in_array($signalScope, $addedScopes, true)) {
-                    $ctx->addScope($signalScope);
-                    $addedScopes[] = $signalScope;
-                }
-            }
+            // 4. signal() joined the context to every scope of its scoped signals.
 
             // 5. Apply #[Broadcast] primary scope, AFTER signal registration so that
             //    un-scoped #[Signal] properties are unaffected by it. This only sets
@@ -74,29 +68,19 @@ final class PageMount {
                 $name = $actionMeta['name'];
                 $scope = $actionMeta['scope'];
 
-                $ctx->action(
-                    static function (Context $ctx) use ($instance, $method, $meta): void {
-                        // Re-hydrate reactive properties before running the action
-                        // (client may have mutated #[Signal] values via data-bind)
-                        self::hydrate($instance, $meta, $ctx);
+                if ($scope === null) {
+                    $ctx->action(static function (Context $ctx) use ($instance, $method, $meta): void {
+                        self::runAction($instance, $method, $meta, $ctx);
+                    }, $name);
 
-                        // Record what the action starts from, so syncBack() can tell an
-                        // untouched property from a changed one and size an atomic delta.
-                        $before = self::snapshot($instance, $meta, $ctx);
+                    continue;
+                }
 
-                        // Run the action method
-                        $instance->{$method}($ctx);
-
-                        // Sync changed values back to signals
-                        // Signal::setValue() auto-broadcasts for scoped signals
-                        self::syncBack($instance, $meta, $ctx, $before);
-
-                        // Flush TAB signal changes to the current client
-                        $ctx->syncSignals();
-                    },
-                    $name,
-                    $scope,
-                );
+                // The first context's callback serves the scope, so it runs on the caller's instance.
+                $ctx->scopedAction(static function (Context $caller) use ($method, $meta): void {
+                    [$owner, $instance] = self::instanceFor($caller, $meta);
+                    self::runAction($instance, $method, $meta, $owner);
+                }, $name, $scope);
             }
 
             // 8. Register lifecycle hooks. Handlers are NOT re-hydrated first: they
@@ -125,12 +109,59 @@ final class PageMount {
     }
 
     /**
-     * Resolve a declared signal scope to its concrete runtime scope.
-     * Scope::ROUTE is expanded to the per-route scope (matching Context::scope());
-     * Scope::SESSION is left for SignalFactory to resolve to session:{id}.
+     * Run an #[Action] method on $instance, the instance mounted on $ctx.
      */
-    private static function resolveScope(string $scope, Context $ctx): string {
-        return $scope === Scope::ROUTE ? Scope::routeScope($ctx->getRoute()) : $scope;
+    private static function runAction(object $instance, string $method, ClassMetadata $meta, Context $ctx): void {
+        // Re-hydrate reactive properties before running the action
+        // (client may have mutated #[Signal] values via data-bind)
+        self::hydrate($instance, $meta, $ctx);
+
+        // Record what the action starts from, so syncBack() can tell an
+        // untouched property from a changed one and size an atomic delta.
+        $before = self::snapshot($instance, $meta, $ctx);
+
+        // Run the action method
+        $instance->{$method}($ctx);
+
+        // Sync changed values back to signals
+        // Signal::setValue() auto-broadcasts for scoped signals
+        self::syncBack($instance, $meta, $ctx, $before);
+
+        // Flush TAB signal changes to the current client
+        $ctx->syncSignals();
+    }
+
+    /**
+     * The context a scoped action runs for and its instance of the class: the caller's own, or that of a component
+     * of the caller, since a page also runs the scoped actions its components registered.
+     *
+     * @return array{Context, object}
+     *
+     * @throws \RuntimeException when neither the caller nor its components mounted the class
+     */
+    private static function instanceFor(Context $caller, ClassMetadata $meta): array {
+        return self::findInstance($caller, $meta) ?? throw new \RuntimeException(
+            "No {$meta->class} is mounted on context {$caller->getId()} or its components, so its scoped action cannot run there."
+        );
+    }
+
+    /**
+     * @return null|array{Context, object}
+     */
+    private static function findInstance(Context $ctx, ClassMetadata $meta): ?array {
+        $instance = self::$instances[$ctx] ?? null;
+        if ($instance instanceof $meta->class) {
+            return [$ctx, $instance];
+        }
+
+        foreach ($ctx->getComponentManager()->getComponents() as $component) {
+            $found = self::findInstance($component, $meta);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
     }
 
     /**

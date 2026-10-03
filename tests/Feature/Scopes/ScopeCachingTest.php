@@ -325,19 +325,18 @@ describe('Route Scope Signal Sharing', function (): void {
         expect($html2Updated)->toContain('Price: 105.5'); // Client 2 sees update
     });
 
-    test('signals without explicit scope inherit context scope', function (): void {
+    test('signals declared with the context scope are shared', function (): void {
         $app = createVia();
 
         // First client connects with ROUTE scope
         $client1 = new Context('client1', '/stock/NFLX', $app);
         $client1->scope(Scope::ROUTE);
-        // Signal inherits context's ROUTE scope
-        $price1 = $client1->signal(100.0, 'price');
+        $price1 = $client1->signal(100.0, 'price', Scope::ROUTE);
 
         // Second client connects with ROUTE scope
         $client2 = new Context('client2', '/stock/NFLX', $app);
         $client2->scope(Scope::ROUTE);
-        $price2 = $client2->signal(100.0, 'price');
+        $price2 = $client2->signal(100.0, 'price', Scope::ROUTE);
 
         // These should be the same Signal object (shared)
         expect($price1)->toBe($price2);

@@ -118,10 +118,14 @@ describe('Multi-node broadcast via TestBroker', function (): void {
             $brokerBCalled = true;
         });
 
-        // Broadcasting TAB scope should not reach nodeB
-        $viaA->broadcast(Scope::TAB);
+        // A TAB-primary context's broadcast syncs that tab, and a bare TAB has no recipients to publish to
+        $tab = new Context('tab', '/t', $viaA);
+        $tab->view(fn (): string => '<p>tab</p>');
+        $tab->broadcast();
 
-        expect($brokerBCalled)->toBeFalse('TAB scope must not be published to broker');
+        expect(fn () => $viaA->broadcast(Scope::TAB))->toThrow(InvalidArgumentException::class)
+            ->and($brokerBCalled)->toBeFalse('TAB scope must not be published to broker')
+        ;
     });
 
     test('disconnected broker receives no messages', function (): void {

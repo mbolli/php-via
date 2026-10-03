@@ -10,6 +10,7 @@ use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
+use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
 use Twig\Markup;
@@ -85,6 +86,9 @@ class Context {
 
     /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued to be sent with the next response */
     private array $pendingCookies = [];
+
+    /** Whether broadcast() has warned that it no longer reaches the scopes this TAB-primary context joined */
+    private bool $tabBroadcastWarned = false;
 
     /** Read epoch of the newest broadcast frame queued for this context; see syncFanOut() */
     private int $fanOutEpoch = 0;
@@ -572,13 +576,14 @@ class Context {
      *
      * Replaces any previously set scopes. To add additional scopes, use addScope().
      *
+     * The primary scope is the target of broadcast() and the key of the shared update render. It is no
+     * default for later declarations: actions stay per tab, and signal() needs the scope to share a signal.
+     * Scope::ROUTE resolves to this route's scope and Scope::SESSION to this session's.
+     *
      * @param string $scope Built-in scope (Scope::TAB, etc.) or custom (e.g., "room:lobby")
      */
     public function scope(string $scope): void {
-        // Auto-expand ROUTE to include the actual route path
-        if ($scope === Scope::ROUTE) {
-            $scope = Scope::routeScope($this->route);
-        }
+        $scope = Scope::resolve($scope, $this, 'Context::scope()');
 
         $this->scopes = [$scope];
         $this->app->registerContextInScope($this, $scope);
@@ -590,10 +595,12 @@ class Context {
      *
      * Allows a context to belong to multiple scopes simultaneously.
      * Example: A user in a chat room can have both "user:123" and "room:lobby" scopes.
+     * Scope::ROUTE and Scope::SESSION resolve as in scope().
      *
      * @param string $scope Additional scope to add
      */
     public function addScope(string $scope): void {
+        $scope = Scope::resolve($scope, $this, 'Context::addScope()');
         if (!\in_array($scope, $this->scopes, true)) {
             $this->scopes[] = $scope;
             $this->app->registerContextInScope($this, $scope);
@@ -610,6 +617,7 @@ class Context {
      * @param string $scope Scope to remove
      */
     public function removeScope(string $scope): void {
+        $scope = Scope::resolve($scope, $this, 'Context::removeScope()');
         if ($scope === Scope::TAB) {
             return; // TAB scope is permanent: it's the per-context identity scope
         }
@@ -654,9 +662,28 @@ class Context {
      * Broadcast updates to all contexts with the same primary scope.
      *
      * Inside a coroutine this only marks the scope for the worker's next broadcast flush; see Via::broadcast().
+     * With the default primary scope, TAB, it syncs this tab only: scopes joined through addScope() are reached
+     * with Via::broadcast().
      */
     public function broadcast(): void {
-        $this->app->broadcast($this->getPrimaryScope());
+        $scope = $this->getPrimaryScope();
+        if ($scope !== Scope::TAB) {
+            $this->app->broadcast($scope);
+
+            return;
+        }
+
+        $joined = array_values(array_diff($this->scopes, [Scope::TAB]));
+        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->getDevMode()) {
+            $this->tabBroadcastWarned = true;
+            $this->app->log('warn', \sprintf(
+                'Context::broadcast() syncs only this tab, since its primary scope is TAB; before php-via 0.14 it re-rendered '
+                . 'every tab on the worker. To reach the scopes it joined (%s), call $app->broadcast() with one of them.',
+                implode(', ', $joined),
+            ), $this);
+        }
+
+        $this->sync();
     }
 
     /**
@@ -815,8 +842,13 @@ class Context {
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
      *
+     * A scoped signal joins this context to its scope, so its writes reach the tab. The primary scope
+     * set by scope() is not a default: after scope() set a shared one, a signal without a scope throws.
+     *
      * Declaring a TAB signal again with the same name returns the existing signal and sets it to
      * the new initial value; a warning is logged when that changes the live value.
+     *
+     * @throws \LogicException without a scope, after scope() set a primary scope other than TAB
      */
     public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
@@ -885,75 +917,70 @@ class Context {
     }
 
     /**
-     * Create an action trigger.
+     * Create an action trigger. It runs for the tab, or the component, that posts it.
      *
-     * Actions can be TAB-scoped (per-context) or shared across a scope.
-     * If the context has a non-TAB scope, the action is registered as a scoped action
-     * and shared with all contexts in the same scope.
+     * Registering a name twice keeps the later callback and logs a warning once per id.
      *
-     * Registering a name twice: a TAB action keeps the later callback and logs a warning once
-     * per id; a scoped action keeps the first callback registered in its scope and reuses it.
-     *
-     * @param callable    $fn    The action function to execute
-     * @param null|string $name  Optional human-readable name
-     * @param null|string $scope Optional explicit scope (defaults to context's primary scope)
+     * @param callable    $fn         The action function to execute
+     * @param null|string $name       Optional human-readable name
+     * @param mixed       ...$removed Nothing: the $scope argument was removed in php-via 0.14, and a value here throws
      */
-    public function action(callable $fn, ?string $name = null, ?string $scope = null): Action {
-        // Use explicit scope if provided, otherwise use context's primary scope
-        $actionScope = $scope ?? $this->getPrimaryScope();
-
-        // Auto-expand ROUTE to include the actual route path
-        if ($actionScope === Scope::ROUTE) {
-            $actionScope = Scope::routeScope($this->route);
+    public function action(callable $fn, ?string $name = null, mixed ...$removed): Action {
+        if ($removed !== []) {
+            Removed::method('The $scope argument of Context::action()', 'An action runs for the tab that posts it: drop the third argument, and give signal() a scope to share state.');
         }
 
-        // For scoped actions, use deterministic ID (name only) so cached views work
-        // For TAB scope, use random ID to ensure uniqueness per context
-        if ($actionScope !== Scope::TAB) {
-            if ($name === null) {
-                throw new \InvalidArgumentException('Action name is required for scoped actions (non-TAB scope)');
-            }
-            $actionId = $name; // Use name directly for deterministic ID
+        // Deterministic ID so a destroyed context that is later revived
+        // (re-created with the same context ID, handler re-run) regenerates byte-identical
+        // action URLs: the already-loaded DOM's buttons keep working without a reload.
+        // Keyed on the stable namespace (not the random component context ID): a component's
+        // namespace disambiguates its actions from the parent page's (e.g. `a-increment` vs
+        // `increment`), which keeps executeAction()'s parent-first lookup unambiguous.
+        $base = $name ?? 'action' . $this->anonActionSeq++;
+        $namespace = $this->getNamespace();
+        $actionId = $namespace !== null ? $namespace . '-' . $base : $base;
 
-            // Check if action already exists in this scope
-            $existingAction = $this->app->getScopedAction($actionScope, $actionId);
-            if ($existingAction !== null) {
-                // Action already registered in this scope, reuse it
-                $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
-                $action = new Action($actionId, $this->getConfig()->getBasePath());
-                $this->namedActions[$name] = $action;
-
-                return $action;
-            }
-
-            // Register as scoped action
-            $this->app->log('debug', "[{$this->getId()}] Registering new action {$actionId} in scope {$actionScope}", $this);
-
-            $this->app->registerScopedAction($actionScope, $actionId, $fn);
-        } else {
-            // TAB scope: deterministic ID so a destroyed context that is later revived
-            // (re-created with the same context ID, handler re-run) regenerates byte-identical
-            // action URLs: the already-loaded DOM's buttons keep working without a reload.
-            // Keyed on the stable namespace (not the random component context ID): a component's
-            // namespace disambiguates its actions from the parent page's (e.g. `a-increment` vs
-            // `increment`), which keeps executeAction()'s parent-first lookup unambiguous.
-            $base = $name ?? 'action' . $this->anonActionSeq++;
-            $namespace = $this->getNamespace();
-            $actionId = $namespace !== null ? $namespace . '-' . $base : $base;
-
-            if (isset($this->actionRegistry[$actionId]) && !isset($this->duplicateActionWarned[$actionId])) {
-                $this->duplicateActionWarned[$actionId] = true;
-                $this->app->log('warn', "Action '{$actionId}' registered twice in this context; the later callback replaces the earlier one", $this);
-            }
-
-            $this->actionRegistry[$actionId] = $fn;
+        if (isset($this->actionRegistry[$actionId]) && !isset($this->duplicateActionWarned[$actionId])) {
+            $this->duplicateActionWarned[$actionId] = true;
+            $this->app->log('warn', "Action '{$actionId}' registered twice in this context; the later callback replaces the earlier one", $this);
         }
+
+        $this->actionRegistry[$actionId] = $fn;
 
         $action = new Action($actionId, $this->getConfig()->getBasePath());
 
         if ($name !== null) {
             $this->namedActions[$name] = $action;
         }
+
+        return $action;
+    }
+
+    /**
+     * Register an action shared by every context of $scope, as #[Action(scope: ...)] does. The first callback
+     * registered for a name in a scope serves the whole scope and receives the context that posts it.
+     *
+     * @internal used by PageMount
+     */
+    public function scopedAction(callable $fn, string $name, string $scope): Action {
+        $actionScope = Scope::resolve($scope, $this, '#[Action(scope: ...)]');
+        if ($actionScope === Scope::TAB) {
+            return $this->action($fn, $name);
+        }
+
+        // The name is the id, so a shared render carries the same URL for every context
+        $actionId = $name;
+        $action = new Action($actionId, $this->getConfig()->getBasePath());
+        $this->namedActions[$name] = $action;
+
+        if ($this->app->getScopedAction($actionScope, $actionId) !== null) {
+            $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
+
+            return $action;
+        }
+
+        $this->app->log('debug', "[{$this->getId()}] Registering new action {$actionId} in scope {$actionScope}", $this);
+        $this->app->registerScopedAction($actionScope, $actionId, $fn);
 
         return $action;
     }
@@ -1021,6 +1048,17 @@ class Context {
             $scopedAction = $this->app->getScopedAction(Scope::GLOBAL, $actionId);
             if ($scopedAction !== null) {
                 $this->app->log('debug', "Found scoped action {$actionId} in GLOBAL scope", $this);
+                $scopedAction($this);
+
+                return;
+            }
+        }
+
+        $sessionScope = $this->sessionId !== null ? Scope::sessionScope($this->sessionId) : null;
+        if ($sessionScope !== null && !\in_array($sessionScope, $scopes, true)) {
+            $scopedAction = $this->app->getScopedAction($sessionScope, $actionId);
+            if ($scopedAction !== null) {
+                $this->app->log('debug', "Found scoped action {$actionId} in SESSION scope", $this);
                 $scopedAction($this);
 
                 return;

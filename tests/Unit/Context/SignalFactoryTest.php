@@ -27,13 +27,13 @@ test('signal updates value when called multiple times with same name in scoped c
     $context = new Context('ctx1', '/test', $this->app);
     $context->scope(Scope::build('stock', 'AAPL'));
 
-    $signal1 = $context->signal(100.0, 'price');
+    $signal1 = $context->signal(100.0, 'price', Scope::build('stock', 'AAPL'));
     expect($signal1->getValue())->toBe(100.0);
 
     // Scoped signals are NOT overwritten by re-registration — the initial value
     // is only used on first creation. This prevents re-renders on one context
     // from resetting live shared state (e.g. a game board) to the initial value.
-    $signal2 = $context->signal(200.0, 'price');
+    $signal2 = $context->signal(200.0, 'price', Scope::build('stock', 'AAPL'));
     expect($signal2->getValue())->toBe(100.0); // unchanged — returns existing signal as-is
     expect($signal1->getValue())->toBe(100.0);
     expect($signal1->id())->toBe($signal2->id()); // same instance
@@ -47,11 +47,11 @@ test('scoped signals are shared across contexts and update consistently', functi
     $context2->scope(Scope::build('stock', 'AAPL'));
 
     // Create signal in first context
-    $signal1 = $context1->signal(100.0, 'price');
+    $signal1 = $context1->signal(100.0, 'price', Scope::build('stock', 'AAPL'));
     expect($signal1->getValue())->toBe(100.0);
 
     // Second context joins the scope — gets the existing signal, initial value ignored
-    $signal2 = $context2->signal(150.0, 'price');
+    $signal2 = $context2->signal(150.0, 'price', Scope::build('stock', 'AAPL'));
     expect($signal2->getValue())->toBe(100.0); // not 150 — live value preserved
 
     // Both reference the exact same signal instance
@@ -67,12 +67,12 @@ test('signal updates with complex values like arrays', function (): void {
     $context = new Context('ctx1', '/test', $this->app);
     $context->scope(Scope::build('stock', 'AAPL'));
 
-    $signal1 = $context->signal(['a', 'b'], 'data');
+    $signal1 = $context->signal(['a', 'b'], 'data', Scope::build('stock', 'AAPL'));
     // Signal stores complex values natively
     expect($signal1->getValue())->toEqual(['a', 'b']);
 
     // Re-registration returns same signal, initial value ignored
-    $signal2 = $context->signal(['c', 'd', 'e'], 'data');
+    $signal2 = $context->signal(['c', 'd', 'e'], 'data', Scope::build('stock', 'AAPL'));
     expect($signal1->id())->toBe($signal2->id());
     expect($signal1->getValue())->toEqual(['a', 'b']); // unchanged
 

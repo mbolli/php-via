@@ -38,7 +38,7 @@ function workerApp(?SharedSignalStore $store = null): Via {
 
     $app->page('/probe', function (Context $c): void {
         $c->scope(Scope::ROUTE);
-        $count = $c->signal(0, 'count');
+        $count = $c->signal(0, 'count', Scope::ROUTE);
         $c->action(function (Context $ctx): void {
             $signal = $ctx->getSignal('count');
             $signal->setValue($signal->int() + 1);

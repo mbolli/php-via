@@ -219,7 +219,7 @@ describe('Scope state after a component is released', function (): void {
         $handler = function (Context $c): void {
             $c->component(function (Context $w): void {
                 $w->scope('widgets');
-                $w->signal(0, 'clicks');
+                $w->signal(0, 'clicks', 'widgets');
                 $w->view(fn (): string => 'widget');
             }, 'widget');
             $c->view(fn (): string => 'page');

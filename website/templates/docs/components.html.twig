@@ -99,21 +99,19 @@ $app->onClientDisconnect(fn () => $app->broadcast('site:presence'));
 {% endverbatim %}{% endcode %}
     <p>
         A broadcast to the page's scope re-renders every component on the page, so give a busy widget its
-        own scope and broadcast to that. A component in a custom scope registers its actions with
-        <code>Scope::TAB</code>: the page finds scoped actions through its own scopes, its route and
-        <code>Scope::GLOBAL</code>, not through a component's custom scope. A component action reads the
-        page's request (<code>$c->input()</code>, <code>$c->cookie()</code>) and broadcasts with
-        <code>$app->broadcast()</code>:
+        own scope and broadcast to that. A component action runs for its own tab, whatever scope the
+        component joined. It reads the page's request (<code>$c->input()</code>, <code>$c->cookie()</code>)
+        and broadcasts with <code>$app->broadcast()</code>:
     </p>
     {% code 'php' %}{% verbatim %}
 $counterComponent = function (Context $c) use ($app): void {
     $c->scope('home:counter');
-    $count = $c->signal(0, 'count');
+    $count = $c->signal(0, 'count', 'home:counter');
 
     $c->action(function () use ($app, $count): void {
         $count->increment(broadcast: false);
         $app->broadcast('home:counter');
-    }, 'increment', Scope::TAB);
+    }, 'increment');
 
     $c->view('counter.html.twig');
 };

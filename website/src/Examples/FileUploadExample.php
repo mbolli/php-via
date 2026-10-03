@@ -178,7 +178,8 @@ final class FileUploadExample {
      * }
      */
     private static function mountUploadState(Context $c, Via $app): array {
-        $uploadScope = Scope::build('upload', $c->getSessionId() ?? $c->getId());
+        // Keyed by the hashed session scope: the raw id is the HttpOnly cookie, and signal ids carry the scope.
+        $uploadScope = Scope::build('upload', Scope::sessionScope($c->getSessionId() ?? $c->getId()));
         $c->addScope($uploadScope);
 
         // SESSION-scoped signals, shared across all contexts in the upload scope

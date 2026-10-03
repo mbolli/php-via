@@ -39,10 +39,10 @@ function mountWorker(SharedSignalStore $store, string $contextId, string $mode):
     $app->page('/probe', function (Context $c) use ($mode): void {
         $c->scope(Scope::ROUTE);
         if ($mode === 'append' || $mode === 'mutate') {
-            $items = $c->signal([], 'items');
+            $items = $c->signal([], 'items', Scope::ROUTE);
             $c->view(fn (): string => 'count=' . count($items->array()));
         } else {
-            $count = $c->signal(0, 'count');
+            $count = $c->signal(0, 'count', Scope::ROUTE);
             $c->view(fn (): string => 'count=' . $count->int());
         }
     });

@@ -39,7 +39,7 @@ $app = new Via(
 
 $app->page('/probe', function (Context $c) use ($mode): void {
     $c->scope(Scope::ROUTE);
-    $count = $c->signal(0, 'count');
+    $count = $c->signal(0, 'count', Scope::ROUTE);
 
     $bump = $c->action(function (Context $ctx) use ($mode): void {
         $signal = $ctx->getSignal('count');

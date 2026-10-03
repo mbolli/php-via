@@ -159,7 +159,7 @@ describe('strict TAB signals', function (): void {
     test('strict mode leaves scoped signals as they were', function (): void {
         $ctx = new Context('ctx1', '/test', createVia((new Config())->withStrictTabSignals()));
         $ctx->scope('room:strict');
-        $shared = $ctx->signal('', 'note', clientWritable: true);
+        $shared = $ctx->signal('', 'note', 'room:strict', clientWritable: true);
 
         $ctx->injectSignals([$shared->id() => 'client']);
 

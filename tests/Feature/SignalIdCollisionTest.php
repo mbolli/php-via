@@ -130,7 +130,7 @@ describe('signal ids stay apart when names differ only by punctuation', function
     test('a component TAB signal does not share its id with a scoped signal', function (): void {
         $page = new Context('/f_/a1b2c3d4e5f6a7b8', '/f', createVia());
         $page->scope('search');
-        $scoped = $page->signal('shared', 'q');
+        $scoped = $page->signal('shared', 'q', 'search');
         $page->component(function (Context $k): void {
             $k->signal('mine', 'q');
             $k->view(fn (): string => '');
