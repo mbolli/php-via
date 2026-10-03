@@ -1841,8 +1841,6 @@ class Via {
             $context,
             $context->getId(),
             $this->config->getBasePath(),
-            $this->config->getDatastarUrl(),
-            $this->config->getImportMapTag(),
         );
 
         // Inject the Dev Bar overlay before </body> when tracing is enabled.

@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
@@ -19,9 +20,11 @@ use Mbolli\PhpVia\Support\Stats;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
 use Twig\Environment;
+use Twig\Error\RuntimeError;
 use Twig\Loader\ArrayLoader;
 use Twig\Loader\FilesystemLoader;
 use Twig\Markup;
+use Twig\Runtime\EscaperRuntime;
 use Twig\TwigFunction;
 
 /**
@@ -896,10 +899,9 @@ class Application {
 
         // Add global variables
         $this->twig->addGlobal('basePath', $this->config->getBasePath());
-        $this->twig->addGlobal('datastarUrl', $this->config->getDatastarUrl());
-        $this->twig->addGlobal('importMap', new Markup($this->config->getImportMapTag(), 'UTF-8'));
 
         $this->addTwigFunctions();
+        $this->twig->getRuntime(EscaperRuntime::class)->addSafeClass(Html::class, ['html']);
     }
 
     /**
@@ -918,5 +920,25 @@ class Application {
                 ['is_safe' => ['html']]
             ),
         );
+
+        foreach (['via_head', 'via_foot'] as $name) {
+            $this->twig->addFunction(new TwigFunction(
+                $name,
+                static fn (array $context): string => self::documentPart($context, $name),
+                ['needs_context' => true, 'is_safe' => ['html']],
+            ));
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private static function documentPart(array $context, string $name): string {
+        $html = $context[$name] ?? null;
+        if (!$html instanceof Html) {
+            throw new RuntimeError("{$name}() needs the page it renders for: render this template with \$c->view() or \$c->render(), not through the Twig environment directly.");
+        }
+
+        return (string) $html;
     }
 }

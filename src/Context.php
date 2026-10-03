@@ -10,11 +10,12 @@ use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
 use starfederation\datastar\enums\ElementPatchMode;
-use Twig\Markup;
 
 /**
  * Context represents a living bridge between PHP and the browser.
@@ -806,6 +807,37 @@ class Context {
     }
 
     /**
+     * The tags that connect a page to php-via, for its <head> right after <meta charset>: the
+     * via_ctx signal, the import map (with withDatastarRocket() or withImportMap() entries), the
+     * SSE connect with its reconnect, and the beacon that closes the context when the tab goes.
+     *
+     * The default shell writes it with {{ via_head }}, a custom shell with the same placeholder, a
+     * Twig template with {{ via_head() }}, and a closure that returns a full document with this
+     * method. Every tag carries the nonce from the page request's 'via.csp_nonce' attribute, which
+     * middleware sets for a Content-Security-Policy. A component returns its page's.
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    public function viaHead(): string {
+        $page = $this->getPageContext();
+        $nonce = $page->cspNonce();
+        $config = $this->app->getConfig();
+
+        return Bootstrap::head($page->id, $config->getBasePath(), $config->getImportMapTag($nonce), $nonce);
+    }
+
+    /**
+     * The Datastar module script, from Config::getDatastarUrl(), for the end of <body>: {{ via_foot }}
+     * in a shell, {{ via_foot() }} in a Twig template. It carries the nonce of viaHead(). A layout
+     * that loads its own Datastar bundle leaves it out.
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    public function viaFoot(): string {
+        return Bootstrap::foot($this->app->getConfig()->getDatastarUrl(), $this->getPageContext()->cspNonce());
+    }
+
+    /**
      * Render the view with automatic scope-based caching.
      *
      * @internal Called by Via during SSE updates and initial page render
@@ -1309,15 +1341,26 @@ class Context {
     }
 
     /**
-     * The current datastarUrl and importMap, which shadow the Twig globals of the same names
-     * so a layout follows Config changes made after new Via().
+     * via_head and via_foot as template data, built only when a template prints them.
      *
-     * @return array{datastarUrl: string, importMap: Markup}
+     * @return array{via_head: Html, via_foot: Html}
      */
     private function documentData(): array {
-        $config = $this->app->getConfig();
+        return ['via_head' => new Html($this->viaHead(...)), 'via_foot' => new Html($this->viaFoot(...))];
+    }
 
-        return ['datastarUrl' => $config->getDatastarUrl(), 'importMap' => new Markup($config->getImportMapTag(), 'UTF-8')];
+    /**
+     * The CSP nonce from this context's page request, null without one.
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    private function cspNonce(): ?string {
+        $nonce = $this->requestAttributes['via.csp_nonce'] ?? null;
+        if ($nonce === null || \is_string($nonce)) {
+            return $nonce;
+        }
+
+        throw new \LogicException("The 'via.csp_nonce' request attribute holds the CSP nonce for via_head and via_foot as a string, got " . get_debug_type($nonce) . '.');
     }
 
     /**
