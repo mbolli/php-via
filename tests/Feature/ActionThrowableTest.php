@@ -151,7 +151,7 @@ describe('page render', function (): void {
 
         expect($response->statusCode)->toBe(500)
             ->and($response->headers['Content-Type'] ?? null)->toBe('text/html; charset=utf-8')
-            ->and($response->body)->toContain('InvalidArgumentException: view() takes a Twig template name')
+            ->and($response->body)->toContain('InvalidArgumentException: view() takes a template name')
             ->and($response->body)->toContain('&lt;div&gt;')
             ->and($response->body)->not->toContain('<div>')
         ;

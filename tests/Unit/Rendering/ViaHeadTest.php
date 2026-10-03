@@ -6,7 +6,6 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use Twig\Error\RuntimeError;
-use Twig\Loader\ArrayLoader;
 
 /*
  * via_head and via_foot: the tags that connect a page to php-via, the same from Context::viaHead()
@@ -118,8 +117,9 @@ describe('Context::viaFoot()', function (): void {
 
 describe('via_head() and via_foot() in Twig templates', function (): void {
     test('print what viaHead() and viaFoot() return, unescaped, as do the via_head and via_foot variables', function (): void {
-        $via = createVia((new Config())->withDatastarRocket());
-        $via->getTwig()->setLoader(new ArrayLoader(['layout.html.twig' => '{{ via_head() }}|{{ via_foot() }}|{{ via_head }}']));
+        $via = createVia((new Config())->withDatastarRocket()->withTemplateEngine(arrayTwig([
+            'layout.html.twig' => '{{ via_head() }}|{{ via_foot() }}|{{ via_head }}',
+        ])));
         $ctx = new Context('/_/twig1', '/', $via);
         $ctx->setRequestAttributes(['via.csp_nonce' => 'n1']);
 
@@ -129,15 +129,14 @@ describe('via_head() and via_foot() in Twig templates', function (): void {
     });
 
     test('work on a context without a page request', function (): void {
-        $via = createVia();
-        $via->getTwig()->setLoader(new ArrayLoader(['layout.html.twig' => '{{ via_head() }}']));
+        $via = createVia((new Config())->withTemplateEngine(arrayTwig(['layout.html.twig' => '{{ via_head() }}'])));
         $ctx = new Context('/_/twig2', '/', $via);
 
         expect($ctx->render('layout.html.twig'))->toBe($ctx->viaHead())->not->toContain('nonce');
     });
 
     test('throw in a template rendered outside a context', function (): void {
-        $via = createVia();
+        $via = createVia((new Config())->withTemplateEngine(arrayTwig([])));
 
         expect(fn () => $via->getTwig()->createTemplate('{{ via_head() }}')->render([]))
             ->toThrow(RuntimeError::class, 'via_head() needs the page it renders for')
@@ -147,10 +146,9 @@ describe('via_head() and via_foot() in Twig templates', function (): void {
     });
 
     test('a full-document view that writes via_head() gets no via_ctx injected and no warning', function (): void {
-        $via = new Via((new Config())->withDevMode(true)->withLogLevel('warn'));
-        $via->getTwig()->setLoader(new ArrayLoader([
+        $via = new Via((new Config())->withDevMode(true)->withLogLevel('warn')->withTemplateEngine(arrayTwig([
             'doc.html.twig' => '<!DOCTYPE html><html><head><meta charset="UTF-8">{{ via_head() }}</head><body><main id="m">x</main>{{ via_foot() }}</body></html>',
-        ]));
+        ])));
         $ctx = new Context('/_/twig3', '/doc', $via);
         $ctx->view('doc.html.twig');
 

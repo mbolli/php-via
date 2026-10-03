@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Signal;
 
@@ -234,7 +235,7 @@ describe('Signal::bind()', function (): void {
     })->with(['', 'Value', 'value"', 'a b', 'value__event.input', 'value.x', '-value', 'value-']);
 
     test('Twig passes the property through bind()', function (): void {
-        $via = createVia();
+        $via = createVia((new Config())->withTemplateEngine(arrayTwig([])));
         $signal = (new Context(testContextId(), '/test', $via))->signal('', 'name');
 
         $out = $via->getTwig()->createTemplate('{{ bind(s) }}|{{ bind(s, "value") }}')->render(['s' => $signal]);

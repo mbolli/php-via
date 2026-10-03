@@ -6,7 +6,6 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use Twig\Loader\ArrayLoader;
 
 /*
  * view(callable) or view('template', array|callable $data, ?string $block, bool $shareRender).
@@ -14,13 +13,12 @@ use Twig\Loader\ArrayLoader;
  */
 
 function viewShapeApp(?Config $config = null): Via {
-    $app = $config === null ? createVia() : new Via($config);
-    $app->getTwig()->setLoader(new ArrayLoader([
+    $engine = arrayTwig([
         'count.html.twig' => '<p id="n">{{ n }}</p>',
         'doc.html.twig' => '<!DOCTYPE html><html><head><meta data-signals=\'{"via_ctx":"{{ contextId }}"}\'></head><body>{% block main %}<main id="m">{{ n }}</main>{% endblock %}</body></html>',
-    ]));
+    ]);
 
-    return $app;
+    return $config === null ? createVia((new Config())->withTemplateEngine($engine)) : new Via($config->withTemplateEngine($engine));
 }
 
 function viewShapeLog(callable $fn): string {

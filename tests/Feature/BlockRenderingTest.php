@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
-use Twig\Loader\ArrayLoader;
 
 /*
  * Block Rendering Tests
@@ -14,13 +14,10 @@ use Twig\Loader\ArrayLoader;
  */
 
 beforeEach(function (): void {
-    $this->app = createVia();
-
-    // Register a simple test template with a named block
-    $this->app->getTwig()->setLoader(new ArrayLoader([
+    $this->app = createVia((new Config())->withTemplateEngine(arrayTwig([
         'page.html.twig' => '<page>{% block main %}<block-content/>{% endblock %}</page>',
         'multi.html.twig' => '<outer>{% block top %}<top/>{% endblock %}{% block body %}<body-content/>{% endblock %}</outer>',
-    ]));
+    ])));
 });
 
 describe('Initial Render (isUpdate=false)', function (): void {

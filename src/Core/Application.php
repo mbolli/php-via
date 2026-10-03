@@ -6,8 +6,6 @@ namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
-use Mbolli\PhpVia\Rendering\Html;
-use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SharedClientRegistry;
@@ -19,13 +17,6 @@ use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
-use Twig\Environment;
-use Twig\Error\RuntimeError;
-use Twig\Loader\ArrayLoader;
-use Twig\Loader\FilesystemLoader;
-use Twig\Markup;
-use Twig\Runtime\EscaperRuntime;
-use Twig\TwigFunction;
 
 /**
  * Application - Core application state management.
@@ -34,7 +25,6 @@ use Twig\TwigFunction;
  * - Context registry
  * - Client tracking
  * - Global state
- * - Twig environment
  * - Context lifecycle (cleanup, timers)
  */
 class Application {
@@ -122,8 +112,6 @@ class Application {
     /** When this worker last swept expired context directory records (hrtime ns). */
     private int $directoryPrunedAtNs = 0;
 
-    private Environment $twig;
-
     public function __construct(
         private Config $config,
         private Logger $logger,
@@ -132,28 +120,9 @@ class Application {
         private SignalManager $signalManager,
         private ActionRegistry $actionRegistry,
     ) {
-        $this->initializeTwig();
         $this->defer = static function (\Closure $next): void {
             Timer::after(1, $next);
         };
-    }
-
-    /**
-     * Apply configuration changes (called when config is updated).
-     */
-    public function applyConfig(): void {
-        if ($this->config->getTemplateDir()) {
-            $loader = new FilesystemLoader($this->config->getTemplateDir());
-            $loader->addPath(\dirname(__DIR__, 2), 'via');
-            $this->twig->setLoader($loader);
-        }
-    }
-
-    /**
-     * Get Twig environment.
-     */
-    public function getTwig(): Environment {
-        return $this->twig;
     }
 
     /**
@@ -877,68 +846,5 @@ class Application {
         }
 
         $this->logger->log('warning', "Session data LRU eviction: removed {$evictCount} inactive sessions (cap: " . self::MAX_SESSIONS . ')');
-    }
-
-    /**
-     * Initialize Twig environment with appropriate loader.
-     */
-    private function initializeTwig(): void {
-        if ($this->config->getTemplateDir()) {
-            $loader = new FilesystemLoader($this->config->getTemplateDir());
-            $loader->addPath(\dirname(__DIR__, 2), 'via');
-        } else {
-            $loader = new ArrayLoader([]);
-        }
-
-        $this->twig = new Environment($loader, [
-            'cache' => $this->config->getTwigCacheDir(),
-            'auto_reload' => true,
-            'autoescape' => 'html',
-            'strict_variables' => true,
-        ]);
-
-        // Add global variables
-        $this->twig->addGlobal('basePath', $this->config->getBasePath());
-
-        $this->addTwigFunctions();
-        $this->twig->getRuntime(EscaperRuntime::class)->addSafeClass(Html::class, ['html']);
-    }
-
-    /**
-     * Add custom Twig functions for Via.
-     */
-    private function addTwigFunctions(): void {
-        $this->twig->addFunction(new TwigFunction(
-            'bind',
-            fn (Signal $signal, ?string $prop = null) => new Markup($signal->bind($prop), 'html')
-        ));
-
-        $this->twig->addFunction(
-            new TwigFunction(
-                'dump',
-                fn (mixed ...$vars): string => '<pre>' . htmlspecialchars(print_r($vars, true), ENT_QUOTES, 'UTF-8') . '</pre>',
-                ['is_safe' => ['html']]
-            ),
-        );
-
-        foreach (['via_head', 'via_foot'] as $name) {
-            $this->twig->addFunction(new TwigFunction(
-                $name,
-                static fn (array $context): string => self::documentPart($context, $name),
-                ['needs_context' => true, 'is_safe' => ['html']],
-            ));
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $context
-     */
-    private static function documentPart(array $context, string $name): string {
-        $html = $context[$name] ?? null;
-        if (!$html instanceof Html) {
-            throw new RuntimeError("{$name}() needs the page it renders for: render this template with \$c->view() or \$c->render(), not through the Twig environment directly.");
-        }
-
-        return (string) $html;
     }
 }

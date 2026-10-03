@@ -12,6 +12,7 @@ use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
 use Mbolli\PhpVia\Rendering\Bootstrap;
 use Mbolli\PhpVia\Rendering\Html;
+use Mbolli\PhpVia\Rendering\TemplateEngine;
 use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
@@ -734,20 +735,22 @@ class Context {
      *
      * Either view($callable), which renders whatever the callable returns and receives
      * ($isUpdate, $basePath), or view('template.html.twig', $data, $block), which renders a
-     * Twig template.
+     * template through the engine from Config::withTemplateEngine() or withTemplateDir().
      *
-     * @param callable(bool, string): string|string                 $view        Function that returns HTML, or a Twig template name
+     * @param callable(bool, string): string|string                 $view        Function that returns HTML, or a template name
      * @param array<string, mixed>|callable(): array<string, mixed> $data        Template data, or a callable that builds it on every render. Template views only.
-     * @param null|string                                           $block       Twig block rendered on SSE updates instead of the whole template; the initial page load always renders the whole template. Template views only.
+     * @param null|string                                           $block       Block rendered on SSE updates instead of the whole template; the initial page load always renders the whole template. Template views only.
      * @param bool                                                  $shareRender Render each update once for every context of this view (same primary scope, route and component) instead of once per context. Only for views that are identical for every tab: TAB signals, per-user data or components inside the view make the shared HTML wrong for the others. Needs a primary scope set with scope(). A full-document view never shares its render.
      *
      * @throws \InvalidArgumentException when $data or $block is passed with a callable, or the template name is markup
+     * @throws \LogicException           for a template without a template engine, or $block with an engine that renders no blocks
      */
     public function view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void {
         if (\is_string($view)) {
             if (str_contains($view, '<')) {
-                throw new \InvalidArgumentException('view() takes a Twig template name as a string, not markup. Return the HTML from a callable instead: $c->view(fn () => \'<div>...</div>\').');
+                throw new \InvalidArgumentException('view() takes a template name as a string, not markup. Return the HTML from a callable instead: $c->view(fn () => \'<div>...</div>\').');
             }
+            $this->templateEngine("view('{$view}')", $block);
 
             $this->viewFn = fn (bool $isUpdate): string => $this->render($view, $this->resolveViewData($data), $isUpdate ? $block : null);
         } else {
@@ -781,29 +784,29 @@ class Context {
     }
 
     /**
-     * Render a Twig template with context data.
+     * Render a template with this context's data: its named signals and actions, '_via',
+     * contextId, currentRoute, basePath, and via_head and via_foot. Explicit $data wins.
      *
      * @param array<string, mixed> $data  Data to pass to the template
      * @param null|string          $block Optional block name to render only that block
+     *
+     * @throws \LogicException without a template engine, or with $block and an engine that renders no blocks
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
+        $this->templateEngine("render('{$template}')", $block);
         $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
-        $data += ['contextId' => $this->id, 'currentRoute' => $this->route] + $this->documentData();
+        $data += ['contextId' => $this->id, 'currentRoute' => $this->route, 'basePath' => $this->app->getConfig()->getBasePath()] + $this->documentData();
 
         return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
     }
 
     /**
-     * Render a Twig template from string.
+     * @deprecated removed in 0.14; throws and names getTwig()->createTemplate()
      *
-     * @param string               $template Template content
-     * @param array<string, mixed> $data     Data to pass to the template
+     * @param array<string, mixed> $data
      */
-    public function renderString(string $template, array $data = []): string {
-        // Add context data automatically
-        $data += ['contextId' => $this->id] + $this->documentData();
-
-        return $this->app->getViewRenderer()->renderString($template, $data);
+    public function renderString(string $template, array $data = []): never {
+        Removed::method('Context::renderString()', 'Render a template held as a string with $app->getTwig()->createTemplate($template)->render($data).');
     }
 
     /**
@@ -1350,6 +1353,23 @@ class Context {
     }
 
     /**
+     * The app's template engine, for $call, which renders a template.
+     *
+     * @throws \LogicException without an engine, or with $block and an engine that renders no blocks
+     */
+    private function templateEngine(string $call, ?string $block): TemplateEngine {
+        $engine = $this->app->getViewRenderer()->getEngine();
+        if ($engine === null) {
+            throw new \LogicException("{$call} renders a template, and this app has no template engine. For Twig templates run composer require twig/twig, then set \$config->withTemplateDir(__DIR__ . '/templates') or ->withTemplateEngine(new \\Mbolli\\PhpVia\\Twig\\TwigEngine(__DIR__ . '/templates')). Without templates, return the HTML from a closure: \$c->view(fn () => '<div>...</div>').");
+        }
+        if ($block !== null && !$engine->supportsBlocks()) {
+            throw new \LogicException("{$call} with block: '{$block}' needs a template engine that renders single blocks, and " . $engine::class . ' does not. Drop block:, so updates render the whole template.');
+        }
+
+        return $engine;
+    }
+
+    /**
      * The CSP nonce from this context's page request, null without one.
      *
      * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
@@ -1382,7 +1402,7 @@ class Context {
     }
 
     /**
-     * Build the auto-injection data array for Twig templates.
+     * Build the auto-injection data array for templates.
      *
      * Merges all named signals (keyed by user-supplied name) and named actions
      * (keyed by camelCase of user-supplied name) into a single array, plus a

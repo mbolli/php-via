@@ -8,8 +8,10 @@ use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\TemplateEngine;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Twig\TwigEngine;
 
 /**
  * Configuration class with fluent API.
@@ -21,6 +23,11 @@ class Config {
     private string $logLevel = 'info';
     private ?string $templateDir = null;
     private false|string $twigCacheDir = false;
+    private ?TemplateEngine $templateEngine = null;
+
+    /** The TwigEngine built from withTemplateDir() and withTwigCacheDir(), once asked for */
+    private ?TwigEngine $templateDirEngine = null;
+
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
@@ -269,20 +276,72 @@ class Config {
         return $this;
     }
 
+    /**
+     * The engine that renders template views, view('page.html.twig', ...) and Context::render():
+     *
+     * ```php
+     * $config->withTemplateEngine(new TwigEngine(__DIR__ . '/templates', cacheDir: '/tmp/twig'));
+     * ```
+     *
+     * Without an engine, views are closures that return HTML, and a template view throws.
+     */
+    public function withTemplateEngine(TemplateEngine $engine): self {
+        $this->templateEngine = $engine;
+
+        return $this;
+    }
+
+    /**
+     * Twig templates from $dir: short for withTemplateEngine(new TwigEngine($dir)), with the cache
+     * directory from withTwigCacheDir(). Needs twig/twig; new Via() throws without it.
+     */
     public function withTemplateDir(string $dir): self {
         $this->templateDir = $dir;
+        $this->templateDirEngine = null;
 
         return $this;
     }
 
+    /**
+     * Where the TwigEngine that withTemplateDir() sets up keeps its compiled templates.
+     */
     public function withTwigCacheDir(string $dir): self {
         $this->twigCacheDir = $dir;
+        $this->templateDirEngine = null;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getTwigCacheDir(): false|string {
         return $this->twigCacheDir;
+    }
+
+    /**
+     * The engine from withTemplateEngine(), or the TwigEngine withTemplateDir() describes, built on
+     * the first call; null when there is neither.
+     *
+     * @internal read by Via at construction
+     *
+     * @throws \LogicException when withTemplateEngine() and withTemplateDir() or withTwigCacheDir() are both set,
+     *                         or withTemplateDir() is set without twig/twig
+     */
+    public function getTemplateEngine(): ?TemplateEngine {
+        if ($this->templateEngine !== null) {
+            if ($this->templateDir !== null || $this->twigCacheDir !== false) {
+                throw new \LogicException('withTemplateEngine() replaces withTemplateDir() and withTwigCacheDir(): set only the engine, and give a TwigEngine its directories as new TwigEngine($templateDir, $cacheDir).');
+            }
+
+            return $this->templateEngine;
+        }
+
+        if ($this->templateDir === null) {
+            return null;
+        }
+
+        return $this->templateDirEngine ??= new TwigEngine($this->templateDir, $this->twigCacheDir);
     }
 
     /**
@@ -671,6 +730,9 @@ class Config {
         return $this->logLevel;
     }
 
+    /**
+     * @internal
+     */
     public function getTemplateDir(): ?string {
         return $this->templateDir;
     }
