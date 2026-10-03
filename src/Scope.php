@@ -97,6 +97,60 @@ class Scope {
     }
 
     /**
+     * The scope all tabs of one browser session share, as Scope::SESSION resolves inside a context.
+     *
+     * Opaque: it is derived from the session id but never contains it, since the id is the HttpOnly
+     * cookie value and scopes reach the Dev Bar, traces, broker messages and signal ids in the page.
+     * The format may change; build it only through this method.
+     *
+     * @param string $sessionId the id $c->getSessionId() returns
+     */
+    public static function sessionScope(string $sessionId): string {
+        return 'session:' . substr(hash('sha256', 'via.session-scope|' . $sessionId), 0, 32);
+    }
+
+    /**
+     * Resolve a scope as user code writes it to the scope contexts register under.
+     *
+     * With a context, Scope::ROUTE becomes its route's scope and Scope::SESSION its session's;
+     * Scope::TAB and every other scope stay as they are. Without one, as in Via::broadcast(), there is
+     * nothing to resolve the bare TAB, ROUTE and SESSION against, so they throw.
+     *
+     * @internal
+     *
+     * @param string $caller the public method, named in the exception
+     *
+     * @throws \InvalidArgumentException for a bare TAB, ROUTE or SESSION without a context
+     * @throws \LogicException           for Scope::SESSION on a context without a session
+     */
+    public static function resolve(string $scope, ?Context $context, string $caller): string {
+        if ($context !== null) {
+            return match ($scope) {
+                self::ROUTE => self::routeScope($context->getRoute()),
+                self::SESSION => self::sessionScope($context->getSessionId() ?? throw new \LogicException(
+                    "{$caller} cannot resolve Scope::SESSION: context {$context->getId()} has no session."
+                )),
+                default => $scope,
+            };
+        }
+
+        return match ($scope) {
+            self::TAB => throw new \InvalidArgumentException(
+                "{$caller} needs a shared scope, and Scope::TAB names no one else. To update the calling tab use \$c->sync(); "
+                . "otherwise pass Scope::GLOBAL, Scope::routeScope('/path'), Scope::sessionScope(\$sessionId) or a custom scope."
+            ),
+            self::ROUTE => throw new \InvalidArgumentException(
+                "{$caller} has no route to resolve Scope::ROUTE against. Pass Scope::routeScope('/path')."
+            ),
+            self::SESSION => throw new \InvalidArgumentException(
+                "{$caller} has no session to resolve Scope::SESSION against. Pass Scope::sessionScope(\$sessionId), "
+                . 'with the id from $c->getSessionId().'
+            ),
+            default => $scope,
+        };
+    }
+
+    /**
      * Check if a scope matches a pattern.
      *
      * Patterns support wildcards:

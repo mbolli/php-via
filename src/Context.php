@@ -575,10 +575,7 @@ class Context {
      * @param string $scope Built-in scope (Scope::TAB, etc.) or custom (e.g., "room:lobby")
      */
     public function scope(string $scope): void {
-        // Auto-expand ROUTE to include the actual route path
-        if ($scope === Scope::ROUTE) {
-            $scope = Scope::routeScope($this->route);
-        }
+        $scope = Scope::resolve($scope, $this, 'Context::scope()');
 
         $this->scopes = [$scope];
         $this->app->registerContextInScope($this, $scope);
@@ -594,6 +591,7 @@ class Context {
      * @param string $scope Additional scope to add
      */
     public function addScope(string $scope): void {
+        $scope = Scope::resolve($scope, $this, 'Context::addScope()');
         if (!\in_array($scope, $this->scopes, true)) {
             $this->scopes[] = $scope;
             $this->app->registerContextInScope($this, $scope);
@@ -610,6 +608,7 @@ class Context {
      * @param string $scope Scope to remove
      */
     public function removeScope(string $scope): void {
+        $scope = Scope::resolve($scope, $this, 'Context::removeScope()');
         if ($scope === Scope::TAB) {
             return; // TAB scope is permanent: it's the per-context identity scope
         }
@@ -900,12 +899,7 @@ class Context {
      */
     public function action(callable $fn, ?string $name = null, ?string $scope = null): Action {
         // Use explicit scope if provided, otherwise use context's primary scope
-        $actionScope = $scope ?? $this->getPrimaryScope();
-
-        // Auto-expand ROUTE to include the actual route path
-        if ($actionScope === Scope::ROUTE) {
-            $actionScope = Scope::routeScope($this->route);
-        }
+        $actionScope = Scope::resolve($scope ?? $this->getPrimaryScope(), $this, 'Context::action()');
 
         // For scoped actions, use deterministic ID (name only) so cached views work
         // For TAB scope, use random ID to ensure uniqueness per context
@@ -1021,6 +1015,17 @@ class Context {
             $scopedAction = $this->app->getScopedAction(Scope::GLOBAL, $actionId);
             if ($scopedAction !== null) {
                 $this->app->log('debug', "Found scoped action {$actionId} in GLOBAL scope", $this);
+                $scopedAction($this);
+
+                return;
+            }
+        }
+
+        $sessionScope = $this->sessionId !== null ? Scope::sessionScope($this->sessionId) : null;
+        if ($sessionScope !== null && !\in_array($sessionScope, $scopes, true)) {
+            $scopedAction = $this->app->getScopedAction($sessionScope, $actionId);
+            if ($scopedAction !== null) {
+                $this->app->log('debug', "Found scoped action {$actionId} in SESSION scope", $this);
                 $scopedAction($this);
 
                 return;

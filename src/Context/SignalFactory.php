@@ -63,23 +63,8 @@ class SignalFactory {
             }
         }
 
-        // Resolve ROUTE scope to the route-qualified scope ("route:/path").
-        // Without this an explicit Scope::ROUTE stays the literal string "route",
-        // which no context ever belongs to, so syncScopedSignals() (which walks the
-        // context's own scopes) never finds the signal and no patch is ever emitted.
-        // The literal bucket is also shared across every route, so two routes using
-        // this form collide on signal ids.
-        if ($scope === Scope::ROUTE) {
-            $scope = Scope::routeScope($context->getRoute());
-        }
-
-        // Resolve SESSION scope to actual session ID
-        if ($scope === Scope::SESSION) {
-            $sessionId = $context->getSessionId();
-            if ($sessionId === null) {
-                throw new \RuntimeException('Cannot use SESSION scope without session ID');
-            }
-            $scope = 'session:' . $sessionId;
+        if ($scope !== null) {
+            $scope = Scope::resolve($scope, $context, 'Context::signal()');
         }
 
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
