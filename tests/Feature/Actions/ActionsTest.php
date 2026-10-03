@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Action;
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\Scope;
 
 /*
@@ -161,12 +162,18 @@ describe('Component actions and the request', function (): void {
             }, 'pick')->id();
             $w->view(fn (): string => 'widget');
         }, 'w');
-        $page->setRequestInput(['q' => 'needle'], []);
+        $request = new RequestScope($page, ['q' => 'needle'], [], [], []);
+        $request->bind();
 
-        $page->executeAction((string) $actionId);
+        try {
+            $page->executeAction((string) $actionId);
+        } finally {
+            $request->unbind();
+        }
 
         expect($seen)->toBe('needle')
-            ->and(array_column($page->flushPendingCookies(), 'value', 'name'))->toBe(['picked' => 'yes'])
+            ->and(array_column($request->answer(), 'value', 'name'))->toBe(['picked' => 'yes'])
+            ->and($page->flushPendingCookies())->toBe([])
         ;
     });
 });

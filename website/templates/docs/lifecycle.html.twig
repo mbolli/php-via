@@ -75,6 +75,12 @@ $config->withContextTimeouts(reconnectMs: 60_000); // default; 0 uses the connec
         ten attempts. Datastar also closes the stream while the tab is hidden and opens it
         again when the tab is shown.
     </p>
+    <p>
+        Each connect renders the view again, and Datastar morphs it into the page. An attribute the browser
+        set by itself, such as the <code>open</code> of a dialog opened with <code>showModal()</code>, goes
+        with it unless the element lists it in <code>data-preserve-attr</code>; see
+        <a href="/docs/views#preserve-attr">Attributes the browser sets</a>.
+    </p>
 
     <h3 id="disconnect-detection">How a closed tab is detected</h3>
     <p>

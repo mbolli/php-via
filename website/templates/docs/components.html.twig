@@ -99,7 +99,7 @@ $app->onClientDisconnect(fn () => $app->broadcast('site:presence'));
     <p>
         A broadcast to the page's scope re-renders every component on the page, so give a busy widget its
         own scope and broadcast to that. A component action runs for its own tab, whatever scope the
-        component joined. It reads the page's request (<code>$c->input()</code>, <code>$c->cookie()</code>)
+        component joined. It reads the request that posted it (<code>$c->input()</code>, <code>$c->cookie()</code>)
         and broadcasts with <code>$app->broadcast()</code>:
     </p>
     {% code 'php' %}{% verbatim %}

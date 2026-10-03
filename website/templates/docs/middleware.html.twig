@@ -125,6 +125,11 @@ $app->page('/dashboard', function (Context $c): void {
     ]);
 })->middleware(new AuthMiddleware());
     {% endverbatim %}{% endcode %}
+    <p>
+        In an action, <code>getRequestAttribute()</code> returns what the middleware set on that action's
+        request. Only global middleware runs on actions, so an attribute that per-route middleware sets is
+        there in the page handler only: read it there and pass it to the action's closure.
+    </p>
 
     <h2 id="example">Live example: Auth middleware</h2>
     <p>

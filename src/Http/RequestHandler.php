@@ -739,7 +739,8 @@ class RequestHandler {
 
             public function handle(ServerRequestInterface $request): ResponseInterface {
                 $this->handled = true;
-                $this->actionHandler->handleAction($this->swooleRequest, $this->swooleResponse, $this->actionId);
+                $attributes = array_diff_key($request->getAttributes(), ['brotli_write' => true, 'brotli_finish' => true]);
+                $this->actionHandler->handleAction($this->swooleRequest, $this->swooleResponse, $this->actionId, $attributes);
 
                 return new Psr7Response(200);
             }

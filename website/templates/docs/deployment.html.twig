@@ -45,8 +45,10 @@ systemctl status myapp
 
     <h2 id="caddy">Caddy reverse proxy</h2>
     <p>
-        Caddy handles TLS automatically. The key requirement is disabling response buffering for SSE
-        (the <code>/_sse</code> endpoint streams indefinitely):
+        Caddy handles TLS automatically, and SSE needs no setting: <code>reverse_proxy</code> flushes a
+        response with <code>Content-Type: text/event-stream</code> to the client immediately, whatever
+        <code>flush_interval</code> says (<a href="https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#flush_interval" target="_blank" rel="noopener">Caddy docs</a>).
+        A plain <code>reverse_proxy</code> streams <code>/_sse</code> as php-via writes it:
     </p>
     {% code 'caddy' %}{% verbatim %}
 myapp.example.com {
@@ -63,6 +65,30 @@ myapp.example.com {
 }
     {% endverbatim %}{% endcode %}
 
+    <p>
+        The live site runs this pattern: HTTP/2 cleartext from Caddy to php-via, which runs with
+        <code>withH2c()</code> (see <a href="#brotli-prod">Brotli</a>), and no flush setting.
+        <code>versions h2c</code> is what an <code>h2c://</code> upstream sets, and the zero timeouts
+        state Caddy's default of none, so a stream that stays open for hours is never cut:
+    </p>
+    {% code 'caddy' %}{% verbatim %}
+myapp.example.com {
+    reverse_proxy 127.0.0.1:3000 {
+        transport http {
+            versions h2c
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+}
+    {% endverbatim %}{% endcode %}
+
+    <p>
+        Behind nginx, the <code>X-Accel-Buffering: no</code> header of every SSE response turns off
+        nginx's proxy buffering for it (<a href="https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering" target="_blank" rel="noopener">nginx docs</a>).
+        Set <code>proxy_buffering off</code> for <code>/_sse</code> only if <code>proxy_ignore_headers</code>
+        drops that header.
+    </p>
     <p>
         An idle <code>/_sse</code> stream writes an SSE comment after 15 seconds without output, so a proxy
         idle timeout longer than that, such as nginx's default <code>proxy_read_timeout</code> of 60 seconds,

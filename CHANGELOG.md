@@ -141,6 +141,9 @@ All notable changes to php-via will be documented in this file.
   `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`, `getDatastarIntegrity()`,
   `getImportMap()` and `getContextRevivalWindowMs()`. php-via reads its settings from a snapshot
   that `new Via()` takes. `$app->activeSseCount[$id]` becomes `$c->isConnected()`.
+- **`getRequestAttribute()` in an action** returns what global middleware set on the action's
+  request, not the page request's attributes. Outside an action, such as in a timer, `input()` and
+  `cookie()` read the page request instead of the tab's last action.
 
 ### Upgrading from 0.13
 
@@ -424,6 +427,12 @@ message that names the new one.
   PSR-3 and syslog names now, and throws for anything else.
 - A full-document view got its signal seed right after `<head>`, ahead of `<meta charset>`. With
   `via_head` it goes right after `via_head`'s first tag now.
+- Components on a route with parameters, such as `/blog/{slug}`, never updated: their wrapper id
+  kept the pattern's braces, so the selector of their updates was invalid.
+- Two actions of one tab that ran at once shared one request: after a wait, an action read the
+  other's `input()`, `file()` and `cookie()`, and its cookies could go out with the other's
+  response. Each action has its own request now; see
+  [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
 
 ### Tests
 
@@ -440,6 +449,10 @@ message that names the new one.
 - New [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression) and
   [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused) sections in
   Deployment.
+- [Views](https://via.zweiundeins.gmbh/docs/views#preserve-attr) shows how `data-preserve-attr`
+  keeps a `<dialog>` opened with `showModal()` open across updates and SSE reconnects.
+- Deployment no longer says Caddy needs response buffering turned off for SSE: `reverse_proxy`
+  flushes `text/event-stream` responses at once. It shows the live site's h2c setup instead.
 
 ## [0.13.1] - 2026-10-02
 

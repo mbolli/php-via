@@ -63,6 +63,24 @@ $vote = $c->action(function (Context $c) use ($app, $votes): void {
 <button data-on:click="@post('{{ vote_url }}?option=a')">Vote A</button>
     {% endverbatim %}{% endcode %}
 
+    <h3 id="action-request">Each action reads its own request</h3>
+    <p>
+        <code>$c->input()</code>, <code>$c->file()</code>, <code>$c->cookie()</code> and
+        <code>$c->getRequestAttribute()</code> return the values of the request that posted the action, and a
+        cookie from <code>$c->setCookie()</code> goes out with that action's response, whatever its status.
+        This holds when two actions of one tab run at once and one of them waits on I/O.
+    </p>
+    <ul>
+        <li>A <code>$c->spawn()</code> task keeps the request of the action that started it. Once the action
+            has answered, <code>$c->file()</code> returns null, because OpenSwoole deletes the upload's
+            temporary file with the request: move the file in the action. A cookie the task sets after that
+            goes out with the tab's next action response.</li>
+        <li>Code outside an action, such as a timer, the SSE connect or a broadcast render, reads the page
+            request. A cookie it sets goes out with the tab's next action response.</li>
+        <li>Signals are the tab's state, not the request's: an action that waits sees the values the
+            browser sent with a later action of the tab.</li>
+    </ul>
+
     <h2 id="syncing">Syncing after an action</h2>
     <p>
         Actions don't auto-sync. You must call <code>$c-&gt;sync()</code> (view + signals) or <code>$c-&gt;syncSignals()</code>

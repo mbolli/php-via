@@ -461,7 +461,7 @@ $c->onCleanup(function (Context $c) use ($room, $app): void {
     <h3 id="context-cookies"><code>cookie(string $name): ?string</code></h3>
     <h3><code>setCookie(string $name, string $value, int $expires = 0, string $path = '/', bool $httpOnly = true, bool $secure = true, string $sameSite = 'Lax'): void</code></h3>
     <h3><code>deleteCookie(string $name, string $path = '/'): void</code></h3>
-    <p>Coroutine-safe cookie access. <code>cookie()</code> reads a request cookie (replaces <code>$_COOKIE</code>, which is unsafe in OpenSwoole). <code>setCookie()</code> queues a cookie for the response with secure defaults. <code>deleteCookie()</code> expires a cookie immediately. Cookies queued during a page load are flushed by <code>RequestHandler</code>; cookies set inside an action are flushed by <code>ActionHandler</code>.</p>
+    <p>Coroutine-safe cookie access. <code>cookie()</code> reads a cookie of the request the code serves (replaces <code>$_COOKIE</code>, which is unsafe in OpenSwoole). <code>setCookie()</code> queues a cookie for that request's response with secure defaults. <code>deleteCookie()</code> expires a cookie immediately. A cookie set in the page handler goes out with the page, one set in an action with that action's response, and one set outside a request, such as in a timer, with the tab's next action response. See <a href="/docs/actions#action-request">Each action reads its own request</a>.</p>
     {% code 'php' %}{% verbatim %}
 $theme = $c->cookie('theme');        // null if not set
 $c->setCookie('theme', 'dark');      // Secure, HttpOnly, SameSite=Lax by default
@@ -469,7 +469,7 @@ $c->deleteCookie('theme');           // expires cookie immediately
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-file"><code>file(string $name): ?array</code></h3>
-    <p>Read a file from a multipart form upload. Returns the upload array (<code>name</code>, <code>type</code>, <code>tmp_name</code>, <code>size</code>) or <code>null</code> if the field is missing or errored. Use Datastar's <code>contentType: 'form'</code> modifier to submit the form as a real multipart POST.</p>
+    <p>Read a file from the multipart form upload of the action request. Returns the upload array (<code>name</code>, <code>type</code>, <code>tmp_name</code>, <code>size</code>) or <code>null</code> if the field is missing or errored, outside an action, and once the action has answered, because OpenSwoole then deletes the temporary file. Use Datastar's <code>contentType: 'form'</code> modifier to submit the form as a real multipart POST.</p>
     {% code 'php' %}{% verbatim %}
 $upload = $c->file('avatar');
 if ($upload !== null) {
@@ -539,14 +539,14 @@ $c->action(function (Context $c) use ($email, $password, $users): void {
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-input"><code>input(string $name, mixed $default = null): mixed</code></h3>
-    <p>Read a query or POST parameter safely. Checks POST first, then query string. Replaces direct <code>$_GET</code>/<code>$_POST</code> access (which is coroutine-unsafe in OpenSwoole).</p>
+    <p>Read a query or POST parameter safely. Checks POST first, then query string. Replaces direct <code>$_GET</code>/<code>$_POST</code> access (which is coroutine-unsafe in OpenSwoole). In an action, and in the <code>spawn()</code> tasks it starts, it reads the action's request; anywhere else, such as the page handler or a timer, the page's query.</p>
     {% code 'php' %}{% verbatim %}
 $id = $c->input('id');                  // POST['id'] ?? GET['id'] ?? null
 $cat = $c->input('cat', 'all');         // with default
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-request-attributes"><code>getRequestAttribute(string $name, mixed $default = null): mixed</code></h3>
-    <p>Read a request attribute set by PSR-15 middleware. See <a href="/docs/middleware">Middleware</a>.</p>
+    <p>Read a request attribute set by PSR-15 middleware: in an action, one the global middleware set on that action's request; anywhere else, one of the page request. See <a href="/docs/middleware#request-attributes">Middleware</a>.</p>
     {% code 'php' %}{% verbatim %}
 $user = $c->getRequestAttribute('user');  // set by AuthMiddleware
     {% endverbatim %}{% endcode %}

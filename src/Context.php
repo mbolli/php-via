@@ -9,6 +9,7 @@ use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
+use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\Context\SignalFactory;
 use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Rendering\Bootstrap;
@@ -74,11 +75,8 @@ class Context {
     /** @var array<string> Per-context additions before </body> */
     private array $contextFootIncludes = [];
 
-    /** @var array<string, mixed> PSR-7 request attributes set by middleware */
+    /** @var array<string, mixed> PSR-7 request attributes the middleware of the page request set */
     private array $requestAttributes = [];
-
-    /** @var array<string, mixed> HTTP query/post params for the current request */
-    private array $requestInput = [];
 
     /** @var array<string, mixed> Query of the page request, which the context record keeps for a rebuild */
     private array $pageInput = [];
@@ -90,13 +88,10 @@ class Context {
      */
     private array $tabState = [];
 
-    /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
-    private array $requestFiles = [];
-
-    /** @var array<string, string> Cookies from the current request */
+    /** @var array<string, string> Cookies of the page request, or of the request that rebuilt the page */
     private array $requestCookies = [];
 
-    /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued to be sent with the next response */
+    /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued outside an action, sent with the next response */
     private array $pendingCookies = [];
 
     /** Whether regenerateSession() asked for a new session cookie with the next response */
@@ -420,7 +415,7 @@ class Context {
     }
 
     /**
-     * Set PSR-7 request attributes from middleware.
+     * Set the PSR-7 attributes the middleware of the page request set.
      *
      * @internal called by RequestHandler after middleware pipeline runs
      *
@@ -431,41 +426,26 @@ class Context {
     }
 
     /**
-     * Get a request attribute set by middleware.
+     * Get a request attribute set by middleware with $request->withAttribute(), such as the signed-in user.
      *
-     * Middleware can store data (e.g. authenticated user, locale) as PSR-7
-     * request attributes via $request->withAttribute(). These are bridged
-     * into the Context so page handlers can access them.
+     * In an action it is an attribute of that action's request, which global middleware sets: per-route
+     * middleware runs on page loads only. Anywhere else it is one of the page request (see input()).
      */
     public function getRequestAttribute(string $name, mixed $default = null): mixed {
-        return $this->requestOwner()->requestAttributes[$name] ?? $default;
+        return $this->getRequestAttributes()[$name] ?? $default;
     }
 
     /**
-     * Get all request attributes set by middleware.
+     * Get all request attributes set by middleware, from the same request as getRequestAttribute().
      *
      * @return array<string, mixed>
      */
     public function getRequestAttributes(): array {
-        return $this->requestOwner()->requestAttributes;
+        return RequestScope::current($this)->attributes ?? $this->requestOwner()->requestAttributes;
     }
 
     /**
-     * Set HTTP request input (query + post params + files) for the current action request.
-     *
-     * @internal called by ActionHandler before executing an action
-     *
-     * @param array<string, mixed>                                                                      $query GET query parameters
-     * @param array<string, mixed>                                                                      $post  POST body parameters
-     * @param array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> $files Uploaded files (from multipart/form-data)
-     */
-    public function setRequestInput(array $query, array $post, array $files = []): void {
-        $this->requestInput = array_merge($query, $post);
-        $this->requestFiles = $files;
-    }
-
-    /**
-     * Set the query of the page request, which input() reads until the first action.
+     * Set the query of the page request.
      *
      * @internal called by RequestHandler on a page load, and by Via when it rebuilds the context from its record
      *
@@ -473,8 +453,6 @@ class Context {
      */
     public function setPageInput(array $query): void {
         $this->pageInput = $query;
-        $this->requestInput = $query;
-        $this->requestFiles = [];
     }
 
     /**
@@ -489,8 +467,11 @@ class Context {
     }
 
     /**
-     * Get an HTTP request parameter: in an action, from the action request's merged GET and POST
-     * parameters; in the page handler and the renders before the first action, from the page's query.
+     * Get an HTTP request parameter of the request the running code serves:
+     * - in an action, in the renders it runs and in the coroutines it starts while it runs, the action
+     *   request's merged GET and POST parameters, so two actions of one tab that run at once each read their own
+     * - in a spawn() task, the request that started the task, also after it was answered
+     * - anywhere else, such as the page handler, a timer, the SSE connect or a broadcast render, the page's query
      *
      * A context rebuilt after its tab was away (revival) or on another worker sees the page's query again,
      * up to 512 bytes of it: a longer query is dropped from the rebuild with a warning, so keep state that
@@ -502,15 +483,17 @@ class Context {
      * @param mixed  $default Value returned if parameter is not set
      */
     public function input(string $name, mixed $default = null): mixed {
-        return $this->requestOwner()->requestInput[$name] ?? $default;
+        return (RequestScope::current($this)->input ?? $this->requestOwner()->pageInput)[$name] ?? $default;
     }
 
     /**
-     * Get an uploaded file from the current action request.
+     * Get an uploaded file of the action request the running code serves (see input()).
      *
      * Returns the parsed file array for the named field when a file was
      * successfully uploaded via a multipart/form-data form. Returns null if
-     * no file was sent, the field is missing, or the upload failed.
+     * no file was sent, the field is missing, or the upload failed, and outside an action.
+     * Once the action has answered it is null too, because OpenSwoole deletes the temporary
+     * file with the request: move the file in the action before a spawn() task works on it.
      *
      * Use this in action callbacks instead of \$_FILES, which is not safe in
      * OpenSwoole's coroutine model.
@@ -520,8 +503,8 @@ class Context {
      * @return null|array{name: string, type: string, tmp_name: string, error: int, size: int}
      */
     public function file(string $name): ?array {
-        $f = $this->requestOwner()->requestFiles[$name] ?? null;
-        if (!\is_array($f) || $f['error'] !== UPLOAD_ERR_OK) {
+        $f = RequestScope::current($this)?->file($name);
+        if ($f === null || $f['error'] !== UPLOAD_ERR_OK) {
             return null;
         }
 
@@ -529,9 +512,9 @@ class Context {
     }
 
     /**
-     * Set cookies from the current request.
+     * Set the cookies of the page request, or of the request that rebuilt the page.
      *
-     * @internal called by RequestHandler and ActionHandler before executing the handler/action
+     * @internal called by RequestHandler on a page load, and by Via when it rebuilds the context
      *
      * @param array<string, string> $cookies Raw cookie array from the OpenSwoole request
      */
@@ -540,7 +523,8 @@ class Context {
     }
 
     /**
-     * Get a cookie value from the current request.
+     * Get a cookie value of the request the running code serves (see input()): the action's in an action,
+     * the page request's, or that of the request that rebuilt the page, outside one.
      *
      * Returns null if the cookie is not present. Use this instead of $_COOKIE,
      * which is not safe in OpenSwoole's coroutine model.
@@ -548,16 +532,18 @@ class Context {
      * @param string $name Cookie name
      */
     public function cookie(string $name): ?string {
-        $value = $this->requestOwner()->requestCookies[$name] ?? null;
+        $value = (RequestScope::current($this)->cookies ?? $this->requestOwner()->requestCookies)[$name] ?? null;
 
         return $value !== null ? (string) $value : null;
     }
 
     /**
-     * Queue a cookie to be sent with the next response.
+     * Queue a cookie for the response of the request the running code serves.
      *
-     * The cookie is applied to the HTTP response by RequestHandler (page load) or
-     * ActionHandler (action response). It cannot be sent mid-SSE-stream.
+     * In a page handler it goes out with the page, in an action (and in the spawn() tasks it starts, until
+     * it answers) with that action's response, whatever its status. Queued outside a request, such as in a
+     * timer, or by a task after its action answered, it goes out with the tab's next action response. It
+     * cannot be sent mid-SSE-stream.
      *
      * @param string $name     Cookie name
      * @param string $value    Cookie value
@@ -578,7 +564,15 @@ class Context {
         bool $httpOnly = true,
         string $sameSite = 'Lax',
     ): void {
-        $this->requestOwner()->pendingCookies[] = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
+        $cookie = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
+        $request = RequestScope::current($this);
+        if ($request !== null && $request->queueCookie($cookie)) {
+            return;
+        }
+        if ($request !== null) {
+            $this->app->log('warn', "setCookie('{$name}') ran after its action had answered, so it goes out with the tab's next action response", $this);
+        }
+        $this->requestOwner()->pendingCookies[] = $cookie;
     }
 
     /**
@@ -594,7 +588,7 @@ class Context {
     }
 
     /**
-     * Return all pending cookies and clear the queue.
+     * Return the cookies queued outside an action, and clear the queue.
      *
      * @internal called by RequestHandler and ActionHandler to apply queued cookies
      *
@@ -659,6 +653,10 @@ class Context {
      * A stopping worker waits for its running tasks: with its open streams before the onWorkerStop()
      * callbacks, and after them for the rest of the stop budget (max_wait_time less a second). A task
      * that loops checks Via::isShuttingDown(). spawn() on a destroyed context does nothing.
+     *
+     * A task started in an action reads that action's input(), cookie() and request attributes for as long
+     * as it runs; file() is null once the action has answered. A cookie it sets before then goes out with the
+     * action's response, and after it with the tab's next action response.
      *
      * @param callable(Context): void $task
      *
@@ -1646,6 +1644,22 @@ class Context {
     }
 
     /**
+     * The CSP nonce from this context's page request, null without one.
+     *
+     * @internal also used by the Dev Bar's injector
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    public function cspNonce(): ?string {
+        $nonce = $this->requestOwner()->requestAttributes['via.csp_nonce'] ?? null;
+        if ($nonce === null || \is_string($nonce)) {
+            return $nonce;
+        }
+
+        throw new \LogicException("The 'via.csp_nonce' request attribute holds the CSP nonce for via_head and via_foot as a string, got " . get_debug_type($nonce) . '.');
+    }
+
+    /**
      * The component, at any depth, that registered $actionId for its tab or in a scope it joined.
      */
     private function componentWithAction(string $actionId): ?self {
@@ -1691,20 +1705,6 @@ class Context {
         }
 
         return $engine;
-    }
-
-    /**
-     * The CSP nonce from this context's page request, null without one.
-     *
-     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
-     */
-    private function cspNonce(): ?string {
-        $nonce = $this->requestAttributes['via.csp_nonce'] ?? null;
-        if ($nonce === null || \is_string($nonce)) {
-            return $nonce;
-        }
-
-        throw new \LogicException("The 'via.csp_nonce' request attribute holds the CSP nonce for via_head and via_foot as a string, got " . get_debug_type($nonce) . '.');
     }
 
     /**

@@ -118,6 +118,28 @@ $c->view(function (bool $isUpdate) use ($c, $data): string {
         <li>Datastar morphs only the changed DOM nodes, no full page reload</li>
     </ol>
 
+    <h3 id="preserve-attr">Attributes the browser sets</h3>
+    <p>
+        A morph sets each element's attributes to those of the server's markup, and every stream connect,
+        the first and each <a href="/docs/lifecycle#reconnect">reconnect</a>, renders the view again. So an
+        attribute the browser set by itself goes: the <code>open</code> that <code>showModal()</code> puts on
+        a <code>&lt;dialog&gt;</code> closes the dialog at the next update. List such attributes in
+        <code>data-preserve-attr</code>, and Datastar leaves them as the browser has them:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<dialog id="confirm" data-preserve-attr="open">
+    <p>Delete {{ count }} rows?</p>
+    <button data-on:click="@post('{{ delete_url }}')">Delete</button>
+</dialog>
+<button data-on:click="document.getElementById('confirm').showModal()">Delete rows</button>
+    {% endverbatim %}{% endcode %}
+    <p>
+        The dialog stays open and modal across updates and reconnects, and its content still updates. The
+        attribute takes several names separated by spaces, and it belongs in the markup the server renders:
+        Datastar reads it from the new HTML. <code>data-ignore-morph</code> instead keeps the whole element,
+        content included, as it is.
+    </p>
+
     <h2 id="sync-vs-sync-signals">sync() vs syncSignals()</h2>
     <p>
         <code>$c-&gt;sync()</code> re-renders the view <em>and</em> pushes signal values.
