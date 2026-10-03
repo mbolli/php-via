@@ -280,7 +280,11 @@ class Signal {
     }
 
     /**
-     * Mark signal as synced.
+     * Drop this signal's pending patch, so neither the page seed nor the next sync sends the
+     * current value. It does not stop a scoped signal's broadcast.
+     *
+     * Use it after setValue() on a TAB signal the browser already shows, or for a value the
+     * page seeds on the client.
      */
     public function markSynced(): void {
         $this->changed = false;
