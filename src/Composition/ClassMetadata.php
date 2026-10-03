@@ -11,6 +11,7 @@ use Mbolli\PhpVia\Attributes\OnDisconnect;
 use Mbolli\PhpVia\Attributes\Persist;
 use Mbolli\PhpVia\Attributes\Signal;
 use Mbolli\PhpVia\Scope;
+use Mbolli\PhpVia\Support\ClientValue;
 
 /**
  * Reflection metadata for a page/component class.
@@ -31,6 +32,7 @@ final class ClassMetadata {
      * @param array<string, mixed>                                       $defaults        Default value per annotated property
      * @param array<array{name: string, type: string}>                   $viewRouteParams Route params declared on view() beyond Context
      * @param list<string>                                               $onCleanup       #[OnCleanup] method names in declaration order
+     * @param array<string, null|list<string>>                           $clientTypes     Types a client write may have, per #[Signal] property with a declared type
      */
     private function __construct(
         public readonly string $class,
@@ -45,6 +47,7 @@ final class ClassMetadata {
         /** Primary scope from #[Broadcast] on the class, or null. */
         public readonly ?string $broadcastScope,
         public readonly array $onCleanup,
+        public readonly array $clientTypes = [],
     ) {}
 
     /**
@@ -84,6 +87,7 @@ final class ClassMetadata {
         $scopedSignals = [];
         $atomicSignals = [];
         $clientWritable = [];
+        $clientTypes = [];
         $persists = [];
         $defaults = [];
 
@@ -111,6 +115,11 @@ final class ClassMetadata {
                 }
                 if ($signalAttr->clientWritable !== null) {
                     $clientWritable[$name] = $signalAttr->clientWritable;
+                }
+                // hydrate() assigns the signal's value to the property, so the declared type is what a client write must have.
+                $types = ClientValue::typesOfProperty($prop);
+                if ($types !== false) {
+                    $clientTypes[$name] = $types;
                 }
                 $defaults[$name] = $default;
 
@@ -182,6 +191,7 @@ final class ClassMetadata {
             viewRouteParams: $viewRouteParams,
             broadcastScope: $broadcastScope,
             onCleanup: $onCleanup,
+            clientTypes: $clientTypes,
         );
     }
 

@@ -56,6 +56,30 @@ describe('SharedContextDirectory', function (): void {
         expect($app->getApp()->getContext('/docs_/late'))->toBe($ctx);
     });
 
+    test('tab state needs a live row, and a put of the record keeps it', function (): void {
+        $directory = new SharedContextDirectory(maxRows: 16);
+        $set = static fn (array $state): array => ['' => ['k' => serialize(1)]];
+
+        expect($directory->changeState('/docs_/none', $set, '"k"'))->toBeFalse()
+            ->and($directory->getState('/docs_/none'))->toBeNull()
+        ;
+
+        $directory->put('/docs_/a', directoryRecord(time() + 60));
+        expect($directory->changeState('/docs_/a', $set, '"k"'))->toBeTrue();
+        $directory->put('/docs_/a', directoryRecord(time() + 120));
+
+        expect($directory->getState('/docs_/a'))->toBe(['' => ['k' => serialize(1)]]);
+    });
+
+    test('an expired row has no tab state', function (): void {
+        $directory = new SharedContextDirectory(maxRows: 16);
+        $directory->put('/docs_/old', directoryRecord(time() - 1));
+
+        expect($directory->changeState('/docs_/old', static fn (array $state): array => ['' => ['k' => 'x']], '"k"'))->toBeFalse()
+            ->and($directory->getState('/docs_/old'))->toBeNull()
+        ;
+    });
+
     test('with revival off, registering a context writes no directory row', function (): void {
         $app = createVia((new Config())->withContextTimeouts(revivalWindowMs: 0));
         $directory = new SharedContextDirectory(maxRows: 16);

@@ -170,7 +170,7 @@ class SseHandler {
         ++$this->via->runningSseStreams;
 
         try {
-            // A context an action revived without signals takes the tab's values from this connect.
+            // A context an action revived without signals, and a clientSeeded signal, take the tab's values from this connect.
             $this->via->seedFromConnect($context, $signals);
 
             // Track client info when SSE connects (not at page load)

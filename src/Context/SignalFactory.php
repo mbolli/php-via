@@ -29,6 +29,9 @@ class SignalFactory {
     /** @var array<string, true> Re-declaration warnings already logged, keyed by kind and name */
     private array $redeclarationWarned = [];
 
+    /** @var array<string, true> Signal ids whose refused client write dev mode already logged */
+    private array $typeWarned = [];
+
     /**
      * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
      */
@@ -45,6 +48,7 @@ class SignalFactory {
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write it; null picks the scope's default
+     * @param bool        $clientSeeded   Whether the browser holds the initial value; see Context::signal()
      *
      * TAB scope (scope=null): Signal is private to this context, not shared
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
@@ -52,9 +56,10 @@ class SignalFactory {
      *
      * A scoped signal joins the context to its scope, which its value reaches the tab through.
      *
-     * @throws \LogicException without a scope, on a context whose primary scope is not TAB
+     * @throws \LogicException           without a scope, on a context whose primary scope is not TAB
+     * @throws \InvalidArgumentException for clientSeeded with a shared scope or with clientWritable: false
      */
-    public function createSignal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
+    public function createSignal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null, bool $clientSeeded = false): Signal {
         if (trim($name) === '') {
             throw new \InvalidArgumentException('A signal needs a non-empty name, for example $c->signal(0, \'count\').');
         }
@@ -77,6 +82,15 @@ class SignalFactory {
         }
 
         $scope = Scope::resolve($scope, $context, 'Context::signal()');
+        if ($clientSeeded) {
+            if ($scope !== Scope::TAB) {
+                throw new \InvalidArgumentException("Signal '{$baseName}' cannot be clientSeeded with scope '{$scope}': a shared signal has one value for every tab, and only a tab's own signal can take its browser's.");
+            }
+            if ($clientWritable === false) {
+                throw new \InvalidArgumentException("Signal '{$baseName}' is clientSeeded, so it takes its value from the browser, and clientWritable: false refuses it. Drop one of the two.");
+            }
+            $clientWritable = true;
+        }
 
         // For scoped signals, use scope + name as ID (no context ID needed - they're shared)
         // For TAB signals, use context ID to make them unique per context
@@ -117,6 +131,12 @@ class SignalFactory {
 
         if (isset($this->signals[$signalId])) {
             $existing = $this->signals[$signalId];
+            // The browser's value is the live one; the initial value is only the fallback.
+            if ($existing->isClientSeeded()) {
+                $this->signalNameMap[$baseName] = $existing;
+
+                return $existing;
+            }
             $this->warnOnRedeclaration($existing, $baseName, $initialValue, $clientWritable);
             $existing->setValue($initialValue);
             $this->signalNameMap[$baseName] = $existing;
@@ -128,7 +148,7 @@ class SignalFactory {
             $clientWritable = false;
         }
 
-        $signal = new Signal($signalId, $initialValue, null, true, $clientWritable);
+        $signal = new Signal($signalId, $initialValue, null, true, $clientWritable, null, $clientSeeded);
         $this->signals[$signalId] = $signal;
         $this->signalNameMap[$baseName] = $signal;
 
@@ -220,8 +240,10 @@ class SignalFactory {
      *
      * Only signals whose isClientWritable() is true take the client's value: by default TAB
      * signals do and scoped signals (ROUTE, SESSION, GLOBAL, custom) do not, and an explicit
-     * clientWritable or Config::withStrictTabSignals() changes that. Ids this context does not
-     * own are passed on to its component contexts.
+     * clientWritable or Config::withStrictTabSignals() changes that. A value of another type than
+     * the signal's initial value (or #[Signal] property) is refused like a write to a signal that
+     * is not client-writable, unless it is a lossless form of it, such as '5' for a number. Ids
+     * this context does not own are passed on to its component contexts.
      *
      * @param array<int|string, mixed> $signalsData Nested structure of signals from the client
      */
@@ -241,8 +263,9 @@ class SignalFactory {
         foreach ($flat as $signalId => $value) {
             if (isset($this->signals[$signalId])) {
                 $signal = $this->signals[$signalId];
-                if ($signal->isClientWritable()) {
-                    $signal->injectValue($value);
+                $accepted = $signal->isClientWritable() ? $this->acceptClientValue($signal, $value) : null;
+                if ($accepted !== null) {
+                    $signal->injectValue($accepted[0]);
                 } elseif (!self::sameClientValue($signal->getValue(), $value)) {
                     // Re-send the server value so the browser drops its stale copy.
                     $signal->setValue($signal->getValue());
@@ -255,8 +278,9 @@ class SignalFactory {
             foreach ($context->getScopes() as $scope) {
                 $signal = $this->app->getScopedSignal($scope, $signalId);
                 if ($signal !== null) {
-                    if ($signal->isClientWritable()) {
-                        $signal->injectValue($value);
+                    $accepted = $signal->isClientWritable() ? $this->acceptClientValue($signal, $value) : null;
+                    if ($accepted !== null) {
+                        $signal->injectValue($accepted[0]);
                     }
                     unset($flat[$signalId]);
 
@@ -283,6 +307,34 @@ class SignalFactory {
 
     private function context(): Context {
         return $this->context->get() ?? throw new \LogicException('Signal factory of a freed context');
+    }
+
+    /**
+     * The client's value as the signal's type, or null after logging why it was refused.
+     *
+     * @return null|array{mixed}
+     */
+    private function acceptClientValue(Signal $signal, mixed $value): ?array {
+        $accepted = $signal->acceptClientValue($value);
+        if ($accepted !== null) {
+            return $accepted;
+        }
+
+        $id = $signal->id();
+        $devMode = $this->app->getSettings()->devMode;
+        if (!$devMode || !isset($this->typeWarned[$id])) {
+            $this->typeWarned[$id] = true;
+            $this->app->log($devMode ? 'warn' : 'debug', \sprintf(
+                "Signal '%s' holds a value of type %s, and the browser sent one of type %s that is no form of it: the write "
+                . 'was refused and the server value kept. Declare the signal with a value of the type the element sends, or '
+                . 'with null to take any type.',
+                $id,
+                get_debug_type($signal->getValue()),
+                get_debug_type($value),
+            ), $this->context());
+        }
+
+        return null;
     }
 
     /**

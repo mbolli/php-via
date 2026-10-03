@@ -245,6 +245,28 @@ message that names the new one.
 - **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
 - **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
+- **`$c->input()` on a page load** reads the page's query string, where it returned the default.
+  The context record keeps up to 512 bytes of it, so a context rebuilt after its tab was away or on
+  another worker reads the same input. A longer query is left out of the record with a warning.
+- **`$c->tabState($key)` and `$c->setTabState($key, $value)`** keep server-side values of a tab,
+  such as a query result the page shows, across a revival, where apps copied them into
+  `globalState`. One worker keeps them in memory, and the revival records of destroyed tabs hold up
+  to 64 MiB of them. With more than one worker every worker reads the same values from the context
+  directory, up to 1024 serialized bytes per tab: raise it with
+  `withContextDirectorySize(maxTabStateBytes:)`. Values must be serializable.
+- **Typed client writes.** A value the browser sends for a signal must have the type of the
+  signal's initial value or `#[Signal]` property. A lossless form, such as `'5'` from a textarea for
+  a number or `'false'` from a radio group for a bool, is stored as that type; any other value is
+  refused like a write to a signal that is not client-writable, where it was stored as sent. A signal
+  declared with `null` takes any type. Dev mode warns once per signal.
+- **`signal($fallback, 'name', clientSeeded: true)`** declares a TAB signal whose initial value the
+  browser holds, such as one the page's own script reads from the URL. The page seed and the first
+  sync leave it out, a second declaration keeps the live value, and every SSE connect gives it the
+  browser's value before the view renders, until the server writes it. It replaces calling
+  `markSynced()` right after `signal()`, which keeps working.
+- **`new Via()` warns about a stale Datastar pin:** an import map integrity entry for
+  `/datastar.js` at another URL than `getDatastarUrl()`, such as one built before `withBasePath()`
+  or `withDatastarRocket()` or copied from an earlier build, under which the browser checks no hash.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
 

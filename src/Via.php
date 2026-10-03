@@ -293,6 +293,7 @@ class Via {
             $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
                 . '$app->flushBroadcasts() where a broadcast has to land before the next step.');
         }
+        $this->warnStaleDatastarPin();
 
         // Dev Bar tracing substrate. Allocated here (master process, before fork)
         // so the per-worker tracer + buffer are inherited cleanly. When tracing
@@ -1026,6 +1027,7 @@ class Via {
                 $this->app->setContextDirectory(new SharedContextDirectory(
                     $this->settings->contextDirectoryRows,
                     $this->settings->contextDirectoryRecordBytes,
+                    $this->settings->contextDirectoryTabStateBytes,
                 ));
 
                 // So getClients() and the connect/disconnect hooks see the whole server rather
@@ -1761,6 +1763,11 @@ class Via {
         $this->contextSessions[$contextId] = $sessionId;
         $context->injectRouteParams($record['params']);
         $context->setRequestCookies($cookies);
+        if (($record['query'] ?? '') !== '') {
+            parse_str($record['query'], $query);
+            $context->setPageInput($query);
+        }
+        $context->importTabState($record['tabState'] ?? []);
 
         try {
             $this->invokeHandlerWithParams($handler, $context, $record['params']);
@@ -1816,7 +1823,8 @@ class Via {
     }
 
     /**
-     * Seed a context that an action revived without client signals from its SSE connect; others ignore the call.
+     * Seed a context that an action revived without client signals from its SSE connect, and give the
+     * clientSeeded signals of any other the browser's values.
      *
      * @param array<string, mixed> $clientSignals Signal values the SSE connect carries
      *
@@ -1824,6 +1832,8 @@ class Via {
      */
     public function seedFromConnect(Context $context, array $clientSignals): void {
         if (!$context->isAwaitingSeed()) {
+            $context->takeClientSeeded($clientSignals);
+
             return;
         }
 
@@ -2120,6 +2130,25 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Warn about an import map integrity entry for php-via's own Datastar bundle at another URL than the one
+     * pages load, which leaves Datastar unpinned: one built before withBasePath() or withDatastarRocket(),
+     * or copied from an earlier build.
+     */
+    private function warnStaleDatastarPin(): void {
+        $url = $this->settings->datastarUrl;
+        foreach ($this->config->getImportMap()['integrity'] ?? [] as $pinned => $_) {
+            $path = parse_url($pinned, PHP_URL_PATH);
+            if ($pinned === $url || !str_starts_with($pinned, '/') || !\is_string($path) || basename($path) !== 'datastar.js') {
+                continue;
+            }
+
+            $this->log('warn', "Config::withImportMap() pins '{$pinned}', but pages load Datastar from '{$url}', so the browser "
+                . 'checks no hash for it. Pin it with $config->withImportMap([], [$config->getDatastarUrl() => '
+                . '$config->getDatastarIntegrity()]) after withDatastarRocket() and withBasePath(), not with a URL from an earlier build.');
+        }
     }
 
     /**

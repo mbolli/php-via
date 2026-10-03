@@ -71,6 +71,7 @@ final readonly class Settings {
         public int $contextDirectoryRows,
         public int $contextDirectoryRecordBytes,
         public int $contextDirectoryTtlSeconds,
+        public int $contextDirectoryTabStateBytes,
         public int $scopedSignalTableRows,
         public int $scopedSignalTableValueBytes,
         public ?string $globalStatePath,

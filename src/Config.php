@@ -149,6 +149,8 @@ final class Config {
 
     private int $contextDirectoryTtlSeconds = 3600;
 
+    private int $contextDirectoryTabStateBytes = 1024;
+
     private int $scopedSignalTableRows = 1024;
 
     private int $scopedSignalTableValueBytes = 32768;
@@ -411,6 +413,8 @@ final class Config {
      * ```php
      * $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
      * ```
+     *
+     * new Via() warns when a pin names another URL of the bundle, such as one built before those calls.
      *
      * @throws \RuntimeException if the bundle cannot be read
      */
@@ -763,7 +767,8 @@ final class Config {
      *   30 s by default (retryMaxWait). 0 uses $connectMs.
      * - $revivalWindowMs (default 10 min): for this long after a context is destroyed, a returning tab gets an
      *   equivalent one (same id, handler run again, signals seeded from the browser) instead of a full reload.
-     *   Server-only state such as #[Persist] starts over, as on a reload. 0 turns revival off.
+     *   Context::tabState() values come back; other server-only state such as #[Persist] starts over, as on a
+     *   reload. 0 turns revival off.
      *
      * The context's onCleanup() callbacks run when it is destroyed, whichever timer did it.
      */
@@ -1027,15 +1032,23 @@ final class Config {
      * the records of the contexts it streams to every quarter of $ttlSeconds or of the revival
      * window, whichever is shorter, so this only governs entries left behind by a crashed worker.
      *
-     * @param int $maxRows        Guaranteed number of tracked contexts (default 4096)
-     * @param int $maxRecordBytes Serialized bytes per record (default 1024; real records are 92-341)
-     * @param int $ttlSeconds     Expiry for a record with no heartbeat (default 3600)
+     * The record also holds the tab's Context::setTabState() values, serialized together, so
+     * every worker reads the same ones. A write that would take the tab past $maxTabStateBytes
+     * throws \OverflowException. The column is reserved for every row: each KB costs about
+     * 2 KB × $maxRows of shared memory, resident from start-up (8 MB at the defaults).
+     *
+     * @param int $maxRows          Guaranteed number of tracked contexts (default 4096)
+     * @param int $maxRecordBytes   Serialized bytes per record (default 1024; real records are 92-341, plus a page
+     *                              query of up to 512)
+     * @param int $ttlSeconds       Expiry for a record with no heartbeat (default 3600)
+     * @param int $maxTabStateBytes Serialized bytes of one tab's tabState() values (default 1024)
      */
-    public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600): self {
+    public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600, int $maxTabStateBytes = 1024): self {
         $this->assertMutable(__FUNCTION__);
         $this->contextDirectoryRows = max(1, $maxRows);
         $this->contextDirectoryRecordBytes = max(128, $maxRecordBytes);
         $this->contextDirectoryTtlSeconds = max(60, $ttlSeconds);
+        $this->contextDirectoryTabStateBytes = max(64, $maxTabStateBytes);
 
         return $this;
     }
@@ -1541,6 +1554,7 @@ final class Config {
             contextDirectoryRows: $this->contextDirectoryRows,
             contextDirectoryRecordBytes: $this->contextDirectoryRecordBytes,
             contextDirectoryTtlSeconds: $this->contextDirectoryTtlSeconds,
+            contextDirectoryTabStateBytes: $this->contextDirectoryTabStateBytes,
             scopedSignalTableRows: $this->scopedSignalTableRows,
             scopedSignalTableValueBytes: $this->scopedSignalTableValueBytes,
             globalStatePath: $this->globalStatePath,

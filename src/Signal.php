@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\State\SharedSignalStore;
+use Mbolli\PhpVia\Support\ClientValue;
 use Mbolli\PhpVia\Support\Removed;
 
 /**
@@ -20,6 +21,12 @@ final class Signal {
     private bool $autoBroadcast = true;
     private ?bool $clientWritable = null;
     private ?Via $app = null;
+
+    /** @var null|list<string> The types a client write may have (see ClientValue), null for any */
+    private ?array $clientTypes;
+
+    /** Whether the browser holds the initial value, so the page sends the server's only once it writes one. */
+    private bool $clientSeeded;
 
     /**
      * Monotonic count of value-changing writes made through this Signal object.
@@ -52,7 +59,8 @@ final class Signal {
         ?string $scope = null,
         bool $autoBroadcast = true,
         ?bool $clientWritable = null,
-        ?Via $app = null
+        ?Via $app = null,
+        bool $clientSeeded = false,
     ) {
         $this->id = $id;
         $this->scope = $scope;
@@ -60,6 +68,9 @@ final class Signal {
         $this->clientWritable = $clientWritable;
         $this->app = $app;
         $this->value = $initialValue;
+        $this->clientTypes = ClientValue::typesOf($initialValue);
+        $this->clientSeeded = $clientSeeded;
+        $this->changed = !$clientSeeded;
     }
 
     /**
@@ -272,6 +283,37 @@ final class Signal {
     }
 
     /**
+     * Whether the browser holds this signal's initial value; see Context::signal().
+     *
+     * @internal
+     */
+    public function isClientSeeded(): bool {
+        return $this->clientSeeded;
+    }
+
+    /**
+     * Set the types a client write may have, in place of the initial value's.
+     *
+     * @internal PageMount passes a #[Signal] property's declared type
+     *
+     * @param null|list<string> $types see ClientValue, null for any
+     */
+    public function acceptClientTypes(?array $types): void {
+        $this->clientTypes = $types;
+    }
+
+    /**
+     * A value the browser sent, as this signal's type, wrapped in a list; null when it has another type.
+     *
+     * @internal used by SignalFactory before it stores a client write
+     *
+     * @return null|array{mixed}
+     */
+    public function acceptClientValue(mixed $value): ?array {
+        return $this->clientTypes === null ? [$value] : ClientValue::coerce($value, $this->clientTypes);
+    }
+
+    /**
      * Number of value-changing writes made through this Signal object so far.
      *
      * Only useful as a before/after comparison around a call into other code: an unchanged
@@ -296,8 +338,8 @@ final class Signal {
      * Drop this signal's pending patch, so neither the page seed nor the next sync sends the
      * current value. It does not stop a scoped signal's broadcast.
      *
-     * Use it after setValue() on a TAB signal the browser already shows, or for a value the
-     * page seeds on the client.
+     * Use it after setValue() on a TAB signal the browser already shows. For a value the browser
+     * seeds itself, declare the signal with signal(..., clientSeeded: true) instead.
      */
     public function markSynced(): void {
         $this->changed = false;

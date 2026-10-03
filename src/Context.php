@@ -79,6 +79,16 @@ class Context {
     /** @var array<string, mixed> HTTP query/post params for the current request */
     private array $requestInput = [];
 
+    /** @var array<string, mixed> Query of the page request, which the context record keeps for a rebuild */
+    private array $pageInput = [];
+
+    /**
+     * Tab state this page keeps itself: with one worker, and with several until its directory row exists.
+     *
+     * @var array<string, array<string, string>> key bucket ('' for the page, 'component:<namespace>' for a component) => key => serialized value
+     */
+    private array $tabState = [];
+
     /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
     private array $requestFiles = [];
 
@@ -189,6 +199,90 @@ class Context {
         }
 
         $this->app->clearSessionData($this->sessionId, $key);
+    }
+
+    /**
+     * Get a server-side value of this tab, kept across a revival.
+     *
+     * Tab state is for what the page needs to rebuild the tab but the browser does not hold, such as
+     * the last query result or a cursor: it never reaches the browser, and the handler that runs again
+     * on a revival reads it back. It lives as long as the tab's context and then for the revival window
+     * (Config::withContextTimeouts()).
+     * A component has keys of its own. Values are copies: change one and write it again.
+     *
+     * @param string $key     Key
+     * @param mixed  $default Value returned if the key is not set
+     */
+    public function tabState(string $key, mixed $default = null): mixed {
+        $page = $this->getPageContext();
+        $state = $this->app->getApp()->sharedTabState($page->id) ?? $page->tabState;
+        $serialized = $state[$this->tabStateBucket()][$key] ?? null;
+
+        return $serialized === null ? $default : unserialize($serialized);
+    }
+
+    /**
+     * Set a server-side value of this tab, kept across a revival; null removes the key.
+     *
+     * With one worker, the values live in its memory, and the revival records of destroyed tabs keep
+     * up to 64 MiB of them, evicting the oldest past that. With more than one worker, every worker reads
+     * the same values from the shared context directory, which caps a tab's serialized values at
+     * Config::withContextDirectorySize(maxTabStateBytes:), 1024 bytes by default.
+     *
+     * @throws \InvalidArgumentException if the value cannot be serialized, such as a closure
+     * @throws \OverflowException        with worker_num > 1, if the tab's values would exceed maxTabStateBytes
+     * @throws \RuntimeException         with worker_num > 1, if the tab's lock is not taken within about 7 s
+     */
+    public function setTabState(string $key, mixed $value): void {
+        try {
+            $serialized = $value === null ? null : serialize($value);
+        } catch (\Throwable $e) {
+            throw new \InvalidArgumentException("Tab state \"{$key}\" cannot be serialized: {$e->getMessage()}", 0, $e);
+        }
+
+        $bucket = $this->tabStateBucket();
+        $change = static function (array $state) use ($bucket, $key, $serialized): array {
+            if ($serialized !== null) {
+                $state[$bucket][$key] = $serialized;
+            } elseif (isset($state[$bucket][$key])) {
+                unset($state[$bucket][$key]);
+                if ($state[$bucket] === []) {
+                    unset($state[$bucket]);
+                }
+            }
+
+            return $state;
+        };
+
+        $page = $this->getPageContext();
+        $app = $this->app->getApp();
+        if (!$app->changeSharedTabState($page->id, $change, "\"{$key}\"")) {
+            $state = $change($page->tabState);
+            $app->assertTabStateFits($state, "\"{$key}\"");
+            $page->tabState = $state;
+        }
+    }
+
+    /**
+     * The tab state this page keeps itself.
+     *
+     * @internal read by Application for the revival record and the directory row
+     *
+     * @return array<string, array<string, string>>
+     */
+    public function localTabState(): array {
+        return $this->tabState;
+    }
+
+    /**
+     * Replace the tab state this page keeps itself.
+     *
+     * @internal set by Via from a revival record, and by Application once the directory row holds it
+     *
+     * @param array<string, array<string, string>> $state
+     */
+    public function importTabState(array $state): void {
+        $this->tabState = $state;
     }
 
     /**
@@ -320,10 +414,38 @@ class Context {
     }
 
     /**
-     * Get an HTTP request parameter from the current action request.
+     * Set the query of the page request, which input() reads until the first action.
      *
-     * Reads from merged GET + POST parameters. Use this instead of \$_GET/\$_POST
-     * superglobals, which are not safe in OpenSwoole's coroutine model.
+     * @internal called by RequestHandler on a page load, and by Via when it rebuilds the context from its record
+     *
+     * @param array<string, mixed> $query
+     */
+    public function setPageInput(array $query): void {
+        $this->pageInput = $query;
+        $this->requestInput = $query;
+        $this->requestFiles = [];
+    }
+
+    /**
+     * The query of the page request.
+     *
+     * @internal read by Application for the context record
+     *
+     * @return array<string, mixed>
+     */
+    public function getPageInput(): array {
+        return $this->pageInput;
+    }
+
+    /**
+     * Get an HTTP request parameter: in an action, from the action request's merged GET and POST
+     * parameters; in the page handler and the renders before the first action, from the page's query.
+     *
+     * A context rebuilt after its tab was away (revival) or on another worker sees the page's query again,
+     * up to 512 bytes of it: a longer query is dropped from the rebuild with a warning, so keep state that
+     * has to survive in a path parameter, a signal or tabState().
+     *
+     * Use this instead of \$_GET/\$_POST superglobals, which are not safe in OpenSwoole's coroutine model.
      *
      * @param string $name    Parameter name
      * @param mixed  $default Value returned if parameter is not set
@@ -524,6 +646,7 @@ class Context {
         // Clear references to prevent memory leaks
         $this->signalFactory->clearSignals();
         $this->seedWait = null;
+        $this->tabState = [];
         $this->actionRegistry = [];
         // A component that joined a scope is registered there itself and would outlive the page.
         foreach ($this->componentManager->getComponents() as $component) {
@@ -936,10 +1059,17 @@ class Context {
      * Declaring a TAB signal again with the same name returns the existing signal and sets it to
      * the new initial value; a warning is logged when that changes the live value.
      *
-     * @throws \LogicException without a scope, after scope() set a primary scope other than TAB
+     * $clientSeeded declares a TAB signal whose initial value the browser holds, such as one the page's
+     * own script reads from the URL or from localStorage: $initialValue is only the server's fallback.
+     * The page seed and the first sync leave the signal out, declaring it again keeps the live value, and
+     * until the server writes it, every SSE connect gives it the browser's value before the view renders.
+     * Such a signal is client-writable.
+     *
+     * @throws \LogicException           without a scope, after scope() set a primary scope other than TAB
+     * @throws \InvalidArgumentException for $clientSeeded with a shared scope or with clientWritable: false
      */
-    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
-        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
+    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null, bool $clientSeeded = false): Signal {
+        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable, $clientSeeded);
     }
 
     /**
@@ -1343,6 +1473,27 @@ class Context {
     }
 
     /**
+     * Give the clientSeeded TAB signals of this page and its components the browser's values, for those the
+     * server has not written. The usual clientWritable and type rules apply.
+     *
+     * @internal called through Via::seedFromConnect()
+     *
+     * @param array<int|string, mixed> $clientSignals Signal values the SSE connect carries
+     */
+    public function takeClientSeeded(array $clientSignals): void {
+        $seed = [];
+        foreach ($this->collectTabSignals() as $signal) {
+            if ($signal->isClientSeeded() && $signal->writeCount() === 0 && \array_key_exists($signal->id(), $clientSignals)) {
+                $seed[$signal->id()] = $clientSignals[$signal->id()];
+            }
+        }
+
+        if ($seed !== []) {
+            $this->signalFactory->injectFlat($seed);
+        }
+    }
+
+    /**
      * Get next patch from the queue, or null if none is available. Its `confirm` must be invoked
      * only after the patch has actually been written.
      *
@@ -1442,6 +1593,13 @@ class Context {
      */
     private function resolveViewData(array|callable $data): array {
         return \is_array($data) ? $data : $data();
+    }
+
+    /**
+     * The tab state keys of this context: the page's, or for a component, its namespace's.
+     */
+    private function tabStateBucket(): string {
+        return $this->componentManager->isComponent() ? 'component:' . $this->namespace : '';
     }
 
     /**

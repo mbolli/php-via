@@ -412,6 +412,7 @@ class RequestHandler {
 
         // Make request cookies available to the page handler via $c->cookie()
         $context->setRequestCookies($request->cookie ?? []);
+        $context->setPageInput($request->get ?? []);
 
         // Bridge PSR-7 request attributes from middleware into Context, minus the response's
         // Brotli writers, which belong to this response and not to the tab.
