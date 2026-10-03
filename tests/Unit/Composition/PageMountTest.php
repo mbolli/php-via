@@ -17,8 +17,8 @@ use Mbolli\PhpVia\Via;
 
 /*
  * PageMount: the class model must behave like the closure model it is built on. Each #[Action]
- * runs on the calling tab's own instance, #[Broadcast] only sets the broadcast target, and cleanup
- * hooks see current values.
+ * runs on the calling tab's own instance, #[Broadcast] only sets the broadcast target, cleanup
+ * hooks see current values, and class components share the page's session.
  */
 
 final class PageMountLog {
@@ -123,6 +123,16 @@ final class PmOnDisconnectPage {
 
     #[OnDisconnect]
     public function leave(Context $ctx): void {}
+}
+
+final class PmSessionWidget {
+    #[Signal(Scope::SESSION)]
+    public string $theme = 'light';
+
+    public function view(Context $ctx): void {
+        PageMountLog::$calls[] = $ctx->getSessionId();
+        $ctx->view(fn (): string => $this->theme);
+    }
 }
 
 /** @param class-string $class */
@@ -273,6 +283,44 @@ describe('cleanup hooks', function (): void {
 
         expect(fn () => $app->mount(PmOnDisconnectPage::class, '/gone'))
             ->toThrow(LogicException::class, 'PmOnDisconnectPage::leave() uses #[OnDisconnect], which was removed in php-via 0.14. Use #[OnCleanup]')
+        ;
+    });
+});
+
+describe('components share the page\'s session', function (): void {
+    test('a class component with #[Signal(Scope::SESSION)] mounts on the page\'s session', function (): void {
+        $app = pageMountApp();
+        $page = new Context('P', '/p', $app, null, 'sess-1');
+        $other = new Context('Q', '/q', $app, null, 'sess-1');
+
+        $page->component(PmSessionWidget::class, 'theme');
+        $other->component(PmSessionWidget::class, 'theme');
+
+        $widget = array_values($page->getComponentRegistry())[0];
+        $otherWidget = array_values($other->getComponentRegistry())[0];
+
+        expect(PageMountLog::$calls)->toBe(['sess-1', 'sess-1'])
+            ->and($widget->getSignal('theme'))->toBe($otherWidget->getSignal('theme'))
+        ;
+    });
+
+    test('closure and nested components read and write the page\'s session data', function (): void {
+        $app = pageMountApp();
+        $page = new Context('P', '/p', $app, null, 'sess-2');
+        $seen = [];
+
+        $page->component(function (Context $outer) use (&$seen): void {
+            $outer->setSessionData('k', 'v');
+            $outer->component(function (Context $inner) use (&$seen): void {
+                $seen[] = $inner->getSessionId();
+                $seen[] = $inner->sessionData('k');
+                $inner->view(fn (): string => '');
+            }, 'inner');
+            $outer->view(fn (): string => '');
+        }, 'outer');
+
+        expect($seen)->toBe(['sess-2', 'v'])
+            ->and($page->sessionData('k'))->toBe('v')
         ;
     });
 });
