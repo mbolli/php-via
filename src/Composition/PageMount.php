@@ -18,6 +18,14 @@ use Mbolli\PhpVia\Via;
  */
 final class PageMount {
     /**
+     * Each context's runners for its #[Action(scope: ...)] methods. A scoped action is registered
+     * once per scope, so the shared callback looks up the calling context's own instance here.
+     *
+     * @var null|\WeakMap<Context, array<string, \Closure(Context): void>>
+     */
+    private static ?\WeakMap $scopedRunners = null;
+
+    /**
      * Build a setup closure for the given class metadata.
      *
      * @param ClassMetadata             $meta    Reflection metadata for the page/component class
@@ -30,76 +38,55 @@ final class PageMount {
             $class = $meta->class;
             $instance = $factory !== null ? ($factory)() : new $class();
 
-            // 2. Register signals. #[Signal] (TAB) is created with an explicit TAB
-            //    scope so it never inherits a non-TAB primary scope set by #[Broadcast].
+            // 2. Register #[Action] methods. An unscoped one is a per-tab action; it is registered
+            //    before #[Broadcast] sets the primary scope so that it cannot inherit it.
+            $joinScopes = [];
+            foreach ($meta->actions as ['method' => $method, 'name' => $name, 'scope' => $scope]) {
+                $run = self::actionRunner($instance, $method, $meta);
+                if ($scope === null) {
+                    $ctx->action($run, $name);
+
+                    continue;
+                }
+
+                self::bindScoped($ctx, $name, $run);
+                $ctx->action(static function (Context $caller) use ($name): void {
+                    self::runScoped($caller, $name);
+                }, $name, $scope);
+                // Context::executeAction() looks in the ROUTE and GLOBAL scopes without membership.
+                if ($scope !== Scope::ROUTE && $scope !== Scope::GLOBAL) {
+                    $joinScopes[] = $scope;
+                }
+            }
+
+            // 3. #[Broadcast] only sets the target of $ctx->broadcast(). It comes before the joins
+            //    below because scope() replaces the context's scope list.
+            if ($meta->broadcastScope !== null) {
+                $ctx->scope($meta->broadcastScope);
+            }
+
+            // 4. Register signals, each with the scope it declares.
             foreach ($meta->signals as $prop) {
                 $ctx->signal($meta->defaults[$prop], $prop, Scope::TAB, clientWritable: $meta->clientWritable[$prop] ?? null);
             }
-            // 3. Register scoped #[Signal(Scope::X)] signals. ROUTE is expanded to the
-            //    per-route scope here (SignalFactory resolves SESSION on its own).
             foreach ($meta->scopedSignals as ['prop' => $prop, 'scope' => $scope]) {
-                $ctx->signal($meta->defaults[$prop], $prop, self::resolveScope($scope, $ctx), clientWritable: $meta->clientWritable[$prop] ?? null);
+                $signal = $ctx->signal($meta->defaults[$prop], $prop, $scope, clientWritable: $meta->clientWritable[$prop] ?? null);
+                if ($signal->getScope() !== null) {
+                    $joinScopes[] = $signal->getScope();
+                }
             }
             // #[Persist] → no signal, pure instance property
 
-            // 4. Register context in every scope used by its scoped signals so that:
-            //    - syncScopedSignals() includes these signals in patches
-            //    - broadcast() reaches this context via the scope registry
-            $addedScopes = [];
-            foreach ($meta->scopedSignals as ['prop' => $prop]) {
-                $signal = $ctx->getSignal($prop);
-                if ($signal === null) {
-                    continue;
-                }
-                $signalScope = $signal->getScope();
-                if ($signalScope !== null && !\in_array($signalScope, $addedScopes, true)) {
-                    $ctx->addScope($signalScope);
-                    $addedScopes[] = $signalScope;
-                }
-            }
-
-            // 5. Apply #[Broadcast] primary scope, AFTER signal registration so that
-            //    un-scoped #[Signal] properties are unaffected by it. This only sets
-            //    the target of $ctx->broadcast() (with no argument).
-            if ($meta->broadcastScope !== null) {
-                $ctx->scope($meta->broadcastScope);
+            // 5. Join the scopes of scoped signals and actions, so that their patches and
+            //    broadcasts reach this context and executeAction() finds the actions.
+            foreach (array_unique($joinScopes) as $scope) {
+                $ctx->addScope($scope);
             }
 
             // 6. Hydrate instance from current signal values
             self::hydrate($instance, $meta, $ctx);
 
-            // 7. Register #[Action] methods as named actions
-            foreach ($meta->actions as $actionMeta) {
-                $method = $actionMeta['method'];
-                $name = $actionMeta['name'];
-                $scope = $actionMeta['scope'];
-
-                $ctx->action(
-                    static function (Context $ctx) use ($instance, $method, $meta): void {
-                        // Re-hydrate reactive properties before running the action
-                        // (client may have mutated #[Signal] values via data-bind)
-                        self::hydrate($instance, $meta, $ctx);
-
-                        // Record what the action starts from, so syncBack() can tell an
-                        // untouched property from a changed one and size an atomic delta.
-                        $before = self::snapshot($instance, $meta, $ctx);
-
-                        // Run the action method
-                        $instance->{$method}($ctx);
-
-                        // Sync changed values back to signals
-                        // Signal::setValue() auto-broadcasts for scoped signals
-                        self::syncBack($instance, $meta, $ctx, $before);
-
-                        // Flush TAB signal changes to the current client
-                        $ctx->syncSignals();
-                    },
-                    $name,
-                    $scope,
-                );
-            }
-
-            // 8. Register lifecycle hooks. Handlers are NOT re-hydrated first: they
+            // 7. Register lifecycle hooks. Handlers are NOT re-hydrated first: they
             //    do cleanup (presence updates, broadcasts) rather than read signals.
             if ($meta->onDisconnect !== null) {
                 $method = $meta->onDisconnect;
@@ -114,7 +101,7 @@ final class PageMount {
                 });
             }
 
-            // 9. Set up view: inject route params if declared on view()
+            // 8. Set up view: inject route params if declared on view()
             $viewArgs = [$ctx];
             foreach ($meta->viewRouteParams as ['name' => $paramName, 'type' => $paramType]) {
                 $raw = $ctx->getPathParam($paramName);
@@ -125,12 +112,83 @@ final class PageMount {
     }
 
     /**
-     * Resolve a declared signal scope to its concrete runtime scope.
-     * Scope::ROUTE is expanded to the per-route scope (matching Context::scope());
-     * Scope::SESSION is left for SignalFactory to resolve to session:{id}.
+     * The callback of one #[Action] method on one instance.
+     *
+     * @return \Closure(Context): void
      */
-    private static function resolveScope(string $scope, Context $ctx): string {
-        return $scope === Scope::ROUTE ? Scope::routeScope($ctx->getRoute()) : $scope;
+    private static function actionRunner(object $instance, string $method, ClassMetadata $meta): \Closure {
+        return static function (Context $ctx) use ($instance, $method, $meta): void {
+            // Re-hydrate first: the client may have changed #[Signal] values via data-bind.
+            self::hydrate($instance, $meta, $ctx);
+
+            // Record what the action starts from, so syncBack() can tell an
+            // untouched property from a changed one and size an atomic delta.
+            $before = self::snapshot($instance, $meta, $ctx);
+
+            $instance->{$method}($ctx);
+
+            // Sync changed values back to signals
+            // Signal::setValue() auto-broadcasts for scoped signals
+            self::syncBack($instance, $meta, $ctx, $before);
+
+            // Flush TAB signal changes to the current client
+            $ctx->syncSignals();
+        };
+    }
+
+    /**
+     * @param \Closure(Context): void $run
+     */
+    private static function bindScoped(Context $ctx, string $name, \Closure $run): void {
+        $runners = self::scopedRunners();
+        if (!isset($runners[$ctx])) {
+            // Dropped with the context's other action callbacks, so an instance that keeps its
+            // Context does not leave a cycle for PHP's collector.
+            $ctx->onCleanup(static function (Context $ctx) use ($runners): void {
+                unset($runners[$ctx]);
+            });
+            $runners[$ctx] = [];
+        }
+        $runners[$ctx] = [...$runners[$ctx], $name => $run];
+    }
+
+    /**
+     * Run a scoped #[Action] on the calling context's own instance.
+     *
+     * @throws \RuntimeException if neither the caller nor one of its components mounted it
+     */
+    private static function runScoped(Context $caller, string $name): void {
+        [$owner, $run] = self::findScopedRunner($caller, $name)
+            ?? throw new \RuntimeException("Action not found: {$name} (no instance on this context declares it)");
+        $run($owner);
+    }
+
+    /**
+     * The caller's runner for $name, else the first component's: Context::executeAction() tries
+     * the page's ROUTE and GLOBAL actions before its components'.
+     *
+     * @return null|array{Context, \Closure(Context): void}
+     */
+    private static function findScopedRunner(Context $ctx, string $name): ?array {
+        $run = self::scopedRunners()[$ctx][$name] ?? null;
+        if ($run !== null) {
+            return [$ctx, $run];
+        }
+        foreach ($ctx->getComponentRegistry() as $component) {
+            $found = self::findScopedRunner($component, $name);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return \WeakMap<Context, array<string, \Closure(Context): void>>
+     */
+    private static function scopedRunners(): \WeakMap {
+        return self::$scopedRunners ??= new \WeakMap();
     }
 
     /**
