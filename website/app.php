@@ -206,7 +206,7 @@ $sharedCounterDemo = function (Context $c) use ($app, $twig): void {
         'last_click_hue_id' => $lastClickHue->id(),
         'last_click_hue_val' => $lastClickHue->int(),
         'increment_url' => $increment->url(),
-    ]));
+    ]), shareRender: true);
 };
 
 /**
@@ -299,7 +299,7 @@ $routeScopeDemo = function (Context $c) use ($app): void {
                     data-on:click="@post('{$url}')">+1 (everyone)</button>
         </div>
         HTML;
-    });
+    }, shareRender: true);
 };
 
 /**
@@ -358,7 +358,7 @@ $livePollDemo = function (Context $c) use ($app, $twig): void {
         return $twig->render('components/live-poll.html.twig', [
             'options' => $options,
         ]);
-    });
+    }, shareRender: true);
 };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────

@@ -63,7 +63,7 @@ final class GameOfLifeExample {
                 }
             }, 'tapCell');
 
-            $c->view(function () use ($toggleRunning, $reset, $tapCell, $app, $c): string {
+            $c->view('examples/game_of_life.html.twig', function () use ($toggleRunning, $reset, $tapCell, $app): array {
                 $tiles = self::renderBoard();
                 $generation = self::$generation;
                 $running = self::$running;
@@ -71,7 +71,7 @@ final class GameOfLifeExample {
                 $runningText = $running ? 'Pause' : 'Resume';
                 $runningEmoji = $running ? '⏸️' : '▶️';
 
-                return $c->render('examples/game_of_life.html.twig', [
+                return [
                     'title' => '🎮 Game of Life',
                     'description' => 'Multiplayer Conway\'s Game of Life. Click to draw, watch patterns evolve.',
                     'summary' => [
@@ -108,8 +108,8 @@ final class GameOfLifeExample {
                     'toggleUrl' => $toggleRunning->url(),
                     'resetUrl' => $reset->url(),
                     'tapUrl' => $tapCell->url(),
-                ]);
-            }, block: 'demo');
+                ];
+            }, block: 'demo', shareRender: true);
         });
 
         $app->setInterval(fn () => self::tick($app), 200);

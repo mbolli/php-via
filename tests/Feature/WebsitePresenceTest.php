@@ -38,7 +38,7 @@ function presenceApp(): Via {
     $app->page('/', function (Context $c) use ($demo): void {
         $presence = $c->component($demo->component(...), 'presence');
         // Like StaticPage::view(): updates render nothing, and the component patches itself.
-        $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : '<main id="home">' . $presence() . '</main>', cacheUpdates: false);
+        $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : '<main id="home">' . $presence() . '</main>');
     });
 
     return $app;

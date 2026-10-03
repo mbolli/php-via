@@ -7,7 +7,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 
 /*
- * The update cache is keyed by a context's primary scope. A broadcast that reaches contexts any
+ * A shared update render is keyed by a context's primary scope. A broadcast that reaches contexts any
  * other way (a secondary scope, a wildcard, GLOBAL) must not serve them an update cached earlier.
  */
 
@@ -16,7 +16,7 @@ function cacheProbeContext(Via $app, string $id): Context {
     $c = new Context($id, '/a', $app);
     $c->scope('room:main');
     $c->addScope('alerts');
-    $c->view(fn (): string => '<p>v=' . $GLOBALS['cache_probe'] . '</p>');
+    $c->view(fn (): string => '<p>v=' . $GLOBALS['cache_probe'] . '</p>', shareRender: true);
     $app->contexts[$id] = $c;
     $app->getApp()->registerContext($c);
 
@@ -122,7 +122,7 @@ describe('Update cache in coalesced and concurrent broadcasts', function (): voi
         $page = new Context('/a_/1', '/a', $app);
         $widget = $page->component(static function (Context $w): void {
             $w->scope('widgets');
-            $w->view(static fn (): string => '<span>w=' . $GLOBALS['cache_probe'] . '</span>');
+            $w->view(static fn (): string => '<span>w=' . $GLOBALS['cache_probe'] . '</span>', shareRender: true);
         }, 'w');
         // The page's update frame leaves the component out, so the component syncs on its own.
         $page->view(static fn (bool $isUpdate): string => $isUpdate ? '<div id="page">header</div>' : '<div id="page">header' . $widget() . '</div>');

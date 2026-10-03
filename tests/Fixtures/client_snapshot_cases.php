@@ -65,7 +65,7 @@ function presenceTab(Via $app, string $id, string $scope, PresenceWorld $world):
         }
 
         return "<div id=\"{$id}\">{$n}</div>";
-    }, cacheUpdates: false);
+    });
 }
 
 /** Run $fn in Coroutine::run, which returns once deferred flushes and timers are done. */

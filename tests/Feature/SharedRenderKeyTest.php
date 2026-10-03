@@ -33,11 +33,11 @@ describe('shared render key', function (): void {
 
         $page = new Context('/lobby_/a', '/lobby', $app);
         $page->scope('room:lobby');
-        $page->view(fn (): string => '<div id="lobby">LOBBY PAGE</div>');
+        $page->view(fn (): string => '<div id="lobby">LOBBY PAGE</div>', shareRender: true);
 
         $side = new Context('/dashboard_/b', '/dashboard', $app);
         $side->scope('room:lobby');
-        $side->view(fn (): string => '<div id="sidebar">SIDEBAR</div>');
+        $side->view(fn (): string => '<div id="sidebar">SIDEBAR</div>', shareRender: true);
 
         $app->contexts[$page->getId()] = $page;
         $app->contexts[$side->getId()] = $side;
@@ -53,11 +53,11 @@ describe('shared render key', function (): void {
         $page = new Context('/room_/a', '/room', $app);
         $page->component(function (Context $c): void {
             $c->scope('room:lobby');
-            $c->view(fn (): string => '<p>MEMBERS</p>');
+            $c->view(fn (): string => '<p>MEMBERS</p>', shareRender: true);
         }, 'members');
         $page->component(function (Context $c): void {
             $c->scope('room:lobby');
-            $c->view(fn (): string => '<p>MESSAGES</p>');
+            $c->view(fn (): string => '<p>MESSAGES</p>', shareRender: true);
         }, 'messages');
 
         [$members, $messages] = array_values($page->getComponentRegistry());
@@ -76,7 +76,7 @@ describe('shared render key', function (): void {
                 ++$renders;
 
                 return '<div id="lobby">LOBBY</div>';
-            });
+            }, shareRender: true);
 
             return $c;
         };

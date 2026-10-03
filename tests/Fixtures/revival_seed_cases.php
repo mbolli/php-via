@@ -232,7 +232,7 @@ function counterPage(SeedWorld $world): Closure {
             $world->renders[$c->getId()] = ($world->renders[$c->getId()] ?? 0) + 1;
 
             return "<div id=\"page\">count={$count->int()} total={$total->int()}</div>";
-        }, cacheUpdates: false);
+        });
     };
 }
 
@@ -332,7 +332,7 @@ $cases = [
                 $world->renders[$c->getId()] = ($world->renders[$c->getId()] ?? 0) + 1;
 
                 return "<div id=\"h\">n={$n->int()} mine={$mine->string()}</div>";
-            }, cacheUpdates: false);
+            });
         };
         $app->page('/r', $handler);
         $mineId = mintPage($app, $handler, '/r', '/r_/h')->getSignal('mine')->id();
@@ -355,7 +355,7 @@ $cases = [
             }
 
             return $html;
-        }, cacheUpdates: false);
+        });
 
         $epoch = new ReflectionProperty(Context::class, 'fanOutEpoch');
         $epochs = (new ReflectionProperty(Via::class, 'readEpochs'))->getValue($app);

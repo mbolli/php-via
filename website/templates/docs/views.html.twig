@@ -35,9 +35,9 @@ $c->view(function () use ($count, $increment): string {
 // On initial load: renders the full template (layout, nav, content)
 // On SSE updates:  renders only {% block demo %}
 // addTodo (action) is auto-injected; only pass non-signal data explicitly
-$c->view(fn () => $c->render('todo.html.twig', [
+$c->view('todo.html.twig', fn (): array => [
     'todos' => self::$todos,
-]), block: 'demo', cacheUpdates: false);
+], block: 'demo');
 {% endverbatim %}{% endcode %}
     {% code 'twig' %}{% verbatim %}
 {# todo.html.twig #}
@@ -59,13 +59,13 @@ $c->view(fn () => $c->render('todo.html.twig', [
 {% endblock %}
 {% endverbatim %}{% endcode %}
 
-    <p>The <code>block:</code> parameter works with both string and callable views:</p>
+    <p>The <code>block:</code> parameter belongs to template views. Pass the data as an array, or as a callable that builds it on every render:</p>
     {% code 'php' %}{% verbatim %}
-// String view: block auto-applied on updates
+// Data fixed when the view is defined
 $c->view('todo.html.twig', ['todos' => $todos], block: 'demo');
 
-// Callable view: same behavior, block auto-applied when $c->render() is called
-$c->view(fn () => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo');
+// Data read again on every render
+$c->view('todo.html.twig', fn (): array => ['todos' => self::$todos], block: 'demo');
 {% endverbatim %}{% endcode %}
 
     <h3>When to use <code>block:</code></h3>
@@ -132,24 +132,19 @@ $c->action(function (Context $c) use ($status): void {
 }, 'save');
     {% endverbatim %}{% endcode %}
 
-    <h2 id="caching">View caching</h2>
+    <h2 id="caching">Sharing one render</h2>
     <p>
-        Update renders are cached per scope: when a broadcast reaches a scope, the first context renders its
-        view and every other context in the scope receives the same HTML. A broadcast drops the cached update
-        of every context it reaches, whether through its primary scope, another scope, a wildcard or
-        <code>Scope::GLOBAL</code>, so a view that reads state outside signals, such as
-        <code>$app->getClients()</code>, is current after each broadcast.
-    </p>
-    <p>
-        Turn caching off with <code>cacheUpdates: false</code> when the view differs per client (it reads TAB
-        signals, the session or a cookie), or when contexts with different views share the scope. The cache is
-        keyed by the scope alone, so they would receive each other's HTML:
+        Each tab renders its own update. A view that is the same for every tab in its scope can pass
+        <code>shareRender: true</code>: when a broadcast reaches the scope, the first context renders the view
+        and every other context of the same route and component in that primary scope receives the same HTML.
+        It needs a primary scope set with <code>scope()</code>, and a full-document view never shares its
+        render. A broadcast drops the shared render of every context it reaches, so a view that reads state
+        outside signals, such as <code>$app->getClients()</code>, is current after each broadcast.
     </p>
     {% code 'php' %}{% verbatim %}
-// Every tab in this scope shows its own cart, so each one renders for itself
-$c->view(fn (): string => $twig->render('cart.html.twig', [
-    'items' => $cart->forSession($c->getSessionId()),
-]), cacheUpdates: false);
+// Every tab on this route shows the same board, so it renders once per broadcast
+$c->scope(Scope::ROUTE);
+$c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], block: 'board', shareRender: true);
 {% endverbatim %}{% endcode %}
 
     <h2 id="components">Views in components</h2>

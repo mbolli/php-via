@@ -73,8 +73,8 @@ final class FileUploadExample {
             // Real uploads go through startReal (worker) → startUpload → uploadChunk.
             // The action is removed to avoid a dead URL being registered.
 
-            $c->view(function () use ($c, &$fileError): string {
-                return $c->render('examples/file-upload.html.twig', array_merge(self::meta(), [
+            $c->view('examples/file-upload.html.twig', function () use ($c, &$fileError): array {
+                return array_merge(self::meta(), [
                     // Sim options
                     'sizes' => self::SIZES,
                     'speeds' => self::SPEEDS,
@@ -83,26 +83,26 @@ final class FileUploadExample {
                     'activePage' => 'upload',
                     // Per-render state (PHP refs, not signals)
                     'fileError' => $fileError,
-                ]));
-            }, block: 'demo', cacheUpdates: false);
+                ]);
+            }, block: 'demo');
         });
 
         $app->page('/examples/file-upload/browse', function (Context $c) use ($app): void {
             self::mountUploadState($c, $app);
 
-            $c->view(fn (): string => $c->render('examples/file-upload-browse.html.twig', array_merge(self::meta(), [
+            $c->view('examples/file-upload-browse.html.twig', fn (): array => array_merge(self::meta(), [
                 'ctxId' => $c->getId(),
                 'activePage' => 'browse',
-            ])), block: 'demo', cacheUpdates: false);
+            ]), block: 'demo');
         });
 
         $app->page('/examples/file-upload/settings', function (Context $c) use ($app): void {
             self::mountUploadState($c, $app);
 
-            $c->view(fn (): string => $c->render('examples/file-upload-settings.html.twig', array_merge(self::meta(), [
+            $c->view('examples/file-upload-settings.html.twig', fn (): array => array_merge(self::meta(), [
                 'ctxId' => $c->getId(),
                 'activePage' => 'settings',
-            ])), block: 'demo', cacheUpdates: false);
+            ]), block: 'demo');
         });
     }
 

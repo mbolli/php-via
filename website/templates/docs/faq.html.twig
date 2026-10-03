@@ -52,7 +52,7 @@
             "name": "Scoped signals return stale values after broadcast",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "If the view is cached (default for ROUTE/SESSION/GLOBAL scopes), later clients reuse the cached HTML without re-rendering. Fix: pass cacheUpdates: false to $c->view() for views that must always reflect current state."
+                "text": "An array passed to $c->view() is built once, when the page handler runs, so every later render shows the values it held then. Fix: pass the data as a closure, which runs on every render: $c->view('t.html.twig', fn (): array => [...])."
             }
         },
         {
@@ -222,7 +222,7 @@ $c->view(fn (): string => $c->render('page.html.twig', $data + [
         <p>A page without components whose template has a named block around the dynamic content can send
         only that block on updates:</p>
         {% code 'php' %}{% verbatim %}
-$c->view(fn() => $c->render('page.html.twig', $data), block: 'demo');
+$c->view('page.html.twig', $data, block: 'demo');
         {% endverbatim %}{% endcode %}
     </details>
 
@@ -261,14 +261,13 @@ $app->page('/', function (Context $c) use ($shell, $twig): void {
             You create a signal with a non-TAB scope (e.g. <code>Scope::routeScope('/')</code>).
             After calling <code>broadcast()</code>, some clients re-render with the old value.
         </p>
-        <p><strong>Why:</strong> Scoped signals are shared objects. If the view is cached (default for
-        ROUTE/SESSION/GLOBAL scopes), later clients reuse the cached HTML without re-rendering. The cached
-        HTML contains the old value baked in. Only the first render after a cache miss picks up the new value.
+        <p><strong>Why:</strong> An array passed to <code>$c->view()</code> is built once, when the page
+        handler runs. Every later render shows the values it held then.
         </p>
-        <p><strong>Fix:</strong> Disable view caching for views that must always reflect current state:
+        <p><strong>Fix:</strong> Pass the data as a closure, which runs on every render:
         </p>
         {% code 'php' %}{% verbatim %}
-$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
+$c->view('presence.html.twig', fn (): array => ['count' => count($app->getClients())]);
         {% endverbatim %}{% endcode %}
     </details>
 
@@ -296,7 +295,7 @@ $c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getCl
 {% endblock %}
         {% endverbatim %}{% endcode %}
         {% code 'php' %}{% verbatim %}
-$c->view(fn () => $c->render('template.html.twig', $data), block: 'demo');
+$c->view('template.html.twig', $data, block: 'demo');
         {% endverbatim %}{% endcode %}
     </details>
 

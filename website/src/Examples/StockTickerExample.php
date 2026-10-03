@@ -63,14 +63,14 @@ final class StockTickerExample {
         // Dashboard
         $app->page('/examples/stock-ticker', function (Context $c): void {
             $c->scope(Scope::ROUTE);
-            $c->view(fn (): string => $c->render('examples/stock_dashboard.html.twig', [
+            $c->view('examples/stock_dashboard.html.twig', fn (): array => [
                 'title' => '📈 Stock Ticker',
                 'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
                 'stocks' => self::$stocks,
-            ]));
+            ], block: 'demo', shareRender: true);
         });
 
         // Individual stock page
@@ -127,7 +127,7 @@ final class StockTickerExample {
                     'pricesSignal' => $pricesSignal,
                     'otherStocks' => $otherStocks,
                 ]);
-            }, cacheUpdates: false);
+            });
         });
 
         $app->setInterval(fn () => self::tick($app), 2000);

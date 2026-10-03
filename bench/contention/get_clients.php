@@ -10,7 +10,7 @@ declare(strict_types=1);
  *
  * Each case times getClients() in a loop, then again right after a client connects (so a cached
  * result must be rebuilt and include the newcomer), then creates min(N, --fanout-cap)
- * TAB-primary contexts whose view calls getClients() with cacheUpdates: false, connects one
+ * TAB-primary contexts whose view calls getClients(), connects one
  * more client and times one Via::broadcast(Scope::GLOBAL).
  * With N > cap, the registry still holds N clients, which is the multi-worker picture: this
  * worker renders `cap` contexts, each reading all N clients. The full single-worker cost
@@ -263,7 +263,7 @@ function runCase(string $mode, int $n, int $fanoutCap, string $broadcastsArg, in
             }
 
             return $html . '</div>';
-        }, cacheUpdates: false);
+        });
         $via->contexts[$id] = $ctx;
         $contexts[] = $ctx;
     }

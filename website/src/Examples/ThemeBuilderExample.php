@@ -62,7 +62,7 @@ final class ThemeBuilderExample {
     public int $historyIdx = 0;
 
     public function view(Context $ctx): void {
-        $ctx->view(fn (): string => $ctx->render('examples/theme_builder.html.twig', [
+        $ctx->view('examples/theme_builder.html.twig', fn (): array => [
             'title' => '🎨 Theme Builder',
             'description' => 'Composition API: undo/redo history lives in a <code>#[Persist]</code> array (per-connection server state, no signals). Click swatches to repaint the preview card server-side.',
             'summary' => [
@@ -99,7 +99,7 @@ final class ThemeBuilderExample {
             'historyIdx' => $this->historyIdx,
             'swatches' => self::SWATCHES,
             'slotLabels' => self::SLOT_LABELS,
-        ]), block: 'demo', cacheUpdates: false);
+        ], block: 'demo');
     }
 
     #[Action]

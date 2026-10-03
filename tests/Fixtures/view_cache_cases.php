@@ -51,7 +51,7 @@ Coroutine::run(static function () use ($case): void {
                 ++$GLOBALS['renders'];
 
                 return '<p>v=' . $GLOBALS['v'] . '</p>';
-            });
+            }, shareRender: true);
             $app->contexts["/board_/{$i}"] = $c;
             $app->getApp()->registerContext($c);
             $contexts[] = $c;
@@ -90,7 +90,7 @@ Coroutine::run(static function () use ($case): void {
                 }
 
                 return '<p>v=' . $v . '</p>';
-            });
+            }, shareRender: true);
             $app->contexts[$id] = $c;
             $app->getApp()->registerContext($c);
 

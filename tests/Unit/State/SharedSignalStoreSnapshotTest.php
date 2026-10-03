@@ -227,7 +227,7 @@ describe('Signal reads under a snapshot', function (): void {
             ++$renders;
 
             return '<div id="snap"></div>';
-        }, cacheUpdates: false);
+        });
 
         $signal = new Signal('room_snap_c', 1, 'room:snap', app: $app);
         $store->attachTo($signal);
@@ -256,7 +256,7 @@ describe('Frame epochs', function (): void {
             ++$renders;
 
             return '<div id="snap"></div>';
-        }, cacheUpdates: false);
+        });
 
         foreach (range(1, 3) as $_) {
             $app->broadcast('room:snap');

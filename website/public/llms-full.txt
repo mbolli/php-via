@@ -186,25 +186,25 @@ Views render a context's HTML. They run on page load, on `$c->sync()` and on eve
 broadcast flush that reaches the context.
 
 ```php
-// Simple string view
-$c->view('<p>Hello</p>');
+// Closure view returning HTML (a string argument is always a template name)
+$c->view(fn (): string => '<p>Hello</p>');
 
 // Twig template; the context's signals and actions are passed in by name
 $c->view('pages/home.html.twig', ['title' => 'Home']);
 
-// Closure view
-$c->view(fn (): string => $c->render('counter.html.twig'));
-
 // Only send a named Twig block on SSE updates
-$c->view(fn () => $c->render('page.html.twig'), block: 'counter');
+$c->view('page.html.twig', block: 'counter');
 
-// Views that read per-client or fast-changing data must not use the update cache
-$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
+// Data read on every render, for values that change after page load
+$c->view('presence.html.twig', fn (): array => ['count' => count($app->getClients())]);
+
+// One render per broadcast for every tab in the primary scope (only for views identical for all tabs)
+$c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], shareRender: true);
 ```
 
-Compute values inside the view closure, as above. A value computed in the page handler,
-such as `count($app->getClients())` passed to `$c->view('tpl', [...])`, is frozen at page
-load.
+Pass changing data as a closure, as above. An array computed in the page handler,
+such as `['count' => count($app->getClients())]` passed to `$c->view('tpl', [...])`, is frozen
+at page load.
 
 ### 4. Scopes
 
@@ -397,8 +397,8 @@ an open tab costs 570 to 650 KB with Brotli level 4, 65 to 125 KB at level 1 and
 Brotli, mostly the stream encoder's window; a private action about 0.2 ms; a broadcast about 0.05 ms
 per receiving tab. A broadcast to a page's scope re-renders every component on the page, so give
 busy widgets a custom scope and broadcast to it, and keep presence indicators out of Scope::GLOBAL.
-A view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`, with
-`cacheUpdates: false`) renders a static page once. Size the shared context directory for peak open
+A view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`) renders a
+static page once. Size the shared context directory for peak open
 tabs plus peak page views per second times 630. The harness is bench/capacity in the repository.
 
 ---
@@ -710,7 +710,7 @@ php-via.
 7. **Value frozen at page load**: compute it inside the view closure, not in the page
    handler (applies to `count($app->getClients())` and to component HTML).
 8. **Variable null in view closure**: add it to both outer and inner `use` lists.
-9. **Stale cached view after broadcast**: pass `cacheUpdates: false` to `$c->view()`.
+9. **Stale view after broadcast**: pass the view data as a closure, `$c->view('t', fn (): array => [...])`.
 10. **PatchElementsNoTargetsFound**: the root element of your rendered block must have a
     unique `id` attribute.
 11. **Timer fires with no clients**: guard `$app->broadcast()` with

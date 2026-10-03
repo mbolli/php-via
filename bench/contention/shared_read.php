@@ -252,7 +252,7 @@ function defineRoute(Via $app, string $mode, array $kinds, array $p, RenderCount
             }
 
             return $html . '</div>';
-        });
+        }, shareRender: $mode === 'route');
     });
 }
 

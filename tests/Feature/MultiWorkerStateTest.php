@@ -182,7 +182,7 @@ function fanWorker(SharedSignalStore $store, Closure $afterRead): Via {
             $afterRead($c, $count);
 
             return $html;
-        }, cacheUpdates: false);
+        });
     });
 
     return $app;

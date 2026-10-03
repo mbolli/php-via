@@ -18,8 +18,8 @@ use Twig\Environment;
  * based on context scope (TAB, ROUTE, SESSION, GLOBAL, custom).
  */
 class ViewRenderer {
-    /** @var array<string, true> Routes already warned about a silently-disabled update cache */
-    private array $multiScopeWarned = [];
+    /** @var array<string, true> Routes already warned about a full document asking to share its render */
+    private array $documentShareWarned = [];
 
     public function __construct(
         private Environment $twig,
@@ -46,48 +46,31 @@ class ViewRenderer {
         Context $context,
         ?string $route = null
     ): string {
-        // Check if this scope supports caching (non-TAB scopes)
-        // Only cache UPDATE renders, not initial page loads (which contain unique context IDs)
-        $shouldCache = $scope !== Scope::TAB && $isUpdate;
-
-        if ($shouldCache) {
+        // Only update renders are shared: an initial page load carries the context's own id.
+        if ($isUpdate && $scope !== Scope::TAB && $context->shouldShareRender()) {
             $view = ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+            $cached = $this->cache->get($scope, true, $view);
+            if ($cached !== null) {
+                $this->logger->debug("Using shared update render for scope: {$scope}", $context);
+                $this->recordCacheHit($scope, $context);
 
-            // If context allows update caching (default true), use cache for performance
-            // This prevents rendering once per client (e.g., game of life)
-            if ($context->shouldCacheUpdates()) {
-                $cached = $this->cache->get($scope, true, $view);
-                if ($cached !== null) {
-                    $this->logger->debug("Using cached update view for scope: {$scope}", $context);
-                    $this->recordCacheHit($scope, $context);
-
-                    return $cached;
-                }
+                return $cached;
             }
 
-            // Render fresh (either no cache, or cacheUpdates=false)
-            $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
+            $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
 
             $generation = $this->cache->generation($scope);
             $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
 
-            // Cache the result if updates are cacheable, unless a broadcast invalidated the scope while
-            // the view rendered: the render saw the older state.
-            if ($context->shouldCacheUpdates()) {
+            // Not stored when a broadcast invalidated the scope while the view rendered: the render saw the older state.
+            if (!$this->isSharedDocument($result, $context)) {
                 $this->cache->setIfCurrent($scope, $result, true, $generation, $view);
             }
 
             return $result;
         }
 
-        // No caching for: TAB scope or initial page loads
-        // Initial page loads contain unique context IDs that must not be cached
-        if ($isUpdate && $scope === Scope::TAB) {
-            $this->warnSilentCacheOptOut($context, $route);
-        }
-
-        $logContext = $scope === Scope::TAB ? 'TAB-scoped' : 'initial page load';
-        $this->logger->debug("Rendering {$logContext} view for {$route} (no cache)", $context);
+        $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
 
         return $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
     }
@@ -180,49 +163,20 @@ class ViewRenderer {
     }
 
     /**
-     * Warn once per route when a shared-scope context looks like it could use the update cache.
-     *
-     * `addScope()` (and the Composition API's scoped-signal registration) subscribes a context to a
-     * broadcast channel without touching the primary scope, and the update cache is keyed on the
-     * primary scope alone. A TAB-primary context therefore opts out of caching entirely, and every
-     * client in the shared scope re-renders on each broadcast, with nothing in the code to show it.
-     *
-     * For almost every caller that is the CORRECT outcome: their views embed per-client data, so a
-     * shared cache entry would serve one client's HTML to another (see `b0b8dda`). Warning on those
-     * would be pure noise. The narrow case worth reporting is a context that declares no TAB-scoped
-     * signals at all, where promoting the shared scope is likely an N-to-1 render win. `hasSignals()`
-     * is a heuristic, not a proof (the view may still read per-context state), so the message asks
-     * for a decision rather than asserting one.
+     * Whether a shared update render is a full document, which carries the context's own id
+     * (via_ctx, the beacon) and so is never shared. Warns once per route in dev mode.
      */
-    private function warnSilentCacheOptOut(Context $context, ?string $route): void {
-        // Only ambiguous while the author still believes the view is cacheable.
-        if (!$context->shouldCacheUpdates()) {
-            return;
+    private function isSharedDocument(string $html, Context $context): bool {
+        if (stripos($html, '<html') === false) {
+            return false;
         }
 
-        // A declared TAB signal is near-proof the render differs per client. Leave it alone.
-        if ($context->getSignalFactory()->hasSignals()) {
-            return;
+        $route = $context->getRoute();
+        if ($context->getConfig()->getDevMode() && !isset($this->documentShareWarned[$route])) {
+            $this->documentShareWarned[$route] = true;
+            $this->logger->warn("The view of {$route} renders a full document, which holds this tab's context id, so shareRender: true is ignored and every tab renders its own update. Drop shareRender, or move the shared part into a component.", $context);
         }
 
-        $shared = array_values(array_filter($context->getScopes(), static fn (string $s): bool => $s !== Scope::TAB));
-        if ($shared === []) {
-            return;
-        }
-
-        $key = ($route ?? '?') . '|' . implode(',', $shared);
-        if (isset($this->multiScopeWarned[$key])) {
-            return;
-        }
-        $this->multiScopeWarned[$key] = true;
-
-        $this->logger->warn(\sprintf(
-            'Update cache is disabled for %s: this context broadcasts to %s but its primary scope is still TAB, so every '
-            . 'client in that scope re-renders on each broadcast. It declares no TAB-scoped signals, so promoting the '
-            . 'shared scope with scope() would likely render once for all of them. Do that only if the view is identical '
-            . 'for every client; otherwise declare cacheUpdates: false to record that the per-client render is intended.',
-            $route ?? 'this route',
-            implode(', ', $shared)
-        ), $context);
+        return true;
     }
 }

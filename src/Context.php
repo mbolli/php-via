@@ -44,14 +44,8 @@ class Context {
 
     private ?string $namespace = null;
 
-    /** Whether to cache update renders (default true for performance) */
-    private bool $cacheUpdates = true;
-
-    /** Twig block name to render on SSE updates instead of the full template */
-    private ?string $updateBlock = null;
-
-    /** Whether we are currently inside an SSE update render */
-    private bool $isUpdating = false;
+    /** Whether update renders are shared by every context of this view in its primary scope */
+    private bool $shareRender = false;
 
     /** @var array<string> Explicit scopes for this context (can have multiple) */
     private array $scopes = [];
@@ -701,25 +695,36 @@ class Context {
     /**
      * Define the UI rendered by this context.
      *
-     * @param callable(bool, string): string|string $view         Function that returns HTML content (receives $isUpdate, $basePath), or Twig template name
-     * @param array<string, mixed>                  $data         Optional data for Twig templates
-     * @param null|string                           $block        Twig block name to render on SSE updates instead of the full template. On initial page load the full template is always rendered.
-     * @param bool                                  $cacheUpdates Whether to cache update renders (default true). Set to false if view returns different content on updates (e.g., empty string).
+     * Either view($callable), which renders whatever the callable returns and receives
+     * ($isUpdate, $basePath), or view('template.html.twig', $data, $block), which renders a
+     * Twig template.
+     *
+     * @param callable(bool, string): string|string                 $view        Function that returns HTML, or a Twig template name
+     * @param array<string, mixed>|callable(): array<string, mixed> $data        Template data, or a callable that builds it on every render. Template views only.
+     * @param null|string                                           $block       Twig block rendered on SSE updates instead of the whole template; the initial page load always renders the whole template. Template views only.
+     * @param bool                                                  $shareRender Render each update once for every context of this view (same primary scope, route and component) instead of once per context. Only for views that are identical for every tab: TAB signals, per-user data or components inside the view make the shared HTML wrong for the others. Needs a primary scope set with scope(). A full-document view never shares its render.
+     *
+     * @throws \InvalidArgumentException when $data or $block is passed with a callable, or the template name is markup
      */
-    public function view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void {
-        $this->updateBlock = $block;
-
+    public function view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void {
         if (\is_string($view)) {
-            // Twig template name: block is applied automatically by render() during updates
-            $this->viewFn = fn () => $this->render($view, $data);
-        } elseif (\is_callable($view)) {
-            // Callable function - don't wrap, let the callable handle its own structure
-            $this->viewFn = $view;
+            if (str_contains($view, '<')) {
+                throw new \InvalidArgumentException('view() takes a Twig template name as a string, not markup. Return the HTML from a callable instead: $c->view(fn () => \'<div>...</div>\').');
+            }
+
+            $this->viewFn = fn (bool $isUpdate): string => $this->render($view, $this->resolveViewData($data), $isUpdate ? $block : null);
         } else {
-            throw new \RuntimeException('View must be a template name or callable');
+            if ($block !== null) {
+                throw new \InvalidArgumentException("view(callable, block: '{$block}') does nothing: a block applies only to a template view. Use \$c->view('template.html.twig', fn () => [...], block: '{$block}').");
+            }
+            if ($data !== []) {
+                throw new \InvalidArgumentException('view(callable, $data): data applies only to a template view. Build the data inside the callable, or use $c->view(\'template.html.twig\', $data).');
+            }
+
+            $this->viewFn = $view;
         }
 
-        $this->cacheUpdates = $cacheUpdates;
+        $this->shareRender = $shareRender;
     }
 
     /**
@@ -730,29 +735,25 @@ class Context {
     }
 
     /**
-     * Check if update renders should be cached.
+     * Whether update renders are shared by every context of this view in its primary scope.
      *
      * @internal
      */
-    public function shouldCacheUpdates(): bool {
-        return $this->cacheUpdates;
+    public function shouldShareRender(): bool {
+        return $this->shareRender;
     }
 
     /**
      * Render a Twig template with context data.
      *
-     * If a `block` was set via `view()` and this render is called during an SSE update
-     * without an explicit `$block` argument, the update block is applied automatically.
-     *
      * @param array<string, mixed> $data  Data to pass to the template
      * @param null|string          $block Optional block name to render only that block
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
-        $effectiveBlock = $block ?? ($this->isUpdating ? $this->updateBlock : null);
         $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
         $data += ['contextId' => $this->id, 'currentRoute' => $this->route] + $this->documentData();
 
-        return $this->app->getViewRenderer()->renderTemplate($template, $data, $effectiveBlock);
+        return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
     }
 
     /**
@@ -784,19 +785,18 @@ class Context {
             throw new \RuntimeException('View not defined');
         }
 
-        $this->isUpdating = $isUpdate;
-
-        try {
-            return $this->app->getViewRenderer()->renderView(
-                $this->viewFn,
-                $isUpdate,
-                $this->getPrimaryScope(),
-                $this,
-                $this->route
-            );
-        } finally {
-            $this->isUpdating = false;
+        $scope = $this->getPrimaryScope();
+        if ($this->shareRender && $scope === Scope::TAB) {
+            throw new \LogicException("view(shareRender: true) on {$this->route} has no scope to share the render in: its primary scope is TAB. Call \$c->scope(...) with the shared scope, or drop shareRender.");
         }
+
+        return $this->app->getViewRenderer()->renderView(
+            $this->viewFn,
+            $isUpdate,
+            $scope,
+            $this,
+            $this->route
+        );
     }
 
     /**
@@ -1223,6 +1223,17 @@ class Context {
         $config = $this->app->getConfig();
 
         return ['datastarUrl' => $config->getDatastarUrl(), 'importMap' => new Markup($config->getImportMapTag(), 'UTF-8')];
+    }
+
+    /**
+     * The data of a template view for one render.
+     *
+     * @param array<string, mixed>|callable(): array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    private function resolveViewData(array|callable $data): array {
+        return \is_array($data) ? $data : $data();
     }
 
     /**

@@ -161,7 +161,7 @@ final class LiveSearchExample {
                 $ctx->sync();
             }, 'search');
 
-            $c->view(fn (): string => $c->render('examples/live_search.html.twig', [
+            $c->view('examples/live_search.html.twig', fn (): array => [
                 'title' => '🔍 Live Search',
                 'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip, and nobody shipped a line of search logic to the browser.',
                 'summary' => [
@@ -189,7 +189,7 @@ final class LiveSearchExample {
                 ],
                 'results' => self::filter($c->getSignal('query')->string(), $c->getSignal('category')->string()),
                 'categories' => self::CATEGORIES,
-            ]), block: 'results', cacheUpdates: false);
+            ], block: 'results');
         });
     }
 

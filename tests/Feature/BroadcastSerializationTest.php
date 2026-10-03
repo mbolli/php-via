@@ -17,7 +17,7 @@ use Mbolli\PhpVia\Scope;
  * Measured with 6 SSE clients: two distinct sequences, clients 2-5 skipped frame 11.
  *
  * It cannot be fixed by rendering once and pushing that value to every context:
- * cacheUpdates=false exists precisely because those views may differ per context
+ * a view that does not pass shareRender may differ per context
  * (LoginExample renders per-user session state), so sharing one render across
  * contexts would leak one user's view to another.
  *
@@ -56,7 +56,7 @@ test('a nested broadcast does not interleave with the fan-out in progress', func
             }
 
             return '<div id="ctx' . $i . '">x</div>';
-        }, cacheUpdates: false);
+        });
     }
 
     $app->broadcast($scope);
@@ -88,7 +88,7 @@ test('broadcasts arriving during a fan-out coalesce into one re-run', function (
         }
 
         return '<div id="only">x</div>';
-    }, cacheUpdates: false);
+    });
 
     $app->broadcast($scope);
 
@@ -108,7 +108,7 @@ test('sequential broadcasts outside a coroutine still each fan out', function ()
         ++$renders;
 
         return '<div id="seq">x</div>';
-    }, cacheUpdates: false);
+    });
 
     $app->broadcast($scope);
     $app->broadcast($scope);
@@ -127,7 +127,7 @@ test('serialization is per scope, not global', function (): void {
         ++$otherRenders;
 
         return '<div id="other">x</div>';
-    }, cacheUpdates: false);
+    });
 
     $first = new Context('first', '/test', $app);
     $first->scope('room:a');
@@ -140,7 +140,7 @@ test('serialization is per scope, not global', function (): void {
         }
 
         return '<div id="first">x</div>';
-    }, cacheUpdates: false);
+    });
 
     $app->broadcast('room:a');
 

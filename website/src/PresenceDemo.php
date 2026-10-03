@@ -46,9 +46,9 @@ final class PresenceDemo {
      */
     public function component(Context $c): void {
         $c->scope(self::SCOPE);
-        $c->view(fn (): string => $c->render('components/presence.html.twig', [
+        $c->view('components/presence.html.twig', fn (): array => [
             'count' => $this->count(),
-        ]));
+        ], shareRender: true);
     }
 
     /**

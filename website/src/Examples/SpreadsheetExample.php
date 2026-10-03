@@ -667,7 +667,7 @@ final class SpreadsheetExample {
                 return $c->render('examples/spreadsheet.html.twig', array_merge($d, [
                     'initialDynamic' => self::renderDynamic($d),
                 ]));
-            }, cacheUpdates: false);
+            });
         });
     }
 

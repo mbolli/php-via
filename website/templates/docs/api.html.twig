@@ -350,7 +350,7 @@ $inc = $c->action(function (Context $c) use ($count): void {
         callback registered in the scope wins and later registrations reuse it.
     </p>
 
-    <h3 id="context-view"><code>view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void</code></h3>
+    <h3 id="context-view"><code>view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void</code></h3>
     <p>
         Signals and actions registered on the context are <strong>auto-injected</strong> into every Twig render
         as named variables (signal baseName, action camelCase name). Entries in <code>$data</code> take priority.
@@ -365,10 +365,13 @@ $c->view('todo.html.twig', ['todos' => $todos]);
 $c->view(fn() => "<p>Count: {$count->int()}</p>");
 
 // Send only {% block demo %} on SSE updates (full template on initial load):
-$c->view(fn() => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo');
+$c->view('todo.html.twig', ['todos' => $todos], block: 'demo');
 
-// Disable caching for views that read external state:
-$c->view(fn () => $c->render('presence.html.twig', ['n' => count($app->getClients())]), cacheUpdates: false);
+// Data read again on every render, for views that read external state:
+$c->view('presence.html.twig', fn (): array => ['n' => count($app->getClients())]);
+
+// One render per broadcast for every tab in the primary scope (the view must be the same for all of them):
+$c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], shareRender: true);
     {% endverbatim %}{% endcode %}
 
     <h3 id="context-component"><code>component(callable|string $fn, string $namespace): callable</code></h3>

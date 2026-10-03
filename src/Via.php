@@ -2199,8 +2199,8 @@ class Via {
         // never saw the intervening frame at all.
         //
         // This cannot be solved by rendering once and pushing that value to every
-        // context: cacheUpdates=false exists precisely because those views may differ
-        // per context (LoginExample renders per-user session state), so sharing one
+        // context: a view that does not pass shareRender may differ per context
+        // (LoginExample renders per-user session state), so sharing one
         // render across contexts would leak one user's view to another.
         //
         // A broadcast that arrives mid-fan-out is therefore folded into a single

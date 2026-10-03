@@ -47,7 +47,7 @@ $app->onStart(static function () use ($app, $out): void {
             ++$renders;
 
             return '<div id="observer">' . $renders . '</div>';
-        }, cacheUpdates: false);
+        });
 
         Timer::after(500, static function () use (&$renders, $out): void {
             file_put_contents($out, "phase1={$renders}\n", FILE_APPEND | LOCK_EX);

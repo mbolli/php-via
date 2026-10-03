@@ -155,7 +155,7 @@ function reader(Via $app, string $id, array $scopes, SnapshotWorld $world): Cont
         }
 
         return $html;
-    }, cacheUpdates: false);
+    });
 
     return $ctx;
 }
@@ -431,7 +431,7 @@ $cases = [
             $gates['c1']->pass();
 
             return '<div id="c1"></div>';
-        }, cacheUpdates: false);
+        });
         $n = shared($app, 'n');
 
         inCoroutine(static function () use ($app, $store, $n, $gates): void {

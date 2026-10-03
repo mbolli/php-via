@@ -230,7 +230,7 @@ $c->view('counter.html.twig', [
         block on SSE updates while still rendering the full template on the initial page load:
     </p>
     {% code 'php' %}{% verbatim %}
-$c->view(fn () => $c->render('page.html.twig', $data), block: 'demo');
+$c->view('page.html.twig', $data, block: 'demo');
     {% endverbatim %}{% endcode %}
     <p>
         This keeps SSE payloads small: the outer layout, nav, and static content are sent once on
@@ -239,14 +239,13 @@ $c->view(fn () => $c->render('page.html.twig', $data), block: 'demo');
         See <a href="/docs/views#partial-updates">Views → Partial updates</a> for details.
     </p>
 
-    <h2 id="cache-updates">Disabling view caching</h2>
+    <h2 id="cache-updates">Data read on every render</h2>
     <p>
-        php-via caches view renders and skips re-rendering if signals haven't changed.
-        Disable this when your view reads external state (e.g. <code>getClients()</code>), and read that
-        state inside a closure: an array passed to <code>view()</code> is built once, when the page handler runs.
+        When your view reads external state (e.g. <code>getClients()</code>), pass the data as a closure:
+        an array passed to <code>view()</code> is built once, when the page handler runs.
     </p>
     {% code 'php' %}{% verbatim %}
-$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
+$c->view('presence.html.twig', fn (): array => ['count' => count($app->getClients())]);
     {% endverbatim %}{% endcode %}
 
     <h2 id="debugging">Debugging</h2>

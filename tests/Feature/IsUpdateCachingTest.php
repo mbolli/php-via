@@ -21,7 +21,7 @@ test('scoped view is cached for multiple update renders', function (): void {
             ++$renderCount;
 
             return "<div>Stock: {$symbol} (render #{$renderCount}, " . ($isUpdate ? 'update' : 'initial') . ')</div>';
-        });
+        }, shareRender: true);
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -77,7 +77,7 @@ test('scoped view is NOT cached for SSE updates', function (): void {
             $c->signal($price, 'price');
 
             return $isUpdate ? '' : "<div>Stock: {$symbol}</div>";
-        }, cacheUpdates: false); // Opt-out of update caching for this test
+        });
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -119,7 +119,7 @@ test('scoped view: update renders can use cache, initial loads do not', function
             $c->signal($lastPrice, 'price');
 
             return $isUpdate ? '' : "<div>Stock: {$symbol} - Last render: {$renderCount}</div>";
-        }, cacheUpdates: false); // Opt-out of update caching for this test
+        });
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -189,7 +189,7 @@ test('different scopes have separate caches', function (): void {
             ++$renderCount;
 
             return $isUpdate ? '' : "<div>Stock: {$symbol}</div>";
-        });
+        }, shareRender: true);
     };
 
     $this->app->page('/stock/{symbol}', $handler);
