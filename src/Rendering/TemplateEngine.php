@@ -11,7 +11,8 @@ namespace Mbolli\PhpVia\Rendering;
  * context passes the view's data merged with its named signals (Signal objects by name), its named
  * actions (Action objects by camelCased name), '_via' (the names of both), 'contextId',
  * 'currentRoute', 'basePath', and 'via_head' and 'via_foot' (see Context::viaHead() and viaFoot()).
- * Those two are \Stringable trusted markup, which the engine prints unescaped.
+ * Those two are Html values, trusted markup that the engine prints unescaped, so an autoescaping
+ * engine marks the Html class safe.
  */
 interface TemplateEngine {
     /**

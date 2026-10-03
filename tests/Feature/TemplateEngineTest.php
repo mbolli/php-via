@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\RequestHandler;
+use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Rendering\TemplateEngine;
 use Mbolli\PhpVia\Twig\TwigEngine;
 use Mbolli\PhpVia\Via;
@@ -80,7 +81,8 @@ describe('a template engine from withTemplateEngine()', function (): void {
             ->and($data['contextId'])->toBe('mine')
             ->and($data['currentRoute'])->toBe('/p')
             ->and($data['basePath'])->toBe('/app/')
-            ->and($data['via_head'])->toBeInstanceOf(Stringable::class)
+            ->and($data['via_head'])->toBeInstanceOf(Html::class)
+            ->and($data['via_foot'])->toBeInstanceOf(Html::class)
             ->and((string) $data['via_head'])->toBe($ctx->viaHead())
             ->and((string) $data['via_foot'])->toBe($ctx->viaFoot())
         ;

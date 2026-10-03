@@ -225,7 +225,8 @@ message that names the new one.
   mode once per route with a second import map. A copied bootstrap keeps working.
 - **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine` for template views.
   `Twig\TwigEngine` is php-via's, and `withTemplateDir()` sets one up. `view(..., block:)` with an
-  engine that renders no blocks throws.
+  engine that renders no blocks throws. `via_head` and `via_foot` reach the engine as
+  `Rendering\Html`, which an autoescaping engine marks safe.
 - **`$c->patchElements($html, $selector, PatchMode::Append)`** sends HTML to the page outside a
   view render. `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace`
   needs a selector. A component's patches go to its page, and a client that falls behind gets
