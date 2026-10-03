@@ -61,10 +61,10 @@ final class RotationHandler implements RequestHandlerInterface {
 
 /**
  * An app with a login page, a route that reports the session and cookie it sees, a login route and a page behind
- * RotatingMiddleware. Its clock is $now, which a test moves past the grace period.
+ * RotatingMiddleware, or with it as global middleware ($global). Its clock is $now, which a test moves past the grace period.
  */
-function rotationApp(int &$now, ?RotatingMiddleware &$middleware = null): TestApp {
-    $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$middleware): void {
+function rotationApp(int &$now, ?RotatingMiddleware &$middleware = null, bool $global = false): TestApp {
+    $app = new TestApp((new Config())->withLogLevel('error'), static function (Via $via) use (&$middleware, $global): void {
         $via->page('/p', static function (Context $c): void {
             $who = $c->signal('anon', 'who', Scope::SESSION);
             $n = $c->signal(0, 'n');
@@ -104,7 +104,8 @@ function rotationApp(int &$now, ?RotatingMiddleware &$middleware = null): TestAp
         });
 
         $middleware = new RotatingMiddleware($via);
-        $via->page('/m', static fn (Context $c) => $c->view(static fn (): string => '<p id="m">m</p>'))->middleware($middleware);
+        $page = $via->page('/m', static fn (Context $c) => $c->view(static fn (): string => '<p id="m">m</p>'));
+        $global ? $via->middleware($middleware) : $page->middleware($middleware);
     });
 
     $via = $app->via();
@@ -342,6 +343,25 @@ describe('Via::regenerateSession()', function (): void {
         expect($unchanged)->toBe($before)
             ->and($middleware?->errors)->toHaveCount(1)
             ->and($middleware?->errors[0] ?? '')->toContain('before $handler->handle()')
+            ->and($after['cookie'])->not->toBe($before['cookie'])
+            ->and($after['session'])->toBe($before['session'])
+        ;
+    });
+
+    test('rotates in global middleware that calls it before an action runs, and throws after', function (): void {
+        $now = 1_000_000;
+        $middleware = null;
+        $app = rotationApp($now, $middleware, global: true);
+        $tab = $app->open('/p');
+        $before = rotationWhoami($tab);
+
+        $tab->action('bump', ['rotate' => 'after']);
+        $unchanged = rotationWhoami($tab);
+        $tab->action('bump', ['rotate' => 'before']);
+        $after = rotationWhoami($tab);
+
+        expect($unchanged)->toBe($before)
+            ->and($middleware?->errors)->toHaveCount(1)
             ->and($after['cookie'])->not->toBe($before['cookie'])
             ->and($after['session'])->toBe($before['session'])
         ;

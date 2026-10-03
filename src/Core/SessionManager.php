@@ -139,11 +139,11 @@ class SessionManager {
         if ($session->written) {
             return null;
         }
+        $session->written = true;
         $rotate = $rotate || $session->rotate;
         if (!$rotate && !$refresh) {
             return null;
         }
-        $session->written = true;
 
         if ($session->state === RequestSession::NEW) {
             return $session->token;

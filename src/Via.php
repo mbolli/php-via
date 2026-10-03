@@ -548,7 +548,7 @@ class Via {
      * 10 seconds, for requests the browser sent before the new one arrived, and then starts a new session.
      * See Context::regenerateSession() for an action or a page handler.
      *
-     * Middleware on a page calls it before $handler->handle(), which sends the page.
+     * Middleware calls it before $handler->handle(), which sends the page or the action's response.
      *
      * @param ServerRequestInterface $request a request php-via handed to middleware or a route() handler
      *
@@ -560,7 +560,7 @@ class Via {
             throw new \LogicException('regenerateSession() needs the request php-via passed to the middleware or route() handler, or one made from it with withAttribute() and the like.');
         }
         if ($session->written) {
-            throw new \LogicException('regenerateSession() came after the response of this request went out. In middleware on a page, call it before $handler->handle().');
+            throw new \LogicException('regenerateSession() came after the response of this request went out. In middleware, call it before $handler->handle().');
         }
 
         $session->rotate = true;

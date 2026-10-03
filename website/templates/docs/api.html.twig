@@ -65,8 +65,9 @@ $app->middleware(new CorsMiddleware([...]));
     <h3 id="via-regenerate-session"><code>regenerateSession(ServerRequestInterface $request): void</code></h3>
     <p>
         <code>$c-&gt;regenerateSession()</code> for middleware and <code>route()</code> handlers: the response to
-        <code>$request</code> sets a new session cookie. Middleware on a page calls it before
-        <code>$handler-&gt;handle()</code>, which sends the page; afterwards it throws a <code>LogicException</code>.
+        <code>$request</code> sets a new session cookie. Middleware calls it before
+        <code>$handler-&gt;handle()</code>, which sends the page or the action's response; afterwards it throws a
+        <code>LogicException</code>.
     </p>
     {% code 'php' %}{% verbatim %}
 $app->route('POST', '/login', new class($app) implements RequestHandlerInterface {
