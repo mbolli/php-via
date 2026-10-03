@@ -60,7 +60,7 @@ final class CompositionDemo {
             'description' => 'Class-based page and component API using PHP attributes: <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code>, and <code>#[Action]</code>.',
             'summary' => [
                 '<strong>#[Signal]</strong> creates a TAB-scoped reactive signal backed by a client-visible store entry. Client-writable via <code>data-bind</code>. Each browser tab has its own isolated copy.',
-                '<strong>#[Persist]</strong> is a plain server-side instance property, not a signal, not visible to the client. Because the class instance lives for the lifetime of the tab connection, it persists across action calls.',
+                '<strong>#[Persist]</strong> is a plain server-side instance property, not a signal, not visible to the client. Because the class instance lives as long as the tab\'s context, it persists across action calls.',
                 '<strong>#[Signal(Scope::SESSION)]</strong> is a SESSION-scoped signal. Shared across all open tabs of the same browser session. Saving a name here broadcasts it to the other tabs.',
                 '<strong>#[Signal(Scope::GLOBAL)]</strong> is a GLOBAL-scoped signal. Shared across every connected user. The <code>totalClicks</code> counter increments for all users simultaneously, regardless of which tab triggered it.',
                 '<strong>#[Action]</strong> marks a public method as a client-callable action. The optional <code>name:</code> argument overrides the URL slug: <code>resetTab</code> is exposed as <code>/_action/reset-tab</code>.',

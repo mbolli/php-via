@@ -76,8 +76,8 @@
             <h2>A complete counter app</h2>
             <p>
                 The listing is a full <code>app.php</code>. The <strong>TAB</strong> version is the default:
-                every browser tab keeps its own count. The <strong>GLOBAL</strong> version adds
-                <code>$c-&gt;scope(Scope::GLOBAL)</code>, and all visitors share the count. <strong>Composition</strong> shows the same counter as a
+                every browser tab keeps its own count. The <strong>GLOBAL</strong> version passes
+                <code>Scope::GLOBAL</code> to <code>signal()</code>, and all visitors share the count. <strong>Composition</strong> shows the same counter as a
                 class with <code>#[Signal]</code> and <code>#[Action]</code> attributes, as described in the
                 <a href="/docs/composition">composition docs</a>.
             </p>
@@ -118,13 +118,13 @@ $app->page('/', function (Context $c): void {
     // TAB scope (default): each visitor has their own counter
     $count = $c->signal(0, 'count');
 
-    $increment = $c->action(function () use ($c, $count): void {
+    // The new value goes to this tab after the action
+    $increment = $c->action(function () use ($count): void {
         $count->setValue($count->int() + 1);
-        $c->syncSignals(); // push the new value to this tab
     });
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="\${$count->id()}">
+        <p>Count: <strong data-text="{$count->ref()}">
             {$count->int()}
         </strong></p>
         <button data-on:click="@post('{$increment->url()}')">
@@ -154,15 +154,16 @@ $app->page('/', function (Context $c): void {
 {+    // GLOBAL scope: one shared counter for every visitor
     $count = $c->signal(0, 'count', Scope::GLOBAL);+}
 
-{-    $increment = $c->action(function () use ($c, $count): void {
-        $count->setValue($count->int() + 1);
-        $c->syncSignals(); // push the new value to this tab-}
-{+    $increment = $c->action(function () use ($count): void {
-        $count->increment(); // atomic, and broadcasts to the scope+}
+{-    // The new value goes to this tab after the action
+    $increment = $c->action(function () use ($count): void {
+        $count->setValue($count->int() + 1);-}
+{+    // Atomic, and the write broadcasts to every tab in the scope
+    $increment = $c->action(function () use ($count): void {
+        $count->increment();+}
     });
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="\${$count->id()}">
+        <p>Count: <strong data-text="{$count->ref()}">
             {$count->int()}
         </strong></p>
         <button data-on:click="@post('{$increment->url()}')">
@@ -200,7 +201,7 @@ final class Counter {
         $increment = $c->getAction('increment');
 
         $c->view(fn() => <<<HTML
-            <p>Count: <strong data-text="\${$count->id()}">
+            <p>Count: <strong data-text="{$count->ref()}">
                 {$count->int()}
             </strong></p>
             <button data-on:click="@post('{$increment->url()}')">
@@ -244,7 +245,7 @@ final class Counter {
         $increment = $c->getAction('increment');
 
         $c->view(fn() => <<<HTML
-            <p>Count: <strong data-text="\${$count->id()}">
+            <p>Count: <strong data-text="{$count->ref()}">
                 {$count->int()}
             </strong></p>
             <button data-on:click="@post('{$increment->url()}')">
@@ -306,8 +307,8 @@ $app->start();
             <p>
                 php-via runs your app as one long-lived OpenSwoole process. Page state stays in memory
                 between requests, so the server can push a change the moment it happens. A click posts to
-                an action, the action changes signals, and php-via sends the new HTML and signal values to
-                every tab that should see them.
+                an action and the action changes signals. php-via sends the new values to the tab, and a
+                write to a shared signal or a broadcast sends new HTML to every tab that should see it.
             </p>
         </header>
 
@@ -325,7 +326,7 @@ $app->start();
             <li class="px-flow-step">
                 <code class="px-flow-code">$c-&gt;view(…)</code>
                 <h3>View</h3>
-                <p>HTML from Twig or a PHP heredoc. After an action, php-via renders it again and sends the new HTML.</p>
+                <p>HTML from Twig or a PHP heredoc. On <code>sync()</code> or a broadcast, php-via renders it again and sends the new HTML.</p>
             </li>
             <li class="px-flow-step">
                 <code class="px-flow-code">GET /_sse</code>
@@ -395,7 +396,7 @@ $app->start();
             </div>
             <div class="px-spec">
                 <h3>Multi-core workers</h3>
-                <p><code>withWorkerNum()</code> spreads tabs over every core. Scoped signals and session data live in shared memory, and any worker can answer any tab.</p>
+                <p><code>withWorkerNum()</code> spreads tabs over every core. Scoped signals and session data live in shared memory, and a request that reaches another worker goes on to the tab's.</p>
             </div>
             <div class="px-spec">
                 <h3>Dev Bar</h3>

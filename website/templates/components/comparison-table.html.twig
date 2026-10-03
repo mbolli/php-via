@@ -29,7 +29,7 @@
         ['~', 'partial', 'PubSub topics achieve similar results without a declarative scope system.'],
     ]},
     {label: 'Presence (who is online)', cells: [
-        ['✓', 'yes', 'getClients(), onClientConnect() and onClientDisconnect() work across workers, and a closed tab disconnects at once.'],
+        ['✓', 'yes', 'getClients() and countClients() see the tabs on every worker, onClientConnect() and onClientDisconnect() run as tabs come and go, and a closed tab disconnects at once.'],
         ['~', 'partial', 'Laravel presence channels, through Echo and a broadcaster.'],
         ['✗', 'no', ''],
         ['✗', 'no', ''],
@@ -57,7 +57,7 @@
         ['✓', 'yes', 'Built-in progress, drag and drop, previews and direct-to-cloud uploads.'],
     ]},
     {label: 'Form validation', cells: [
-        ['~', 'partial', "No validation API: validate in the action with plain PHP or any validator library, and push per-field errors back as signals. With contentType: 'form', the browser's HTML5 checks run first."],
+        ['~', 'partial', "No validation API: validate in the action with plain PHP or any validator library, and send per-field errors back as signals or re-rendered HTML. With contentType: 'form', the browser's HTML5 checks run first."],
         ['✓', 'yes', "Laravel's validator through #[Validate] attributes or form objects."],
         ['~', 'partial', 'HTML5 checks in the browser. Server-side errors come back as HTML from your backend.'],
         ['✓', 'yes', 'Server validation errors arrive as props from the backend adapter.'],
@@ -78,7 +78,7 @@
         ['✓', 'yes', 'Phoenix LiveDashboard (real-time metrics, requests, processes) plus HEEx debug annotations.'],
     ]},
     {label: 'Multi-core on one server', cells: [
-        ['✓', 'yes', 'withWorkerNum() and SwooleBroker: scoped signals, GlobalState, session data and the client list live in shared memory, and an action reaches its tab on any worker.'],
+        ['✓', 'yes', 'withWorkerNum(), with SwooleBroker by default: scoped signals, GlobalState, session data and the client list live in shared memory, and an action reaches its tab on any worker.'],
         ['✓', 'yes', ''],
         ['✓', 'yes', ''],
         ['✓', 'yes', ''],

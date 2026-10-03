@@ -7,7 +7,6 @@ namespace PhpVia\Website\Examples;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
-use OpenSwoole\Timer;
 
 final class LiveAuctionExample {
     public const string SLUG = 'live-auction';
@@ -19,11 +18,11 @@ final class LiveAuctionExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Server-side countdown</strong>: the clock is an OpenSwoole <code>Timer::tick()</code> that decrements on the server every second and broadcasts to all viewers. No client-side drift, no JS timers.',
+        '<strong>Server-side countdown</strong>: the clock is a <code>$app->setInterval()</code> timer that decrements on the server every second and broadcasts to all viewers. No client-side drift, no JS timers.',
         '<strong>Anti-snipe protection</strong>: if a bid arrives with fewer than 30 seconds remaining, the clock resets to 30s. Classic auction UX, implemented in four lines of PHP.',
-        '<strong>GLOBAL scope</strong> broadcasts every state change (bids, clock, sold status) to every connected viewer simultaneously, regardless of which tab or session they are on.',
+        '<strong>A custom scope</strong>, <code>example:auction</code>, carries every state change (bids, clock, sold status) to every viewer of the auction at once, whatever tab or session they are on.',
         '<strong>SESSION-scoped username</strong> persists across page refreshes and new tabs, giving each bidder a consistent identity throughout the auction lifecycle.',
-        '<strong>Lazy timer</strong>: the countdown only runs while at least one viewer is connected. Zero viewers means zero CPU cost; the auction resumes from saved state when someone reconnects.',
+        '<strong>Paused when unwatched</strong>: the countdown skips its tick while <code>countClients()</code> finds no viewer on any worker, and resumes from where it stopped when someone opens the page.',
         '<strong>Full auction lifecycle</strong>: active bidding, sold state with winner banner, and a reset action to restart the auction. All state transitions happen in PHP with no client logic.',
     ];
 
@@ -58,8 +57,6 @@ final class LiveAuctionExample {
     /** @var list<array{bidder: string, amount: int, time: string}> */
     private static array $bidHistory = [];
 
-    private static ?int $timerId = null;
-
     // ── Registration ───────────────────────────────────────────────────────────
 
     public static function register(Via $app): void {
@@ -76,11 +73,11 @@ final class LiveAuctionExample {
             $c->addScope(self::SCOPE);
 
             // TAB-only bid input
-            $bidInput = $c->signal((string) (self::$topBid + 10), 'bidInput');
+            $c->signal((string) (self::$topBid + 10), 'bidInput');
 
             // ── Actions ───────────────────────────────────────────────────────
 
-            $placeBid = $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function (Context $ctx) use ($app): void {
                 if (self::$status === 'sold') {
                     return;
                 }
@@ -110,14 +107,13 @@ final class LiveAuctionExample {
                 $app->broadcast(self::SCOPE);
             }, 'placeBid');
 
-            $resetAuction = $c->action(function (Context $ctx) use ($app): void {
+            $c->action(function () use ($app): void {
                 self::$timeLeft = self::AUCTION_DURATION;
                 self::$topBid = 50;
                 self::$topBidder = '';
                 self::$status = 'active';
                 self::$bidHistory = [];
                 $app->broadcast(self::SCOPE);
-                self::maybeStartTimer($app);
             }, 'resetAuction');
 
             // ── View ──────────────────────────────────────────────────────────
@@ -133,51 +129,26 @@ final class LiveAuctionExample {
                 'topBidder' => self::$topBidder,
                 'status' => self::$status,
                 'bidHistory' => self::$bidHistory,
-                'bidInputId' => $bidInput->id(),
-                'username' => $usernameSignal->getValue(),
-                'placeBidUrl' => $placeBid->url(),
-                'resetUrl' => $resetAuction->url(),
+                'username' => $usernameSignal->string(),
             ], block: 'demo');
-
-            // Start timer lazily on first viewer
-            self::maybeStartTimer($app);
         });
+
+        $app->setInterval(fn () => self::tick($app), 1000);
     }
 
     // ── Timer ──────────────────────────────────────────────────────────────────
 
-    private static function stopTimer(): void {
-        if (self::$timerId !== null) {
-            Timer::clear(self::$timerId);
-            self::$timerId = null;
-        }
-    }
-
-    private static function maybeStartTimer(Via $app): void {
-        if (self::$timerId !== null || self::$status === 'sold') {
+    private static function tick(Via $app): void {
+        if (self::$status === 'sold' || $app->countClients(self::SCOPE) === 0) {
             return;
         }
-        self::$timerId = Timer::tick(1000, function () use ($app): void {
-            // Stop ticking when nobody is watching
-            if ($app->countClients(self::SCOPE) === 0) {
-                return;
-            }
 
-            if (self::$status === 'sold') {
-                self::stopTimer();
+        --self::$timeLeft;
+        if (self::$timeLeft <= 0) {
+            self::$timeLeft = 0;
+            self::$status = 'sold';
+        }
 
-                return;
-            }
-
-            --self::$timeLeft;
-
-            if (self::$timeLeft <= 0) {
-                self::$timeLeft = 0;
-                self::$status = 'sold';
-                self::stopTimer();
-            }
-
-            $app->broadcast(self::SCOPE);
-        });
+        $app->broadcast(self::SCOPE);
     }
 }

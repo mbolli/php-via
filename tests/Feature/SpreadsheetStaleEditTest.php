@@ -89,7 +89,6 @@ beforeEach(function (): void {
     ssEditStatic('extentCache', null);
     ssEditStatic('cursors', []);
     ssEditStatic('selections', []);
-    ssEditStatic('positions', []);
     ssEditStatic('openEdits', []);
 });
 
@@ -139,7 +138,8 @@ test('a revived tab keeps its open edit only with its saved position', function 
     $app->getApp()->destroyContext($id);
     unset($app->contexts[$id]);
     if (!$positionKept) {
-        ssEditStatic('positions', []);
+        // As on a worker whose revival record of the tab kept no tab state.
+        $app->getApp()->changeDestroyedTabState($id, static fn (): array => []);
     }
 
     $revived = $app->reviveContextFromClient($id, 'sess_edit', $held);

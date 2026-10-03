@@ -25,7 +25,8 @@ final class ShoppingCartExample {
 
     public static function register(Via $app): void {
         $app->page('/examples/shopping-cart', function (Context $c) use ($app): void {
-            // Keyed by the hashed session scope: the raw id is the HttpOnly cookie, and scopes reach the Dev Bar.
+            // One scope per session, built from its session scope, since scopes reach the Dev Bar and the session id stays on the server.
+            // A scope of its own re-renders only cart pages when the cart changes.
             $cartScope = Scope::build('cart', Scope::sessionScope($c->getSessionId() ?? $c->getId()));
             $c->addScope($cartScope);
 
@@ -69,7 +70,7 @@ final class ShoppingCartExample {
                 'title' => '🛒 Shopping Cart',
                 'description' => 'Add items across browser tabs: the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
                 'summary' => [
-                    '<strong>SESSION-scoped cart</strong> via a custom <code>cart:{sessionId}</code> scope means the cart is shared across every tab in your browser. Open a new tab: the cart is already populated.',
+                    '<strong>A cart per session</strong>: every cart page joins a custom <code>cart:</code> scope built from <code>Scope::sessionScope()</code>, so the cart is shared across every tab in your browser. Open a new tab: the cart is already populated.',
                     '<strong>$app->broadcast($cartScope)</strong> pushes the updated cart to all connected tabs of that session simultaneously. No polling, no cache invalidation, no client state sync.',
                     '<strong>$c->sessionData() / setSessionData()</strong> stores the cart in the framework\'s per-session bucket. No static class, no manual cleanup, and the cart survives a full page reload.',
                     '<strong>CSS @starting-style</strong> animates newly inserted cart rows without a single line of JavaScript. When Datastar morphs in the new item, the browser\'s entry transition fires automatically.',

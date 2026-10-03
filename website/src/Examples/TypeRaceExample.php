@@ -48,7 +48,7 @@ final class TypeRaceExample {
         '<strong>Race state machine</strong>: each race moves through <code>waiting → countdown → racing → done</code>. All transitions happen server-side; the client just sends keystrokes.',
         '<strong>Custom scope per race</strong> isolates each race\'s broadcasts. Multiple races can run simultaneously. Joining players are routed to an open race automatically.',
         '<strong>Progress is server-computed</strong>: the client sends only the latest typed text; the server counts matching leading characters against the snippet. No snippet logic ships to the browser.',
-        '<strong>OpenSwoole countdown timer</strong> ticks 3…2…1 before the race starts, broadcasting to all racers each tick. The race clock also tracks elapsed WPM per player.',
+        '<strong>Countdown timer</strong>: an OpenSwoole <code>Timer::tick()</code> per race counts 3…2…1 and broadcasts to all racers each tick. WPM comes from the time since the start.',
         '<strong>SESSION identity</strong> gives each racer a persistent name across tabs and refreshes. Joining the same race twice from two tabs counts as two racers.',
         '<strong>Anti-cheat by design</strong>: the server holds the snippet truth and computes every progress value. Sending the wrong text just gives zero progress.',
     ];
@@ -58,15 +58,14 @@ final class TypeRaceExample {
         'signals' => [
             ['name' => 'username', 'type' => 'string', 'scope' => 'SESSION', 'desc' => 'Racer handle, auto-assigned. Persists across tabs.'],
             ['name' => 'typedText', 'type' => 'string', 'scope' => 'TAB', 'desc' => 'Current textarea value. Sent to server on every input event; never broadcast. The server clears it when a race starts.'],
-            ['name' => 'raceStatus', 'type' => 'string', 'scope' => 'Custom race scope', 'desc' => '"waiting" | "countdown" | "racing" | "done". Controls which UI panel renders.'],
-            ['name' => 'countdown', 'type' => 'int', 'scope' => 'Custom race scope', 'desc' => '3…2…1 before start. Broadcast each tick.'],
         ],
         'actions' => [
             ['name' => 'updateProgress', 'desc' => 'Called on every input event. Server counts correct leading chars, updates this racer\'s progress and WPM, broadcasts to race scope.'],
-            ['name' => 'joinRace', 'desc' => 'Joins the current open race (or creates one). Starts countdown timer when MIN_RACERS reached.'],
+            ['name' => 'startRace', 'desc' => 'Starts the countdown of the race this tab waits in.'],
+            ['name' => 'newRace', 'desc' => 'Resets a finished race with a new snippet and pulls in racers waiting alone in another lobby.'],
         ],
         'views' => [
-            ['name' => 'type_race.html.twig', 'desc' => 'Lobby, countdown overlay, racing textarea + progress bars, and results podium. All driven by raceStatus signal.'],
+            ['name' => 'type_race.html.twig', 'desc' => 'Lobby, countdown overlay, racing textarea + progress bars, and results podium. The race\'s status, kept on the server, picks the panel.'],
         ],
     ];
 
@@ -123,11 +122,11 @@ final class TypeRaceExample {
             unset($race);
 
             // TAB-only input
-            $typedText = $c->signal('', 'typedText');
+            $c->signal('', 'typedText');
 
             // ── Actions ───────────────────────────────────────────────────────
 
-            $updateProgress = $c->action(function (Context $ctx) use ($contextId, $app): void {
+            $c->action(function (Context $ctx) use ($contextId, $app): void {
                 $raceId = self::currentRace($contextId);
                 if ($raceId === null) {
                     return;
@@ -177,7 +176,7 @@ final class TypeRaceExample {
                 unset($racer, $race);
             }, 'updateProgress');
 
-            $startRace = $c->action(function () use ($contextId, $app): void {
+            $c->action(function () use ($contextId, $app): void {
                 $raceId = self::currentRace($contextId);
                 if ($raceId === null) {
                     return;
@@ -192,7 +191,7 @@ final class TypeRaceExample {
                 $app->broadcast($scope);
             }, 'startRace');
 
-            $newRace = $c->action(function () use ($contextId, $app): void {
+            $c->action(function () use ($contextId, $app): void {
                 $raceId = self::currentRace($contextId);
                 if ($raceId === null) {
                     return;
@@ -263,7 +262,7 @@ final class TypeRaceExample {
 
             // ── View ──────────────────────────────────────────────────────────
 
-            $c->view('examples/type_race.html.twig', function () use ($contextId, $username, $typedText, $updateProgress, $startRace, $newRace): array {
+            $c->view('examples/type_race.html.twig', function () use ($contextId): array {
                 $raceId = self::$contextRace[$contextId] ?? '';
 
                 return [
@@ -277,12 +276,6 @@ final class TypeRaceExample {
                     'status' => self::$races[$raceId]['status'] ?? 'waiting',
                     'countdownValue' => self::$races[$raceId]['countdownValue'] ?? self::COUNTDOWN_SECONDS,
                     'racers' => self::$races[$raceId]['racers'] ?? [],
-                    'username' => $username,
-                    'contextId' => $contextId,
-                    'typedTextId' => $typedText->id(),
-                    'updateUrl' => $updateProgress->url(),
-                    'startRaceUrl' => $startRace->url(),
-                    'newRaceUrl' => $newRace->url(),
                 ];
             }, block: 'demo');
         });
@@ -373,7 +366,8 @@ final class TypeRaceExample {
                     Timer::clear($race['timerId']);
                     $race['timerId'] = null;
                 }
-                // The browser keeps the last race's text: clear it before the textarea renders.
+                // The browser keeps the last race's text: clear it before the textarea renders. A timer
+                // gets no post-action send, so syncSignals() sends it, ahead of the broadcast's render.
                 // The countdown shows no input, so no stale post can overwrite this.
                 foreach ($app->getLocalContexts($scope) as $ctx) {
                     $ctx->getSignal('typedText')?->setValue('');

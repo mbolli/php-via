@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpVia\Website;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
 
@@ -56,6 +57,6 @@ final class PresenceDemo {
      * stream connects: its first sync shows the scope's cached render, so the count would drop back.
      */
     private function count(): int {
-        return max(1, \count($this->app->getClients()));
+        return max(1, $this->app->countClients(Scope::GLOBAL));
     }
 }

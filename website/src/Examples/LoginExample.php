@@ -18,8 +18,9 @@ use PhpVia\Website\Middleware\AuthMiddleware;
  *
  * The two protected routes are registered inside Via::group(), so a single
  * ->middleware($authMiddleware) call covers both of them.
- * AuthMiddleware reads sessionData('auth') from the session cookie and either
- * redirects to the login page or passes the auth record as a request attribute.
+ * AuthMiddleware reads sessionData('auth') for the session in the request's
+ * 'via.session' attribute and either redirects to the login page or passes the
+ * auth record as a request attribute.
  * The dashboard handler reads it via $c->getRequestAttribute('auth').
  */
 final class LoginExample {
@@ -31,7 +32,7 @@ final class LoginExample {
 
     private const array SUMMARY = [
         '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code>: one call shields both.',
-        '<strong>AuthMiddleware reads the session cookie</strong> from the PSR-7 request, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute.',
+        '<strong>AuthMiddleware reads the session id</strong> from the request\'s <code>via.session</code> attribute, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute. It runs again when a tab that was away comes back.',
         '<strong>The handlers read <code>$c->getRequestAttribute(\'auth\')</code></strong>: the middleware-set attribute is automatically bridged from the PSR-7 request to the Via Context. No manual session checks needed.',
         '<strong>Login and logout rotate the session cookie</strong> with <code>$c->regenerateSession()</code>, so a cookie someone planted or read before stops reaching the account 10 seconds later. Logout also clears <code>sessionData(\'auth\')</code>, and the middleware blocks protected pages until the next login.',
     ];

@@ -17,7 +17,7 @@
         </div>
         {% endfor %}
     </div>
-    <button class="race-start-btn" data-on:click="@post('{{ startRaceUrl }}')">🏁 Start Race</button>
+    <button class="race-start-btn" data-on:click="@post('{{ startRace.url }}')">🏁 Start Race</button>
 </div>
 
 {# ── COUNTDOWN ──────────────────────────────────────────────────────────────── #}
@@ -59,8 +59,8 @@
             autocorrect="off"
             autocapitalize="off"
             placeholder="Start typing here…"
-            data-bind="{{ typedTextId }}"
-            data-on:input__debounce.50ms="@post('{{ updateUrl }}')"
+            {{ bind(typedText) }}
+            data-on:input__debounce.50ms="@post('{{ updateProgress.url }}')"
             data-on:paste="evt.preventDefault()"
             data-on:keydown="if(evt.key==='Tab'){evt.preventDefault();const s=evt.target;const v=s.value;const p=s.selectionStart;s.value=v.slice(0,p)+'\t'+v.slice(s.selectionEnd);s.selectionStart=s.selectionEnd=p+1;}"></textarea>
         {% else %}
@@ -88,7 +88,7 @@
         {% endfor %}
     </ol>
 
-    <button class="race-again-btn" data-on:click="@post('{{ newRaceUrl }}')">
+    <button class="race-again-btn" data-on:click="@post('{{ newRace.url }}')">
         🔄 Race Again
     </button>
 </div>

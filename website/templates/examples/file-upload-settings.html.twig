@@ -49,7 +49,7 @@
     </form>
 
     <div class="fu-settings-note"
-        data-show="{{ uploadStatus.string == 'uploading' ? 'true' : '$' ~ uploadStatus.id ~ ' === \"uploading\"' }}"
+        data-show="{{ uploadStatus.string == 'uploading' ? 'true' : uploadStatus.ref ~ ' === \"uploading\"' }}"
         style="{{ uploadStatus.string == 'uploading' ? '' : 'display:none' }}">
         <strong>Server state, not browser state.</strong>
         If this were a real settings page, navigating here, changing a setting, and going

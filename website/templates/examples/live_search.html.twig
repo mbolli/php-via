@@ -8,7 +8,7 @@
                placeholder="Filter PHP stdlib functions…"
                autocomplete="off"
                spellcheck="false"
-               data-bind="{{ query.id }}"
+               {{ bind(query) }}
                data-on:input__throttle.100ms.trailing="@post('{{ search.url }}')">
     </div>
 

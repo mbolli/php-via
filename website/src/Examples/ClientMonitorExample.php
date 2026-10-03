@@ -18,51 +18,31 @@ final class ClientMonitorExample {
 
         $app->page('/examples/client-monitor', function (Context $c) use ($app): void {
             $c->scope(Scope::ROUTE);
-            $c->view('examples/client_monitor.html.twig', function () use ($app): array {
-                $clients = $app->getClients();
-                $clientCount = \count($clients);
-
-                $clientsHtml = '';
-                foreach ($clients as $client) {
-                    $duration = time() - $client['connected_at'];
-                    $id = htmlspecialchars($client['id']);
-                    $identicon = htmlspecialchars($client['identicon']);
-                    $ip = htmlspecialchars($client['ip']);
-                    $clientsHtml .= <<<HTML
-                    <div class="card" style="min-width: 120px; text-align: center;">
-                        <img src="{$identicon}" style="width: 64px; height: 64px; border-radius: var(--radius-md); margin-block-end: var(--size-1); display: block; margin-inline: auto;" />
-                        <strong style="font-size: var(--font-size-0);">{$id}</strong><br>
-                        <span style="font-size: 0.7rem; color: var(--text-3);">IP: {$ip}<br>Connected: {$duration}s ago</span>
-                    </div>
-                    HTML;
-                }
-
-                return [
-                    'title' => '👁️ Client Monitor',
-                    'description' => 'Live dashboard of connected clients with identicons and IPs.',
-                    'summary' => [
-                        '<strong>Hook-driven updates</strong>: the client list re-renders only when someone connects or disconnects. No polling, no timer, no wasted cycles.',
-                        '<strong>getClients()</strong> returns all active SSE connections with their identicon, IP, and connection duration. Open multiple tabs to see them appear.',
-                        '<strong>onClientConnect / onClientDisconnect</strong> hooks fire globally. This example broadcasts to the monitor\'s ROUTE scope inside each hook.',
-                        '<strong>Identicons</strong> give each connection a visual fingerprint. They\'re generated server-side from the session ID: same session always gets the same avatar.',
-                        '<strong>ROUTE scope</strong> means every viewer of this page shares the same rendered output. The hook broadcasts once and all clients receive the same HTML patch.',
-                        '<strong>Zero idle cost</strong>: unlike a timer, hooks fire only in response to real events. No guard needed to check for active viewers.',
+            $c->view('examples/client_monitor.html.twig', fn (): array => [
+                'title' => '👁️ Client Monitor',
+                'description' => 'Live dashboard of connected clients with identicons and IPs.',
+                'summary' => [
+                    '<strong>Hook-driven updates</strong>: the client list re-renders only when someone connects or disconnects. No polling, no timer, no wasted cycles.',
+                    '<strong>getClients()</strong> returns every open SSE stream, on every worker, with its identicon, IP, and connection time. Open multiple tabs to see them appear.',
+                    '<strong>onClientConnect / onClientDisconnect</strong> hooks fire globally. This example broadcasts to the monitor\'s ROUTE scope inside each hook.',
+                    '<strong>Identicons</strong> give each connection a visual fingerprint. The server draws them from a random id each tab gets when its stream first connects.',
+                    '<strong>ROUTE scope</strong> means every viewer of this page shares the same rendered output. The hook broadcasts once and all clients receive the same HTML patch.',
+                    '<strong>Zero idle cost</strong>: unlike a timer, hooks fire only in response to real events, and <code>countClients()</code> skips the broadcast while nobody has this page open on any worker.',
+                ],
+                'anatomy' => [
+                    'signals' => [],
+                    'actions' => [],
+                    'views' => [
+                        ['name' => 'client_monitor.html.twig', 'desc' => 'Re-renders on connect/disconnect hooks via ROUTE broadcast. Shows identicons, IPs, and connection duration.'],
                     ],
-                    'anatomy' => [
-                        'signals' => [],
-                        'actions' => [],
-                        'views' => [
-                            ['name' => 'client_monitor.html.twig', 'desc' => 'Re-renders on connect/disconnect hooks via ROUTE broadcast. Shows identicons, IPs, and connection duration.'],
-                        ],
-                    ],
-                    'githubLinks' => [
-                        ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/ClientMonitorExample.php'],
-                        ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/client_monitor.html.twig'],
-                    ],
-                    'clientCount' => $clientCount,
-                    'clientsHtml' => $clientsHtml,
-                ];
-            }, block: 'demo', shareRender: true);
+                ],
+                'githubLinks' => [
+                    ['label' => 'View handler', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/src/Examples/ClientMonitorExample.php'],
+                    ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/client_monitor.html.twig'],
+                ],
+                'clients' => array_values($app->getClients()),
+                'now' => time(),
+            ], block: 'demo', shareRender: true);
         });
     }
 

@@ -19,9 +19,9 @@ use Mbolli\PhpVia\Via;
  *  - Server-controlled render state (step, error) is #[Persist]: never sent to the
  *    client, never hydrated, so it survives untouched between action calls.
  *
- * Because step/error are #[Persist] (not signals) and the view is a callable that
- * reads them live, an action can mutate $this->step and call $ctx->sync() to re-render
- * the current step immediately: no stale-signal ordering issues.
+ * Because step/error are #[Persist] (not signals) and the view's data closure reads
+ * them live, an action can mutate $this->step and call $ctx->sync() to re-render the
+ * current step immediately: no stale-signal ordering issues.
  */
 final class WizardExample {
     /** @var list<string> */
@@ -112,11 +112,11 @@ final class WizardExample {
                 'title' => '🪄 Multi-step Form',
                 'description' => 'Composition API: client inputs are <code>#[Signal]</code>, while the step and validation error are <code>#[Persist]</code>, server-only state that survives between actions and drives the server-side re-render.',
                 'summary' => [
-                    '<strong>#[Persist] step &amp; error</strong>: server-controlled state that is never sent to the client and never hydrated from it. Because the class instance lives for the whole connection, the step survives across Next/Back actions.',
+                    '<strong>#[Persist] step &amp; error</strong>: server-controlled state that is never sent to the client and never hydrated from it. Because the class instance lives as long as the tab\'s context, the step survives across Next/Back actions.',
                     '<strong>#[Signal] inputs</strong>: name, role, years, editor and the eight stack booleans are two-way bound via <code>data-bind</code>. They are hydrated onto the instance before each action runs.',
-                    '<strong>$ctx->sync()</strong>: each action mutates <code>$this->step</code> (a #[Persist] prop the callable view reads live), then calls sync() to re-render the current step. No stale-signal timing issues.',
+                    '<strong>$ctx->sync()</strong>: each action mutates <code>$this->step</code> (a #[Persist] prop the view\'s data closure reads live), then calls sync() to re-render the current step. No stale-signal timing issues.',
                     '<strong>Server-side validation</strong>: next() checks <code>$this->name</code>; on failure it sets <code>$this->error</code> and re-renders the same step with the message shown.',
-                    '<strong>Session persistence</strong>: saveState() writes the current values to <code>$ctx->setSessionData(\'wizard\', …)</code> on every step. view() resumes from the session on reconnect.',
+                    '<strong>Session persistence</strong>: saveState() writes the current values to <code>$ctx->setSessionData(\'wizard\', …)</code> on every step. view() resumes from the session when the page loads again.',
                     '<strong>block: \'demo\'</strong>: only the wizard block re-renders on each step change; the header and anatomy panel stay static in the DOM.',
                 ],
                 'anatomy' => [

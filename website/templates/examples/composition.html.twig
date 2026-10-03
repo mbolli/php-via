@@ -6,9 +6,9 @@
     {# ── Session name ─────────────────────────────────────────────────────── #}
     <div class="card">
         <h3 class="mt-1">Session Name <code class="anatomy-badge anatomy-badge--session">Signal(SESSION)</code></h3>
-        <p>Hello, <strong data-text="${{ name.id }}">{{ name.string }}</strong>!</p>
+        <p>Hello, <strong data-text="{{ name.ref }}">{{ name.string }}</strong>!</p>
         <div class="flex gap-1 items-center mt-1">
-            <input type="text" data-bind="{{ nameInput.id }}" placeholder="Enter your name…" class="flex-1">
+            <input type="text" {{ bind(nameInput) }} placeholder="Enter your name…" class="flex-1">
             <button data-on:click="@post('{{ saveName.url }}')">Save Name</button>
         </div>
         <p class="anatomy-desc mt-1">Open another tab: saving here updates the greeting in both tabs.</p>
@@ -18,7 +18,7 @@
     <div class="card">
         <h3 class="mt-1">Counter <code class="anatomy-badge anatomy-badge--persist">Persist</code></h3>
         <p class="counter-display">
-            Count: <span data-text="${{ count.id }}">{{ count.int }}</span>
+            Count: <span data-text="{{ count.ref }}">{{ count.int }}</span>
         </p>
         <p class="anatomy-desc">Each click adds +1, +2, +3… The multiplier is a server-only <code>#[Persist]</code> property: it survives between action calls but is never sent to the client.</p>
         <div class="flex gap-1 mt-1">
@@ -31,7 +31,7 @@
     <div class="card">
         <h3 class="mt-1">Global Clicks <code class="anatomy-badge anatomy-badge--global">Signal(GLOBAL)</code></h3>
         <p class="counter-display">
-            Total clicks (all users): <span data-text="${{ totalClicks.id }}">{{ totalClicks.int }}</span>
+            Total clicks (all users): <span data-text="{{ totalClicks.ref }}">{{ totalClicks.int }}</span>
         </p>
         <p class="anatomy-desc">Every action on this page increments this counter. Open two browser sessions: clicking in either updates the counter in both.</p>
     </div>
