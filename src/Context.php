@@ -576,6 +576,10 @@ class Context {
      *
      * Replaces any previously set scopes. To add additional scopes, use addScope().
      *
+     * The primary scope is the target of broadcast() and the key of the shared update render. It is no
+     * default for later declarations: actions stay per tab, and signal() needs the scope to share a signal.
+     * Scope::ROUTE resolves to this route's scope and Scope::SESSION to this session's.
+     *
      * @param string $scope Built-in scope (Scope::TAB, etc.) or custom (e.g., "room:lobby")
      */
     public function scope(string $scope): void {
@@ -591,6 +595,7 @@ class Context {
      *
      * Allows a context to belong to multiple scopes simultaneously.
      * Example: A user in a chat room can have both "user:123" and "room:lobby" scopes.
+     * Scope::ROUTE and Scope::SESSION resolve as in scope().
      *
      * @param string $scope Additional scope to add
      */
