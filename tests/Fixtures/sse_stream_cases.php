@@ -132,7 +132,7 @@ Coroutine::run(static function () use ($case): void {
             $second = $s->open('room', 32);
 
             echo 'first_running=', (int) $s->running[31], "\n";
-            echo 'scope_members=', count($app->getContextsByScope('room:lobby')), "\n";
+            echo 'scope_members=', count($app->getLocalContexts('room:lobby')), "\n";
             echo 'clients=', count($app->getClients()), "\n";
 
             $GLOBALS['bumps'] = 1;

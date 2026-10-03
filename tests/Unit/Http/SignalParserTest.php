@@ -2,19 +2,19 @@
 
 declare(strict_types=1);
 
-use Mbolli\PhpVia\Via;
+use Mbolli\PhpVia\Http\SignalParser;
 
 /*
- * Via::parseSignals() tests.
+ * SignalParser::parse() tests.
  *
  * Covers all three signal source paths without requiring an OpenSwoole Request
  * instance (which is a final extension class and cannot be mocked).
  */
-describe('Via::parseSignals()', function (): void {
+describe('SignalParser::parse()', function (): void {
     // ── 1. GET ?datastar=<json> ──────────────────────────────────────────────
 
     it('reads signals from GET datastar param', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: ['datastar' => json_encode(['count' => 5, 'via_ctx' => 'abc123'])],
             post: [],
             body: false,
@@ -24,7 +24,7 @@ describe('Via::parseSignals()', function (): void {
     });
 
     it('returns empty array for malformed GET datastar param', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: ['datastar' => 'not-json'],
             post: [],
             body: false,
@@ -34,7 +34,7 @@ describe('Via::parseSignals()', function (): void {
     });
 
     it('GET datastar takes priority over JSON body', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: ['datastar' => json_encode(['source' => 'get'])],
             post: [],
             body: json_encode(['source' => 'body']),
@@ -46,7 +46,7 @@ describe('Via::parseSignals()', function (): void {
     // ── 2. Raw JSON body (standard Datastar POST/PATCH) ──────────────────────
 
     it('reads signals from JSON body', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: [],
             post: [],
             body: json_encode(['name' => 'Ada', 'via_ctx' => 'ctx-1']),
@@ -56,7 +56,7 @@ describe('Via::parseSignals()', function (): void {
     });
 
     it('falls through to POST field when body is not valid JSON', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: [],
             post: ['datastar' => json_encode(['via_ctx' => 'ctx-multipart'])],
             body: '--boundary\r\nContent-Disposition: form-data; name="file"\r\n\r\nbinary',
@@ -68,7 +68,7 @@ describe('Via::parseSignals()', function (): void {
     // ── 3. POST datastar=<json> field (multipart / urlencoded form) ──────────
 
     it('reads signals from POST datastar field for multipart submissions', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: [],
             post: ['datastar' => json_encode(['via_ctx' => 'ctx-xyz', 'step' => 2])],
             body: false,
@@ -78,7 +78,7 @@ describe('Via::parseSignals()', function (): void {
     });
 
     it('reads via_ctx from POST datastar field', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: [],
             post: ['datastar' => json_encode(['via_ctx' => 'my-context-id'])],
             body: false,
@@ -88,7 +88,7 @@ describe('Via::parseSignals()', function (): void {
     });
 
     it('returns empty array when POST datastar field is malformed JSON', function (): void {
-        $signals = Via::parseSignals(
+        $signals = SignalParser::parse(
             get: [],
             post: ['datastar' => 'not-json-either'],
             body: false,
@@ -100,13 +100,13 @@ describe('Via::parseSignals()', function (): void {
     // ── 4. Nothing present ───────────────────────────────────────────────────
 
     it('returns empty array when no signal source is present', function (): void {
-        $signals = Via::parseSignals(get: [], post: [], body: false);
+        $signals = SignalParser::parse(get: [], post: [], body: false);
 
         expect($signals)->toBe([]);
     });
 
     it('returns empty array for empty body string', function (): void {
-        $signals = Via::parseSignals(get: [], post: [], body: '');
+        $signals = SignalParser::parse(get: [], post: [], body: '');
 
         expect($signals)->toBe([]);
     });

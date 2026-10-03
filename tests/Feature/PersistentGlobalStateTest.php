@@ -175,7 +175,7 @@ test('GlobalState survives a real server restart', function (): void {
 
 test('a write the flush timer never saw survives a stop', function (int $workers): void {
     // No flush tick fires within the run, so only the stop path can persist it: the leader's
-    // stop flush or the master's final drain. Before, onShutdown never ran on a stop.
+    // stop flush or the master's final drain. Before, onWorkerStop never ran on a stop.
     expect(runPersistentServer($this->path, 'late', flushMs: 60_000, workers: $workers))->toBe('NULL');
     expect(runPersistentServer($this->path, '-', flushMs: 60_000, workers: $workers))->toBe("'late'");
 })->with([1, 2]);

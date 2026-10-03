@@ -148,7 +148,7 @@ $b = $c->component($counterWidget, 'b');
 ### Lifecycle Hooks
 
 ```php
-$c->onDisconnect(fn() => /* cleanup */);
+$c->onCleanup(fn() => /* cleanup */);
 $c->setInterval(fn() => $c->sync(), 2000);  // auto-cleaned on disconnect
 $app->onClientConnect(fn(string $id) => /* ... */);
 $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide timer

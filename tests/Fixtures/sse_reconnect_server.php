@@ -38,7 +38,7 @@ if ($mode === 'h2') {
     $config = $config->withH2c();
 } else {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker())
-        ->withContextCleanupDelay(300)->withContextRevivalWindow(2000)->withContextDirectorySize(4096, 1024, 60)
+        ->withContextTimeouts(cleanupDelayMs: 300, revivalWindowMs: 2000)->withContextDirectorySize(4096, 1024, 60)
     ;
 }
 $app = new Via($config);
@@ -60,7 +60,7 @@ $app->page('/bump', function (Context $c) use ($app, &$bumps): void {
 
 $app->page('/count', function (Context $c) use ($app): void {
     $c->view(static fn (): string => 'CLIENTS:' . implode(',', array_column($app->getClients(), 'context_id'))
-        . ':SCOPE:' . implode(',', array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope('room:lobby')))
+        . ':SCOPE:' . implode(',', array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts('room:lobby')))
         . ':PID:' . getmypid() . ':END');
 });
 

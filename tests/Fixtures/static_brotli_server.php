@@ -337,7 +337,7 @@ if ($mode === 'workers') {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker());
 }
 if ($mode === 'head') {
-    $config = $config->withTracing();
+    $config = $config->withDevBar(true);
 }
 
 $app = new Via($config);

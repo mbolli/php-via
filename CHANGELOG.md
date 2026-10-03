@@ -39,7 +39,7 @@ All notable changes to php-via will be documented in this file.
 - **`signal()` and `action()` no longer take the primary scope.** A signal without a scope is
   private to the tab, and after `scope()` set a shared scope, `signal()` without one throws: pass
   the scope as the third argument. An action runs for the tab that posts it, and a third argument to
-  `action()` throws. `#[Action(scope: ...)]` keeps working. See [Scopes](https://via.zweiundeins.gmbh/docs/scopes).
+  `action()` throws an `ArgumentCountError`. `#[Action(scope: ...)]` keeps working. See [Scopes](https://via.zweiundeins.gmbh/docs/scopes).
 - **A scoped signal joins its context to its scope,** so its writes reach the tab without
   `addScope()`. A worker clears a scope's signals when the last context in it is destroyed, so a
   SESSION, custom or GLOBAL signal declared on pages without `scope()` no longer lives for the life
@@ -102,6 +102,28 @@ All notable changes to php-via will be documented in this file.
 - **Routes win over extension-less static files.** A path without a file extension, such as
   `/about`, that matches both a route and a file in `withStaticDir()` now serves the route. Paths
   with an extension are still served from the static directory first.
+- **`new Via($config)` freezes the Config.** A `with*` call afterwards throws a `LogicException`,
+  where a late `withTemplateDir()` or `withBasePath()` was ignored or half applied.
+- **Renamed and merged methods throw and name their replacement** until 0.15:
+  - `Via::onStart()` and `onShutdown()` are `onWorkerStart()` and `onWorkerStop()`. The callback
+    gets the worker id: run work meant for one worker where `$workerId === 0`.
+  - `Via::getContextsByScope()` is `getLocalContexts()`, which lists this worker's contexts only.
+  - `Via::config()` is `getConfig()`, and `Via::getRenderStats()` is `getStats()->getStats()`.
+  - `Context::onDisconnect()` is `onCleanup()`, which runs at the same moment.
+  - `Config::withContextCleanupDelay()`, `withContextConnectTimeout()`,
+    `withContextReconnectTimeout()` and `withContextRevivalWindow()` are one
+    `withContextTimeouts(cleanupDelayMs:, connectMs:, reconnectMs:, revivalWindowMs:)`, where a
+    timer left out keeps its value.
+  - `Config::withTracing()` is `withDevBar()`, and `withTracingWrites()`, `withTraceBufferSize()`
+    and `withSsePollIntervalMs()` are `withDevBarOptions(writes:, traces:, pollMs:)`. A second call
+    changes only what it names.
+  - `Config::getDevMode()` is `isDevMode()`, and `withGcInterval()` is `withGcIntervalMs()`.
+- **`Config`, `Signal`, `Action` and `Scope` are final.**
+- **Removed:** `Via::parseSignals()`, and `Config::getTraceMaxBytes()`, whose limit was never
+  enforced.
+- **Internal API is tagged `@internal`:** Via's public properties, most `Config` getters, the
+  constructors of `Context`, `Signal` and `Action`, and `Signal`'s and `Scope`'s sync helpers.
+  `$app->activeSseCount[$id]` becomes `$c->isConnected()`.
 
 ### New Features
 
@@ -129,9 +151,10 @@ All notable changes to php-via will be documented in this file.
 - **`.br` sidecars.** A `foo.css.br` at least as new as `foo.css` is sent to Brotli clients as it is,
   even without ext-brotli, so large assets need no compression at run time. Build sidecars when
   you deploy, not in git: see [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
-- **`Via::HOOK_FLAGS_NO_FILE_IO`** is the hook set without file, stdio and native curl hooks, for
-  apps that run no shell commands and hold no `flock()` across a suspension.
-  `Via::defaultHookFlags()` returns the default. See [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks-narrow).
+- **`Via::noFileIoHookFlags()`** is the hook set without file and stdio hooks, for apps that run
+  no shell commands and hold no `flock()` across a suspension. It keeps the native curl hook where
+  libcurl is older than 8.20. `Via::defaultHookFlags()` returns the default. See
+  [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks-narrow).
 - **`start()` checks `hook_flags`.** It throws for `SWOOLE_HOOK_STDIO` without `SWOOLE_HOOK_FILE`,
   under which includes suspend halfway through a file and concurrent requests fail with "Class not
   found", and for a `RedisBroker` without the socket hook its connection needs.
@@ -150,6 +173,13 @@ All notable changes to php-via will be documented in this file.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
+
+### Deprecated
+
+- **`Config::withBroadcastCoalescing()`** goes in 0.15, and `new Via()` logs a warning when
+  coalescing is off. Call `$app->flushBroadcasts()` where a broadcast has to land before the next
+  step.
+- **`Via::HOOK_FLAGS_NO_FILE_IO`** goes in 0.15. Use `Via::noFileIoHookFlags()`.
 
 ### Performance
 

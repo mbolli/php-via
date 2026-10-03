@@ -232,25 +232,24 @@ describe('a view that renders its own document', function (): void {
 });
 
 describe('datastarUrl and importMap in Twig templates', function (): void {
-    test('follow the config when it changes after new Via()', function (): void {
-        $via = createVia();
-        $via->getTwig()->setLoader(new ArrayLoader(['layout.html.twig' => '{{ datastarUrl }}|{{ importMap }}']));
-        $ctx = new Context(testContextId(), '/', $via);
-        $plain = $ctx->render('layout.html.twig');
+    test('follow the config given to new Via()', function (): void {
+        $render = static function (Config $config): string {
+            $via = createVia($config);
+            $via->getTwig()->setLoader(new ArrayLoader(['layout.html.twig' => '{{ datastarUrl }}|{{ importMap }}']));
+            $ctx = new Context(testContextId(), '/', $via);
 
-        $config = $via->getConfig()->withDatastarRocket();
-        $rocket = $config->getDatastarUrl() . '|' . $config->getImportMapTag();
+            expect($ctx->renderString('{{ datastarUrl }}|{{ importMap }}'))->toBe($ctx->render('layout.html.twig'));
 
-        expect($plain)->toBe((new Config())->getDatastarUrl() . '|')
-            ->and($ctx->render('layout.html.twig'))->toBe($rocket)
-            ->and($ctx->renderString('{{ datastarUrl }}|{{ importMap }}'))->toBe($rocket)
-            ->and($config->getImportMapTag())->toStartWith('<script type="importmap">{"imports":{"datastar":"' . $config->getDatastarUrl() . '"')
-        ;
+            return $ctx->render('layout.html.twig');
+        };
+        $rocket = (new Config())->withDatastarRocket();
+        $mapped = (new Config())->withDatastarRocket()->withImportMap(['chart' => '/js/chart.js']);
 
-        $config->withImportMap(['chart' => '/js/chart.js']);
-
-        expect($ctx->render('layout.html.twig'))->toBe($config->getDatastarUrl() . '|' . $config->getImportMapTag())
-            ->and($config->getImportMapTag())->toContain('"chart":"/js/chart.js"')
+        expect($render(new Config()))->toBe((new Config())->getDatastarUrl() . '|')
+            ->and($render($rocket))->toBe($rocket->getDatastarUrl() . '|' . $rocket->getImportMapTag())
+            ->and($rocket->getImportMapTag())->toStartWith('<script type="importmap">{"imports":{"datastar":"' . $rocket->getDatastarUrl() . '"')
+            ->and($render($mapped))->toBe($mapped->getDatastarUrl() . '|' . $mapped->getImportMapTag())
+            ->and($mapped->getImportMapTag())->toContain('"chart":"/js/chart.js"')
         ;
     });
 

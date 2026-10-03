@@ -20,6 +20,7 @@ use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\RouteGroup;
+use Mbolli\PhpVia\Http\SignalParser;
 use Mbolli\PhpVia\Http\SseHandler;
 use Mbolli\PhpVia\Http\StaticBrotli;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
@@ -39,6 +40,7 @@ use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Support\Stats;
@@ -58,16 +60,20 @@ use Twig\Environment;
  * Via - Real-time engine for building reactive web applications in PHP.
  *
  * Main application class that manages routing, contexts, and SSE connections.
+ * Not designed for extension.
  */
 class Via {
     public const string VERSION = '0.13.1';
 
     /**
-     * The socket, stream, sleep and proc_open() hooks, without FILE and STDIO, so file and stdio I/O skip the AIO
-     * thread pool (1790 on OpenSwoole 26.2). Only for apps that run no exec(), system() or popen() and hold no
-     * flock() across a yield. It leaves out SWOOLE_HOOK_NATIVE_CURL, which crashes workers on libcurl 8.20 or newer.
+     * The socket, stream, sleep and proc_open() hooks, without FILE, STDIO and NATIVE_CURL (1790 on OpenSwoole 26.2).
+     *
+     * @deprecated removed in 0.15; use Via::noFileIoHookFlags(), which also keeps the native curl hook where it works
      */
-    public const int HOOK_FLAGS_NO_FILE_IO = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
+    public const int HOOK_FLAGS_NO_FILE_IO = self::NO_FILE_IO_HOOKS;
+
+    /** See noFileIoHookFlags(). */
+    private const int NO_FILE_IO_HOOKS = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
         | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
     /**
@@ -95,23 +101,45 @@ class Via {
      */
     private const int FLUSH_WAIT_MS = 1000;
 
-    // Legacy public properties for HTTP handlers (will be phased out)
-    /** @var array<string, Context> */
+    // Public for the HTTP handlers only; they move into Application later.
+    /**
+     * @internal
+     *
+     * @var array<string, Context>
+     */
     public array $contexts = [];
 
-    /** @var array<string, int> Cleanup timer IDs for contexts */
+    /**
+     * @internal
+     *
+     * @var array<string, int> Cleanup timer IDs for contexts
+     */
     public array $cleanupTimers = [];
 
-    /** @var array<string, int> Number of active SSE coroutines per context ID */
+    /**
+     * @internal use Context::isConnected()
+     *
+     * @var array<string, int> Number of active SSE coroutines per context ID
+     */
     public array $activeSseCount = [];
 
-    /** SSE handlers still running, including their exit path and onClientDisconnect hooks */
+    /**
+     * @internal SSE handlers still running, including their exit path and onClientDisconnect hooks
+     */
     public int $runningSseStreams = 0;
 
-    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
+    /**
+     * @internal use getClients()
+     *
+     * @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID
+     */
     public array $clients = [];
 
-    /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
+    /**
+     * @internal
+     *
+     * @var array<string, string> Session ID by context ID (contextId => sessionId)
+     */
     public array $contextSessions = [];
 
     /**
@@ -124,11 +152,14 @@ class Via {
 
     private ?Server $server = null;
 
-    /** @var array<callable> Callbacks to run when server starts */
+    /** @var list<callable(int): void> Callbacks from onWorkerStart() */
     private array $startCallbacks = [];
 
-    /** @var array<callable> Callbacks to run on graceful shutdown */
+    /** @var list<callable(int): void> Callbacks from onWorkerStop() */
     private array $shutdownCallbacks = [];
+
+    /** This process's worker id, set in workerStart */
+    private int $workerId = 0;
 
     /** @var list<array{callable, int, bool}> Server intervals from setInterval(): callback, period, every-worker flag */
     private array $serverIntervals = [];
@@ -236,14 +267,23 @@ class Via {
     /** Active URL prefix set by the currently executing group() closure */
     private string $groupPrefix = '';
 
+    /**
+     * Freezes $config: a with* call on it afterwards throws.
+     */
     public function __construct(private Config $config) {
+        $this->config->freeze();
         $this->viaUnsetCallbackRegistered = new \WeakMap();
 
         // Initialize support classes
         $this->logger = new Logger($this->config->getLogLevel());
-        $this->requestLogger = new RequestLogger($this->config->getDevMode());
+        $this->requestLogger = new RequestLogger($this->config->isDevMode());
         $this->logger->setRequestLogger($this->requestLogger);
         $this->stats = new Stats();
+
+        if (!$this->config->isBroadcastCoalescingEnabled()) {
+            $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
+                . '$app->flushBroadcasts() where a broadcast has to land before the next step.');
+        }
 
         // Dev Bar tracing substrate. Allocated here (master process, before fork)
         // so the per-worker tracer + buffer are inherited cleanly. When tracing
@@ -258,7 +298,7 @@ class Via {
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->getDevMode());
+        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...), $this->config->isDevMode());
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -326,10 +366,10 @@ class Via {
     }
 
     /**
-     * Get the configuration instance for fluent configuration.
+     * @deprecated removed in 0.14; throws and names getConfig()
      */
-    public function config(): Config {
-        return $this->config;
+    public function config(): never {
+        Removed::method('Via::config()', 'Use $app->getConfig(); the Config is frozen once new Via() has it.');
     }
 
     /**
@@ -459,29 +499,6 @@ class Via {
      */
     public function clearSessionData(string $sessionId, ?string $key = null): void {
         $this->app->clearSessionData($sessionId, $key);
-    }
-
-    /**
-     * Get the global view cache.
-     *
-     * @internal Used by Context for global scope caching
-     */
-    /**
-     * Get cached view for a scope.
-     *
-     * @internal Used by Context to get cached view
-     */
-    public function getViewCache(string $scope): ?string {
-        return $this->viewCache->get($scope);
-    }
-
-    /**
-     * Set cached view for a scope.
-     *
-     * @internal Used by Context to cache view
-     */
-    public function setViewCache(string $scope, string $html): void {
-        $this->viewCache->set($scope, $html);
     }
 
     /**
@@ -727,12 +744,22 @@ class Via {
     }
 
     /**
-     * Get all contexts registered under a specific scope.
+     * The contexts of this worker in $scope.
+     *
+     * With more than one worker, contexts in the same scope on other workers are not in the list, so an empty
+     * list does not mean nobody is in the scope.
      *
      * @return array<Context>
      */
-    public function getContextsByScope(string $scope): array {
+    public function getLocalContexts(string $scope): array {
         return $this->scopeRegistry->getContextsByScope($scope);
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names getLocalContexts()
+     */
+    public function getContextsByScope(string $scope): never {
+        Removed::method('Via::getContextsByScope()', 'Use $app->getLocalContexts($scope); it lists the contexts of this worker only.');
     }
 
     /**
@@ -769,7 +796,7 @@ class Via {
     /**
      * Get a scoped signal by scope and browser id ($signal->id()).
      *
-     * To find one by the name it was declared with, use getScopedSignalByName().
+     * @internal use getScopedSignalByName()
      */
     public function getScopedSignal(string $scope, string $signalId): ?Signal {
         return $this->signalManager->getSignal($scope, $signalId);
@@ -1027,7 +1054,7 @@ class Via {
 
                 // Write master PID so external tools (e.g. scripts/dev.sh) can send
                 // SIGUSR1 to the correct process for hot worker reload.
-                if ($this->config->getDevMode()) {
+                if ($this->config->isDevMode()) {
                     $pidFile = sys_get_temp_dir() . '/php-via-master.pid';
                     file_put_contents($pidFile, (string) $server->master_pid);
                 }
@@ -1080,9 +1107,9 @@ class Via {
                     );
                 });
 
-                // Execute all registered start callbacks
+                $this->workerId = $workerId;
                 foreach ($this->startCallbacks as $callback) {
-                    $callback();
+                    $callback($workerId);
                 }
 
                 // Refresh route table: startCallbacks may have registered new routes (e.g. via
@@ -1256,15 +1283,21 @@ class Via {
     }
 
     /**
-     * Register a callback to run when the server starts.
-     * Use this to initialize timers or background tasks.
+     * Register a callback to run in every worker process when it starts, with the worker's id.
+     *
+     * It runs once per worker start, so with withWorkerNum(4) four times, and again when a worker restarts
+     * after a reload (SIGUSR1), a `max_request` recycle or a crash. Run work meant for one worker where
+     * $workerId === 0: worker 0 always exists, runs the setInterval() jobs, and restarts under the same id.
+     * Routes registered here are picked up, so a reload loads them from disk again.
+     *
+     * @param callable(int): void $callback receives the worker id
      */
-    public function onStart(callable $callback): void {
+    public function onWorkerStart(callable $callback): void {
         $this->startCallbacks[] = $callback;
     }
 
     /**
-     * Register a callback to run on graceful shutdown.
+     * Register a callback to run in every worker process when it stops, with the worker's id.
      *
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
@@ -1275,9 +1308,25 @@ class Via {
      *
      * End long-lived coroutines, sockets and `Event::add` fds here (or check isShuttingDown() in
      * the loop): anything still alive holds the worker until `max_wait_time`, then it is killed.
+     *
+     * @param callable(int): void $callback receives the worker id
      */
-    public function onShutdown(callable $callback): void {
+    public function onWorkerStop(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names onWorkerStart()
+     */
+    public function onStart(callable $callback): never {
+        Removed::method('Via::onStart()', 'Use $app->onWorkerStart($fn). It runs in every worker and passes the worker id: run work meant for one worker where $workerId === 0.');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names onWorkerStop()
+     */
+    public function onShutdown(callable $callback): never {
+        Removed::method('Via::onShutdown()', 'Use $app->onWorkerStop($fn). It runs in every worker and passes the worker id.');
     }
 
     /**
@@ -1328,6 +1377,8 @@ class Via {
 
     /**
      * @return null|callable(Request, Response): void
+     *
+     * @internal
      */
     public function getNotFoundHandler(): ?callable {
         return $this->notFoundHandler;
@@ -1409,12 +1460,10 @@ class Via {
     }
 
     /**
-     * Get render statistics.
-     *
-     * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
+     * @deprecated removed in 0.14; throws and names getStats()
      */
-    public function getRenderStats(): array {
-        return $this->app->getRenderStats();
+    public function getRenderStats(): never {
+        Removed::method('Via::getRenderStats()', 'Use $app->getStats()->getStats().');
     }
 
     /**
@@ -1454,8 +1503,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * Called by the GC timer (configurable via Config::withGcInterval()) and
-     * exposed publicly so it can be invoked directly in tests or from user code.
+     * @internal run by the GC timer, see Config::withGcIntervalMs()
      */
     public function runGcCycle(): void {
         $cycles = gc_collect_cycles();
@@ -1463,33 +1511,6 @@ class Via {
         $peakMb = round(memory_get_peak_usage(true) / 1_048_576, 1);
         $this->log('debug', "GC: {$cycles} cycles freed, mem={$memMb}MB peak={$peakMb}MB");
         $this->stats->trackGc($cycles);
-    }
-
-    /**
-     * Track view render time.
-     *
-     * @internal Called by Context during rendering
-     */
-    public function trackRender(float $duration): void {
-        $this->app->trackRender($duration);
-    }
-
-    /**
-     * Get cached view HTML for a route if available and fresh.
-     *
-     * @internal Used by Context for scope-based caching
-     */
-    public function getCachedView(string $route): ?string {
-        return $this->viewCache->get($route);
-    }
-
-    /**
-     * Cache rendered view HTML for a route.
-     *
-     * @internal Used by Context for scope-based caching
-     */
-    public function cacheView(string $route, string $html): void {
-        $this->viewCache->set($route, $html);
     }
 
     /**
@@ -1508,24 +1529,6 @@ class Via {
      */
     public function getViewRenderer(): ViewRenderer {
         return $this->viewRenderer;
-    }
-
-    /**
-     * Check if a route is currently rendering.
-     *
-     * @internal Used by Context for render locking
-     */
-    public function isRendering(string $route): bool {
-        return $this->viewCache->isRendering($route);
-    }
-
-    /**
-     * Set rendering status for a route.
-     *
-     * @internal Used by Context for render locking
-     */
-    public function setRendering(string $route, bool $status): void {
-        $this->viewCache->setRendering($route, $status);
     }
 
     /**
@@ -1551,67 +1554,6 @@ class Via {
             $config->getSessionCookieSameSite(),
             $config->isSessionCookiePartitioned(),
         );
-    }
-
-    /**
-     * Read Datastar signals from an OpenSwoole HTTP request.
-     *
-     * Delegates to parseSignals() with the request's raw parts.
-     *
-     * @internal Used by HTTP handlers
-     *
-     * @return array<string, mixed> The decoded signals array
-     */
-    public static function readSignals(Request $request): array {
-        return self::parseSignals(
-            $request->get ?? [],
-            $request->post ?? [],
-            $request->getContent(),
-        );
-    }
-
-    /**
-     * Parse Datastar signals from raw request parts.
-     *
-     * Signal source priority:
-     *  1. GET  ?datastar=<json>:           Datastar GET actions
-     *  2. Raw JSON body:                   Datastar POST/PATCH actions (application/json)
-     *  3. POST datastar=<json> field:      Datastar POST via multipart/form-data or
-     *                                      application/x-www-form-urlencoded
-     *
-     * Exposed as a public static method so it can be tested without an OpenSwoole
-     * Request instance (which is a final extension class).
-     *
-     * @param array<string, mixed> $get  Parsed GET parameters
-     * @param array<string, mixed> $post Parsed POST parameters
-     * @param false|string         $body Raw request body
-     *
-     * @return array<string, mixed> The decoded signals array
-     */
-    public static function parseSignals(array $get, array $post, false|string $body): array {
-        // 1. GET ?datastar=<json>
-        if (isset($get['datastar'])) {
-            $signals = json_decode((string) $get['datastar'], true);
-
-            return \is_array($signals) ? $signals : [];
-        }
-
-        // 2. Raw JSON body (standard Datastar POST/PATCH action)
-        if ($body) {
-            $signals = json_decode($body, true);
-            if (\is_array($signals)) {
-                return $signals;
-            }
-        }
-
-        // 3. POST field datastar=<json> (multipart/form-data or urlencoded form submission)
-        if (isset($post['datastar'])) {
-            $signals = json_decode((string) $post['datastar'], true);
-
-            return \is_array($signals) ? $signals : [];
-        }
-
-        return [];
     }
 
     /**
@@ -1709,15 +1651,15 @@ class Via {
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
-            self::readSignals($request),
+            SignalParser::read($request),
             $request->cookie ?? [],
             $byConnect,
         );
     }
 
     /**
-     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types (mirrors the
-     * readSignals/parseSignals split so it can be exercised without a live server).
+     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types, so it can be exercised
+     * without a live server.
      *
      * @param string                $requesterSession Session ID of the reconnecting client
      * @param array<string, mixed>  $clientSignals    Signal values the client still holds
@@ -1950,7 +1892,7 @@ class Via {
             'max_coroutine' => 100000,
             'worker_num' => $config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,
-            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onShutdown
+            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onWorkerStop callbacks
             'reload_async' => true,  // Enable async reload
             'enable_reuse_port' => true,  // Allow immediate rebind on restart
             'hook_flags' => self::defaultHookFlags(),  // Sockets, sleep and processes yield; file and stdio I/O go through the AIO thread pool
@@ -1975,6 +1917,17 @@ class Via {
      */
     public static function defaultHookFlags(): int {
         return self::nativeCurlHookCrashes() ? SWOOLE_HOOK_ALL & ~SWOOLE_HOOK_NATIVE_CURL : SWOOLE_HOOK_ALL;
+    }
+
+    /**
+     * The socket, stream, sleep and proc_open() hooks, plus SWOOLE_HOOK_NATIVE_CURL unless nativeCurlHookCrashes(), for
+     * `withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()])`.
+     *
+     * Without FILE and STDIO, file and stdio I/O skip the AIO thread pool and block the worker for the call. Only for
+     * apps that run no exec(), system() or popen() and hold no flock() across a yield.
+     */
+    public static function noFileIoHookFlags(): int {
+        return self::NO_FILE_IO_HOOKS | (self::nativeCurlHookCrashes() ? 0 : SWOOLE_HOOK_NATIVE_CURL);
     }
 
     /**
@@ -2009,7 +1962,7 @@ class Via {
             throw new \RuntimeException(
                 'hook_flags has SWOOLE_HOOK_STDIO without SWOOLE_HOOK_FILE: include and require then yield '
                 . 'halfway through a file, and concurrent requests fail with "Class not found". Add SWOOLE_HOOK_FILE, '
-                . 'drop SWOOLE_HOOK_STDIO, or use Via::defaultHookFlags() or Via::HOOK_FLAGS_NO_FILE_IO.'
+                . 'drop SWOOLE_HOOK_STDIO, or use Via::defaultHookFlags() or Via::noFileIoHookFlags().'
             );
         }
 
@@ -2022,7 +1975,7 @@ class Via {
 
             throw new \RuntimeException(
                 "RedisBroker needs {$name} in hook_flags: without it every Redis call, including the endless "
-                . 'SUBSCRIBE read, blocks the whole worker. Add it, or use Via::defaultHookFlags() or Via::HOOK_FLAGS_NO_FILE_IO.'
+                . 'SUBSCRIBE read, blocks the whole worker. Add it, or use Via::defaultHookFlags() or Via::noFileIoHookFlags().'
             );
         }
     }
@@ -2180,8 +2133,8 @@ class Via {
 
         // The leader flushes once more when it stops: a second SIGTERM to the master can end it
         // before its shutdown event, and then only this flush saves the last window.
-        $this->onShutdown(function () use ($flush): void {
-            if ($this->server?->getWorkerId() === self::LEADER_WORKER_ID) {
+        $this->onWorkerStop(function (int $workerId) use ($flush): void {
+            if ($workerId === self::LEADER_WORKER_ID) {
                 $flush();
             }
         });
@@ -2837,13 +2790,13 @@ class Via {
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
-                $callback();
+                $callback($this->workerId);
             } catch (\Throwable $e) {
                 $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
             }
         }
 
-        // Presence broadcasts from onClientDisconnect and onShutdown may still sit with a running publisher.
+        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $stopBudgetNs = max(0, (int) ($this->server?->setting['max_wait_time'] ?? 3) - 1) * 1_000_000_000;
         $this->drainBroadcasts(renderPending: false, publisherDeadlineNs: min(hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000, $stopStartNs + $stopBudgetNs));
 
@@ -2886,7 +2839,7 @@ class Via {
      * @return int how many contexts it reached
      */
     private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
-        if ($this->config->getDevMode()) {
+        if ($this->config->isDevMode()) {
             $this->viewRenderer->beginFanOut();
 
             try {

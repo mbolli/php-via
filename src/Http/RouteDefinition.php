@@ -46,16 +46,24 @@ class RouteDefinition {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getRoute(): string {
         return $this->route;
     }
 
+    /**
+     * @internal
+     */
     public function getHandler(): callable {
         return $this->handler;
     }
 
     /**
      * @return list<MiddlewareInterface>
+     *
+     * @internal
      */
     public function getMiddleware(): array {
         return $this->middleware;

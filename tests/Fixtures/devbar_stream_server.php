@@ -19,7 +19,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use Tests\Support\FixturePort;
 
-$hookFlags = (int) ($argv[1] ?? Via::HOOK_FLAGS_NO_FILE_IO);
+$hookFlags = (int) ($argv[1] ?? Via::noFileIoHookFlags());
 $brotli = ($argv[2] ?? '') === 'br';
 
 try {
@@ -144,7 +144,7 @@ if ($pid === 0) {
 
 $config = (new Config())
     ->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
-    ->withTracing(true)->withSsePollIntervalMs(20)
+    ->withDevBar(true)->withDevBarOptions(pollMs: 20)
     ->withSwooleSettings(['hook_flags' => $hookFlags])
 ;
 if ($brotli) {

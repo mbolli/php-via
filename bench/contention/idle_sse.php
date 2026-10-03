@@ -20,8 +20,9 @@ declare(strict_types=1);
  *       [--settle=3] [--concurrency=64] [--fire-timeout=10] [--poll-ms=<ms>] [--timeout=<s>]
  *
  * --poll-ms is optional and only for plausibility checks. It sets
- * Config::withSsePollIntervalMs(), which paced page streams before they became
- * event driven and now paces only the Dev Bar stream.
+ * Config::withDevBarOptions(pollMs:), Config::withSsePollIntervalMs() before 0.14,
+ * which paced page streams before they became event driven and now paces only
+ * the Dev Bar stream.
  * --timeout overrides the per-run watchdog (default: derived from the other options).
  *
  * Prints one JSON line on stdout. Logs go to stderr.
@@ -182,10 +183,12 @@ function runServer(array $o): void {
         $config = $config->withBroker(new SwooleBroker());
     }
     if (isset($o['poll-ms']) && $o['poll-ms'] !== '') {
-        if (method_exists($config, 'withSsePollIntervalMs')) {
+        if (method_exists($config, 'withDevBarOptions')) {
+            $config = $config->withDevBarOptions(pollMs: (int) $o['poll-ms']);
+        } elseif (method_exists($config, 'withSsePollIntervalMs')) {
             $config = $config->withSsePollIntervalMs((int) $o['poll-ms']);
         } else {
-            logLine('--poll-ms ignored: Config::withSsePollIntervalMs() does not exist in this revision');
+            logLine('--poll-ms ignored: this revision has neither Config::withDevBarOptions() nor withSsePollIntervalMs()');
         }
     }
     if ($n * 2 > $config->getContextDirectoryRows()) {

@@ -304,9 +304,9 @@ times per worker.
 ## Lifecycle
 
 ```php
-// Server lifecycle: onStart and onShutdown run once in every worker process
-$app->onStart(function () use ($app): void { /* ... */ });
-$app->onShutdown(function () use ($app): void { /* runs on stop, reload and recycle */ });
+// Server lifecycle: run once in every worker process, with its id; worker 0 for one-shot work
+$app->onWorkerStart(function (int $workerId) use ($app): void { /* ... */ });
+$app->onWorkerStop(function (int $workerId) use ($app): void { /* runs on stop, reload and recycle */ });
 
 // Per-client lifecycle
 $app->onClientConnect(function (Context $c) use ($app): void {
@@ -326,8 +326,8 @@ $app->setInterval($perProcessWork, 1000, everyWorker: true); // in every worker
 // Tab timer: start it in the page handler; it stops with the context
 $c->setInterval(fn () => $c->sync(), 1000);
 
-// Context cleanup hooks
-$c->onDisconnect(function (Context $c): void { /* ... */ });
+// Context cleanup hook, when the context is destroyed
+$c->onCleanup(function (Context $c): void { /* ... */ });
 ```
 
 - **A closed tab is noticed at once.** A stream ends about 1 ms after the browser closes
@@ -442,10 +442,12 @@ $config = (new Config())
     ->withBroadcastCoalescing(true)           // false = synchronous broadcasts
     ->withSseKeepAliveMs(15_000)              // SSE comment on silent streams; 0 = off
     ->withSseMaxQueuedBytes(1_048_576)        // drop element frames for a slow client
-    ->withContextCleanupDelay(5_000)          // after a stream closes
-    ->withContextConnectTimeout(30_000)       // free a context whose stream never connects
-    ->withContextReconnectTimeout(60_000)     // keep a tab whose stream is down after an action
-    ->withContextRevivalWindow(600_000)       // rebuild a returning tab
+    ->withContextTimeouts(
+        cleanupDelayMs: 5_000,                // after a stream closes
+        connectMs: 30_000,                    // free a context whose stream never connects
+        reconnectMs: 60_000,                  // keep a tab whose stream is down after an action
+        revivalWindowMs: 600_000,             // rebuild a returning tab
+    )
     ->withStrictTabSignals()                  // TAB signals server-owned by default
     ->withPersistentGlobalState(__DIR__ . '/state.db')
     ->withTrustedOrigins(['https://example.com'])
@@ -508,9 +510,9 @@ family (`stat()`, `filemtime()`, `file_exists()`, `realpath()`), `include`, `ech
 `error_log()`. A hooked connection must not be shared by two coroutines at once.
 
 ```php
-// No file, stdio or native curl hooks (1790 on OpenSwoole 26.2), so curl requests block.
+// No file or stdio hooks, and native curl only where it does not crash (libcurl before 8.20).
 // Only for apps that run no exec()/system()/popen() and hold no flock() across a suspension.
-$config->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
+$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
 
 // Cap the file thread pool: setAio(), before start(); aio_* in withSwooleSettings() fail at start-up
 OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);

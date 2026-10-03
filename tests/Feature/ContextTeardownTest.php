@@ -25,7 +25,7 @@ function teardownMintPage(Via $app, string $route, callable $handler): Context {
 
 /** @return list<string> IDs registered under $scope */
 function teardownIdsIn(Via $app, string $scope): array {
-    return array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope($scope));
+    return array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts($scope));
 }
 
 describe('Context teardown', function (): void {
@@ -133,8 +133,8 @@ describe('Context teardown with a revival under the same ID', function (): void 
 
         expect($app->getApp()->getContext($id))->toBe($revived)
             ->and($app->contexts[$id] ?? null)->toBe($revived)
-            ->and($app->getContextsByScope('room:1'))->toBe([$revived])
-            ->and($app->getContextsByScope(Scope::TAB))->toBe([$revived])
+            ->and($app->getLocalContexts('room:1'))->toBe([$revived])
+            ->and($app->getLocalContexts(Scope::TAB))->toBe([$revived])
         ;
     });
 
@@ -182,7 +182,7 @@ describe('Context teardown with a revival under the same ID', function (): void 
 
         expect($revived)->toBeNull()
             ->and($log)->toContain('database down')
-            ->and($app->getContextsByScope('room:flaky'))->toBe([])
+            ->and($app->getLocalContexts('room:flaky'))->toBe([])
             ->and($app->getContextSessionId($id))->toBeNull()
         ;
     });
@@ -263,7 +263,7 @@ describe('Cycle-free teardown', function (): void {
             },
             '/room' => function (Context $c): void {
                 $c->scope('room:1');
-                $c->onDisconnect(fn () => $c->getId());
+                $c->onCleanup(fn () => $c->getId());
                 $c->view(fn (): string => '<div id="room">room</div>');
             },
         ];

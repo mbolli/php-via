@@ -46,12 +46,12 @@ test('an open Dev Bar stream leaves the worker answering', function (int $hookFl
     expect((int) $r['page_status'])->toBe(200, $context);
     expect((int) $r['stream_traced'])->toBe(1, 'the stream did not deliver the page trace: ' . $context);
 })->with([
-    'narrow flags' => [Via::HOOK_FLAGS_NO_FILE_IO],
-    'narrow flags without the sleep hook' => [Via::HOOK_FLAGS_NO_FILE_IO & ~SWOOLE_HOOK_SLEEP],
+    'narrow flags' => [Via::noFileIoHookFlags()],
+    'narrow flags without the sleep hook' => [Via::noFileIoHookFlags() & ~SWOOLE_HOOK_SLEEP],
 ]);
 
 test('the Dev Bar script is served with an ETag and revalidates to an empty 304', function (): void {
-    $r = devBarStreamServer(Via::HOOK_FLAGS_NO_FILE_IO);
+    $r = devBarStreamServer(Via::noFileIoHookFlags());
     $context = $r['out'];
 
     expect((int) $r['asset_status'])->toBe(200, $context);
@@ -67,7 +67,7 @@ test('the Dev Bar script is sent as Brotli when withBrotli() is on and the clien
         $this->markTestSkipped('ext-brotli required');
     }
 
-    $r = devBarStreamServer(Via::HOOK_FLAGS_NO_FILE_IO, 'br');
+    $r = devBarStreamServer(Via::noFileIoHookFlags(), 'br');
     $context = $r['out'];
 
     expect((int) $r['asset_status'])->toBe(200, $context);

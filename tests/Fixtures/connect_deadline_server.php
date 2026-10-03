@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /*
- * Real-server fixture for Config::withContextConnectTimeout(): a context with no SSE stream on its
+ * Real-server fixture for Config::withContextTimeouts(connectMs:): a context with no SSE stream on its
  * worker is destroyed after the timeout. Cases: page (one worker), off (timeout 0), xworker (two
  * workers, a copy an action rebuilt on the worker the tab does not stream from), revived and
  * revived-late (a tab whose stream dropped, freed after the cleanup delay, then revived by an action
@@ -31,10 +31,10 @@ $marker = sys_get_temp_dir() . '/via_connect_deadline_' . getmypid();
 $port = FixturePort::pick(4800, 150);
 
 $config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
-    ->withContextConnectTimeout($mode === 'off' ? 0 : ($mode === 'xworker' ? 400 : 300))
+    ->withContextTimeouts(connectMs: $mode === 'off' ? 0 : ($mode === 'xworker' ? 400 : 300))
 ;
 if (str_starts_with($mode, 'revived')) {
-    $config = $config->withContextCleanupDelay(200)->withContextReconnectTimeout(1500);
+    $config = $config->withContextTimeouts(cleanupDelayMs: 200, reconnectMs: 1500);
 }
 if ($mode === 'xworker') {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker());
@@ -47,7 +47,7 @@ $app->page('/room', function (Context $c) use ($marker): void {
     $c->action(static function (Context $c): void {
         $c->execScript('window.viaWindow = "WINDOW-PATCH"');
     }, 'window');
-    $c->onDisconnect(static function (Context $c) use ($marker): void {
+    $c->onCleanup(static function (Context $c) use ($marker): void {
         file_put_contents($marker, "cleanup {$c->getId()}\n", FILE_APPEND | LOCK_EX);
     });
     $c->view(fn (): string => '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':END</div>');

@@ -65,7 +65,7 @@ function tabBroadcastOutput(callable $fn): string {
 
 describe('Context::broadcast() on a TAB-primary context', function (): void {
     test('syncs only the calling tab', function (): void {
-        $tabs = tabBroadcastTabs(createVia((new Config())->withBroadcastCoalescing(false)));
+        $tabs = tabBroadcastTabs(createVia());
 
         $tabs['A']->broadcast();
 
@@ -73,7 +73,7 @@ describe('Context::broadcast() on a TAB-primary context', function (): void {
     });
 
     test('in dev mode warns once that it no longer reaches the scopes the tab joined', function (): void {
-        $app = new Via((new Config())->withLogLevel('warn')->withDevMode(true)->withBroadcastCoalescing(false));
+        $app = new Via((new Config())->withLogLevel('warn')->withDevMode(true));
         $tabs = tabBroadcastTabs($app);
         $tabs['A']->addScope('room:lobby');
 
@@ -89,10 +89,10 @@ describe('Context::broadcast() on a TAB-primary context', function (): void {
     });
 
     test('does not warn outside dev mode or without joined scopes', function (): void {
-        $quiet = new Via((new Config())->withLogLevel('warn')->withDevMode(false)->withBroadcastCoalescing(false));
+        $quiet = new Via((new Config())->withLogLevel('warn')->withDevMode(false));
         $joined = tabBroadcastTabs($quiet)['A'];
         $joined->addScope('room:lobby');
-        $loud = new Via((new Config())->withLogLevel('warn')->withDevMode(true)->withBroadcastCoalescing(false));
+        $loud = new Via((new Config())->withLogLevel('warn')->withDevMode(true));
         $alone = tabBroadcastTabs($loud)['A'];
 
         $out = tabBroadcastOutput(function () use ($joined, $alone): void {
@@ -106,7 +106,7 @@ describe('Context::broadcast() on a TAB-primary context', function (): void {
 
 describe('Bare scopes outside a context', function (): void {
     test('Via::broadcast() rejects them and names the fix', function (string $scope, string $fix): void {
-        $app = createVia((new Config())->withBroadcastCoalescing(false));
+        $app = createVia();
         $tabs = tabBroadcastTabs($app);
 
         expect(fn () => $app->broadcast($scope))->toThrow(InvalidArgumentException::class, $fix)
@@ -125,7 +125,7 @@ describe('Bare scopes outside a context', function (): void {
     })->with([Scope::TAB, Scope::ROUTE, Scope::SESSION]);
 
     test('resolved scopes still broadcast', function (): void {
-        $app = createVia((new Config())->withBroadcastCoalescing(false));
+        $app = createVia();
         $tabs = tabBroadcastTabs($app);
 
         $app->broadcast(Scope::routeScope('/b'));

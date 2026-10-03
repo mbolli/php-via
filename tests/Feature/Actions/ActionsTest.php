@@ -86,7 +86,7 @@ describe('The removed $scope argument', function (): void {
         $context = new Context(testContextId(), '/test', createVia());
 
         expect(fn () => $context->action(function (): void {}, 'globalAction', Scope::GLOBAL))
-            ->toThrow(BadMethodCallException::class, 'The $scope argument of Context::action() was removed in php-via 0.14. An action runs for the tab that posts it: drop the third argument')
+            ->toThrow(ArgumentCountError::class, 'The $scope argument of Context::action() was removed in php-via 0.14. An action runs for the tab that posts it: drop the third argument')
         ;
     });
 
@@ -94,7 +94,7 @@ describe('The removed $scope argument', function (): void {
         $context = new Context(testContextId(), '/test', createVia());
 
         expect(fn () => $context->action(function (): void {}, 'tabAction', scope: Scope::TAB))
-            ->toThrow(BadMethodCallException::class, 'drop the third argument')
+            ->toThrow(ArgumentCountError::class, 'drop the third argument')
         ;
     });
 });

@@ -20,6 +20,7 @@ use Twig\Markup;
  * Context represents a living bridge between PHP and the browser.
  *
  * It holds runtime state, defines actions, manages reactive signals, and defines UI through View.
+ * Not designed for extension.
  */
 class Context {
     private string $id;
@@ -104,6 +105,9 @@ class Context {
     private ComponentManager $componentManager;
     private PatchManager $patchManager;
 
+    /**
+     * @internal pages, mount() and component() create contexts
+     */
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null, ?string $sessionId = null) {
         $this->id = $id;
         $this->route = $route;
@@ -426,25 +430,24 @@ class Context {
     }
 
     /**
-     * Register a callback to be executed when the context is cleaned up (SSE disconnect).
+     * Register a callback to run when this context is destroyed, the moment its tab is gone for good:
+     * - the SSE connection closed and stayed closed for the cleanup delay (Config::withContextTimeouts())
+     * - the browser sent the tab-close beacon
+     * - no SSE stream attached within the connect timeout
+     *
+     * Via::onClientDisconnect() runs earlier, when the stream closes, also for a reconnect blip.
+     *
+     * @param callable(Context): void $callback
      */
     public function onCleanup(callable $callback): void {
         $this->lifecycle->addCleanupCallback($callback);
     }
 
     /**
-     * Register a callback to be executed when the user disconnects.
-     *
-     * This is an alias for onCleanup() with clearer semantics.
-     * The callback is executed when:
-     * - the SSE connection closes and stays closed for the cleanup delay (Config::withContextCleanupDelay())
-     * - the browser sends the session close beacon
-     * - no SSE stream attaches within the connect timeout (Config::withContextConnectTimeout())
-     *
-     * @param callable(Context): void $callback Function to call on disconnect
+     * @deprecated removed in 0.14; throws and names onCleanup()
      */
-    public function onDisconnect(callable $callback): void {
-        $this->lifecycle->addCleanupCallback($callback);
+    public function onDisconnect(callable $callback): never {
+        Removed::method('Context::onDisconnect()', 'Use $c->onCleanup($fn): it runs at the same moment, when the context is destroyed.');
     }
 
     /**
@@ -503,6 +506,8 @@ class Context {
 
     /**
      * Get the shell template override for this context, if any.
+     *
+     * @internal
      */
     public function getShellTemplate(): ?string {
         return $this->shellTemplate;
@@ -653,15 +658,6 @@ class Context {
     }
 
     /**
-     * Check if this context has a specific scope.
-     *
-     * @internal
-     */
-    public function hasScope(string $scope): bool {
-        return \in_array($scope, $this->scopes, true);
-    }
-
-    /**
      * Broadcast updates to all contexts with the same primary scope.
      *
      * Inside a coroutine this only marks the scope for the worker's next broadcast flush; see Via::broadcast().
@@ -677,7 +673,7 @@ class Context {
         }
 
         $joined = array_values(array_diff($this->scopes, [Scope::TAB]));
-        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->getDevMode()) {
+        if ($joined !== [] && !$this->tabBroadcastWarned && $this->getConfig()->isDevMode()) {
             $this->tabBroadcastWarned = true;
             $this->app->log('warn', \sprintf(
                 'Context::broadcast() syncs only this tab, since its primary scope is TAB; before php-via 0.14 it re-rendered '
@@ -765,6 +761,8 @@ class Context {
 
     /**
      * Check if a view has been defined for this context.
+     *
+     * @internal
      */
     public function hasView(): bool {
         return $this->viewFn !== null;
@@ -883,6 +881,8 @@ class Context {
      * Covers all scopes: TAB, ROUTE, SESSION, GLOBAL, and custom.
      *
      * @return array<string, Signal>
+     *
+     * @internal
      */
     public function getNamedSignals(): array {
         return $this->signalFactory->getNamedSignals();
@@ -921,6 +921,8 @@ class Context {
      * Only actions registered with an explicit $name are included.
      *
      * @return array<string, Action>
+     *
+     * @internal
      */
     public function getNamedActions(): array {
         return $this->namedActions;
@@ -937,7 +939,8 @@ class Context {
      */
     public function action(callable $fn, ?string $name = null, mixed ...$removed): Action {
         if ($removed !== []) {
-            Removed::method('The $scope argument of Context::action()', 'An action runs for the tab that posts it: drop the third argument, and give signal() a scope to share state.');
+            // ArgumentCountError, like Signal's removed flags: no catch (\Exception) block hides it.
+            throw new \ArgumentCountError('The $scope argument of Context::action() was removed in php-via 0.14. An action runs for the tab that posts it: drop the third argument, and give signal() a scope to share state.');
         }
 
         // Deterministic ID so a destroyed context that is later revived
@@ -997,22 +1000,6 @@ class Context {
         $this->app->registerScopedAction($actionScope, $actionId, static fn (Context $caller) => $fn($caller, $actionId));
 
         return $action;
-    }
-
-    /**
-     * Execute a function periodically.
-     *
-     *     * @deprecated Use setInterval() instead
-     *
-     * @internal
-     *
-     *     * @param int      $milliseconds Interval in milliseconds
-     * @param callable $fn The function to execute
-     *
-     * @return int Timer ID that can be used to clear the timer
-     */
-    public function interval(int $milliseconds, callable $fn): int {
-        return $this->lifecycle->registerTimer($fn, $milliseconds);
     }
 
     /**

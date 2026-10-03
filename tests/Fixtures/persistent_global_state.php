@@ -10,7 +10,7 @@ declare(strict_types=1);
  *
  * argv[1] = db path, argv[2] = value to write ("-" to only read)
  * argv[3] = flush interval ms (default 100), argv[4] = worker count (default 1)
- * argv[5] = "shutdown" to write from the last worker's onShutdown, after the leader has stopped,
+ * argv[5] = "shutdown" to write from the last worker's onWorkerStop, after the leader has stopped,
  *           or "doubleterm" to stop with two SIGTERMs to the master instead of shutdown()
  */
 
@@ -46,7 +46,7 @@ $app = new Via(
 
 $app->page('/', fn () => null);
 
-$app->onStart(static function () use ($app, $write, $writeOnShutdown, $doubleTerm): void {
+$app->onWorkerStart(static function () use ($app, $write, $writeOnShutdown, $doubleTerm): void {
     if ($app->getServer()?->getWorkerId() !== 0) {
         return;
     }
@@ -77,7 +77,7 @@ $app->onStart(static function () use ($app, $write, $writeOnShutdown, $doubleTer
     });
 });
 
-$app->onShutdown(static function () use ($app, $write, $writeOnShutdown, $workers): void {
+$app->onWorkerStop(static function () use ($app, $write, $writeOnShutdown, $workers): void {
     if ($writeOnShutdown && $write !== '-' && $app->getServer()?->getWorkerId() === $workers - 1) {
         Coroutine::usleep(200_000);
         $app->setGlobalState('counter', $write);

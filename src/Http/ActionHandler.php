@@ -68,7 +68,7 @@ class ActionHandler {
         }
 
         // Read signals from request
-        $signals = Via::readSignals($request);
+        $signals = SignalParser::read($request);
 
         // For multipart/form-data (Datastar contentType:'form'), signals are not included in the
         // request: only raw FormData fields are sent. Fall back to $request->post for via_ctx.

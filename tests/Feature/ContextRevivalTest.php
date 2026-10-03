@@ -185,7 +185,7 @@ describe('Context revival', function (): void {
     });
 
     test('revival is disabled when the window is 0 (reconnect falls back to reload)', function (): void {
-        [$app, $handler] = reviveCounterApp((new Config())->withContextRevivalWindow(0));
+        [$app, $handler] = reviveCounterApp((new Config())->withContextTimeouts(revivalWindowMs: 0));
         $contextId = '/counter_/init3';
 
         reviveMintContext($app, $handler, $contextId, 'a11ce000a11ce000a11ce000a11ce000');

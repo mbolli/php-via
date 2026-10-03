@@ -272,7 +272,7 @@ final class DevBarController {
      */
     private function loadAsset(string $file): ?array {
         $cached = $this->assets[$file] ?? null;
-        if ($cached !== null && !$this->via->getConfig()->getDevMode()) {
+        if ($cached !== null && !$this->via->getConfig()->isDevMode()) {
             return $cached;
         }
 

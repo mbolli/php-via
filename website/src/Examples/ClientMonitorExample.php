@@ -68,13 +68,13 @@ final class ClientMonitorExample {
 
     public static function registerHooks(Via $app): void {
         $app->onClientConnect(function () use ($app): void {
-            if ($app->getContextsByScope(self::$routeScope) !== []) {
+            if ($app->getLocalContexts(self::$routeScope) !== []) {
                 $app->broadcast(self::$routeScope);
             }
         });
 
         $app->onClientDisconnect(function () use ($app): void {
-            if ($app->getContextsByScope(self::$routeScope) !== []) {
+            if ($app->getLocalContexts(self::$routeScope) !== []) {
                 $app->broadcast(self::$routeScope);
             }
         });

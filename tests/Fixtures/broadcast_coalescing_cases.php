@@ -696,7 +696,7 @@ $cases = [
             return "<div id=\"obs\">v={$state->value}</div>";
         });
         // Runs after the channels close.
-        $app->onShutdown(static function () use ($state): void {
+        $app->onWorkerStop(static function () use ($state): void {
             $state->order[] = 'callback';
         });
 
@@ -1161,7 +1161,7 @@ $cases = [
     'shutdown' => static function (): array {
         $broker = new CoalesceBroker();
         $app = app((new Config())->withBroker($broker));
-        $app->onShutdown(static fn () => $app->broadcast('room:bye'));
+        $app->onWorkerStop(static fn () => $app->broadcast('room:bye'));
 
         inCoroutine(static fn () => (new ReflectionMethod($app, 'runWorkerShutdown'))->invoke($app));
 
@@ -1396,7 +1396,7 @@ $cases = [
         $broker = new CoalesceBroker();
         $broker->yieldUs = 50_000;
         $app = app((new Config())->withBroker($broker));
-        $app->onShutdown(static fn () => $app->broadcast('room:bye'));
+        $app->onWorkerStop(static fn () => $app->broadcast('room:bye'));
 
         inCoroutine(static function () use ($app): void {
             $app->broadcast('room:busy');
@@ -1416,7 +1416,7 @@ $cases = [
         slowObservers($app, 'room:io', 10, 50, $state);
         $start = 0;
         $callbackAt = null;
-        $app->onShutdown(static function () use (&$callbackAt): void {
+        $app->onWorkerStop(static function () use (&$callbackAt): void {
             $callbackAt = hrtime(true);
         });
 
@@ -1440,7 +1440,7 @@ $cases = [
     },
 
     'trace-schedule' => static function (): array {
-        $app = app((new Config())->withTracing(true));
+        $app = app((new Config())->withDevBar(true));
         $state = new CoalesceState();
         observer($app, 'obs', 'room:trace', $state);
 

@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Fixture for GracefulShutdownTest: a real multi-worker server that holds an SSE stream open to
  * itself, then signals its own master the way docker stop, systemctl stop or Ctrl-C would.
  *
- * Appends "shutdown <pid>" per onShutdown call and "disconnect <pid>" per onClientDisconnect call
+ * Appends "shutdown <pid>" per onWorkerStop call and "disconnect <pid>" per onClientDisconnect call
  * to the marker file. Prints sse=open once the stream is up and sse=eof when the server ends it.
  *
  * argv[1] = worker count
@@ -17,7 +17,7 @@ declare(strict_types=1);
  * argv[4] = options as a query string: shutdownYieldMs, disconnectYieldMs, orphanContext (drop
  *           the stream's context from Via::$contexts on connect without closing its channel)
  *
- * onShutdown and onClientDisconnect yield first, then write, so a cut-off callback leaves no line.
+ * onWorkerStop and onClientDisconnect yield first, then write, so a cut-off callback leaves no line.
  */
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
@@ -48,7 +48,7 @@ $config = (new Config())
     ->withWorkerNum($workers)->withBroker(new SwooleBroker())
 ;
 if ($mode === 'IDLE') {
-    $config = $config->withGcInterval(0);
+    $config = $config->withGcIntervalMs(0);
 }
 
 $port = $config->getPort();
@@ -58,7 +58,7 @@ $app->page('/probe', function (Context $c): void {
     $c->view(fn (): string => 'CTX:' . $c->getId() . ':END');
 });
 
-$app->onShutdown(static function () use ($marker, $shutdownYieldMs): void {
+$app->onWorkerStop(static function () use ($marker, $shutdownYieldMs): void {
     $cid = Coroutine::getCid();
     if ($shutdownYieldMs > 0) {
         Coroutine::usleep($shutdownYieldMs * 1000);
@@ -83,7 +83,7 @@ if ($orphanContext) {
 $masterPid = static fn (): int => (int) $app->getServer()?->master_pid;
 
 if ($mode === 'IDLE') {
-    $app->onStart(static function () use ($app, $masterPid): void {
+    $app->onWorkerStart(static function () use ($app, $masterPid): void {
         if ($app->getServer()?->worker_id === 0) {
             Timer::after(300, static fn () => posix_kill($masterPid(), SIGTERM));
         }
@@ -101,7 +101,7 @@ $app->setInterval(static function () use ($port, $mode, $marker, $reloadFlag, $w
     $fired = true;
 
     if ($mode === 'USR1' && is_file($reloadFlag)) {
-        // New leader after the reload: wait for every old worker's onShutdown, then probe and stop.
+        // New leader after the reload: wait for every old worker's onWorkerStop, then probe and stop.
         Coroutine::create(static function () use ($port, $marker, $workers, $masterPid): void {
             for ($i = 0; $i < 100 && substr_count((string) @file_get_contents($marker), 'shutdown ') < $workers; ++$i) {
                 Coroutine::usleep(50_000);

@@ -303,7 +303,7 @@ class RequestHandler {
 
         // Handle stats endpoint (devMode only: exposes client IPs and memory usage)
         if ($path === '/_stats' && $method === 'GET') {
-            if (!$this->via->getConfig()->getDevMode()) {
+            if (!$this->via->getConfig()->isDevMode()) {
                 $response->status(404);
                 $response->end('Not Found');
 
@@ -496,7 +496,7 @@ class RequestHandler {
         $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
         $this->logRequest($method, $path, 500, $requestStart);
         $response->status(500);
-        if (!$this->via->getConfig()->getDevMode()) {
+        if (!$this->via->getConfig()->isDevMode()) {
             $response->end('Internal Server Error');
 
             return;
@@ -778,7 +778,7 @@ class RequestHandler {
         $stats = [
             'contexts' => \count($this->via->contexts),
             'clients' => $this->via->getClients(),
-            'render_stats' => $this->via->getRenderStats(),
+            'render_stats' => $this->via->getStats()->getStats(),
             // Per worker: the worker that served this request.
             'broadcast_stats' => [
                 'tick_ms' => $this->via->getConfig()->getBroadcastTickMs(),
@@ -936,7 +936,7 @@ class RequestHandler {
      * @param bool $versioned The URL carries the file's current content version
      */
     private function sendStaticFile(string $filePath, string $contentType, bool $compressible, Request $request, Response $response, bool $versioned = false): void {
-        if ($this->via->getConfig()->getDevMode()) {
+        if ($this->via->getConfig()->isDevMode()) {
             // Under the file hooks PHP keeps stat() results across writes, which would hide an edit.
             clearstatcache(true, $filePath);
         }
@@ -1028,7 +1028,7 @@ class RequestHandler {
             return;
         }
 
-        $devMode = $this->via->getConfig()->getDevMode();
+        $devMode = $this->via->getConfig()->isDevMode();
         if (!$this->staticCache->fits($size, $devMode, $filePath)) {
             $response->sendfile($filePath);
 

@@ -144,6 +144,8 @@ final class RedisBroker implements MessageBroker {
 
     /**
      * The hook_flags bit that makes this broker's socket yield: TLS, UNIX for a socket path, else TCP.
+     *
+     * @internal
      */
     public function requiredHookFlag(): int {
         return match (true) {

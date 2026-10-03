@@ -11,7 +11,7 @@ use Mbolli\PhpVia\Config;
  */
 final class OriginPolicy {
     public static function allows(Config $config, ?string $origin, ?string $host): bool {
-        $devMode = $config->getDevMode();
+        $devMode = $config->isDevMode();
 
         if ($origin === null) {
             return $devMode || $config->getAllowMissingOrigin();

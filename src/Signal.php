@@ -12,7 +12,7 @@ use Mbolli\PhpVia\Support\Removed;
  *
  * Signals can be TAB-scoped (per-context) or shared across a scope.
  */
-class Signal {
+final class Signal {
     private string $id;
     private mixed $value = null;
     private bool $changed = true;
@@ -43,6 +43,9 @@ class Signal {
     /** Store read epoch $value was loaded under (see SharedSignalStore::readEpoch()); 0 means read it again. */
     private int $readEpoch = 0;
 
+    /**
+     * @internal
+     */
     public function __construct(
         string $id,
         mixed $initialValue,
@@ -240,6 +243,8 @@ class Signal {
 
     /**
      * Check if this signal is scoped (non-TAB scope).
+     *
+     * @internal
      */
     public function isScoped(): bool {
         return $this->scope !== null && $this->scope !== Scope::TAB;
@@ -247,6 +252,8 @@ class Signal {
 
     /**
      * Get the signal's scope.
+     *
+     * @internal
      */
     public function getScope(): ?string {
         return $this->scope;
@@ -257,6 +264,8 @@ class Signal {
      *
      * An explicit clientWritable (true or false) always wins. Without one, TAB signals are
      * client-writable and scoped signals are server-authoritative.
+     *
+     * @internal
      */
     public function isClientWritable(): bool {
         return $this->clientWritable ?? !$this->isScoped();
@@ -267,6 +276,8 @@ class Signal {
      *
      * Only useful as a before/after comparison around a call into other code: an unchanged
      * count means that code did not write this signal.
+     *
+     * @internal
      */
     public function writeCount(): int {
         return $this->writes;
@@ -274,6 +285,8 @@ class Signal {
 
     /**
      * Check if signal has changed.
+     *
+     * @internal
      */
     public function hasChanged(): bool {
         return $this->changed;

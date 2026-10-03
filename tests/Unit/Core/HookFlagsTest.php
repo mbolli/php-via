@@ -22,7 +22,16 @@ describe('hook flag sets', function (): void {
         expect(Via::serverSettings(new Config())['hook_flags'])->toBe(Via::defaultHookFlags());
     });
 
-    test('the narrow set hooks sockets, sleep and proc_open, and no file or stdio I/O and no native curl', function (): void {
+    test('the narrow set hooks sockets, sleep and proc_open, no file or stdio I/O, and native curl where it does not crash', function (): void {
+        $expected = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG | SWOOLE_HOOK_SSL
+            | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
+
+        expect(Via::noFileIoHookFlags())->toBe(Via::nativeCurlHookCrashes() ? $expected : $expected | SWOOLE_HOOK_NATIVE_CURL);
+        expect(Via::noFileIoHookFlags() & (SWOOLE_HOOK_FILE | SWOOLE_HOOK_STDIO))->toBe(0);
+        expect(Via::noFileIoHookFlags() & ~SWOOLE_HOOK_ALL)->toBe(0);
+    });
+
+    test('the deprecated HOOK_FLAGS_NO_FILE_IO constant keeps its value, without native curl', function (): void {
         $expected = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG | SWOOLE_HOOK_SSL
             | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
@@ -44,9 +53,9 @@ describe('hook flag sets', function (): void {
     });
 
     test('withSwooleSettings() overrides the default', function (): void {
-        $config = (new Config())->withSwooleSettings(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO]);
+        $config = (new Config())->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
 
-        expect(Via::serverSettings($config)['hook_flags'])->toBe(Via::HOOK_FLAGS_NO_FILE_IO);
+        expect(Via::serverSettings($config)['hook_flags'])->toBe(Via::noFileIoHookFlags());
     });
 });
 
@@ -58,7 +67,7 @@ describe('Via::assertHookFlags()', function (): void {
         expect(true)->toBeTrue();
     })->with([
         'default' => [Via::defaultHookFlags()],
-        'narrow' => [Via::HOOK_FLAGS_NO_FILE_IO],
+        'narrow' => [Via::noFileIoHookFlags()],
         'FILE and STDIO' => [SWOOLE_HOOK_FILE | SWOOLE_HOOK_STDIO],
         'none' => [0],
     ]);
@@ -70,12 +79,12 @@ describe('Via::assertHookFlags()', function (): void {
     })->with([
         'STDIO alone' => [SWOOLE_HOOK_STDIO],
         'the default minus FILE' => [Via::defaultHookFlags() & ~SWOOLE_HOOK_FILE],
-        'the narrow set plus STDIO' => [Via::HOOK_FLAGS_NO_FILE_IO | SWOOLE_HOOK_STDIO],
+        'the narrow set plus STDIO' => [Via::noFileIoHookFlags() | SWOOLE_HOOK_STDIO],
     ]);
 
     test('accepts a RedisBroker under the default and the narrow set', function (RedisBroker $broker): void {
         Via::assertHookFlags(['hook_flags' => Via::defaultHookFlags()], $broker);
-        Via::assertHookFlags(['hook_flags' => Via::HOOK_FLAGS_NO_FILE_IO], $broker);
+        Via::assertHookFlags(['hook_flags' => Via::noFileIoHookFlags()], $broker);
 
         expect(true)->toBeTrue();
     })->with([

@@ -70,8 +70,8 @@ describe('Context::scope()', function (): void {
         expect($a->getPrimaryScope())->toBe(Scope::sessionScope(RESOLVER_SID_A))
             ->and($b->getPrimaryScope())->toBe(Scope::sessionScope(RESOLVER_SID_B))
             ->and($a2->getPrimaryScope())->toBe($a->getPrimaryScope())
-            ->and($app->getContextsByScope(Scope::SESSION))->toBe([])
-            ->and(array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope(Scope::sessionScope(RESOLVER_SID_A))))->toBe(['A', 'A2'])
+            ->and($app->getLocalContexts(Scope::SESSION))->toBe([])
+            ->and(array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts(Scope::sessionScope(RESOLVER_SID_A))))->toBe(['A', 'A2'])
         ;
     });
 
@@ -92,17 +92,17 @@ describe('Context::addScope() and removeScope()', function (): void {
         $ctx->addScope(Scope::SESSION);
 
         expect($ctx->getScopes())->toBe([Scope::TAB, Scope::routeScope('/p'), Scope::sessionScope(RESOLVER_SID_A)])
-            ->and($app->getContextsByScope(Scope::routeScope('/p')))->toBe([$ctx])
-            ->and($app->getContextsByScope(Scope::ROUTE))->toBe([])
-            ->and($app->getContextsByScope(Scope::SESSION))->toBe([])
+            ->and($app->getLocalContexts(Scope::routeScope('/p')))->toBe([$ctx])
+            ->and($app->getLocalContexts(Scope::ROUTE))->toBe([])
+            ->and($app->getLocalContexts(Scope::SESSION))->toBe([])
         ;
 
         $ctx->removeScope(Scope::ROUTE);
         $ctx->removeScope(Scope::SESSION);
 
         expect($ctx->getScopes())->toBe([Scope::TAB])
-            ->and($app->getContextsByScope(Scope::routeScope('/p')))->toBe([])
-            ->and($app->getContextsByScope(Scope::sessionScope(RESOLVER_SID_A)))->toBe([])
+            ->and($app->getLocalContexts(Scope::routeScope('/p')))->toBe([])
+            ->and($app->getLocalContexts(Scope::sessionScope(RESOLVER_SID_A)))->toBe([])
         ;
     });
 });
@@ -121,7 +121,7 @@ describe('SESSION signals', function (): void {
     });
 
     test('keep the session id out of the Dev Bar scope list and its traces', function (): void {
-        $app = createVia((new Config())->withDevMode(false)->withTracing(true)->withBroadcastCoalescing(false));
+        $app = createVia((new Config())->withDevMode(false)->withDevBar(true)->withBroadcastCoalescing(false));
         $app->mount(ResolverSessionSignalPage::class, '/demo');
         $ctx = new Context('ctx1', '/demo', $app, null, RESOLVER_SID_A);
         $app->contexts['ctx1'] = $ctx;

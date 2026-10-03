@@ -116,7 +116,7 @@ final class SpreadsheetExample {
                 self::$selections[$contextId] = $pos['sel'];
             }
 
-            $c->onDisconnect(function () use ($contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
+            $c->onCleanup(function () use ($contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
                 $windowMs = $app->getConfig()->getContextRevivalWindowMs();
                 if ($windowMs > 0) {
                     self::$positions[$contextId] = [
@@ -133,7 +133,7 @@ final class SpreadsheetExample {
 
                 unset(self::$cursors[$contextId], self::$selections[$contextId], self::$openEdits[$contextId]);
 
-                if ($app->getContextsByScope(self::SCOPE) !== []) {
+                if ($app->getLocalContexts(self::SCOPE) !== []) {
                     $app->broadcast(self::SCOPE);
                 }
             });
@@ -615,7 +615,7 @@ final class SpreadsheetExample {
                     'clearCellsUrl' => $clearCells->url(),
                     'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
-                    'clientCount' => \count($app->getContextsByScope(self::SCOPE)),
+                    'clientCount' => \count($app->getLocalContexts(self::SCOPE)),
                     'title' => '📊 Spreadsheet',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
                     'summary' => [

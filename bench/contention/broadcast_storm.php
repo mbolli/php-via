@@ -248,7 +248,7 @@ function runServer(array $o): void {
     $app = new Via($config);
     $wid = '0';
 
-    $app->onStart(static function () use ($app, $stats, &$wid, $parentPid, $watchdogMs, $killTarget): void {
+    $app->onWorkerStart(static function () use ($app, $stats, &$wid, $parentPid, $watchdogMs, $killTarget): void {
         $wid = (string) $app->getServer()->worker_id;
         $stats->set($wid, ['pid' => getmypid(), 'renders' => 0, 'updates' => 0, 'mounts' => 0, 'sse' => 0, 'actions' => 0]);
 

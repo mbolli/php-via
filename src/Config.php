@@ -9,11 +9,14 @@ use Mbolli\PhpVia\Broker\MessageBroker;
 use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\Removed;
 
 /**
  * Configuration class with fluent API.
+ *
+ * new Via($config) freezes it: a with* call after that throws, so make every call before.
  */
-class Config {
+final class Config {
     private string $host = '0.0.0.0';
     private int $port = 3000;
     private bool $devMode = false;
@@ -218,34 +221,37 @@ class Config {
      * Whether the Via Dev Bar (tracing overlay + /_via endpoints) is enabled.
      * null = follow devMode; true/false = explicit override.
      */
-    private ?bool $tracing = null;
+    private ?bool $devBar = null;
 
     /**
      * Whether the Dev Bar may write signal state back from the browser.
      * null = follow the VIA_DEVBAR_WRITES env var; true/false = explicit override.
      * Writes are ALWAYS gated behind devMode in addition to this flag.
      */
-    private ?bool $tracingWrites = null;
+    private ?bool $devBarWrites = null;
 
     /** Maximum number of traces retained in the in-process ring buffer. */
     private int $traceBufferSize = 100;
 
-    /** Soft cap on a single serialized trace's byte size (display guard). */
-    private int $traceMaxBytes = 16_384;
+    /** Set by new Via(): from then on every with* call throws. */
+    private bool $frozen = false;
 
     public function withHost(string $host): self {
+        $this->assertMutable(__FUNCTION__);
         $this->host = $host;
 
         return $this;
     }
 
     public function withPort(int $port): self {
+        $this->assertMutable(__FUNCTION__);
         $this->port = $port;
 
         return $this;
     }
 
     public function withDevMode(bool $devMode = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->devMode = $devMode;
 
         return $this;
@@ -261,6 +267,7 @@ class Config {
      * @throws \InvalidArgumentException for any other level
      */
     public function withLogLevel(string $level): self {
+        $this->assertMutable(__FUNCTION__);
         $this->logLevel = Logger::canonicalLevel($level) ?? throw new \InvalidArgumentException(
             "Unknown log level '{$level}': use debug, info, warn or error (PSR-3 and syslog names such as warning or err work too)."
         );
@@ -269,12 +276,14 @@ class Config {
     }
 
     public function withTemplateDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->templateDir = $dir;
 
         return $this;
     }
 
     public function withTwigCacheDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->twigCacheDir = $dir;
 
         return $this;
@@ -292,11 +301,15 @@ class Config {
      * the dir to such a file answers 404 too. Compressible files get Brotli, see withBrotli().
      */
     public function withStaticDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->staticDir = rtrim($dir, '/');
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getStaticDir(): ?string {
         return $this->staticDir;
     }
@@ -336,6 +349,7 @@ class Config {
      * @param null|\Closure(string, string): ?string|string $value
      */
     public function withStaticCacheControl(\Closure|string|null $value): self {
+        $this->assertMutable(__FUNCTION__);
         $this->staticCacheControl = $value;
 
         return $this;
@@ -345,6 +359,8 @@ class Config {
      * @param string $filePath  absolute path of the file being served
      * @param string $mimeType  resolved MIME type without a charset suffix, e.g. 'text/css'
      * @param bool   $versioned the URL carries the file's current content version, such as getDatastarUrl()
+     *
+     * @internal
      */
     public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
         if ($this->staticCacheControl instanceof \Closure) {
@@ -377,11 +393,15 @@ class Config {
      * {{ datastar_url }} placeholders, a Twig layout the importMap and datastarUrl variables.
      */
     public function withDatastarRocket(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->datastarRocket = $enabled;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function isDatastarRocketEnabled(): bool {
         return $this->datastarRocket;
     }
@@ -436,6 +456,7 @@ class Config {
      *                                   which would resolve differently on every route, or an entry for 'datastar'
      */
     public function withImportMap(array $imports, array $integrity = []): self {
+        $this->assertMutable(__FUNCTION__);
         $newImports = [];
         foreach ($imports as $specifier => $url) {
             $specifier = self::importMapString($specifier, 'specifier');
@@ -501,6 +522,7 @@ class Config {
     }
 
     public function withShellTemplate(string $path): self {
+        $this->assertMutable(__FUNCTION__);
         $this->shellTemplate = $path;
 
         return $this;
@@ -513,6 +535,7 @@ class Config {
      * @throws \InvalidArgumentException if the value is not a valid relative path
      */
     public function withBasePath(string $basePath): self {
+        $this->assertMutable(__FUNCTION__);
         // Accept only safe relative paths: zero or more /segment components
         // (each starting with [a-zA-Z0-9]) followed by an optional trailing slash.
         // Rejects protocol-relative paths (//evil.com), absolute URLs (https://…),
@@ -529,17 +552,8 @@ class Config {
     }
 
     /**
-     * How often the Dev Bar's trace and log stream checks for new records (default 100 ms).
-     *
-     * Page SSE streams do not poll: a stream wakes when a patch is queued for it, when its
-     * connection closes and when the worker stops. See withSseKeepAliveMs().
+     * @internal
      */
-    public function withSsePollIntervalMs(int $ms): self {
-        $this->ssePollIntervalMs = max(1, $ms);
-
-        return $this;
-    }
-
     public function getSsePollIntervalMs(): int {
         return $this->ssePollIntervalMs;
     }
@@ -555,11 +569,15 @@ class Config {
      * @param int $ms interval in milliseconds; 0 sends no comment, and idle streams then wake once a minute
      */
     public function withSseKeepAliveMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sseKeepAliveMs = max(0, $ms);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSseKeepAliveMs(): int {
         return $this->sseKeepAliveMs;
     }
@@ -575,11 +593,15 @@ class Config {
      * @param int $bytes threshold in bytes; 0 or less disables dropping entirely
      */
     public function withSseMaxQueuedBytes(int $bytes): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sseMaxQueuedBytes = $bytes;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSseMaxQueuedBytes(): int {
         return $this->sseMaxQueuedBytes;
     }
@@ -598,13 +620,21 @@ class Config {
      * @param bool $enabled false renders and publishes synchronously on every call, as earlier releases did,
      *                      except that a fan-out stopped after 8 passes in a row leaves what it still owes to a
      *                      flush paced by the tick (see withBroadcastTickMs())
+     *
+     * @deprecated goes in php-via 0.15, and new Via() logs a warning when coalescing is off. Call
+     *             Via::flushBroadcasts() where a broadcast has to land before the next step. A composition
+     *             class's auto-broadcast and broadcasts received from the broker cannot be flushed that way.
      */
     public function withBroadcastCoalescing(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broadcastCoalescing = $enabled;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function isBroadcastCoalescingEnabled(): bool {
         return $this->broadcastCoalescing;
     }
@@ -630,11 +660,15 @@ class Config {
      * @param int $ms gap in milliseconds; 0 flushes at the end of every event-loop turn with no gap
      */
     public function withBroadcastTickMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broadcastTickMs = max(0, $ms);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getBroadcastTickMs(): int {
         return $this->broadcastTickMs;
     }
@@ -648,23 +682,33 @@ class Config {
      * @param array<string, mixed> $settings
      */
     public function withSwooleSettings(array $settings): self {
+        $this->assertMutable(__FUNCTION__);
         $this->openSwooleSettings = array_merge($this->openSwooleSettings, $settings);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getHost(): string {
         return $this->host;
     }
 
+    /**
+     * @internal
+     */
     public function getPort(): int {
         return $this->port;
     }
 
-    public function getDevMode(): bool {
+    public function isDevMode(): bool {
         return $this->devMode;
     }
 
+    /**
+     * @internal
+     */
     public function getLogLevel(): string {
         return $this->logLevel;
     }
@@ -673,6 +717,9 @@ class Config {
         return $this->templateDir;
     }
 
+    /**
+     * @internal
+     */
     public function getShellTemplate(): ?string {
         return $this->shellTemplate;
     }
@@ -683,6 +730,8 @@ class Config {
 
     /**
      * @return array<string, mixed>
+     *
+     * @internal
      */
     public function getSwooleSettings(): array {
         return $this->openSwooleSettings;
@@ -693,11 +742,15 @@ class Config {
      * Enable this for any deployment served over HTTPS.
      */
     public function withSecureCookie(bool $secure = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->secureCookie = $secure;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSecureCookie(): bool {
         return $this->secureCookie;
     }
@@ -720,6 +773,7 @@ class Config {
      * @param bool                      $partitioned    partition the cookie per top-level site (CHIPS). Recommended true.
      */
     public function withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sessionCookieSameSite = 'None';
         $this->secureCookie = true;              // SameSite=None requires Secure
         $this->sessionCookiePartitioned = $partitioned;
@@ -730,16 +784,24 @@ class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSessionCookieSameSite(): string {
         return $this->sessionCookieSameSite;
     }
 
+    /**
+     * @internal
+     */
     public function isSessionCookiePartitioned(): bool {
         return $this->sessionCookiePartitioned;
     }
 
     /**
      * @return null|list<string>
+     *
+     * @internal
      */
     public function getFrameAncestors(): ?array {
         return $this->frameAncestors;
@@ -755,6 +817,7 @@ class Config {
      * @param null|list<string> $origins
      */
     public function withTrustedOrigins(?array $origins): self {
+        $this->assertMutable(__FUNCTION__);
         $this->trustedOrigins = $origins;
 
         return $this;
@@ -762,6 +825,8 @@ class Config {
 
     /**
      * @return null|list<string>
+     *
+     * @internal
      */
     public function getTrustedOrigins(): ?array {
         return $this->trustedOrigins;
@@ -776,11 +841,15 @@ class Config {
      * Dev Bar's /_via/signal and /_via/reset.
      */
     public function withAllowMissingOrigin(bool $allow = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->allowMissingOrigin = $allow;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getAllowMissingOrigin(): bool {
         return $this->allowMissingOrigin;
     }
@@ -797,11 +866,15 @@ class Config {
      * server-owned TAB signals are per-worker state: use worker_num = 1 or a scoped signal.
      */
     public function withStrictTabSignals(bool $strict = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->strictTabSignals = $strict;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getStrictTabSignals(): bool {
         return $this->strictTabSignals;
     }
@@ -813,16 +886,23 @@ class Config {
      * @param int $windowSeconds Window size in seconds (default 60)
      */
     public function withActionRateLimit(int $maxRequests, int $windowSeconds = 60): self {
+        $this->assertMutable(__FUNCTION__);
         $this->actionRateLimit = max(0, $maxRequests);
         $this->actionRateWindow = max(1, $windowSeconds);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getActionRateLimit(): int {
         return $this->actionRateLimit;
     }
 
+    /**
+     * @internal
+     */
     public function getActionRateWindow(): int {
         return $this->actionRateWindow;
     }
@@ -837,100 +917,82 @@ class Config {
      *
      * @param int $ms Timer interval in milliseconds. Pass 0 to disable.
      */
-    public function withGcInterval(int $ms): self {
+    public function withGcIntervalMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->gcIntervalMs = max(0, $ms);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getGcIntervalMs(): int {
         return $this->gcIntervalMs;
     }
 
     /**
-     * Configure the context cleanup grace period.
+     * Set how long a context lives without an SSE stream; null keeps a timer as it is.
      *
-     * When an SSE stream disconnects, php-via doesn't destroy the context immediately:
-     * it waits this long for a page navigation or reconnect before tearing it down. Longer
-     * delays tolerate flakier clients at the cost of holding idle contexts (and their
-     * in-memory view payloads) in memory for longer under concurrent disconnects.
+     * - $cleanupDelayMs (default 5 s): after a tab's stream disconnects, the context waits this long for a
+     *   reconnect or a page navigation before it is destroyed. 0 destroys it at once. Longer delays tolerate
+     *   flakier clients and hold idle contexts, with their view payloads, in memory longer.
+     * - $connectMs (default 30 s): a page load whose stream never connects (a crawler, a prefetch, a tab
+     *   closed early), and a context an action rebuilt on a worker the tab does not stream from, are destroyed
+     *   after this long. A connect cancels the timer, and every action on such a context starts it again. 0
+     *   keeps such contexts until the worker stops.
+     * - $reconnectMs (default 60 s): an action that reaches a context whose stream is down (it dropped, or the
+     *   action just revived the context) keeps it this long, so the patches the action queued reach the tab
+     *   when it reconnects. It must exceed the client's longest wait between reconnects: Datastar backs off to
+     *   30 s by default (retryMaxWait). 0 uses $connectMs.
+     * - $revivalWindowMs (default 10 min): for this long after a context is destroyed, a returning tab gets an
+     *   equivalent one (same id, handler run again, signals seeded from the browser) instead of a full reload.
+     *   Server-only state such as #[Persist] starts over, as on a reload. 0 turns revival off.
      *
-     * @param int $ms Grace period in milliseconds. Pass 0 to disable (cleanup is immediate).
+     * The context's onCleanup() callbacks run when it is destroyed, whichever timer did it.
      */
-    public function withContextCleanupDelay(int $ms): self {
-        $this->contextCleanupDelayMs = max(0, $ms);
+    public function withContextTimeouts(?int $cleanupDelayMs = null, ?int $connectMs = null, ?int $reconnectMs = null, ?int $revivalWindowMs = null): self {
+        $this->assertMutable(__FUNCTION__);
+        if ($cleanupDelayMs !== null) {
+            $this->contextCleanupDelayMs = max(0, $cleanupDelayMs);
+        }
+        if ($connectMs !== null) {
+            $this->contextConnectTimeoutMs = max(0, $connectMs);
+        }
+        if ($reconnectMs !== null) {
+            $this->contextReconnectTimeoutMs = max(0, $reconnectMs);
+        }
+        if ($revivalWindowMs !== null) {
+            $this->contextRevivalWindowMs = max(0, $revivalWindowMs);
+        }
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getContextCleanupDelayMs(): int {
         return $this->contextCleanupDelayMs;
     }
 
     /**
-     * Configure how long a context may live without an SSE stream.
-     *
-     * A page load whose stream never connects (a crawler, a prefetch, a tab closed before it
-     * connected) and a context an action rebuilt on a worker the tab does not stream from are
-     * destroyed after this long, running their onCleanup/onDisconnect callbacks. An SSE connect
-     * cancels the timer, and every action on such a context starts it again. A tab that connects
-     * later than this is rebuilt by revival (see withContextRevivalWindow()). A tab whose stream
-     * dropped is freed after withContextCleanupDelay(), or after withContextReconnectTimeout()
-     * once an action reaches it.
-     *
-     * @param int $ms Lifetime in milliseconds. Pass 0 to keep such contexts until the worker stops.
+     * @internal
      */
-    public function withContextConnectTimeout(int $ms): self {
-        $this->contextConnectTimeoutMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextConnectTimeoutMs(): int {
         return $this->contextConnectTimeoutMs;
     }
 
     /**
-     * Configure how long a tab whose stream is down waits for it to reconnect after an action.
-     *
-     * An action that reaches a context without a stream anywhere (its stream dropped, or the action
-     * just revived it) keeps it for this long, and each further action starts the timer again. The
-     * patches the action queued wait in the context, and a freed context takes them with it, so this
-     * must exceed the client's longest wait between reconnect attempts: Datastar backs off to 30 s
-     * by default (retryMaxWait). A copy rebuilt for an action on a worker the tab does not stream
-     * from keeps the connect timeout.
-     *
-     * @param int $ms Wait in milliseconds. Pass 0 to use withContextConnectTimeout().
+     * @internal
      */
-    public function withContextReconnectTimeout(int $ms): self {
-        $this->contextReconnectTimeoutMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextReconnectTimeoutMs(): int {
         return $this->contextReconnectTimeoutMs;
     }
 
     /**
-     * Configure the context revival window.
-     *
-     * When a tab is backgrounded long enough that its context is destroyed (past
-     * {@see withContextCleanupDelay()}), a returning tab normally hard-reloads. With revival
-     * enabled, the server instead rebuilds an equivalent context (same ID, so the already-loaded
-     * DOM keeps working) by re-running the page handler and re-seeding signal values the client
-     * still holds. This preserves local (underscore) signals, scroll, and focus that a reload
-     * would destroy. Revival re-runs the page handler, so it is not lossless: server-only state
-     * (e.g. #[Persist]) resets and onDisconnect/connect hooks re-fire, exactly as on a reload.
-     *
-     * @param int $ms Window in milliseconds. Pass 0 to disable (reconnect falls back to a reload).
+     * How long after a context is destroyed a returning tab can still revive it, in milliseconds; 0 when revival is off.
      */
-    public function withContextRevivalWindow(int $ms): self {
-        $this->contextRevivalWindowMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextRevivalWindowMs(): int {
         return $this->contextRevivalWindowMs;
     }
@@ -943,16 +1005,23 @@ class Config {
      * @param string $keyFile  Path to PEM private key file
      */
     public function withCertificate(string $certFile, string $keyFile): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sslCertFile = $certFile;
         $this->sslKeyFile = $keyFile;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSslCertFile(): ?string {
         return $this->sslCertFile;
     }
 
+    /**
+     * @internal
+     */
     public function getSslKeyFile(): ?string {
         return $this->sslKeyFile;
     }
@@ -1011,6 +1080,7 @@ class Config {
      * @param null|int $staticLevel  level for static files (1 to 11), 0 for none; null: 11, or 0 if $enabled is false
      */
     public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, ?int $staticLevel = null): self {
+        $this->assertMutable(__FUNCTION__);
         $this->brotli = $enabled;
         $this->brotliDynamicLevel = max(0, min(11, $dynamicLevel));
         $this->brotliStaticLevel = max(0, min(11, $staticLevel ?? ($enabled ? 11 : 0)));
@@ -1018,14 +1088,23 @@ class Config {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getBrotli(): bool {
         return $this->brotli;
     }
 
+    /**
+     * @internal
+     */
     public function getBrotliDynamicLevel(): int {
         return $this->brotliDynamicLevel;
     }
 
+    /**
+     * @internal
+     */
     public function getBrotliStaticLevel(): int {
         return $this->brotliStaticLevel;
     }
@@ -1040,11 +1119,15 @@ class Config {
      * Do NOT enable on a server exposed directly to untrusted traffic.
      */
     public function withH2c(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->h2c = $enabled;
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function isH2c(): bool {
         return $this->h2c;
     }
@@ -1063,6 +1146,7 @@ class Config {
      * ```
      */
     public function withBroker(MessageBroker $broker): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broker = $broker;
 
         return $this;
@@ -1089,6 +1173,7 @@ class Config {
      * @param callable(\Throwable): void $handler
      */
     public function onBrokerError(callable $handler): self {
+        $this->assertMutable(__FUNCTION__);
         $this->brokerErrorHandler = $handler;
 
         return $this;
@@ -1098,6 +1183,8 @@ class Config {
      * Return the configured broker error handler, or null if none was set.
      *
      * @return null|callable(\Throwable): void
+     *
+     * @internal
      */
     public function getBrokerErrorHandler(): ?callable {
         return $this->brokerErrorHandler;
@@ -1105,6 +1192,8 @@ class Config {
 
     /**
      * Return the configured broker. Without one, SwooleBroker for more than one worker, else a no-op InMemoryBroker.
+     *
+     * @internal
      */
     public function getBroker(): MessageBroker {
         return $this->broker ?? ($this->workerNum > 1 ? new SwooleBroker() : new InMemoryBroker());
@@ -1119,7 +1208,8 @@ class Config {
      * withBroker() makes start() throw.
      *
      * Session data, GlobalState and scoped signal values move to shared-memory tables sized
-     * at start-up; see withSessionTableSize() and the other with*TableSize() methods.
+     * at start-up; see withSessionTableSize() and the other with*TableSize() methods. Values
+     * there are copied, so a live object kept in globalState() only works with one worker.
      *
      * Example:
      * ```php
@@ -1127,11 +1217,15 @@ class Config {
      * ```
      */
     public function withWorkerNum(int $n): self {
+        $this->assertMutable(__FUNCTION__);
         $this->workerNum = max(1, $n);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getWorkerNum(): int {
         return $this->workerNum;
     }
@@ -1160,6 +1254,7 @@ class Config {
      * @param int $maxValueBytes Maximum serialized byte size per value (default 32768)
      */
     public function withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->assertMutable(__FUNCTION__);
         $this->globalStateTableRows = max(1, $maxRows);
         $this->globalStateTableValueBytes = max(64, $maxValueBytes);
 
@@ -1187,6 +1282,7 @@ class Config {
      * @param int $maxValueBytes Maximum serialized byte size per non-integer value (default 32768)
      */
     public function withScopedSignalTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->assertMutable(__FUNCTION__);
         $this->scopedSignalTableRows = max(1, $maxRows);
         $this->scopedSignalTableValueBytes = max(64, $maxValueBytes);
 
@@ -1210,6 +1306,7 @@ class Config {
      * @param int $ttlSeconds     Expiry for a record with no heartbeat (default 3600)
      */
     public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextDirectoryRows = max(1, $maxRows);
         $this->contextDirectoryRecordBytes = max(128, $maxRecordBytes);
         $this->contextDirectoryTtlSeconds = max(60, $ttlSeconds);
@@ -1240,36 +1337,58 @@ class Config {
      * @param int $maxBytesPerSession Serialized byte cap for all of one session's data (default 16384)
      */
     public function withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 16384): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sessionTableRows = max(1, $maxSessions);
         $this->sessionTableValueBytes = max(64, $maxBytesPerSession);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getSessionTableRows(): int {
         return $this->sessionTableRows;
     }
 
+    /**
+     * @internal
+     */
     public function getSessionTableValueBytes(): int {
         return $this->sessionTableValueBytes;
     }
 
+    /**
+     * @internal
+     */
     public function getContextDirectoryRows(): int {
         return $this->contextDirectoryRows;
     }
 
+    /**
+     * @internal
+     */
     public function getContextDirectoryRecordBytes(): int {
         return $this->contextDirectoryRecordBytes;
     }
 
+    /**
+     * @internal
+     */
     public function getContextDirectoryTtlSeconds(): int {
         return $this->contextDirectoryTtlSeconds;
     }
 
+    /**
+     * @internal
+     */
     public function getScopedSignalTableRows(): int {
         return $this->scopedSignalTableRows;
     }
 
+    /**
+     * @internal
+     */
     public function getScopedSignalTableValueBytes(): int {
         return $this->scopedSignalTableValueBytes;
     }
@@ -1294,79 +1413,100 @@ class Config {
      * @param int    $flushMs How often the leader worker drains the dirty set (default 1000)
      */
     public function withPersistentGlobalState(string $path, int $flushMs = 1000): self {
+        $this->assertMutable(__FUNCTION__);
         $this->globalStatePath = $path;
         $this->globalStateFlushMs = max(50, $flushMs);
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStatePath(): ?string {
         return $this->globalStatePath;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStateFlushMs(): int {
         return $this->globalStateFlushMs;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStateTableRows(): int {
         return $this->globalStateTableRows;
     }
 
+    /**
+     * @internal
+     */
     public function getGlobalStateTableValueBytes(): int {
         return $this->globalStateTableValueBytes;
     }
 
     /**
-     * Enable the Via Dev Bar: a tabbed debug overlay (traces, signals, SSE
-     * patches, request, scopes, errors) injected into every page, plus the
-     * `/_via/*` endpoints and standalone console.
+     * Turn the Via Dev Bar on or off: a tabbed debug overlay (traces, signals, SSE patches, request, scopes,
+     * errors) injected into every page, plus the `/_via/*` endpoints and the standalone console.
      *
-     * Like `/_stats`, the Dev Bar exposes timings, routes, and live signal
-     * state: it is for development. It defaults to `getDevMode()`, but you may
-     * force it on (e.g. to demo it on a public site) by passing `true`, or off
-     * with `false`. Even when forced on, signal *editing* stays disabled unless
-     * devMode is also on (see {@see withTracingWrites()}).
-     *
-     * @param null|bool $enabled true/false to force, null to follow devMode
+     * Without this call it is on in dev mode only. false turns it off in dev mode, true turns it on outside dev
+     * mode, read-only, for an admin-only or demo deployment. Every visitor of such a deployment sees the traces,
+     * scopes, context ids and signal values of all tabs on the worker, like `/_stats`. Editing signals needs dev
+     * mode in any case, see withDevBarOptions().
      */
-    public function withTracing(?bool $enabled = true): self {
-        $this->tracing = $enabled;
+    public function withDevBar(bool $enabled): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->devBar = $enabled;
 
         return $this;
-    }
-
-    public function isTracingEnabled(): bool {
-        return $this->tracing ?? $this->devMode;
     }
 
     /**
-     * Allow the Dev Bar's Signals panel to write values back to the server.
+     * Tune the Dev Bar; null keeps a setting as it is, so a second call changes only what it names.
      *
-     * **Hard production guard:** writes require `devMode` *in addition to* this
-     * flag and tracing being enabled. The leading devMode check means an
-     * explicit `withTracingWrites(true)` is ignored when devMode is off, so
-     * `withTracing(true)` on a public site is always read-only. Editing is
-     * opt-in for local dev via this call or the `VIA_DEVBAR_WRITES=1` env var.
-     *
-     * The abuse surface is real: any visitor who can reach the page could
-     * mutate ROUTE/SESSION/GLOBAL scope state shared with other users. Never
-     * enable this on a deployment exposed to untrusted traffic.
-     *
-     * @param null|bool $enabled true/false to force, null to follow VIA_DEVBAR_WRITES
+     * @param null|bool $writes let the Signals panel write values back to the server. Writes need dev mode in
+     *                          addition, so a Dev Bar on outside dev mode stays read-only. Without this, the
+     *                          VIA_DEVBAR_WRITES=1 env var turns them on. Any visitor who can reach the page could
+     *                          then change ROUTE, SESSION and GLOBAL state shared with other users.
+     * @param null|int  $traces traces kept per worker (default 100)
+     * @param null|int  $pollMs how often the Dev Bar's trace and log stream checks for new records (default 100 ms)
      */
-    public function withTracingWrites(?bool $enabled = null): self {
-        $this->tracingWrites = $enabled;
+    public function withDevBarOptions(?bool $writes = null, ?int $traces = null, ?int $pollMs = null): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->devBarWrites = $writes ?? $this->devBarWrites;
+        if ($traces !== null) {
+            $this->traceBufferSize = max(1, $traces);
+        }
+        if ($pollMs !== null) {
+            $this->ssePollIntervalMs = max(1, $pollMs);
+        }
 
         return $this;
     }
 
+    /**
+     * @internal
+     */
+    public function isTracingEnabled(): bool {
+        return $this->devBar ?? $this->devMode;
+    }
+
+    /**
+     * Whether the Dev Bar may write signals: dev mode, the Dev Bar on, and withDevBarOptions(writes: true) or
+     * VIA_DEVBAR_WRITES=1.
+     *
+     * @internal
+     */
     public function isTracingWritesEnabled(): bool {
         if (!$this->devMode || !$this->isTracingEnabled()) {
             return false;
         }
 
-        if ($this->tracingWrites !== null) {
-            return $this->tracingWrites;
+        if ($this->devBarWrites !== null) {
+            return $this->devBarWrites;
         }
 
         $env = getenv('VIA_DEVBAR_WRITES');
@@ -1375,24 +1515,98 @@ class Config {
     }
 
     /**
-     * Tune the trace ring buffer.
-     *
-     * @param int $traces        Maximum traces retained (default 100)
-     * @param int $maxTraceBytes Soft cap on a serialized trace's size (default 16384)
+     * @internal
      */
-    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): self {
-        $this->traceBufferSize = max(1, $traces);
-        $this->traceMaxBytes = max(1024, $maxTraceBytes);
-
-        return $this;
-    }
-
     public function getTraceBufferSize(): int {
         return $this->traceBufferSize;
     }
 
-    public function getTraceMaxBytes(): int {
-        return $this->traceMaxBytes;
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBar()
+     */
+    public function withTracing(?bool $enabled = true): never {
+        Removed::method('Config::withTracing()', 'Use ->withDevBar(true) or ->withDevBar(false).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withTracingWrites(?bool $enabled = null): never {
+        Removed::method('Config::withTracingWrites()', 'Use ->withDevBarOptions(writes: true).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): never {
+        Removed::method('Config::withTraceBufferSize()', 'Use ->withDevBarOptions(traces: $traces).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withSsePollIntervalMs(int $ms): never {
+        Removed::method('Config::withSsePollIntervalMs()', 'Use ->withDevBarOptions(pollMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names isDevMode()
+     */
+    public function getDevMode(): never {
+        Removed::method('Config::getDevMode()', 'Use ->isDevMode().');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withGcIntervalMs()
+     */
+    public function withGcInterval(int $ms): never {
+        Removed::method('Config::withGcInterval()', 'Use ->withGcIntervalMs($ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextCleanupDelay(int $ms): never {
+        Removed::method('Config::withContextCleanupDelay()', 'Use ->withContextTimeouts(cleanupDelayMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextConnectTimeout(int $ms): never {
+        Removed::method('Config::withContextConnectTimeout()', 'Use ->withContextTimeouts(connectMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextReconnectTimeout(int $ms): never {
+        Removed::method('Config::withContextReconnectTimeout()', 'Use ->withContextTimeouts(reconnectMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextRevivalWindow(int $ms): never {
+        Removed::method('Config::withContextRevivalWindow()', 'Use ->withContextTimeouts(revivalWindowMs: $ms).');
+    }
+
+    /**
+     * Freeze this Config: every later with* call throws.
+     *
+     * @internal called by new Via()
+     */
+    public function freeze(): void {
+        $this->frozen = true;
+    }
+
+    private function assertMutable(string $method): void {
+        if ($this->frozen) {
+            throw new \LogicException(
+                "Config::{$method}() was called after new Via(\$config), which freezes the Config: a later change would be "
+                . 'ignored or only half applied. Make every with* call before new Via().'
+            );
+        }
     }
 
     /**
