@@ -354,6 +354,10 @@ $c->onCleanup(function (Context $c): void { /* ... */ });
   5 s by default).
 - **Idle streams stay open behind proxies.** A stream silent for 15 s writes an SSE
   comment (`withSseKeepAliveMs()`, `0` turns it off).
+- **SSE needs no proxy setting.** Caddy's `reverse_proxy` flushes `text/event-stream`
+  responses immediately, so no `flush_interval` is needed; behind TLS, use
+  `reverse_proxy h2c://127.0.0.1:3000` with `withH2c()`. The SSE response's
+  `X-Accel-Buffering: no` header turns nginx's proxy buffering off for it.
 - **A context whose stream never connects is freed** after the connect timeout
   (`withContextConnectTimeout()`, 30 s by default), running its cleanup hooks.
 - **An action on a tab whose stream is down keeps it for the reconnect.** The stream

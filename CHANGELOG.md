@@ -437,6 +437,8 @@ message that names the new one.
   Deployment.
 - [Views](https://via.zweiundeins.gmbh/docs/views#preserve-attr) shows how `data-preserve-attr`
   keeps a `<dialog>` opened with `showModal()` open across updates and SSE reconnects.
+- Deployment no longer says Caddy needs response buffering turned off for SSE: `reverse_proxy`
+  flushes `text/event-stream` responses at once. It shows the live site's h2c setup instead.
 
 ## [0.13.1] - 2026-10-02
 
