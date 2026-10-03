@@ -137,7 +137,7 @@ $count->bind('value'); // data-bind__prop.value="<id>", for web components
 
 `setValue()`, `increment()` and `mutate()` take no flags: `broadcast:` and `markChanged:`
 throw an `ArgumentCountError`. Declare `autoBroadcast: false` for a quiet scoped signal, and
-call `markSynced()` after a write the tab already shows. `Signal::text()` is removed: use
+call `markSynced()` after a write the tab already shows. Render a value with
 `<span data-text="{$s->ref()}">{$s->string()}</span>`.
 
 **Ids**: a signal's id is unique per tab and includes the tab for TAB signals, so always
@@ -675,13 +675,9 @@ $config = (new Config())
 ;
 ```
 
-Renamed in 0.14 (the old names throw and name the new one): `withContextCleanupDelay()`,
-`withContextConnectTimeout()`, `withContextReconnectTimeout()` and `withContextRevivalWindow()`
-are `withContextTimeouts(...)`; `withTracing()` is `withDevBar()`; `withTracingWrites()`,
-`withTraceBufferSize()` and `withSsePollIntervalMs()` are `withDevBarOptions(...)`;
-`getDevMode()` is `isDevMode()`; `withGcInterval()` is `withGcIntervalMs()`. Apps read only
-`getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`, `getDatastarIntegrity()`,
-`getImportMap()` and `getContextRevivalWindowMs()`; the other getters are internal.
+Apps read only `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`,
+`getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`; the other getters
+are internal. Setters renamed in 0.14 are listed under Upgrading from 0.13.
 
 ---
 
@@ -817,8 +813,7 @@ Twig is optional: `composer require twig/twig`, then `withTemplateDir()` or
 `withTemplateEngine(new \Mbolli\PhpVia\Twig\TwigEngine($dir, $cacheDir))`. Without an engine,
 `view('x.html.twig')`, `render()` and `getTwig()` throw with the command to run.
 `Via::getTwig()` returns the Twig environment for extensions and templates held as strings
-(`$app->getTwig()->createTemplate($src)->render($data)` replaces the removed
-`renderString()`). `Context::render()` passes the context's signals and actions to the template
+(`$app->getTwig()->createTemplate($src)->render($data)`). `Context::render()` passes the context's signals and actions to the template
 by name, plus:
 
 | Variable | Value |
@@ -954,12 +949,18 @@ server, no port and no `VIA_TEST_MODE`, as one worker, with broadcasts rendered 
 The full guide is https://via.zweiundeins.gmbh/docs/upgrading. The changes that break code:
 
 - `composer require twig/twig` for `withTemplateDir()`, template views, `render()` and `getTwig()`.
-- `new Via($config)` freezes the Config; renamed setters throw and name the new call (Config Reference).
+- `new Via($config)` freezes the Config. Renamed setters throw and name the new call:
+  `withContextCleanupDelay()`, `withContextConnectTimeout()`, `withContextReconnectTimeout()` and
+  `withContextRevivalWindow()` are `withContextTimeouts(...)`; `withTracing()` is `withDevBar()`;
+  `withTracingWrites()`, `withTraceBufferSize()` and `withSsePollIntervalMs()` are
+  `withDevBarOptions(...)`; `getDevMode()` is `isDevMode()`; `withGcInterval()` is
+  `withGcIntervalMs()`.
 - `onStart()`/`onShutdown()` are `onWorkerStart()`/`onWorkerStop()`; `config()` is `getConfig()`;
   `getContextsByScope()` is `getLocalContexts()`; `getRenderStats()` is `getStats()->getStats()`;
   `activeSseCount[$id]` is `$c->isConnected()`; `onDisconnect()`/`#[OnDisconnect]` are
   `onCleanup()`/`#[OnCleanup]`; `interval($ms, $fn)` is `setInterval($fn, $ms)`; `renderString()`
-  and `Signal::text()` are removed; `parseSignals()` is gone.
+  (`$app->getTwig()->createTemplate($src)->render($data)`) and `Signal::text()` (`data-text` with
+  `ref()`) are removed; `parseSignals()` is gone.
 - `signal()` needs a name and takes its scope as an argument; after `scope()` a signal without one
   throws. `action()` takes no scope.
 - `setValue()`/`increment()`/`mutate()` take no `broadcast:`/`markChanged:`.
