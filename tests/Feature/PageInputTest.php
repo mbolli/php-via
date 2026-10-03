@@ -18,11 +18,11 @@ use Tests\Support\FakeStaticResponse;
  */
 
 /**
- * Load $path through the RequestHandler and return the context it created and the log.
+ * Load $path through the RequestHandler and return the context it created, the log and the session cookie it set.
  *
  * @param array<string, mixed> $query
  *
- * @return array{0: Context, 1: string}
+ * @return array{0: Context, 1: string, 2: string}
  */
 function pageInputLoad(Via $via, string $path, array $query): array {
     $handler = (new ReflectionProperty(Via::class, 'requestHandler'))->getValue($via);
@@ -48,7 +48,7 @@ function pageInputLoad(Via $via, string $path, array $query): array {
     $created = array_values(array_diff(array_keys($via->contexts), $before));
     expect($created)->toHaveCount(1);
 
-    return [$via->contexts[$created[0]], $log];
+    return [$via->contexts[$created[0]], $log, (string) ($response->cookies['via_session_id'] ?? '')];
 }
 
 /**
@@ -100,11 +100,11 @@ describe('input() on a page load', function (): void {
     test('an action reads the action request, not the page query', function (): void {
         $seen = [];
         $via = pageInputApp($seen);
-        [$ctx] = pageInputLoad($via, '/search', ['q' => 'flows']);
+        [$ctx, , $cookie] = pageInputLoad($via, '/search', ['q' => 'flows']);
 
         $request = new FakeActionRequest('more', ['via_ctx' => $ctx->getId()]);
         $request->get = ['page' => '4'];
-        $request->cookie = ['via_session_id' => (string) $ctx->getSessionId()];
+        $request->cookie = ['via_session_id' => $cookie];
         ob_start();
         (new ActionHandler($via))->handleAction($request, new FakeStaticResponse(), 'more');
         ob_end_clean();

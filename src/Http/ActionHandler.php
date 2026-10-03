@@ -147,6 +147,7 @@ class ActionHandler {
                     $cookie['sameSite'],
                 );
             }
+            $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation());
 
             $response->status(200);
             $response->end();
@@ -160,6 +161,7 @@ class ActionHandler {
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, false);
+            $this->via->writeSessionCookie($request, $response, rotate: $context->takeSessionRotation());
 
             $response->status(500);
             $response->end('Action failed');

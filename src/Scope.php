@@ -105,9 +105,9 @@ final class Scope {
     /**
      * The scope all tabs of one browser session share, as Scope::SESSION resolves inside a context.
      *
-     * Opaque: it is derived from the session id but never contains it, since the id is the HttpOnly
-     * cookie value and scopes reach the Dev Bar, traces, broker messages and signal ids in the page.
-     * The format may change; build it only through this method.
+     * Opaque: it is derived from the session id but never contains it, since scopes reach the Dev Bar,
+     * traces, broker messages and signal ids in the page. The format may change; build it only through
+     * this method.
      *
      * @param string $sessionId the id $c->getSessionId() returns
      */

@@ -156,6 +156,10 @@ final class SharedSessionStore {
         return $removed;
     }
 
+    public function has(string $sessionId): bool {
+        return $this->meta->exists(self::key($sessionId));
+    }
+
     /** Number of sessions holding data. */
     public function count(): int {
         return \count($this->meta);

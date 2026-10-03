@@ -94,6 +94,8 @@ class SseHandler {
         foreach (SwooleSSEGenerator::headers() as $name => $value) {
             $response->header($name, $value);
         }
+        // For a rotation SSE-aware middleware asked for.
+        $this->via->writeSessionCookie($request, $response);
 
         // If context doesn't exist, it was cleaned up. First try to rebuild it (same ID) so the
         // tab keeps its view without a reload; on success we fall through to normal SSE handling.
