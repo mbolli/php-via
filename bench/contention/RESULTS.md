@@ -21,9 +21,9 @@ the recorded base and branch medians from the sections below.
   cores 6 to 11. lock_contention ran on cores 2, 4, 6 and 8 with four busy
   loops, shared_read and get_clients on core 2. The clock was sampled during
   every run.
-- **Protocol:** 0.14.0 then base in every rep, at the sizes and rep counts of
-  the tables below (F5 base 3 reps). Unheld controls used the same pinning
-  without the busy loops. Table format as described at the top of this file.
+- **Protocol:** 0.14.0 then base in every rep, at the sizes and rep counts
+  each table below states. Unheld controls used the same pinning without the
+  busy loops. Table format as described at the top of this file.
   Every run was correct in both trees: every storm converged with no failed
   action, every idle_sse broadcast reached all 5000 connections, every lock
   run reached its final value, shared_read had 0 mismatched frames and every
@@ -43,9 +43,11 @@ workers ran below 4.5 GHz (see F2).
   found no measurable regression.
 - Base's idle CPU in F2 follows the clock: 8.79% held and 17.78% unheld at 5000
   streams on one worker. The recorded 13.39% lies between.
-- Everything else was not clock-inflated: the storms, F1 at K=2 and K=20,
-  lock_contention, shared_read and get_clients read the same held and unheld,
-  or within the noise. Every ratio in the sections below holds.
+- Everything else was not clock-inflated. The storms keep the server busy,
+  and base takes 12 to 13% longer held than recorded. F1 at K=2 and K=20,
+  shared_read and get_clients read the same held and unheld, and
+  lock_contention's throughput moves by under 30% (see F3). Every ratio in the
+  sections below holds.
 - Two verdicts change for 0.14.0, and neither is the clock. The F4 regression
   check fails: the single-worker fan-out costs more per context than base. The
   F2 shutdown regression no longer reproduces.
