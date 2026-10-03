@@ -1,0 +1,50 @@
+<?php
+
+declare(strict_types=1);
+
+use Mbolli\PhpVia\Http\SwooleSSEGenerator;
+use Mbolli\PhpVia\PatchMode;
+use Mbolli\PhpVia\Testing\SseReader;
+use starfederation\datastar\enums\ElementPatchMode;
+
+// Testing\SseReader reads back the frames Datastar's SDK writes, the ones SseHandler sends.
+
+test('an element patch keeps its selector, its mode and its HTML over several lines', function (): void {
+    $sse = new SwooleSSEGenerator();
+    $frames = $sse->patchElements("<ul id=\"list\">\n  <li>a</li>\n</ul>")
+        . $sse->patchElements('<li>b</li>', ['selector' => '#list', 'mode' => ElementPatchMode::Append])
+        . $sse->patchElements('', ['selector' => '#gone', 'mode' => ElementPatchMode::Remove]);
+
+    expect((new SseReader())->read($frames))->toBe([
+        ['type' => 'elements', 'html' => "<ul id=\"list\">\n  <li>a</li>\n</ul>", 'selector' => null, 'mode' => PatchMode::Outer],
+        ['type' => 'elements', 'html' => '<li>b</li>', 'selector' => '#list', 'mode' => PatchMode::Append],
+        ['type' => 'elements', 'html' => '', 'selector' => '#gone', 'mode' => PatchMode::Remove],
+    ]);
+});
+
+test('a signal patch has the decoded values, and onlyIfMissing', function (): void {
+    $sse = new SwooleSSEGenerator();
+    $frames = $sse->patchSignals(['count_x____t' => 3, 'filters' => ['a' => 1, 'b' => null]])
+        . $sse->patchSignals(['seed' => 'v'], ['onlyIfMissing' => true]);
+
+    expect((new SseReader())->read($frames))->toBe([
+        ['type' => 'signals', 'signals' => ['count_x____t' => 3, 'filters' => ['a' => 1, 'b' => null]], 'onlyIfMissing' => false],
+        ['type' => 'signals', 'signals' => ['seed' => 'v'], 'onlyIfMissing' => true],
+    ]);
+});
+
+test('a script is an element patch that appends it to body', function (): void {
+    expect((new SseReader())->read((new SwooleSSEGenerator())->executeScript('alert(1)')))->toBe([
+        ['type' => 'elements', 'html' => '<script data-effect="el.remove()">alert(1)</script>', 'selector' => 'body', 'mode' => PatchMode::Append],
+    ]);
+});
+
+test('keep-alive comments carry no patch, and an event split across writes is read once it is complete', function (): void {
+    $reader = new SseReader();
+    $frame = (new SwooleSSEGenerator())->patchSignals(['n' => 1]);
+
+    expect($reader->read(": keep-alive\n\n"))->toBe([])
+        ->and($reader->read(substr($frame, 0, 20)))->toBe([])
+        ->and($reader->read(substr($frame, 20)))->toBe([['type' => 'signals', 'signals' => ['n' => 1], 'onlyIfMissing' => false]])
+    ;
+});
