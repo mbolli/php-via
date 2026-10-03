@@ -50,7 +50,7 @@ test('a curl request to a hostname returns under the default and the narrow hook
     expect($r['out'])->toContain('hook_flags=' . $flags)->toContain('curl_error=');
 })->with([
     'default' => [Via::defaultHookFlags()],
-    'narrow' => [Via::HOOK_FLAGS_NO_FILE_IO],
+    'narrow' => [Via::noFileIoHookFlags()],
 ]);
 
 test('the native curl hook still crashes with this libcurl, so the default has to leave it out', function (): void {
@@ -75,5 +75,5 @@ test('start() warns when hook_flags keep the native curl hook on an affected lib
 })->with([
     'default flags' => [null, false],
     'SWOOLE_HOOK_ALL' => ["['hook_flags' => SWOOLE_HOOK_ALL]", true],
-    'the narrow set' => ["['hook_flags' => Mbolli\\PhpVia\\Via::HOOK_FLAGS_NO_FILE_IO]", false],
+    'the narrow set' => ["['hook_flags' => Mbolli\\PhpVia\\Via::noFileIoHookFlags()]", false],
 ]);

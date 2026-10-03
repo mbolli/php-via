@@ -65,11 +65,14 @@ class Via {
     public const string VERSION = '0.13.1';
 
     /**
-     * The socket, stream, sleep and proc_open() hooks, without FILE and STDIO, so file and stdio I/O skip the AIO
-     * thread pool (1790 on OpenSwoole 26.2). Only for apps that run no exec(), system() or popen() and hold no
-     * flock() across a yield. It leaves out SWOOLE_HOOK_NATIVE_CURL, which crashes workers on libcurl 8.20 or newer.
+     * The socket, stream, sleep and proc_open() hooks, without FILE, STDIO and NATIVE_CURL (1790 on OpenSwoole 26.2).
+     *
+     * @deprecated removed in 0.15; use Via::noFileIoHookFlags(), which also keeps the native curl hook where it works
      */
-    public const int HOOK_FLAGS_NO_FILE_IO = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
+    public const int HOOK_FLAGS_NO_FILE_IO = self::NO_FILE_IO_HOOKS;
+
+    /** See noFileIoHookFlags(). */
+    private const int NO_FILE_IO_HOOKS = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
         | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
     /**
@@ -1888,6 +1891,17 @@ class Via {
     }
 
     /**
+     * The socket, stream, sleep and proc_open() hooks, plus SWOOLE_HOOK_NATIVE_CURL unless nativeCurlHookCrashes(), for
+     * `withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()])`.
+     *
+     * Without FILE and STDIO, file and stdio I/O skip the AIO thread pool and block the worker for the call. Only for
+     * apps that run no exec(), system() or popen() and hold no flock() across a yield.
+     */
+    public static function noFileIoHookFlags(): int {
+        return self::NO_FILE_IO_HOOKS | (self::nativeCurlHookCrashes() ? 0 : SWOOLE_HOOK_NATIVE_CURL);
+    }
+
+    /**
      * Whether OpenSwoole's native curl hook segfaults the worker on a curl request to any hostname, which it
      * does with libcurl 8.20.0 or newer (curl#21558; OpenSwoole 26.2). False when OpenSwoole was built without
      * the hook (no --enable-hook-curl), since the flag then hooks nothing.
@@ -1919,7 +1933,7 @@ class Via {
             throw new \RuntimeException(
                 'hook_flags has SWOOLE_HOOK_STDIO without SWOOLE_HOOK_FILE: include and require then yield '
                 . 'halfway through a file, and concurrent requests fail with "Class not found". Add SWOOLE_HOOK_FILE, '
-                . 'drop SWOOLE_HOOK_STDIO, or use Via::defaultHookFlags() or Via::HOOK_FLAGS_NO_FILE_IO.'
+                . 'drop SWOOLE_HOOK_STDIO, or use Via::defaultHookFlags() or Via::noFileIoHookFlags().'
             );
         }
 
@@ -1932,7 +1946,7 @@ class Via {
 
             throw new \RuntimeException(
                 "RedisBroker needs {$name} in hook_flags: without it every Redis call, including the endless "
-                . 'SUBSCRIBE read, blocks the whole worker. Add it, or use Via::defaultHookFlags() or Via::HOOK_FLAGS_NO_FILE_IO.'
+                . 'SUBSCRIBE read, blocks the whole worker. Add it, or use Via::defaultHookFlags() or Via::noFileIoHookFlags().'
             );
         }
     }
