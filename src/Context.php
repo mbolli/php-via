@@ -1148,8 +1148,8 @@ class Context {
      *
      * Without $selector, Outer and Replace match the top-level elements of $html by id; the other modes
      * need a selector. Remove needs no HTML: patchElements(selector: '#toast', mode: PatchMode::Remove).
-     * Patches queue until the tab's stream is open, like sync(). Append, Prepend, Before and After each
-     * count, so a full queue drops them last and a client that falls behind gets them all.
+     * Patches queue until the tab's stream is open, like sync(). Each one counts, since no render sends it
+     * again: a full queue drops them last, and a client that falls behind gets them all.
      *
      * @throws \InvalidArgumentException when there is neither HTML nor a selector, or the mode needs a selector
      */

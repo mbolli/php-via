@@ -139,7 +139,8 @@ All notable changes to php-via will be documented in this file.
   lag under `runtime`.
 - **`$c->patchElements($html, $selector, PatchMode::Append)`** sends HTML to the page outside a
   view render. `PatchMode` has a case for each Datastar mode; every mode but `Outer` and `Replace`
-  needs a selector. A component's patches go to its page.
+  needs a selector. A component's patches go to its page, and a client that falls behind gets
+  every one of them.
 - **`$c->isConnected()`** says whether the tab has an open stream. A component answers for its page.
 - **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
 - **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
@@ -243,7 +244,8 @@ All notable changes to php-via will be documented in this file.
 - A full-document view that contained the text `via_ctx` anywhere, such as a `filterSignals`
   pattern, got no `via_ctx` signal injected.
 - For a client that fell behind, element patches were dropped as if each replaced the one before,
-  so appended and prepended chunks went missing. Only morphs, replacements and removals are dropped.
+  so appended and prepended chunks went missing. Only view updates are dropped now, which the next
+  render sends again.
 - `Signal::bool()` returned false for integers such as 2. Values that are not strings follow PHP
   truthiness.
 - `Config::withLogLevel()` treated unknown names as `info`. It accepts `warning` and the other

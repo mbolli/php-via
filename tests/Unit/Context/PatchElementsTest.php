@@ -92,27 +92,43 @@ describe('Eviction from a full queue', function (): void {
         ;
     });
 
-    test('inserting patches are evicted after signal patches and morphs, then oldest first', function (): void {
+    test('patchElements() patches are evicted after view frames and signal patches, then oldest first', function (): void {
         $ctx = new Context(testContextId(), '/test', createVia());
         $pm = $ctx->getPatchManager();
-        for ($i = 0; $i < 48; ++$i) {
+        for ($i = 0; $i < 47; ++$i) {
             $ctx->patchElements("<li>{$i}</li>", '#log', PatchMode::Append);
         }
         $pm->queuePatch(['type' => 'signals', 'content' => ['a' => 1]]);
+        $pm->queuePatch(['type' => 'elements', 'content' => '<main id="page">1</main>']);
         $ctx->patchElements('<p>open</p>', '#modal', PatchMode::Inner);
 
-        $ctx->patchElements('<li>48</li>', '#log', PatchMode::Prepend);
-        $ctx->patchElements('<li>49</li>', '#log', PatchMode::Before);
-        $ctx->patchElements('<li>50</li>', '#log', PatchMode::After);
+        $ctx->patchElements('<li>47</li>', '#log', PatchMode::Prepend);
+        $ctx->patchElements('<li>48</li>', '#log', PatchMode::Before);
+        $ctx->patchElements('<li>49</li>', '#log', PatchMode::After);
 
         $contents = array_map(static fn (array $p): mixed => $p['content'], patchElementsQueue($ctx));
 
         expect($contents)->toHaveCount(50)
-            ->and($contents)->not->toContain('<p>open</p>')
+            ->and($contents)->not->toContain('<main id="page">1</main>')
             ->and($contents)->not->toContain(['a' => 1])
+            ->and($contents)->toContain('<p>open</p>')
             ->and($contents[0])->toBe('<li>1</li>', 'the oldest chunk goes once nothing else is left')
-            ->and(array_slice($contents, -3))->toBe(['<li>48</li>', '<li>49</li>', '<li>50</li>'])
+            ->and(array_slice($contents, -3))->toBe(['<li>47</li>', '<li>48</li>', '<li>49</li>'])
         ;
+    });
+
+    test('a removal outside the view outlives the view frames queued after it', function (): void {
+        $ctx = new Context(testContextId(), '/test', createVia());
+        $ctx->patchElements('<div id="toast">Saved</div>', '#toasts', PatchMode::Append);
+        $ctx->patchElements(selector: '#toast', mode: PatchMode::Remove);
+        $ctx->patchElements('<div id="modal" hidden></div>');
+        for ($i = 0; $i < 60; ++$i) {
+            $ctx->getPatchManager()->queuePatch(['type' => 'elements', 'content' => "<main id=\"page\">{$i}</main>"]);
+        }
+
+        $modes = array_map(static fn (array $p): mixed => $p['mode'] ?? null, array_slice(patchElementsQueue($ctx), 0, 4));
+
+        expect($modes)->toBe([PatchMode::Append, PatchMode::Remove, PatchMode::Outer, null]);
     });
 
     test('an Append queued with datastar-php\'s enum or a string is not evicted either', function (mixed $mode): void {
@@ -131,16 +147,18 @@ describe('Eviction from a full queue', function (): void {
 });
 
 describe('PatchManager::isOneShot()', function (): void {
-    test('names scripts and inserting element patches', function (array $patch, bool $expected): void {
+    test('names scripts and element patches that no render sends again', function (array $patch, bool $expected): void {
         expect(PatchManager::isOneShot($patch))->toBe($expected);
     })->with([
         'script' => [['type' => 'script', 'content' => 'x'], true],
         'signals' => [['type' => 'signals', 'content' => []], false],
         'page frame' => [['type' => 'elements', 'content' => '<main></main>'], false],
-        'Outer' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Outer], false],
-        'Inner' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Inner], false],
-        'Replace' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Replace], false],
-        'Remove' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Remove], false],
+        'component frame' => [['type' => 'elements', 'content' => '<div id="c-x"></div>', 'selector' => '#c-x'], false],
+        'Outer' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Outer], true],
+        'Inner' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Inner], true],
+        'Replace' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Replace], true],
+        'Remove' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Remove], true],
+        'datastar-php Remove' => [['type' => 'elements', 'content' => '', 'mode' => ElementPatchMode::Remove], true],
         'Append' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Append], true],
         'Prepend' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Prepend], true],
         'Before' => [['type' => 'elements', 'content' => '', 'mode' => PatchMode::Before], true],

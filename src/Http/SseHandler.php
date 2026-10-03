@@ -230,8 +230,8 @@ class SseHandler {
      * where the latest supersedes the rest, so a backed-up client simply catches up on
      * the next broadcast. `signals` are deltas (self-healing only because delivery is
      * acknowledged), and `script` patches are one-shot side effects with no resend
-     * path, so neither is ever sacrificed here. Nor are element patches that insert
-     * (PatchManager::isOneShot()), which the stream loop leaves out before asking.
+     * path, so neither is ever sacrificed here. Nor are the element patches of
+     * patchElements() (PatchManager::isOneShot()), which the stream loop leaves out before asking.
      *
      * @param string $type           patch type
      * @param int    $queuedBytes    `send_queued_bytes` for the connection

@@ -453,10 +453,11 @@ class PatchManager {
     }
 
     /**
-     * Whether a patch takes effect once, so that dropping it or sending it twice changes the page: a
-     * script, or an element patch that inserts (Append, Prepend, Before, After).
+     * Whether a patch has no re-send path, so that dropping it changes the page: a script, or an element
+     * patch with a mode, as Context::patchElements() queues. Its target, such as a toast or a modal, may
+     * lie outside the view, and a dropped Remove or Append is never repaired.
      *
-     * Other element patches morph, replace or remove a target, and a later sync renders it again.
+     * The view frames sync() queues carry no mode, and a later sync renders their target again.
      *
      * @internal read by the queue's eviction and by the SSE loop's backlog drop
      *
@@ -467,10 +468,7 @@ class PatchManager {
             return $patch['type'] === 'script';
         }
 
-        $mode = $patch['mode'] ?? null;
-        $mode = $mode instanceof \BackedEnum ? $mode->value : $mode;
-
-        return \in_array($mode, ['append', 'prepend', 'before', 'after'], true);
+        return isset($patch['mode']);
     }
 
     /**
@@ -563,12 +561,12 @@ class PatchManager {
     /**
      * Choose and remove one victim from a full queue.
      *
-     * Element patches that morph, replace or remove go first: a later sync renders the
-     * same target again. Signal patches are next, since an undelivered signal stays dirty
-     * and is resent (acknowledgement happens at delivery, see syncSignals()). One-shot
-     * patches (isOneShot()) have no re-send path: a dropped redirect is a broken login
-     * flow, a dropped Append chunk a gap in the output. The oldest of them goes only when
-     * the queue holds nothing else.
+     * View frames go first: a later sync renders the same target again. Signal patches are
+     * next, since an undelivered signal stays dirty and is resent (acknowledgement happens at
+     * delivery, see syncSignals()). One-shot patches (isOneShot()) have no re-send path: a
+     * dropped redirect is a broken login flow, a dropped Append chunk a gap in the output, a
+     * dropped Remove a toast that never goes. The oldest of them goes only when the queue
+     * holds nothing else.
      *
      * @param list<QueuedPatch> $patches
      *
