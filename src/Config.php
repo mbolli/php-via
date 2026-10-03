@@ -190,8 +190,7 @@ final class Config {
     private int $actionRateWindow = 60;
 
     /**
-     * Interval in milliseconds between proactive gc_collect_cycles() calls.
-     * 0 disables the timer and leaves GC entirely to PHP's automatic trigger.
+     * Longest time in milliseconds between a worker's cycle collector runs. 0 leaves the collector to PHP.
      */
     private int $gcIntervalMs = 30_000;
 
@@ -777,14 +776,14 @@ final class Config {
     }
 
     /**
-     * Configure the proactive GC timer interval.
+     * Set how a worker runs PHP's cycle collector, whose every run walks all live objects.
      *
-     * php-via runs as a persistent process; PHP's cycle collector only fires when
-     * its internal root buffer fills (~10,000 new roots), which can cause sudden
-     * micro-pauses under load. Calling gc_collect_cycles() on a fixed timer spreads
-     * that work out predictably during idle gaps between requests.
+     * A worker turns PHP's own runs off and runs the collector when its memory has grown by half since the last
+     * run, and at least every $ms while possible roots wait. PHP ran it every 10,000 or more roots, which in a
+     * burst of page views or in an app whose requests leave cycles meant a walk of every live context each time.
+     * A long loop that creates cycles without ever waiting on I/O frees them only once it ends.
      *
-     * @param int $ms Timer interval in milliseconds. Pass 0 to disable.
+     * @param int $ms longest time between runs, 30 s by default. 0 leaves the collector to PHP, as before 0.14.
      */
     public function withGcIntervalMs(int $ms): self {
         $this->assertMutable(__FUNCTION__);

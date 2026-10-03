@@ -16,6 +16,7 @@ use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Rendering\Bootstrap;
 use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Rendering\TemplateEngine;
+use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
@@ -54,6 +55,9 @@ class Context {
 
     /** Whether update renders are shared by every context of this view in its primary scope */
     private bool $shareRender = false;
+
+    /** Memo of viewKey() */
+    private ?string $viewKey = null;
 
     /** @var array<string> Explicit scopes for this context (can have multiple) */
     private array $scopes = [];
@@ -1062,6 +1066,13 @@ class Context {
      */
     public function shouldShareRender(): bool {
         return $this->shareRender;
+    }
+
+    /**
+     * @internal the view part of this context's shared render key, see ViewCache::viewKey()
+     */
+    public function viewKey(): string {
+        return $this->viewKey ??= ViewCache::viewKey($this->route, $this->namespace);
     }
 
     /**

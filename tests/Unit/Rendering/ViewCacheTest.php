@@ -76,3 +76,33 @@ describe('ViewCache views', function (): void {
         ;
     });
 });
+
+describe('ViewCache idle', function (): void {
+    test('is idle only while nothing is cached and no shared render runs', function (): void {
+        $cache = new ViewCache();
+        expect($cache->isIdle())->toBeTrue();
+
+        $token = $cache->beginRender('room:1');
+        expect($cache->isIdle())->toBeFalse();
+
+        $cache->endRender('room:1');
+        $cache->setIfCurrent('room:1', '<p>x</p>', true, $token);
+        expect($cache->isIdle())->toBeFalse();
+
+        $cache->invalidate('room:1');
+        expect($cache->isIdle())->toBeTrue();
+    });
+
+    test('counts overlapping renders of one scope', function (): void {
+        $cache = new ViewCache();
+        $cache->beginRender('room:1');
+        $cache->beginRender('room:1');
+        $cache->endRender('room:1');
+
+        expect($cache->isIdle())->toBeFalse();
+
+        $cache->endRender('room:1');
+
+        expect($cache->isIdle())->toBeTrue();
+    });
+});

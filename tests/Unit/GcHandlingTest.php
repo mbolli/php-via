@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Support\CycleCollector;
 use Mbolli\PhpVia\Support\Stats;
 
 describe('Config GC interval', function (): void {
@@ -16,7 +17,7 @@ describe('Config GC interval', function (): void {
         expect($config->freeze()->gcIntervalMs)->toBe(60_000);
     });
 
-    test('withGcIntervalMs(0) disables the timer', function (): void {
+    test('withGcIntervalMs(0) leaves the collector to PHP', function (): void {
         $config = (new Config())->withGcIntervalMs(0);
         expect($config->freeze()->gcIntervalMs)->toBe(0);
     });
@@ -108,4 +109,101 @@ describe('Via::runGcCycle()', function (): void {
 
         expect($via->getStats()->getAll()['gc_runs'])->toBe(3);
     });
+});
+
+/**
+ * A collector over a fake heap: [collector, set memory in MiB, advance the clock in ms, set the waiting roots].
+ *
+ * @return array{CycleCollector, Closure(int): void, Closure(int): void, Closure(int): void}
+ */
+function fakeCycleCollector(int $baseMib, int $limitMib = 0, int $intervalMs = 30_000): array {
+    $memory = $baseMib << 20;
+    $now = 1_000;
+    $roots = 0;
+    $collector = new CycleCollector(
+        $intervalMs,
+        $limitMib << 20,
+        static function () use (&$memory): int { return $memory; },
+        static function () use (&$now): int { return $now; },
+        static function () use (&$roots): int { return $roots; },
+    );
+
+    return [
+        $collector,
+        static function (int $mib) use (&$memory): void { $memory = $mib << 20; },
+        static function (int $ms) use (&$now): void { $now += $ms; },
+        static function (int $n) use (&$roots): void { $roots = $n; },
+    ];
+}
+
+describe('CycleCollector', function (): void {
+    test('a run is due once memory grew by 32 MiB on a small heap', function (): void {
+        [$collector, $setMemory] = fakeCycleCollector(10);
+
+        $setMemory(41);
+        $before = $collector->isDue();
+        $setMemory(42);
+
+        expect($before)->toBeFalse()->and($collector->isDue())->toBeTrue();
+    });
+
+    test('a run is due once memory grew by half on a large heap', function (): void {
+        [$collector, $setMemory] = fakeCycleCollector(200);
+
+        $setMemory(299);
+        $before = $collector->isDue();
+        $setMemory(300);
+
+        expect($before)->toBeFalse()->and($collector->isDue())->toBeTrue();
+    });
+
+    test('near memory_limit a run is due after half the room left', function (): void {
+        [$collector, $setMemory] = fakeCycleCollector(100, limitMib: 128);
+
+        $setMemory(113);
+        $before = $collector->isDue();
+        $setMemory(114);
+
+        expect($before)->toBeFalse()->and($collector->isDue())->toBeTrue();
+    });
+
+    test('a run is due after the interval only while possible roots wait', function (): void {
+        [$collector, , $advance, $setRoots] = fakeCycleCollector(10, intervalMs: 5_000);
+
+        $advance(4_999);
+        $setRoots(5);
+        $early = $collector->isDue();
+        $advance(1);
+        $setRoots(0);
+        $noRoots = $collector->isDue();
+        $setRoots(5);
+
+        expect($early)->toBeFalse()->and($noRoots)->toBeFalse()->and($collector->isDue())->toBeTrue();
+    });
+
+    test('a run measures growth and time from where it ended', function (): void {
+        [$collector, $setMemory, $advance, $setRoots] = fakeCycleCollector(10, intervalMs: 5_000);
+        $setRoots(5);
+        $setMemory(60);
+        $advance(5_000);
+        $collector->ran();
+
+        $setMemory(91);
+        $advance(4_999);
+        $before = $collector->isDue();
+        $setMemory(92);
+
+        expect($before)->toBeFalse()->and($collector->isDue())->toBeTrue();
+    });
+
+    test('reads memory_limit', function (string $ini, int $bytes): void {
+        expect(CycleCollector::memoryLimit($ini))->toBe($bytes);
+    })->with([
+        'none' => ['-1', 0],
+        'empty' => ['', 0],
+        'megabytes' => ['128M', 128 << 20],
+        'gigabytes' => ['2g', 2 << 30],
+        'kilobytes' => ['512K', 512 << 10],
+        'bytes' => ['1048576', 1 << 20],
+    ]);
 });

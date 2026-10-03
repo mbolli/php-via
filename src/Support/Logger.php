@@ -38,12 +38,16 @@ class Logger {
         'emergency' => 'error',
     ];
 
+    /** Whether debug messages are written, so hot paths can skip building them. */
+    public readonly bool $debugEnabled;
+
     private int $minLevel;
     private ?RequestLogger $requestLogger = null;
     private ?LogBuffer $buffer = null;
 
     public function __construct(string $logLevel = 'info') {
         $this->minLevel = self::LEVELS[self::normalizeLevel($logLevel)] ?? self::LEVELS['info'];
+        $this->debugEnabled = $this->minLevel <= self::LEVELS['debug'];
     }
 
     /**

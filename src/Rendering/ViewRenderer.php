@@ -60,19 +60,28 @@ class ViewRenderer {
     ): string {
         // Only update renders are shared: an initial page load carries the context's own id.
         if ($isUpdate && $scope !== Scope::TAB && $context->shouldShareRender()) {
-            $view = ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+            $view = $context->viewKey();
             $cached = $this->cache->get($scope, true, $view);
             if ($cached !== null) {
-                $this->logger->debug("Using shared update render for scope: {$scope}", $context);
+                if ($this->logger->debugEnabled) {
+                    $this->logger->debug("Using shared update render for scope: {$scope}", $context);
+                }
                 $this->recordCacheHit($scope, $context);
 
                 return $cached;
             }
 
-            $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
+            if ($this->logger->debugEnabled) {
+                $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
+            }
 
-            $generation = $this->cache->generation($scope);
-            $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+            $generation = $this->cache->beginRender($scope);
+
+            try {
+                $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+            } finally {
+                $this->cache->endRender($scope);
+            }
 
             // Not stored when a broadcast invalidated the scope while the view rendered: the render saw the older state.
             if (!$this->isSharedDocument($result, $context)) {
@@ -82,7 +91,9 @@ class ViewRenderer {
             return $result;
         }
 
-        $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
+        if ($this->logger->debugEnabled) {
+            $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
+        }
         $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
         if ($isUpdate && $this->fanOuts !== []) {
             $this->noteFanOutRender($result, $scope, $context);
@@ -117,7 +128,7 @@ class ViewRenderer {
         foreach ($views as $view) {
             $context = $view['context'];
             $tabPrimary = $context->getPrimaryScope() === Scope::TAB;
-            $key = ViewCache::viewKey($context->getRoute(), $context->getNamespace()) . ($tabPrimary ? "\0tab" : '');
+            $key = $context->viewKey() . ($tabPrimary ? "\0tab" : '');
             if ($view['renders'] < 2 || \count($view['hashes']) !== 1 || isset($this->identicalHinted[$key])) {
                 continue;
             }
@@ -219,7 +230,7 @@ class ViewRenderer {
             return;
         }
 
-        $key = $scope . "\0" . ViewCache::viewKey($context->getRoute(), $context->getNamespace());
+        $key = $scope . "\0" . $context->viewKey();
         $view = $this->fanOuts[$cid][$depth][$key] ?? ['hashes' => [], 'renders' => 0, 'context' => $context];
         $view['hashes'][hash('xxh128', $html)] = true;
         ++$view['renders'];

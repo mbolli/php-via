@@ -65,6 +65,20 @@ describe('overlay injection', function (): void {
         expect($app->buildHtmlDocument($plain))->not->toContain('nonce=');
     });
 
+    test('decorates each tab of a fan-out on its own, also after an update it left as it was', function (): void {
+        $app = devBarVia();
+        $a = new Context('fan-1', '/demo', $app);
+        $b = new Context('fan-2', '/demo', $app);
+        $fragment = '<div id="x">hi</div>';
+        $document = '<html><head></head><body><div id="x">hi</div></body></html>';
+
+        expect($app->decorateUpdate($fragment, $a))->toBe($fragment)
+            ->and($app->decorateUpdate($fragment, $b))->toBe($fragment)
+            ->and($app->decorateUpdate($document, $a))->toContain('<via-dev-bar')->toContain('fan-1')
+            ->and($app->decorateUpdate($document, $b))->toContain('<via-dev-bar')->toContain('fan-2')->not->toContain('fan-1')
+        ;
+    });
+
     test('does not inject when tracing is disabled', function (): void {
         $app = createVia((new Config())->withLogLevel('error'));
         $ctx = new Context('noinj_/1', '/demo', $app);

@@ -362,3 +362,25 @@ test('scopes past SCOPES_BYTES are left out whole', function (): void {
 
     expect(array_keys($registry->scopeIndex()))->toBe(['route:/a', $long, 'r:1']);
 });
+
+test('scope reads under one read epoch share one index until this process changes the scopes', function (): void {
+    $registry = new SharedClientRegistry(64);
+    $registry->claimWorker(0);
+    $registry->register('ctx-a', 'client-a', '10.0.0.1', 1000, ['room:a']);
+    $other = clone $registry;
+    $other->claimWorker(1);
+
+    expect($registry->scopeIndex(7))->toHaveKey('room:a');
+    $other->register('ctx-b', 'client-b', '10.0.0.2', 1000, ['room:b']);
+    expect($registry->scopeIndex(7))->not->toHaveKey('room:b')
+        ->and($registry->scopeIndex())->toHaveKey('room:b')
+    ;
+
+    expect($registry->scopeIndex(8))->toHaveKey('room:a');
+    $registry->setScopes('ctx-a', ['room:c']);
+    expect($registry->scopeIndex(8))->toHaveKey('room:c')->not->toHaveKey('room:a');
+    $other->setScopes('ctx-b', ['room:d']);
+    expect($registry->scopeIndex(8))->toHaveKey('room:b')
+        ->and($registry->scopeIndex(9))->toHaveKey('room:d')->not->toHaveKey('room:b')
+    ;
+});

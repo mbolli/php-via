@@ -571,6 +571,49 @@ describe('SessionTokens', function (): void {
         ;
     });
 
+    test('stillNames() follows a rotation to the end of the grace period, with the table shared or not', function (bool $shared): void {
+        [$tokens, $advance] = rotationTokens();
+        if ($shared) {
+            $tokens->share();
+        }
+        $first = str_repeat('ab', 16);
+        $key = SessionTokens::key($first);
+        $memo = [-1, 0];
+
+        $fresh = $tokens->stillNames($key, $key, $memo);
+        $second = (string) $tokens->rotate($first);
+        $inGrace = $tokens->stillNames($key, $key, $memo);
+        $advance(SessionTokens::GRACE_SECONDS - 1);
+        $graceEnding = $tokens->stillNames($key, $key, $memo);
+        $advance(1);
+
+        $secondMemo = [-1, 0];
+        $otherSession = [-1, 0];
+        expect($fresh)->toBeTrue()
+            ->and($inGrace)->toBeTrue()
+            ->and($graceEnding)->toBeTrue()
+            ->and($tokens->stillNames($key, $key, $memo))->toBeFalse()
+            ->and($tokens->stillNames(SessionTokens::key($second), $key, $secondMemo))->toBeTrue()
+            ->and($tokens->stillNames(SessionTokens::key($second), SessionTokens::key($second), $otherSession))->toBeFalse()
+        ;
+    })->with(['array' => false, 'table' => true]);
+
+    test('stillNames() keeps its memo when a lookup only refreshes the last-seen time', function (): void {
+        [$tokens, $advance] = rotationTokens();
+        $first = str_repeat('ab', 16);
+        $key = SessionTokens::key($first);
+        $current = SessionTokens::key((string) $tokens->rotate($first));
+        $memo = [-1, 0];
+        $tokens->stillNames($current, $key, $memo);
+        $version = $memo[0];
+
+        $advance(61);
+
+        expect($tokens->stillNames($current, $key, $memo))->toBeTrue()
+            ->and($memo[0])->toBe($version)
+        ;
+    });
+
     test('a cookie rotates once, and a cookie in its grace period does not rotate', function (): void {
         [$tokens] = rotationTokens();
         $first = str_repeat('ab', 16);
