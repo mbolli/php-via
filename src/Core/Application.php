@@ -38,6 +38,9 @@ class Application {
      */
     private const int MAX_REVIVABLE = 10_000;
 
+    /** Longest query string, as http_build_query() writes it, that a context record keeps for input(). */
+    private const int MAX_RECORD_QUERY_BYTES = 512;
+
     /** Longest stretch destroyExpired() runs before it lets the event loop serve requests again. */
     private const int DESTROY_SLICE_NS = 10_000_000;
 
@@ -93,7 +96,7 @@ class Application {
      * instead of hard-reloading. Populated at cleanup time only, so this holds recently-gone
      * contexts, not live ones.
      *
-     * @var array<string, array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}>
+     * @var array<string, array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}>
      */
     private array $revivableContexts = [];
 
@@ -109,6 +112,9 @@ class Application {
 
     /** When this worker last swept expired context directory records (hrtime ns). */
     private int $directoryPrunedAtNs = 0;
+
+    /** @var array<string, true> Routes already warned about for a query too long for the context record */
+    private array $queryDroppedRoutes = [];
 
     public function __construct(
         private Settings $settings,
@@ -566,7 +572,7 @@ class Application {
     /**
      * Look up a revival record by context ID, or null if absent or expired.
      *
-     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}
+     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}
      */
     public function getRevivable(string $contextId): ?array {
         if ($this->contextDirectory !== null) {
@@ -705,13 +711,20 @@ class Application {
             return;
         }
 
+        $record = $this->contextRecord($context, time() + $ttlSeconds);
+
         try {
-            $this->contextDirectory->put($context->getId(), [
-                'route' => $context->getRoute(),
-                'params' => $context->getRouteParams(),
-                'sessionId' => $context->getSessionId(),
-                'expiresAt' => time() + $ttlSeconds,
-            ]);
+            try {
+                $this->contextDirectory->put($context->getId(), $record);
+            } catch (\OverflowException $e) {
+                // A record over the byte cap still rebuilds the context without the query.
+                if (!isset($record['query'])) {
+                    throw $e;
+                }
+                unset($record['query']);
+                $this->contextDirectory->put($context->getId(), $record);
+                $this->warnQueryDropped($context->getRoute(), 'the context record is over Config::withContextDirectorySize(maxRecordBytes:) with it');
+            }
         } catch (\OverflowException $e) {
             // Losing the entry costs cross-worker reachability for this one context, which
             // degrades to the old 400. It must not take the page load down with it.
@@ -722,6 +735,42 @@ class Application {
                 $this->logger->log('warn', "Context directory write failed ({$this->directoryWriteFailures} times in this worker): " . $e->getMessage());
             }
         }
+    }
+
+    /**
+     * What it takes to rebuild $context: its route, path parameters, session and page query.
+     *
+     * @return array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}
+     */
+    private function contextRecord(Context $context, int $expiresAt): array {
+        $record = [
+            'route' => $context->getRoute(),
+            'params' => $context->getRouteParams(),
+            'sessionId' => $context->getSessionId(),
+            'expiresAt' => $expiresAt,
+        ];
+
+        $input = $context->getPageInput();
+        if ($input !== []) {
+            $query = http_build_query($input);
+            if (\strlen($query) <= self::MAX_RECORD_QUERY_BYTES) {
+                $record['query'] = $query;
+            } else {
+                $this->warnQueryDropped($context->getRoute(), \strlen($query) . ' bytes is over the ' . self::MAX_RECORD_QUERY_BYTES . ' it keeps');
+            }
+        }
+
+        return $record;
+    }
+
+    private function warnQueryDropped(string $route, string $why): void {
+        if (isset($this->queryDroppedRoutes[$route])) {
+            return;
+        }
+
+        $this->queryDroppedRoutes[$route] = true;
+        $this->logger->log('warn', "The context record of {$route} leaves out the page's query ({$why}), so a context rebuilt after "
+            . 'its tab was away or on another worker reads no input(). Keep what has to survive in a path parameter, a signal or tabState().');
     }
 
     /**
@@ -751,12 +800,7 @@ class Application {
 
         // Assigning to an existing key keeps its old position, and pruning relies on expiry order.
         unset($this->revivableContexts[$context->getId()]);
-        $this->revivableContexts[$context->getId()] = [
-            'route' => $context->getRoute(),
-            'params' => $context->getRouteParams(),
-            'sessionId' => $context->getSessionId(),
-            'expiresAt' => time() + (int) ceil($windowMs / 1000),
-        ];
+        $this->revivableContexts[$context->getId()] = $this->contextRecord($context, time() + (int) ceil($windowMs / 1000));
 
         $this->pruneRevivableIfNeeded();
     }

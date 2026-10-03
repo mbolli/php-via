@@ -1028,7 +1028,8 @@ final class Config {
      * window, whichever is shorter, so this only governs entries left behind by a crashed worker.
      *
      * @param int $maxRows        Guaranteed number of tracked contexts (default 4096)
-     * @param int $maxRecordBytes Serialized bytes per record (default 1024; real records are 92-341)
+     * @param int $maxRecordBytes Serialized bytes per record (default 1024; real records are 92-341, plus a page
+     *                            query of up to 512)
      * @param int $ttlSeconds     Expiry for a record with no heartbeat (default 3600)
      */
     public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600): self {

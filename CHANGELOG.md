@@ -239,6 +239,9 @@ message that names the new one.
 - **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
 - **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
+- **`$c->input()` on a page load** reads the page's query string, where it returned the default.
+  The context record keeps up to 512 bytes of it, so a context rebuilt after its tab was away or on
+  another worker reads the same input. A longer query is left out of the record with a warning.
 - **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
   logs a hint when every tab of a view rendered the same HTML in one broadcast.
 

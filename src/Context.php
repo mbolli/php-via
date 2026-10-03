@@ -79,6 +79,9 @@ class Context {
     /** @var array<string, mixed> HTTP query/post params for the current request */
     private array $requestInput = [];
 
+    /** @var array<string, mixed> Query of the page request, which the context record keeps for a rebuild */
+    private array $pageInput = [];
+
     /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
     private array $requestFiles = [];
 
@@ -317,10 +320,38 @@ class Context {
     }
 
     /**
-     * Get an HTTP request parameter from the current action request.
+     * Set the query of the page request, which input() reads until the first action.
      *
-     * Reads from merged GET + POST parameters. Use this instead of \$_GET/\$_POST
-     * superglobals, which are not safe in OpenSwoole's coroutine model.
+     * @internal called by RequestHandler on a page load, and by Via when it rebuilds the context from its record
+     *
+     * @param array<string, mixed> $query
+     */
+    public function setPageInput(array $query): void {
+        $this->pageInput = $query;
+        $this->requestInput = $query;
+        $this->requestFiles = [];
+    }
+
+    /**
+     * The query of the page request.
+     *
+     * @internal read by Application for the context record
+     *
+     * @return array<string, mixed>
+     */
+    public function getPageInput(): array {
+        return $this->pageInput;
+    }
+
+    /**
+     * Get an HTTP request parameter: in an action, from the action request's merged GET and POST
+     * parameters; in the page handler and the renders before the first action, from the page's query.
+     *
+     * A context rebuilt after its tab was away (revival) or on another worker sees the page's query again,
+     * up to 512 bytes of it: a longer query is dropped from the rebuild with a warning, so keep state that
+     * has to survive in a path parameter, a signal or tabState().
+     *
+     * Use this instead of \$_GET/\$_POST superglobals, which are not safe in OpenSwoole's coroutine model.
      *
      * @param string $name    Parameter name
      * @param mixed  $default Value returned if parameter is not set

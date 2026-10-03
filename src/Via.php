@@ -1711,6 +1711,10 @@ class Via {
         $this->contextSessions[$contextId] = $sessionId;
         $context->injectRouteParams($record['params']);
         $context->setRequestCookies($cookies);
+        if (($record['query'] ?? '') !== '') {
+            parse_str($record['query'], $query);
+            $context->setPageInput($query);
+        }
 
         try {
             $this->invokeHandlerWithParams($handler, $context, $record['params']);

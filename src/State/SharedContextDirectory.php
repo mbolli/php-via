@@ -39,7 +39,8 @@ final class SharedContextDirectory {
      * @param int $maxRows        Concurrent contexts to track across all workers. As with the
      *                            other shared tables this is a floor, not a ceiling.
      * @param int $maxRecordBytes Serialized byte cap per record. Measured real records run
-     *                            92-341 bytes (route, params, session, expiry).
+     *                            92-341 bytes (route, params, session, expiry), plus a page
+     *                            query of up to 512 bytes.
      */
     public function __construct(int $maxRows = 4096, private int $maxRecordBytes = 1024) {
         $table = new Table($maxRows);
@@ -52,7 +53,7 @@ final class SharedContextDirectory {
     /**
      * Store or replace the record for a context.
      *
-     * @param array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int} $record
+     * @param array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string} $record
      *
      * @throws \OverflowException if the serialized record exceeds the column, or the table is full
      */
@@ -62,7 +63,7 @@ final class SharedContextDirectory {
         if (\strlen($serialized) > $this->maxRecordBytes) {
             throw new \OverflowException(
                 "Context record for \"{$contextId}\" exceeds {$this->maxRecordBytes} bytes. "
-                . 'Route parameters are the only variable-length part; raise the limit with '
+                . 'Route parameters and the page query are the variable-length parts; raise the limit with '
                 . 'Config::withContextDirectorySize().'
             );
         }
@@ -93,7 +94,7 @@ final class SharedContextDirectory {
     /**
      * Look up a context record, or null when absent or expired.
      *
-     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}
+     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}
      */
     public function get(string $contextId): ?array {
         $key = self::key($contextId);
@@ -150,7 +151,7 @@ final class SharedContextDirectory {
      * A malformed record has to mean "cannot revive" (the caller's existing fallback), not a
      * TypeError inside the action path.
      *
-     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int}
+     * @return null|array{route: string, params: array<string, string>, sessionId: null|string, expiresAt: int, query?: string}
      */
     private static function decode(string $serialized): ?array {
         $record = unserialize($serialized);
@@ -159,7 +160,8 @@ final class SharedContextDirectory {
             || !\is_string($record['route'] ?? null)
             || !\is_array($record['params'] ?? null)
             || !\is_int($record['expiresAt'] ?? null)
-            || !(($record['sessionId'] ?? null) === null || \is_string($record['sessionId']))) {
+            || !(($record['sessionId'] ?? null) === null || \is_string($record['sessionId']))
+            || !\is_string($record['query'] ?? '')) {
             return null;
         }
 
@@ -168,12 +170,17 @@ final class SharedContextDirectory {
             $params[(string) $name] = (string) $value;
         }
 
-        return [
+        $decoded = [
             'route' => $record['route'],
             'params' => $params,
             'sessionId' => $record['sessionId'],
             'expiresAt' => $record['expiresAt'],
         ];
+        if (isset($record['query']) && $record['query'] !== '') {
+            $decoded['query'] = $record['query'];
+        }
+
+        return $decoded;
     }
 
     /**
