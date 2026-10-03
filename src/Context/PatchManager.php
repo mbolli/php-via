@@ -42,6 +42,13 @@ class PatchManager {
     /** Whether the last getPatch() found the channel closed rather than merely idle. */
     private bool $channelClosed = false;
 
+    /**
+     * Per action coroutine: the TAB signals a sync queued during the action, with their write count then.
+     *
+     * @var array<int, \WeakMap<Signal, int>>
+     */
+    private array $queuedInAction = [];
+
     private string $contextId;
 
     /**
@@ -304,6 +311,8 @@ class PatchManager {
         $updatedSignals = $this->prepareSignalsForPatch($pending);
 
         if (!empty($updatedSignals)) {
+            $this->noteQueuedInAction($pending);
+
             // Acknowledgement is deferred to delivery. Marking these synced here,
             // at queue time, meant that any patch destroyed before transmission
             // (evicted when the queue filled, or discarded wholesale by
@@ -326,6 +335,50 @@ class PatchManager {
 
         // Also sync scoped signals for all scopes this context belongs to
         $this->syncScopedSignals();
+    }
+
+    /**
+     * Start tracking which TAB signals the action running in this coroutine syncs itself.
+     *
+     * @internal called by ActionHandler on the page context before the action runs
+     */
+    public function beginAction(): void {
+        $this->queuedInAction[Coroutine::getCid()] = new \WeakMap();
+    }
+
+    /**
+     * Send the TAB signals of this page and its components that changed and that no sync during
+     * the action already queued unchanged, so an action needs no trailing syncSignals().
+     *
+     * @internal called by ActionHandler on the page context after the action, also when it threw
+     */
+    public function syncSignalsAfterAction(): void {
+        $cid = Coroutine::getCid();
+        $queued = $this->queuedInAction[$cid] ?? null;
+        unset($this->queuedInAction[$cid]);
+
+        if ($this->isHeldForSeed()) {
+            return;
+        }
+
+        $flat = [];
+
+        /** @var list<Signal> $pending */
+        $pending = [];
+        self::collectChangedTabSignals($this->context(), $queued, $flat, $pending);
+        if ($flat === []) {
+            return;
+        }
+
+        $this->queuePatch([
+            'type' => 'signals',
+            'content' => $this->flatToNested($flat),
+            'confirm' => static function () use ($pending): void {
+                foreach ($pending as $signal) {
+                    $signal->markSynced();
+                }
+            },
+        ]);
     }
 
     /**
@@ -444,6 +497,44 @@ class PatchManager {
         }
 
         return $flat;
+    }
+
+    /**
+     * The changed TAB signals of $context and, recursively, its components, minus those queued
+     * during the action at their current write count.
+     *
+     * @param null|\WeakMap<Signal, int> $queued
+     * @param array<string, mixed>       $flat
+     * @param list<Signal>               $pending
+     */
+    private static function collectChangedTabSignals(Context $context, ?\WeakMap $queued, array &$flat, array &$pending): void {
+        foreach ($context->getSignalFactory()->getTabSignals() as $id => $signal) {
+            if ($signal->hasChanged() && ($queued[$signal] ?? null) !== $signal->writeCount()) {
+                $flat[$id] = $signal->getValue();
+                $pending[] = $signal;
+            }
+        }
+
+        foreach ($context->getComponentManager()->getComponents() as $component) {
+            self::collectChangedTabSignals($component, $queued, $flat, $pending);
+        }
+    }
+
+    /**
+     * Record signals a sync queued while an action of this page runs in this coroutine.
+     *
+     * @param list<Signal> $signals
+     */
+    private function noteQueuedInAction(array $signals): void {
+        $page = $this->componentManager->getParentPageContext()?->getPatchManager() ?? $this;
+        $queued = $page->queuedInAction[Coroutine::getCid()] ?? null;
+        if ($queued === null) {
+            return;
+        }
+
+        foreach ($signals as $signal) {
+            $queued[$signal] = $signal->writeCount();
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -125,7 +126,9 @@ class ActionHandler {
             $context->injectSignals($signals);
 
             // Execute the context-level action
+            $context->getPatchManager()->beginAction();
             $context->executeAction($actionId);
+            $this->syncSignalsAfterAction($context, $actionId);
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, true);
@@ -149,6 +152,8 @@ class ActionHandler {
         } catch (\Throwable $e) {
             $this->via->log('error', "Action {$actionId} failed: " . Logger::describe($e));
             $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
+            // The values the action wrote before it threw are already the server's.
+            $this->syncSignalsAfterAction($context, $actionId);
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, false);
@@ -159,6 +164,14 @@ class ActionHandler {
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+        }
+    }
+
+    private function syncSignalsAfterAction(Context $context, string $actionId): void {
+        try {
+            $context->getPatchManager()->syncSignalsAfterAction();
+        } catch (\Throwable $e) {
+            $this->via->log('error', "Sending the signals changed by action {$actionId} failed: " . Logger::describe($e));
         }
     }
 
