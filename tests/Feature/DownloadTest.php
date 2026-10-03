@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Via;
@@ -182,6 +183,19 @@ describe('Context::download()', function (): void {
 
         expect(fetchDownload($via, $fromPage)->statusCode)->toBe(404)
             ->and(fetchDownload($via, $fromComponent)->statusCode)->toBe(404)
+        ;
+    });
+
+    test('keeps nothing for a context destroyed already, and its URL answers 404', function (): void {
+        $via = createVia();
+        $page = downloadPage($via);
+        $page->cleanup();
+
+        $url = $page->download(fn (): string => 'late', 'a.txt', 'text/plain');
+
+        expect($url)->toMatch('#^/_download/[0-9a-f]{32}$#')
+            ->and(fetchDownload($via, $url)->statusCode)->toBe(404)
+            ->and((new ReflectionProperty(DownloadHandler::class, 'downloads'))->getValue($via->getApp()->downloads()))->toBe([])
         ;
     });
 

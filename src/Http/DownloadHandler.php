@@ -47,6 +47,11 @@ final class DownloadHandler {
             throw new \InvalidArgumentException("download() needs a MIME type such as 'text/csv; charset=utf-8', got " . var_export($mimeType, true) . '.');
         }
 
+        if ($page->isDestroyed()) {
+            // Its onCleanup() callbacks ran already, so nothing would drop it: a URL that answers 404, as once they ran.
+            return bin2hex(random_bytes(16));
+        }
+
         if (!isset($this->tokensByPage[$page])) {
             $this->tokensByPage[$page] = [];
             $page->onCleanup($this->forget(...));
