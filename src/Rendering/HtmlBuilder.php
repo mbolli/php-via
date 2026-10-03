@@ -78,8 +78,8 @@ class HtmlBuilder {
      *
      * A view that renders its own `<html>` document is completed by injectIntoDocument(); any other
      * view is placed into the shell template. Warns once per shell and once per full-document route
-     * without via_head, or with via_head and no Datastar or a second Datastar, and in dev mode once
-     * per route with more than one import map.
+     * without via_head, or with via_head and a second Datastar, and in dev mode once with via_head and
+     * no Datastar, and once per route with more than one import map.
      *
      * @param string  $content   Rendered HTML content
      * @param Context $context   Context for signal injection
@@ -220,9 +220,10 @@ class HtmlBuilder {
     }
 
     /**
-     * Warn once per key about a page without via_head, or with via_head and no Datastar script, or
-     * with a Datastar script other than via_foot's next to via_head's import map. Outside dev mode a
-     * sound page is not checked again; in dev mode the next render checks the edited template.
+     * Warn once per key about a page without via_head, or with a Datastar script other than via_foot's
+     * next to via_head's import map, and in dev mode with via_head and no Datastar script, which a
+     * bundle whose URL does not name Datastar would set off. Outside dev mode a sound page is not
+     * checked again; in dev mode the next render checks the edited template.
      *
      * @param array<string, true>                    $checked  keys warned about or found sound
      * @param array{0: string, 1: string, 2: string} $messages for no via_head, no Datastar and a second Datastar
@@ -233,7 +234,7 @@ class HtmlBuilder {
             $problem = $messages[0];
         } elseif (!str_contains($html, $context->viaFoot())) {
             if (preg_match(self::DATASTAR_SCRIPT, $html) !== 1) {
-                $problem = $messages[1];
+                $problem = $this->devMode ? $messages[1] : null;
             } elseif (str_contains($context->viaHead(), '<script type="importmap"')) {
                 $problem = $messages[2];
             }
