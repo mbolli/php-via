@@ -223,6 +223,9 @@ class Via {
     /** Set in workerStart: from then on the reactor can run a deferred flush even outside a coroutine. */
     private bool $workerStarted = false;
 
+    /** Set by serveInProcess(): this app runs without a server, see Testing\TestApp. */
+    private bool $inProcess = false;
+
     private Application $app;
     private Router $router;
     private SessionManager $sessionManager;
@@ -2022,6 +2025,48 @@ class Via {
      */
     public function getServer(): ?Server {
         return $this->server;
+    }
+
+    /**
+     * Serve requests in this process without a server, as one worker, for Testing\TestApp.
+     *
+     * Contexts created from now on queue their patches in an array, and an SSE loop running in a
+     * Fiber parks on it as it parks on a Channel in a coroutine. The onWorkerStart callbacks run
+     * here, as worker 0; nothing else of a worker start happens, so no timer is armed.
+     *
+     * @internal
+     *
+     * @throws \LogicException after start() or a first call
+     */
+    public function serveInProcess(): RequestHandler {
+        if ($this->server !== null || $this->inProcess) {
+            throw new \LogicException('serveInProcess() runs once, on a Via that start() has not started.');
+        }
+        $this->inProcess = true;
+
+        foreach ($this->startCallbacks as $callback) {
+            $callback($this->workerId);
+        }
+
+        return $this->requestHandler;
+    }
+
+    /**
+     * Whether serveInProcess() runs this app.
+     *
+     * @internal read by PatchManager
+     */
+    public function isInProcess(): bool {
+        return $this->inProcess;
+    }
+
+    /**
+     * Stop as a worker stops: end the SSE streams, run the onWorkerStop callbacks and disconnect the broker.
+     *
+     * @internal for Testing\TestApp, after serveInProcess()
+     */
+    public function stopInProcess(): void {
+        $this->runWorkerShutdown();
     }
 
     /**

@@ -38,6 +38,19 @@ class PatchManager {
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
 
+    /** Via::serveInProcess() runs the app: the array queue behaves as a Channel whose consumer parks in a Fiber. */
+    private bool $inProcess = false;
+
+    /**
+     * In process: the SSE loop's fiber, parked in getPatch() on an empty queue.
+     *
+     * @var null|\Fiber<mixed, mixed, mixed, mixed>
+     */
+    private ?\Fiber $parked = null;
+
+    /** In process: closePatchChannel() ran and recreatePatchChannel() has not since, as with a closed Channel. */
+    private bool $closed = false;
+
     /** Blocking-pop timeout in seconds: the keep-alive interval, which bounds how long an idle SSE loop parks. */
     private float $pollTimeout = 15.0;
 
@@ -64,7 +77,8 @@ class PatchManager {
     ) {
         $this->contextId = $context->get()?->getId() ?? '';
         // In test mode (no OpenSwoole server running), use array instead of Channel
-        $inTestMode = getenv('VIA_TEST_MODE') === '1';
+        $this->inProcess = $app->isInProcess();
+        $inTestMode = $this->inProcess || getenv('VIA_TEST_MODE') === '1';
 
         $keepAliveMs = $app->getSettings()->sseKeepAliveMs;
         $this->pollTimeout = ($keepAliveMs > 0 ? $keepAliveMs : self::IDLE_BACKSTOP_MS) / 1000;
@@ -98,11 +112,18 @@ class PatchManager {
         }
 
         if ($this->useArray) {
+            if ($this->closed) {
+                $this->app->log('debug', "Patch rejected (channel closed) for context {$this->contextId}");
+
+                return;
+            }
+
             // Array-based queue for tests
             if (\count($this->patchChannel) >= self::CHANNEL_CAPACITY) {
                 $this->patchChannel = $this->evictOne($this->patchChannel);
             }
             $this->patchChannel[] = $patch;
+            $this->resumeParked();
         } else {
             // OpenSwoole Channel for production
             $channel = $this->getPatchChannel();
@@ -151,8 +172,16 @@ class PatchManager {
         $this->channelClosed = false;
 
         if ($this->useArray) {
+            $fiber = $this->inProcess && $this->patchChannel === [] && !$this->closed ? \Fiber::getCurrent() : null;
+            if ($fiber !== null) {
+                $this->parked = $fiber;
+                \Fiber::suspend();
+            }
+
             // Array-based queue for tests
             if (empty($this->patchChannel)) {
+                $this->channelClosed = $this->closed;
+
                 return null;
             }
 
@@ -177,7 +206,12 @@ class PatchManager {
      * The channel stays open, so patches queued afterwards still carry over to the next stream.
      */
     public function wakeConsumers(): void {
-        if ($this->useArray || !$this->patchChannel instanceof Channel || Coroutine::getCid() <= 0) {
+        if ($this->useArray) {
+            $this->resumeParked();
+
+            return;
+        }
+        if (!$this->patchChannel instanceof Channel || Coroutine::getCid() <= 0) {
             return;
         }
 
@@ -415,6 +449,10 @@ class PatchManager {
     public function closePatchChannel(): void {
         if (!$this->useArray) {
             $this->patchChannel->close();
+        } elseif ($this->inProcess) {
+            // As a closed Channel: the consumer takes what is queued, then sees the close.
+            $this->closed = true;
+            $this->resumeParked();
         } else {
             $this->patchChannel = [];
         }
@@ -449,6 +487,7 @@ class PatchManager {
         } else {
             // In test mode the queue is a plain array; carry it across unchanged.
             $this->patchChannel = array_values($this->patchChannel);
+            $this->closed = false;
         }
     }
 
@@ -623,6 +662,19 @@ class PatchManager {
 
     private static function parkedConsumers(Channel $channel): int {
         return (int) ($channel->stats()['consumer_num'] ?? 0);
+    }
+
+    /**
+     * In process: run the parked SSE loop until it parks again, as a Channel push or close resumes a parked consumer.
+     */
+    private function resumeParked(): void {
+        $fiber = $this->parked;
+        if ($fiber === null || !$fiber->isSuspended()) {
+            return;
+        }
+
+        $this->parked = null;
+        $fiber->resume();
     }
 
     /**
