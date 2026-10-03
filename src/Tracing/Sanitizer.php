@@ -15,7 +15,7 @@ namespace Mbolli\PhpVia\Tracing;
  */
 final class Sanitizer {
     /** Keys matching this pattern have their value replaced with REDACTED. */
-    private const string REDACT_PATTERN = '/pass(word)?|token|secret|authorization|cookie|api[_-]?key|\bkey\b|credential/i';
+    private const string REDACT_PATTERN = '/pass(word)?|token|secret|authorization|cookie|session|api[_-]?key|\bkey\b|credential/i';
 
     private const string REDACTED = '[redacted]';
 

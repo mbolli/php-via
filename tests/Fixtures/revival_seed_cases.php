@@ -145,10 +145,10 @@ function captureWarnings(Via $app): ArrayObject {
 
 /** A page load of $route under $contextId, as RequestHandler::doHandlePage() registers it. */
 function mintPage(Via $app, callable $handler, string $route, string $contextId): Context {
-    $ctx = new Context($contextId, $route, $app, null, 'sess_owner');
+    $ctx = new Context($contextId, $route, $app, null, 'a11ce000a11ce000a11ce000a11ce000');
     $app->contexts[$contextId] = $ctx;
     $app->getApp()->registerContext($ctx);
-    $app->getApp()->setContextSession($contextId, 'sess_owner');
+    $app->getApp()->setContextSession($contextId, 'a11ce000a11ce000a11ce000a11ce000');
     $app->registerContextInScope($ctx, Scope::TAB);
     $app->invokeHandlerWithParams($handler, $ctx, []);
 
@@ -168,7 +168,7 @@ function dropPage(Via $app, string $contextId): void {
  */
 function postAction(Via $app, string $actionId, array $signals): int {
     $post = new FakeActionRequest($actionId, $signals);
-    $post->cookie = ['via_session_id' => 'sess_owner'];
+    $post->cookie = ['via_session_id' => 'a11ce000a11ce000a11ce000a11ce000'];
     $response = new FakeStaticResponse();
     (new ActionHandler($app))->handleAction($post, $response, $actionId);
 
@@ -184,7 +184,7 @@ function openStream(Via $app, string $contextId, array $signals): SeedStream {
     $connect = new FakeActionRequest('unused', []);
     $connect->server = ['request_uri' => '/_sse', 'request_method' => 'GET'];
     $connect->get = ['datastar' => (string) json_encode(['via_ctx' => $contextId] + $signals)];
-    $connect->cookie = ['via_session_id' => 'sess_owner'];
+    $connect->cookie = ['via_session_id' => 'a11ce000a11ce000a11ce000a11ce000'];
     $stream = new SeedStream();
 
     Coroutine::create(static function () use ($app, $connect, $stream, $contextId): void {

@@ -75,23 +75,26 @@ class SessionManager {
 
     /**
      * Get or create session ID from request cookies.
+     *
+     * Only an id in the form this class issues is taken; anything else starts a new session. With secure
+     * cookies only the __Host- cookie counts: a sibling subdomain or a plain-HTTP response can set the plain one.
      */
     public function getOrCreateSessionId(Request $request, bool $secure = false): string {
         $cookies = $request->cookie ?? [];
-        $cookieName = $secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME;
-        $sessionId = $cookies[$cookieName] ?? null;
+        $sessionId = $cookies[$secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME] ?? null;
 
-        // Fall back to non-prefixed name for migration from HTTP to HTTPS
-        if (!$sessionId && $secure) {
-            $sessionId = $cookies[self::SESSION_COOKIE_NAME] ?? null;
-        }
-
-        if (!$sessionId) {
-            // Generate new session ID
+        if (!\is_string($sessionId) || !self::isValidSessionId($sessionId)) {
             $sessionId = bin2hex(random_bytes(16));
         }
 
         return $sessionId;
+    }
+
+    /**
+     * Whether $sessionId has the form of an id this class issues: 32 lowercase hex characters.
+     */
+    public static function isValidSessionId(string $sessionId): bool {
+        return \strlen($sessionId) === 32 && strspn($sessionId, '0123456789abcdef') === 32;
     }
 
     /**
@@ -131,7 +134,7 @@ class SessionManager {
             true,       // HttpOnly
             $sameSite,  // SameSite: 'Lax' blocks cross-site POSTs carrying the session cookie
         );
-        $this->logger->log('debug', "Set session cookie: {$sessionId}, result: " . ($result ? 'success' : 'failed'));
+        $this->logger->log('debug', 'Set session cookie: ' . ($result ? 'success' : 'failed'));
     }
 
     /**
