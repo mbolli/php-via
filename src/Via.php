@@ -541,8 +541,8 @@ class Via {
      *
      * The class must have a public `view(Context $ctx)` method and may declare
      * reactive properties with #[Signal] (optionally scoped, e.g. #[Signal(Scope::SESSION)]),
-     * server-only state with #[Persist], a primary scope with #[Broadcast], action
-     * methods with #[Action], and lifecycle hooks with #[OnDisconnect] / #[OnCleanup].
+     * server-only state with #[Persist], a broadcast target with #[Broadcast], action
+     * methods with #[Action], and cleanup hooks with #[OnCleanup].
      *
      * @param class-string  $class   Page class name
      * @param string        $route   URL pattern (may contain {params})
@@ -551,6 +551,7 @@ class Via {
      *                               The factory should return an instance of $class.
      *
      * @throws \InvalidArgumentException if $class has no public view(Context) method
+     * @throws \LogicException           if $class still uses the removed #[OnDisconnect]
      */
     public function mount(string $class, string $route, ?callable $factory = null): RouteDefinition {
         $meta = ClassMetadata::analyze($class);

@@ -30,6 +30,7 @@ final class ClassMetadata {
      * @param array<array{method: string, name: string, scope: ?string}> $actions
      * @param array<string, mixed>                                       $defaults        Default value per annotated property
      * @param array<array{name: string, type: string}>                   $viewRouteParams Route params declared on view() beyond Context
+     * @param list<string>                                               $onCleanup       #[OnCleanup] method names in declaration order
      */
     private function __construct(
         public readonly string $class,
@@ -43,10 +44,7 @@ final class ClassMetadata {
         public readonly array $viewRouteParams,
         /** Primary scope from #[Broadcast] on the class, or null. */
         public readonly ?string $broadcastScope,
-        /** Method name annotated #[OnDisconnect], or null. */
-        public readonly ?string $onDisconnect,
-        /** Method name annotated #[OnCleanup], or null. */
-        public readonly ?string $onCleanup,
+        public readonly array $onCleanup,
     ) {}
 
     /**
@@ -55,6 +53,7 @@ final class ClassMetadata {
      * @param class-string $class
      *
      * @throws \InvalidArgumentException if the class has no public view(Context) method
+     * @throws \LogicException           if a method carries the removed #[OnDisconnect]
      */
     public static function analyze(string $class): self {
         if (isset(self::$cache[$class])) {
@@ -124,12 +123,19 @@ final class ClassMetadata {
             }
         }
 
-        // Collect #[Action], #[OnDisconnect], #[OnCleanup] methods
+        // Collect #[Action] and #[OnCleanup] methods
         $actions = [];
-        $onDisconnect = null;
-        $onCleanup = null;
+        $onCleanup = [];
         foreach ($rc->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
             $methodName = $method->getName();
+
+            // @phpstan-ignore classConstant.deprecatedClass (this guard is why the class still exists)
+            if ($method->getAttributes(OnDisconnect::class) !== []) {
+                throw new \LogicException(
+                    "{$class}::{$methodName}() uses #[OnDisconnect], which was removed in php-via 0.14. "
+                    . 'Use #[OnCleanup]: it runs at the same moment, when the context is destroyed.'
+                );
+            }
 
             $actionAttr = self::getMethodAttr($method, Action::class);
             if ($actionAttr instanceof Action) {
@@ -140,22 +146,8 @@ final class ClassMetadata {
                 ];
             }
 
-            if (self::getMethodAttr($method, OnDisconnect::class) instanceof OnDisconnect) {
-                if ($onDisconnect !== null) {
-                    throw new \InvalidArgumentException(
-                        "Class '{$class}' has more than one #[OnDisconnect] method."
-                    );
-                }
-                $onDisconnect = $methodName;
-            }
-
             if (self::getMethodAttr($method, OnCleanup::class) instanceof OnCleanup) {
-                if ($onCleanup !== null) {
-                    throw new \InvalidArgumentException(
-                        "Class '{$class}' has more than one #[OnCleanup] method."
-                    );
-                }
-                $onCleanup = $methodName;
+                $onCleanup[] = $methodName;
             }
         }
 
@@ -189,7 +181,6 @@ final class ClassMetadata {
             defaults: $defaults,
             viewRouteParams: $viewRouteParams,
             broadcastScope: $broadcastScope,
-            onDisconnect: $onDisconnect,
             onCleanup: $onCleanup,
         );
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Mbolli\PhpVia\Attributes\Action;
 use Mbolli\PhpVia\Attributes\Broadcast;
+use Mbolli\PhpVia\Attributes\OnCleanup;
+use Mbolli\PhpVia\Attributes\OnDisconnect;
 use Mbolli\PhpVia\Attributes\Persist;
 use Mbolli\PhpVia\Attributes\Signal;
 use Mbolli\PhpVia\Composition\ClassMetadata;
@@ -15,7 +17,8 @@ use Mbolli\PhpVia\Via;
 
 /*
  * PageMount: the class model must behave like the closure model it is built on. Each #[Action]
- * runs on the calling tab's own instance, and #[Broadcast] only sets the broadcast target.
+ * runs on the calling tab's own instance, #[Broadcast] only sets the broadcast target, and cleanup
+ * hooks see current values.
  */
 
 final class PageMountLog {
@@ -94,6 +97,32 @@ final class PmScopedWidget {
     public function vote(Context $ctx): void {
         PageMountLog::$calls[] = [$ctx->getId(), $this->owner];
     }
+}
+
+final class PmTwoCleanups {
+    #[Signal]
+    public int $n = 0;
+
+    public function view(Context $ctx): void {
+        $ctx->view(fn (): string => '');
+    }
+
+    #[OnCleanup]
+    public function first(Context $ctx): void {
+        PageMountLog::$calls[] = ['first', $this->n];
+    }
+
+    #[OnCleanup]
+    public function second(Context $ctx): void {
+        PageMountLog::$calls[] = ['second', $this->n];
+    }
+}
+
+final class PmOnDisconnectPage {
+    public function view(Context $ctx): void {}
+
+    #[OnDisconnect]
+    public function leave(Context $ctx): void {}
 }
 
 /** @param class-string $class */
@@ -223,6 +252,27 @@ describe('#[Broadcast] only sets the broadcast target', function (): void {
             ->and($ctx->getScopes())->toContain('room:pm')
             ->and($signalIds)->toContain($ctx->getSignal('total')?->id())
             ->and($signalIds)->toContain($ctx->getSignal('room')?->id())
+        ;
+    });
+});
+
+describe('cleanup hooks', function (): void {
+    test('several #[OnCleanup] methods run in declaration order on a hydrated instance', function (): void {
+        $app = pageMountApp();
+        $ctx = new Context('A', '/p', $app, null, 's1');
+        pageMountHandler($app, PmTwoCleanups::class)($ctx);
+        $ctx->getSignal('n')?->setValue(7);
+
+        $ctx->cleanup();
+
+        expect(PageMountLog::$calls)->toBe([['first', 7], ['second', 7]]);
+    });
+
+    test('#[OnDisconnect] fails at mount and names #[OnCleanup]', function (): void {
+        $app = pageMountApp();
+
+        expect(fn () => $app->mount(PmOnDisconnectPage::class, '/gone'))
+            ->toThrow(LogicException::class, 'PmOnDisconnectPage::leave() uses #[OnDisconnect], which was removed in php-via 0.14. Use #[OnCleanup]')
         ;
     });
 });

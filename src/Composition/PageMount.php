@@ -86,19 +86,16 @@ final class PageMount {
             // 6. Hydrate instance from current signal values
             self::hydrate($instance, $meta, $ctx);
 
-            // 7. Register lifecycle hooks. Handlers are NOT re-hydrated first: they
-            //    do cleanup (presence updates, broadcasts) rather than read signals.
-            if ($meta->onDisconnect !== null) {
-                $method = $meta->onDisconnect;
-                $ctx->onDisconnect(static function (Context $ctx) use ($instance, $method): void {
-                    $instance->{$method}($ctx);
+            // 7. Register #[OnCleanup] methods in declaration order, on a freshly hydrated instance.
+            if ($meta->onCleanup !== []) {
+                $ctx->onCleanup(static function (Context $ctx) use ($instance, $meta): void {
+                    self::hydrate($instance, $meta, $ctx);
                 });
-            }
-            if ($meta->onCleanup !== null) {
-                $method = $meta->onCleanup;
-                $ctx->onCleanup(static function (Context $ctx) use ($instance, $method): void {
-                    $instance->{$method}($ctx);
-                });
+                foreach ($meta->onCleanup as $method) {
+                    $ctx->onCleanup(static function (Context $ctx) use ($instance, $method): void {
+                        $instance->{$method}($ctx);
+                    });
+                }
             }
 
             // 8. Set up view: inject route params if declared on view()

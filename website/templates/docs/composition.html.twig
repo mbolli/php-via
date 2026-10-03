@@ -23,7 +23,7 @@
             <tr><td><code>#[Persist]</code></td><td>server-only property</td><td>no</td><td>—</td></tr>
             <tr><td><code>#[Broadcast(Scope::X)]</code></td><td>class: primary scope</td><td>—</td><td>—</td></tr>
             <tr><td><code>#[Action]</code></td><td>method: action</td><td>—</td><td>—</td></tr>
-            <tr><td><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></td><td>method: lifecycle</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[OnCleanup]</code></td><td>method: lifecycle</td><td>—</td><td>—</td></tr>
         </tbody>
     </table>
 
@@ -247,15 +247,14 @@ public function setUsername(Context $ctx): void { }     // session-scoped action
 
     <h2 id="lifecycle">Lifecycle hooks</h2>
     <p>
-        Annotate a method with <code>#[OnDisconnect]</code> or <code>#[OnCleanup]</code> to run cleanup
-        when the connection closes. The method receives the <code>Context</code>. At most one method per
-        class may carry each attribute. Handlers are not re-hydrated first. They typically broadcast
-        presence changes or release resources rather than read live signals:
+        Annotate a method with <code>#[OnCleanup]</code> to run cleanup when the context is destroyed.
+        The method receives the <code>Context</code>. Several methods may carry the attribute; they run in
+        declaration order, after reactive properties are re-hydrated from their signals:
     </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\OnDisconnect;
+use Mbolli\PhpVia\Attributes\OnCleanup;
 
-#[OnDisconnect]
+#[OnCleanup]
 public function leave(Context $ctx): void {
     --Room::$members[$this->room];
     $ctx->broadcast();
