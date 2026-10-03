@@ -41,6 +41,7 @@ use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\State\SqliteSnapshot;
+use Mbolli\PhpVia\Support\CycleCollector;
 use Mbolli\PhpVia\Support\DatastarBundle;
 use Mbolli\PhpVia\Support\ErrorHooks;
 use Mbolli\PhpVia\Support\IdGenerator;
@@ -173,6 +174,9 @@ class Via {
 
     /** @var list<int> Timer IDs for running server intervals (populated in workerStart) */
     private array $serverIntervalIds = [];
+
+    /** Whether this worker runs the cycle collector from a timer, with PHP's own runs off */
+    private bool $collectsCycles = false;
 
     /** @var array<callable(Context): void> Callbacks to run when a client connects via SSE */
     private array $clientConnectCallbacks = [];
@@ -1299,16 +1303,23 @@ class Via {
                     }
                 }
 
-                // Proactive GC timer: call gc_collect_cycles() on a fixed schedule
-                // to prevent unpredictable mid-request pauses. PHP's automatic cycle
-                // collector fires when its root buffer fills (~10,000 roots); calling
-                // it periodically spreads the work out during idle gaps between requests.
+                // The worker runs the cycle collector itself, see Config::withGcIntervalMs().
                 $gcIntervalMs = $this->settings->gcIntervalMs;
                 if ($gcIntervalMs > 0) {
-                    $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
+                    $collector = new CycleCollector($gcIntervalMs, CycleCollector::memoryLimit((string) \ini_get('memory_limit')));
+                    gc_disable();
+                    $id = Timer::tick(CycleCollector::CHECK_MS, function () use ($collector): void {
+                        if ($collector->isDue()) {
+                            $this->runGcCycle();
+                            $collector->ran();
+                        }
+                    });
 
                     if ($id !== false) {
                         $this->serverIntervalIds[] = $id;
+                        $this->collectsCycles = true;
+                    } else {
+                        gc_enable();
                     }
                 }
 
@@ -1716,7 +1727,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * @internal run by the GC timer, see Config::withGcIntervalMs()
+     * @internal run when a worker's CycleCollector finds a run due, see Config::withGcIntervalMs()
      */
     public function runGcCycle(): void {
         $cycles = gc_collect_cycles();
@@ -3270,6 +3281,10 @@ class Via {
             Timer::clear($id);
         }
         $this->serverIntervalIds = [];
+        // The tick that ran the cycle collector is gone, so PHP runs it again while the worker drains.
+        if ($this->collectsCycles) {
+            gc_enable();
+        }
 
         // The frames waiting for the tick go out before the channels close; workerExit clears the tick's timer.
         $this->drainBroadcasts(renderPending: true);
