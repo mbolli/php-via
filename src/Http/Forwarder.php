@@ -25,8 +25,8 @@ use OpenSwoole\Process;
  * Every message is a list whose first entry names it:
  * - to the home: req, ack (a chunk is written), gone (the receiver gave up or its client left), requeue (cookies of
  *   a response the receiver gave up on), handover (a stream took the tab elsewhere)
- * - to the receiver: nothome, res (a whole response), head, chunk, end, file (sendfile), close; patches go to the new
- *   home of a tab that was handed over
+ * - to the receiver: nothome, res (a whole response), head, chunk, end, file (sendfile), close; patches, with TAB
+ *   signal values, go to the new home of a tab that was handed over
  *
  * @internal
  */
@@ -187,17 +187,15 @@ final class Forwarder {
 
             case 'handover':
                 if (\is_string($message[1] ?? null)) {
-                    $patches = $this->via->releaseHandedOver($message[1]);
-                    if ($patches !== []) {
-                        $this->send($from, ['patches', $message[1], $patches]);
-                    }
+                    $handed = $this->via->releaseHandedOver($message[1]);
+                    $this->sendHandedOver($from, $message[1], $handed['patches'], $handed['signals']);
                 }
 
                 return;
 
             case 'patches':
                 if (\is_string($message[1] ?? null) && \is_array($message[2] ?? null)) {
-                    $this->via->queueHandedOverPatches($message[1], $message[2]);
+                    $this->via->queueHandedOverPatches($message[1], $message[2], self::decodeSignals($message[3] ?? []));
                 }
 
                 return;
@@ -224,6 +222,28 @@ final class Forwarder {
             && \is_array($message[3] ?? null) && \is_array($message[4] ?? null)) {
             $this->send($from, ['requeue', $message[$type === 'res' ? 6 : 5], $message[4], $message[3]]);
         }
+    }
+
+    /**
+     * Send the new home of a tab what its previous home handed over, see Via::releaseHandedOver().
+     *
+     * @param list<array{type: string, content: string, selector?: string, mode?: string}> $patches
+     * @param array<string, mixed>                                                         $signals by signal id
+     */
+    public function sendHandedOver(int $workerId, string $contextId, array $patches, array $signals): void {
+        if ($patches === [] && $signals === []) {
+            return;
+        }
+
+        // As JSON, the form the browser gets them in: the pipe takes no objects.
+        $encoded = [];
+        foreach ($signals as $id => $value) {
+            $json = json_encode($value, JSON_PRESERVE_ZERO_FRACTION);
+            if ($json !== false) {
+                $encoded[$id] = $json;
+            }
+        }
+        $this->send($workerId, ['patches', $contextId, $patches, $encoded]);
     }
 
     /**
@@ -298,6 +318,29 @@ final class Forwarder {
         }
 
         return $head . 'content-length: ' . \strlen($body) . "\r\n\r\n" . $body;
+    }
+
+    /**
+     * The signal values of a patches message.
+     *
+     * @param mixed $encoded the message's entry as unserialized: JSON strings by signal id, or nothing usable
+     *
+     * @return array<string, mixed> by signal id
+     */
+    private static function decodeSignals(mixed $encoded): array {
+        $signals = [];
+        foreach (\is_array($encoded) ? $encoded : [] as $id => $json) {
+            if (!\is_string($json)) {
+                continue;
+            }
+
+            try {
+                $signals[(string) $id] = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+            }
+        }
+
+        return $signals;
     }
 
     /**

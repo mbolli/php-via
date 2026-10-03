@@ -507,6 +507,40 @@ class PatchManager {
     }
 
     /**
+     * The values of this page's and its components' TAB signals that the worker a tab moved to cannot get from the
+     * browser: those not yet sent to it, and with $serverOwned also those it does not send back. They count as sent
+     * here, so a later call returns only values written since.
+     *
+     * @return array<string, mixed> by signal id
+     */
+    public function takeHandOverSignals(bool $serverOwned): array {
+        $values = [];
+        self::collectHandOverSignals($this->context(), $serverOwned, $values);
+
+        return $values;
+    }
+
+    /**
+     * Write the TAB signal values the worker that held the tab handed over that differ from this copy's, as the
+     * server's, and send them with the view; see takeHandOverSignals().
+     *
+     * @param array<string, mixed> $values by signal id
+     */
+    public function applyHandedOverSignals(array $values): void {
+        $written = false;
+        foreach (self::tabSignalsById($this->context()) as $id => $signal) {
+            if (\array_key_exists($id, $values) && $signal->getValue() !== $values[$id]) {
+                $signal->setValue($values[$id]);
+                $written = true;
+            }
+        }
+
+        if ($written) {
+            $this->sync();
+        }
+    }
+
+    /**
      * Whether a patch has no re-send path, so that dropping it changes the page: a script, or an element
      * patch with a mode, as Context::patchElements() queues. Its target, such as a toast or a modal, may
      * lie outside the view, and a dropped Remove or Append is never repaired.
@@ -624,6 +658,32 @@ class PatchManager {
         foreach ($context->getComponentManager()->getComponents() as $component) {
             self::collectChangedTabSignals($component, $queued, $flat, $pending);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    private static function collectHandOverSignals(Context $context, bool $serverOwned, array &$values): void {
+        foreach (self::tabSignalsById($context) as $id => $signal) {
+            if ($signal->hasChanged() || ($serverOwned && !$signal->isClientWritable())) {
+                $values[$id] = $signal->getValue();
+                $signal->markSynced();
+            }
+        }
+    }
+
+    /**
+     * The TAB signals of $context and, recursively, its components.
+     *
+     * @return array<string, Signal>
+     */
+    private static function tabSignalsById(Context $context): array {
+        $signals = $context->getSignalFactory()->getTabSignals();
+        foreach ($context->getComponentManager()->getComponents() as $component) {
+            $signals += self::tabSignalsById($component);
+        }
+
+        return $signals;
     }
 
     /**

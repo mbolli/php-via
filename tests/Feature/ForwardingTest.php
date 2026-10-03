@@ -61,6 +61,16 @@ describe('over HTTP/1.1', function (): void {
         ], $r['out']);
     });
 
+    test('a stream that moves to another worker takes the TAB signals and the output of actions the old one ran', function (): void {
+        $r = forwardingFixture('forwarding_workers.php', '2', 'handover');
+
+        expect($r)->toMatchArray([
+            'early' => '200:42:7:1',
+            'moved' => '200:100:1:0',
+            'owned' => '7',
+        ], $r['out']);
+    });
+
     test('when the worker holding the tab dies mid-action the receiver answers 503 without running it, and takes the tab', function (): void {
         $r = forwardingFixture('forwarding_workers.php', '2', 'crash');
 

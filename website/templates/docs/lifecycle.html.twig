@@ -123,8 +123,9 @@ $config->withSseKeepAliveMs(15_000); // default; 0 sends no comment
         TAB signals (<code>clientWritable: false</code>, or every TAB signal under
         <code>Config::withStrictTabSignals()</code>) do not take the client's copy and start from the
         handler's initial value. With <code>worker_num &gt; 1</code> the same rebuild happens when a
-        tab's stream reconnects to a worker that does not hold the context; actions that land on another
-        worker are passed to the one that holds it. Keep server-owned state that has to survive that in a
+        tab's stream reconnects to a worker that does not hold the context, and the worker that held it
+        hands over its TAB signal values while it runs; actions that land on another worker are passed to
+        the one that holds the context. Keep server-owned state that has to survive a worker restart in a
         scoped signal or in <code>tabState()</code>, or use <code>worker_num = 1</code>.
     </p>
     <p>

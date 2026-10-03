@@ -166,8 +166,9 @@ $app->setInterval(fn() => $app->broadcast(Scope::GLOBAL), 5000); // process-wide
 > reload. Server-owned TAB signals (`clientWritable: false`, or all of them under
 > `Config::withStrictTabSignals()`) start from the handler's initial value. With `worker_num > 1` a
 > tab lives on the worker of its SSE stream, and actions that reach another worker are passed there;
-> when the stream reconnects to another worker, the context is rebuilt the same way, so keep state that
-> has to survive in a scoped signal or `tabState()`, or use `worker_num = 1`.
+> when the stream reconnects to another worker, the context is rebuilt the same way and takes the TAB
+> signal values the old worker still holds. Keep state that has to survive a worker restart in a scoped
+> signal or `tabState()`, or use `worker_num = 1`.
 
 ### Route Groups: shared prefix and/or middleware
 

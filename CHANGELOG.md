@@ -464,6 +464,8 @@ message that names the new one.
 - With several workers, an action that reached a worker other than the tab's ran on a copy of the
   context that no stream read, so its TAB signals, `sync()`, scripts and `patchElements()` were lost.
   It now runs on the tab's worker, as do uploads and `download()` URLs, and its cookies come back.
+  When the stream moves to another worker, the old one hands over the TAB signal values the browser
+  cannot send and what its running actions send.
 - A stopping worker, on a deploy or a reload, ended its streams and the tabs waited up to 15 s to
   reconnect. It now asks them to reconnect at once.
 

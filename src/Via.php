@@ -184,6 +184,12 @@ class Via {
     /** Whether this worker runs the cycle collector from a timer, with PHP's own runs off */
     private bool $collectsCycles = false;
 
+    /** @var array<string, int> Actions running on this worker, by context ID */
+    private array $runningActions = [];
+
+    /** @var array<string, true> Contexts handed over to another worker that wait here for their running actions to end */
+    private array $handingOver = [];
+
     /** @var array<callable(Context): void> Callbacks to run when a client connects via SSE */
     private array $clientConnectCallbacks = [];
 
@@ -1095,10 +1101,11 @@ class Via {
                     . 'Signal::mutate() for anything else. Reading a session data key and writing it back '
                     . 'loses updates the same way and has no atomic form. (2) PHP statics in your own handlers are '
                     . 'per-process, so a simulation kept in one diverges per worker. (3) A tab lives on the worker of '
-                    . 'its SSE stream. When the stream reconnects to another worker, that worker rebuilds the tab as a '
-                    . 'revival does, so a server-owned TAB signal (clientWritable: false, or any TAB signal without '
-                    . 'clientWritable: true under withStrictTabSignals()) starts from its initial value: keep state that '
-                    . 'must survive in a scoped signal or tabState(), or use worker_num = 1. '
+                    . 'its SSE stream. When the stream reconnects to another worker after the one that held the tab '
+                    . 'stopped, the new one rebuilds the tab as a revival does, so a server-owned TAB signal '
+                    . '(clientWritable: false, or any TAB signal without clientWritable: true under withStrictTabSignals()) '
+                    . 'starts from its initial value: keep state that must survive in a scoped signal or tabState(), or '
+                    . 'use worker_num = 1. '
                     . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
                 );
             }
@@ -1875,11 +1882,12 @@ class Via {
 
         // Pass an active-SSE guard so the timer won't destroy a context that has
         // a live SSE connection (can happen under load when the cleanup timer fires
-        // before the next SSE reconnection completes its handshake).
+        // before the next SSE reconnection completes its handshake), nor one that
+        // finishHandover() destroys once its running actions end.
         $this->app->scheduleContextCleanup(
             $contextId,
             $delayMs,
-            fn (): bool => ($this->activeSseCount[$contextId] ?? 0) > 0,
+            fn (): bool => ($this->activeSseCount[$contextId] ?? 0) > 0 || isset($this->handingOver[$contextId]),
         );
     }
 
@@ -2092,43 +2100,87 @@ class Via {
     }
 
     /**
-     * Give up this worker's copy of a tab whose stream connected to another worker: destroy it, which ends a stream
-     * it still has here, without touching its record, and return the patches no render sends again, for the new home.
+     * Note an action of a tab that starts running on this worker.
+     *
+     * @internal called by ActionHandler
+     */
+    public function actionStarted(string $contextId): void {
+        $this->runningActions[$contextId] = ($this->runningActions[$contextId] ?? 0) + 1;
+    }
+
+    /**
+     * Note an action that ended, after its response, and finish the handover of its tab when it was the last one.
+     *
+     * @internal called by ActionHandler
+     */
+    public function actionEnded(string $contextId): void {
+        $left = ($this->runningActions[$contextId] ?? 1) - 1;
+        if ($left > 0) {
+            $this->runningActions[$contextId] = $left;
+
+            return;
+        }
+
+        unset($this->runningActions[$contextId]);
+        if (isset($this->handingOver[$contextId])) {
+            unset($this->handingOver[$contextId]);
+            $this->finishHandover($contextId);
+        }
+    }
+
+    /**
+     * Give up this worker's copy of a tab whose stream connected to another worker, and return what the new home
+     * needs from it: the patches no render sends again, and the TAB signal values the browser cannot send there.
+     *
+     * The copy is destroyed without touching its record, which ends a stream it still has here. While actions of
+     * the tab run here, it stays without a stream until the last one ends, and then passes on what they sent.
      *
      * @internal called by Forwarder on a handover
      *
-     * @return list<array{type: string, content: string, selector?: string, mode?: string}>
+     * @return array{patches: list<array{type: string, content: string, selector?: string, mode?: string}>, signals: array<string, mixed>}
      */
     public function releaseHandedOver(string $contextId): array {
         $context = $this->contexts[$contextId] ?? null;
         $home = $this->app->getContextDirectory()?->home($contextId);
         if ($context === null || $context->isDestroyed() || $home === null || $home === $this->app->workerIdentity()) {
-            return [];
+            return ['patches' => [], 'signals' => []];
         }
 
-        $patches = $context->getPatchManager()->takeOneShotPatches();
-        $this->log('debug', "Handed context {$contextId} over to worker {$home[0]}, which its stream reached", $context);
+        $patchManager = $context->getPatchManager();
+        $handed = ['patches' => $patchManager->takeOneShotPatches(), 'signals' => $patchManager->takeHandOverSignals(serverOwned: true)];
         $this->app->cancelContextCleanup($contextId);
         unset($this->cleanupTimers[$contextId]);
-        $this->app->destroyContext($contextId, handedOver: true);
-        if (($this->contexts[$contextId] ?? null) === $context) {
-            unset($this->contexts[$contextId], $this->contextSessions[$contextId]);
+
+        if (($this->runningActions[$contextId] ?? 0) > 0) {
+            $this->log('debug', "Handing context {$contextId} over to worker {$home[0]} once its running actions end", $context);
+            $this->handingOver[$contextId] = true;
+            // Ends a stream the copy still has here; what the actions queue waits in the new channel.
+            $patchManager->recreatePatchChannel();
+
+            return $handed;
         }
 
-        return $patches;
+        $this->dropHandedOver($context, $home);
+
+        return $handed;
     }
 
     /**
-     * Queue the patches the previous home of a tab handed over.
+     * Queue the patches and write the TAB signal values the previous home of a tab handed over.
      *
      * @internal called by Forwarder
      *
-     * @param array<mixed> $patches as releaseHandedOver() returns them
+     * @param array<mixed>         $patches as releaseHandedOver() returns them
+     * @param array<string, mixed> $signals signal values by id
      */
-    public function queueHandedOverPatches(string $contextId, array $patches): void {
+    public function queueHandedOverPatches(string $contextId, array $patches, array $signals = []): void {
         $context = $this->contexts[$contextId] ?? null;
         if ($context === null || $context->isDestroyed()) {
             return;
+        }
+
+        if ($signals !== []) {
+            $context->getPatchManager()->applyHandedOverSignals($signals);
         }
 
         foreach ($patches as $patch) {
@@ -2582,6 +2634,42 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Pass on what the actions that outlived a handover sent, and destroy the copy they ran on.
+     */
+    private function finishHandover(string $contextId): void {
+        $context = $this->contexts[$contextId] ?? null;
+        $home = $this->app->getContextDirectory()?->home($contextId);
+        // The tab's stream may have come back here meanwhile.
+        if ($context === null || $context->isDestroyed() || $home === null || $home === $this->app->workerIdentity()) {
+            return;
+        }
+
+        $patchManager = $context->getPatchManager();
+        $patches = $patchManager->takeOneShotPatches();
+        $signals = $patchManager->takeHandOverSignals(serverOwned: false);
+        if ($patches !== [] || $signals !== []) {
+            $this->forwarder?->sendHandedOver($home[0], $contextId, $patches, $signals);
+        }
+        $this->app->cancelContextCleanup($contextId);
+        unset($this->cleanupTimers[$contextId]);
+        $this->dropHandedOver($context, $home);
+    }
+
+    /**
+     * Destroy this worker's copy of a tab another worker holds now.
+     *
+     * @param array{int, int} $home
+     */
+    private function dropHandedOver(Context $context, array $home): void {
+        $contextId = $context->getId();
+        $this->log('debug', "Handed context {$contextId} over to worker {$home[0]}, which its stream reached", $context);
+        $this->app->destroyContext($contextId, handedOver: true);
+        if (($this->contexts[$contextId] ?? null) === $context) {
+            unset($this->contexts[$contextId], $this->contextSessions[$contextId]);
+        }
     }
 
     /**

@@ -11,6 +11,8 @@ declare(strict_types=1);
  *   signals, a script, a cookie, a login that rotates the session, an upload and a download
  * - timeout: an action that outlasts withContextTimeouts(forwardMs: 1000), whose cookie goes out with the next response
  * - crash: the worker holding the tab dies during an action
+ * - handover: the stream moves to another worker after an action ran on the old one, while one runs there, and after
+ *   the old one sent a server-owned value
  *
  * Prints key=value lines.
  */
@@ -43,6 +45,7 @@ $app = new Via($config);
 
 $app->page('/p', static function (Context $c) use ($app): void {
     $n = $c->signal(0, 'n');
+    $own = $c->signal(0, 'own', clientWritable: false);
     $s = $c->signal(0, 's', Scope::SESSION);
     $r = $c->signal(0, 'r', Scope::ROUTE);
     $up = $c->signal('', 'up');
@@ -79,6 +82,17 @@ $app->page('/p', static function (Context $c) use ($app): void {
         $n->setValue($n->int() + 100);
         $c->sync();
     }, 'slow');
+    $c->action(static function (Context $c) use ($n, $own): void {
+        $n->setValue(42);
+        $own->setValue(7);
+        $c->execScript('window.__init = 1');
+    }, 'init');
+    $c->action(static function (Context $c) use ($n): void {
+        Coroutine::usleep(1_000_000);
+        $n->setValue($n->int() + 100);
+        $c->execScript('window.__moved = 1');
+        $c->sync();
+    }, 'slowmove');
     $c->action(static function () use ($app): void {
         $app->incrementGlobalState('died');
         Coroutine::usleep(300_000);
@@ -89,7 +103,7 @@ $app->page('/p', static function (Context $c) use ($app): void {
     $c->setTabState('builds', (int) $c->tabState('builds', 0) + 1);
     $builds = (int) $c->tabState('builds');
     $query = (string) $c->input('q', '');
-    $c->view(static fn (): string => '<p id="v">CTX:' . $c->getId() . ':N:' . $n->int() . ':S:' . $s->int() . ':R:' . $r->int()
+    $c->view(static fn (): string => '<p id="v">CTX:' . $c->getId() . ':N:' . $n->int() . ':OWN:' . $own->int() . ':S:' . $s->int() . ':R:' . $r->int()
         . ':PID:' . getmypid() . ':T:' . $builds . ':Q:' . $query . ':DL:' . $download . ':END</p>');
 });
 
@@ -111,6 +125,16 @@ $app->route('GET', '/whoami', new class($app) implements RequestHandlerInterface
  */
 function fwdRequest(mixed $sock, string $head, string $body = ''): array {
     fwrite($sock, $head . "\r\n" . $body);
+
+    return fwdResponse($sock);
+}
+
+/**
+ * The next response on a keep-alive socket.
+ *
+ * @return array{0: int, 1: string, 2: string} status, head and body
+ */
+function fwdResponse(mixed $sock): array {
     $raw = '';
     while (!str_contains($raw, "\r\n\r\n") && !feof($sock)) {
         $raw .= (string) fread($sock, 1);
@@ -320,6 +344,49 @@ function fwdCrash(int $port): void {
     echo 'receiver_alive=', (int) Process::kill($pidB, 0), "\n";
 }
 
+function fwdHandover(int $port): void {
+    // An action ran on the page's worker before the stream connected to another one.
+    [$onA, $pidA] = fwdSocketOn($port, 0, false);
+    [$contextId, $cookie] = fwdPage($onA);
+    [$initStatus] = fwdAction($onA, $port, 'init', $contextId, $cookie);
+    [$stream] = fwdSocketOn($port, $pidA, true);
+    $seen = fwdStream($stream, $contextId, $cookie) . fwdDrain($stream, 0.3);
+    echo 'early=', $initStatus, ':', fwdLast($seen, 'N'), ':', fwdLast($seen, 'OWN'), ':', (int) str_contains($seen, 'window.__init = 1'), "\n";
+    fclose($stream);
+
+    // The stream moves to another worker while an action runs on the old one.
+    [$onA, $pidA] = fwdSocketOn($port, 0, false);
+    [$contextId, $cookie] = fwdPage($onA);
+    [$old] = fwdSocketOn($port, $pidA, false);
+    fwdStream($old, $contextId, $cookie);
+    [$slow] = fwdSocketOn($port, $pidA, false);
+    $body = (string) json_encode(['via_ctx' => $contextId]);
+    fwrite($slow, "POST /_action/slowmove HTTP/1.1\r\nHost: 127.0.0.1:{$port}\r\nOrigin: http://127.0.0.1:{$port}\r\nCookie: via_session_id={$cookie}\r\n"
+        . 'Content-Type: application/json' . "\r\nContent-Length: " . strlen($body) . "\r\n\r\n" . $body);
+    Coroutine::usleep(300_000);
+    [$new] = fwdSocketOn($port, $pidA, true);
+    $seen = fwdStream($new, $contextId, $cookie);
+    [$slowStatus] = fwdResponse($slow);
+    $seen .= fwdDrain($new, 0.5);
+    $seenOld = fwdDrain($old, 0.1);
+    echo 'moved=', $slowStatus, ':', fwdLast($seen, 'N'), ':', (int) str_contains($seen, 'window.__moved = 1'), ':', (int) str_contains($seenOld, 'window.__moved'), "\n";
+    fclose($new);
+    fclose($old);
+
+    // A server-owned value the old worker already sent stays when the stream moves.
+    [$onA, $pidA] = fwdSocketOn($port, 0, false);
+    [$contextId, $cookie] = fwdPage($onA);
+    [$first] = fwdSocketOn($port, $pidA, false);
+    fwdStream($first, $contextId, $cookie);
+    fwdAction($onA, $port, 'init', $contextId, $cookie);
+    fwdDrain($first, 0.3);
+    fclose($first);
+    [$second] = fwdSocketOn($port, $pidA, true);
+    $seen = fwdStream($second, $contextId, $cookie) . fwdDrain($second, 0.3);
+    echo 'owned=', fwdLast($seen, 'OWN'), "\n";
+    fclose($second);
+}
+
 $app->setInterval(static function () use ($app, $port, $mode): void {
     static $fired = false;
     // The marker keeps a restarted leader from driving the run again.
@@ -335,6 +402,7 @@ $app->setInterval(static function () use ($app, $port, $mode): void {
             match ($mode) {
                 'timeout' => fwdTimeout($port),
                 'crash' => fwdCrash($port),
+                'handover' => fwdHandover($port),
                 default => fwdLayouts($port),
             };
         } catch (Throwable $e) {

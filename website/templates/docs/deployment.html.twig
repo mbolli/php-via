@@ -527,15 +527,22 @@ $config = (new Config())
         different workers. A worker that gets an action or a <code>download()</code> URL of a tab it does not
         hold passes the request to the tab's worker over OpenSwoole's worker pipe and sends back that worker's
         answer, with its cookies and a rotated session cookie. Middleware and the handler run on the tab's
-        worker only. Passing a request on adds about 0.05&nbsp;ms to it. An upload goes over as it arrived, so
-        <code>file()</code> and <code>move_uploaded_file()</code> work there.
+        worker only. Passing a request on adds about 0.04&nbsp;ms to it, and a passed action costs the server
+        about twice the CPU of one that reaches the tab's worker (0.18 against 0.09&nbsp;ms in a benchmark of
+        TAB actions). Over HTTP/1.1 with N workers, about (N&minus;1)/N of a tab's actions are passed. An upload
+        goes over as it arrived, so <code>file()</code> and <code>move_uploaded_file()</code> work there.
     </p>
     <p>
         The stream is not passed on. When it reconnects to another worker, that worker rebuilds the context by
         re-running the route handler, as a <a href="/docs/lifecycle#revival">revival</a> does, and the worker
-        that held the tab drops its copy and hands over the scripts and <code>patchElements()</code> patches
-        still queued. Scoped signal values, GlobalState, session data, tab state and the connected-client list
-        are in shared memory, and <code>withActionRateLimit()</code> counts across workers.
+        that held the tab drops its copy and hands over what the browser cannot send: the scripts and
+        <code>patchElements()</code> patches still queued, the TAB signal values the browser has not received,
+        and the values of server-owned TAB signals. An action still running there finishes on the old copy,
+        and what it sends follows the tab once it ends; a <code>spawn()</code> task still running there sends
+        nothing more, as for a destroyed context. Other server-side state, such as
+        <code>#[Persist]</code> properties, starts over. Scoped signal values, GlobalState, session data, tab
+        state and the connected-client list are in shared memory, and <code>withActionRateLimit()</code>
+        counts across workers.
     </p>
     <p>
         A worker waits up to <code>withContextTimeouts(forwardMs: ...)</code> (60&nbsp;s by default) for the tab's
@@ -589,9 +596,9 @@ $config = (new Config())
             per worker.
         </li>
         <li>
-            <strong>Server-owned TAB signals.</strong> When a tab's stream reconnects to another worker, the
-            context rebuilt there starts them from the handler's initial value. Keep state that has to survive in
-            a scoped signal or in <code>tabState()</code>.
+            <strong>Server-owned TAB signals.</strong> When a tab's stream reconnects to another worker after
+            the worker that held it stopped or crashed, the context rebuilt there starts them from the handler's
+            initial value. Keep state that has to survive that in a scoped signal or in <code>tabState()</code>.
         </li>
     </ul>
     <p>

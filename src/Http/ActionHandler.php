@@ -147,6 +147,7 @@ class ActionHandler {
             $this->via->getRequestSession($request),
         );
         $scope->bind();
+        $this->via->actionStarted($contextId);
 
         try {
             // Inject signals into context
@@ -182,6 +183,7 @@ class ActionHandler {
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+            $this->via->actionEnded($contextId);
         }
     }
 

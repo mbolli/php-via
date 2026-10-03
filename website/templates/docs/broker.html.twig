@@ -65,7 +65,7 @@ $config = (new Config())
         cannot pick one anyway. A tab lives on the worker that holds its stream, and an action or a download
         that lands on another worker is passed there. Scoped signal values, GlobalState, session data and the
         client list are shared; PHP statics stay per worker, and server-owned TAB signals start over when a
-        tab's stream reconnects to another worker. See
+        tab's stream reconnects after the worker that held it stopped. See
         <a href="/docs/deployment#same-machine">Deployment → Same machine</a> for the details and for the
         atomic update methods.
     </p>

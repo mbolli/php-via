@@ -394,8 +394,10 @@ $config = (new Config())
 Scoped signal values, GlobalState, session data, the client list, the action rate limit and
 a context directory live in shared memory. A tab lives on the worker of its SSE stream, and an
 action or download that lands on another worker is passed there over the worker pipe. No sticky
-sessions are needed. What stays per worker: PHP statics in app code; server-owned TAB signals
-start over when a tab's stream reconnects to another worker. Read-modify-write on shared values loses updates between workers:
+sessions are needed. When a tab's stream reconnects to another worker, the worker that held it
+hands over the TAB signal values the browser cannot send and what its running actions send. What
+stays per worker: PHP statics in app code; server-owned TAB signals start over when the worker that
+held the tab stopped. Read-modify-write on shared values loses updates between workers:
 use `increment()`/`mutate()` on signals, `incrementGlobalState()`/`mutateGlobalState()` on
 GlobalState, and `#[Signal(..., atomic: true)]` in the composition API. Session data values
 must be serializable. `withScopedSignalTableSize()`, `withContextDirectorySize()`,
