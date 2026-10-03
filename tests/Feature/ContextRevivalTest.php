@@ -713,13 +713,25 @@ describe('Revival and per-route middleware', function (): void {
         ;
     });
 
-    test('a rebuild the middleware refuses answers an action with the middleware\'s response', function (): void {
+    test('a rebuild the middleware refuses reloads the tab from an action, where Datastar would morph a redirect\'s target into it', function (): void {
         $gate = new ReviveRouteGate();
-        $tab = reviveGateApp($gate)->open('/item/1');
+        $app = reviveGateApp($gate);
+        $tab = $app->open('/item/1');
         $tab->patches();
+        $contextId = $tab->context()->getId();
         $gate->open = false;
         $tab->disconnect(expire: true);
 
-        expect(fn () => $tab->action('noop'))->toThrow(RuntimeException::class, "Action 'noop' answered 302");
+        $response = $tab->request('POST', '/_action/noop', (string) json_encode(['via_ctx' => $contextId]), [
+            'origin' => $app->origin(),
+            'content-type' => 'application/json',
+        ]);
+
+        expect($response->getStatusCode())->toBe(200)
+            ->and($response->getHeaderLine('Content-Type'))->toBe('text/javascript')
+            ->and((string) $response->getBody())->toBe('window.location.reload()')
+            ->and($response->hasHeader('Location'))->toBeFalse()
+            ->and($gate->runs)->toBe(2)
+        ;
     });
 });

@@ -371,7 +371,8 @@ $c->onCleanup(function (Context $c): void { /* ... */ });
   (`withContextTimeouts(revivalWindowMs: ...)`, 10 minutes by default), instead of reloading.
   Its page handler runs behind the route's middleware again, on a GET of the page's URL, and
   reads the attributes it and the reviving request's middleware set. When the route's
-  middleware answers instead, an SSE reconnect reloads the page and an action gets that answer.
+  middleware answers instead, the tab reloads, from an SSE reconnect or an action, and the page
+  load gets that answer.
 - **Reconnects.** After a network error Datastar retries the stream after 1, 2, 4, 8 and
   16 s, then every 30 s, ten times in all, each time with the tab's current signals. Once
   the retries run out or the stream ends, the default shell opens a new one within 15 s.

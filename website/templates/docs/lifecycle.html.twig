@@ -142,8 +142,8 @@ $config->withContextTimeouts(revivalWindowMs: 600_000); // 10 minutes (default);
         an auth gate applies and the attributes it sets reach the handler. The middleware gets a GET of the
         page's URL with the cookies of the request that revives the tab, and the attributes global middleware
         set on that request: on an action, or <code>SseAwareMiddleware</code> on an SSE reconnect. When it
-        answers instead of calling the handler, the tab is not revived: an SSE reconnect reloads the page, and
-        an action gets the middleware's response.
+        answers instead of calling the handler, the tab is not revived but reloads, from an SSE reconnect or
+        from an action, so the page load gets the middleware's answer, such as its redirect to a login page.
     </p>
 
     <h2 id="on-client-connect">onClientConnect (app-level)</h2>

@@ -7,7 +7,6 @@ namespace Mbolli\PhpVia\Http;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\ErrorPhase;
-use Mbolli\PhpVia\Http\Adapter\PsrResponseEmitter;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -18,6 +17,9 @@ use OpenSwoole\Http\Response;
  * Handles action triggers from the client.
  */
 class ActionHandler {
+    /** The body of an action answer that reloads the tab: Datastar runs a text/javascript answer. */
+    public const string RELOAD_SCRIPT = 'window.location.reload()';
+
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
@@ -93,10 +95,14 @@ class ActionHandler {
         // was cleaned up, then fires an action before its SSE stream reconnects.
         $refused = null;
         if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request, attributes: $attributes, refused: $refused) === null) {
-            // The route's middleware, such as an auth gate, answers as it would on a page load.
+            // The route's middleware, such as an auth gate, refused: the page load the reload makes gets its answer.
+            // Datastar would follow a redirect and morph what it leads to into the tab.
             if ($refused !== null) {
                 $this->via->writeSessionCookie($request, $response);
-                (new PsrResponseEmitter())->emit($refused, $response);
+                $response->status(200);
+                $response->header('Content-Type', 'text/javascript');
+                $response->header('Cache-Control', 'no-store');
+                $response->end(self::RELOAD_SCRIPT);
 
                 return;
             }

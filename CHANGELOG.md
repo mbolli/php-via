@@ -128,8 +128,8 @@ All notable changes to php-via will be documented in this file.
 - **A component namespace takes letters, digits, `_` and `-` only,** since it goes into action URLs
   and signal names. Any other character throws.
 - **A tab rebuilt after it was away runs the route's middleware again,** on a GET of the page's URL,
-  so an auth gate applies. When the middleware answers instead, the tab reloads, and an action that
-  would rebuild it gets the middleware's response. See [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival).
+  so an auth gate applies. When the middleware answers instead, the tab reloads, from an SSE reconnect
+  or an action, and the page load gets the middleware's answer. See [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival).
 - **Workers turn PHP's own cycle collector runs off** and start them between coroutines. A loop that
   creates cycles without waiting on I/O frees them only once it ends: call `gc_collect_cycles()` in
   it, or keep PHP's runs with `withGcIntervalMs(0)`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
