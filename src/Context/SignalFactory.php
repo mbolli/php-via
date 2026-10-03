@@ -41,7 +41,7 @@ class SignalFactory {
      * Create a signal.
      *
      * @param mixed       $initialValue   The initial value of the signal
-     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param string      $name           Signal name, unique per context and scope
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write it; null picks the scope's default
@@ -50,8 +50,11 @@ class SignalFactory {
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
      */
-    public function createSignal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
-        $baseName = $name ?? 'signal';
+    public function createSignal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
+        if (trim($name) === '') {
+            throw new \InvalidArgumentException('A signal needs a non-empty name, for example $c->signal(0, \'count\').');
+        }
+        $baseName = $name;
         $context = $this->context();
 
         // If no explicit scope provided, inherit from context's primary scope

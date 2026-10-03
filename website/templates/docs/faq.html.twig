@@ -20,7 +20,7 @@
             "name": "Shared counter uses globalState + manual broadcast instead of scoped signals",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Scoped signals already are shared state. When a context has a non-TAB scope, every $c->signal() call for the same name returns the same Signal object across all contexts in that scope. Fix: use $c->scope(Scope::ROUTE) and $c->signal(0). The signal auto-broadcasts on setValue(). Drop globalState and the manual broadcast() call."
+                "text": "Scoped signals already are shared state. When a context has a non-TAB scope, every $c->signal() call for the same name returns the same Signal object across all contexts in that scope. Fix: use $c->scope(Scope::ROUTE) and $c->signal(0, 'count'). The signal auto-broadcasts on setValue(). Drop globalState and the manual broadcast() call."
             }
         },
         {
@@ -148,7 +148,7 @@ $c->view(function () use ($app) {
         {% code 'php' %}{% verbatim %}
 // ❌ dual state: globalState + signal kept in sync manually
 $c->scope(Scope::GLOBAL);
-$count = $c->signal($app->globalState('count'));
+$count = $c->signal($app->globalState('count'), 'count');
 
 $increment = $c->action(function () use ($app, $count): void {
     $newVal = $app->globalState('count') + 1;
@@ -159,7 +159,7 @@ $increment = $c->action(function () use ($app, $count): void {
 
 // ✅ scoped signal is the single source of truth
 $c->scope(Scope::GLOBAL);
-$count = $c->signal(0);
+$count = $c->signal(0, 'count');
 
 $increment = $c->action(
     fn () => $count->increment()

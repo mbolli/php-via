@@ -76,13 +76,26 @@ describe('Signal Names', function (): void {
         expect($signal->id())->toContain('mySignal');
     });
 
-    test('signal generates name if not provided', function (): void {
-        $app = createVia();
-        $context = new Context(testContextId(), '/test', $app);
+    test('a signal without a name fails instead of sharing one object with every other unnamed signal', function (): void {
+        $context = new Context(testContextId(), '/test', createVia());
+        $signal = $context->signal(...);
 
-        $signal = $context->signal('value');
+        expect(fn () => $signal('value'))->toThrow(ArgumentCountError::class, 'Too few arguments')
+            ->and(fn () => $signal('value', scope: 'room:a'))->toThrow(ArgumentCountError::class, '($name) not passed')
+            ->and(fn () => $signal('value', ''))->toThrow(InvalidArgumentException::class, "\$c->signal(0, 'count')")
+        ;
+    });
 
-        expect($signal->id())->not->toBeEmpty();
+    test('two signals with different names are two objects', function (): void {
+        $context = new Context(testContextId(), '/test', createVia());
+
+        $a = $context->signal(1, 'a');
+        $b = $context->signal(2, 'b');
+
+        expect($a)->not->toBe($b)
+            ->and($a->int())->toBe(1)
+            ->and($b->int())->toBe(2)
+        ;
     });
 });
 

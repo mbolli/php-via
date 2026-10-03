@@ -803,7 +803,8 @@ class Context {
      * Create a signal.
      *
      * @param mixed       $initialValue   The initial value of the signal
-     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param string      $name           The signal's name in this context, used by getSignal(), templates
+     *                                    and the browser id
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write this signal. null (default):
@@ -818,7 +819,7 @@ class Context {
      * Declaring a TAB signal again with the same name returns the existing signal and sets it to
      * the new initial value; a warning is logged when that changes the live value.
      */
-    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
+    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
         return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
     }
 
