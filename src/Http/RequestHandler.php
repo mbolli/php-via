@@ -295,6 +295,19 @@ class RequestHandler {
             return;
         }
 
+        // One-shot downloads from Context::download(); GET only, so nothing else uses one up
+        if (str_starts_with($path, '/' . DownloadHandler::PATH)) {
+            if ($method !== 'GET') {
+                self::methodNotAllowed($request, $response, 'GET');
+
+                return;
+            }
+            $status = $this->via->getApp()->downloads()->send($response, substr($path, \strlen(DownloadHandler::PATH) + 1), $this->via->getSessionId($request));
+            $this->logRequest($method, $path, $status, $requestStart);
+
+            return;
+        }
+
         // Handle session close
         if ($path === '/_session/close' && $method === 'POST') {
             $status = $this->handleSessionClose($request, $response);
@@ -553,6 +566,11 @@ class RequestHandler {
         }
         if (str_starts_with($path, '/_action/')) {
             self::methodNotAllowed($request, $response, 'POST');
+
+            return;
+        }
+        if (str_starts_with($path, '/' . DownloadHandler::PATH)) {
+            self::methodNotAllowed($request, $response, 'GET');
 
             return;
         }

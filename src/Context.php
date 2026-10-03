@@ -10,6 +10,7 @@ use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
 use Mbolli\PhpVia\Context\SignalFactory;
+use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Rendering\Bootstrap;
 use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Rendering\TemplateEngine;
@@ -1195,6 +1196,39 @@ class Context {
         }
 
         $this->patchManager->execScript($script);
+    }
+
+    /**
+     * A one-shot URL that sends $source to the browser as a file download over plain HTTP, for exports that do not
+     * belong in the SSE stream.
+     *
+     * A string is the path of a file, sent with sendfile(); php-via does not delete it. A callable returns the
+     * content, or yields it in chunks, when the browser fetches the URL, so a generator streams an export of any
+     * size without holding it in memory. The URL works once and only for this tab's session, while its context
+     * lives: it is gone after the first request for it or when the context is destroyed. Send the browser there,
+     * with a link the view renders or $c->execScript('window.location = ' . json_encode($url)).
+     *
+     * With more than one worker only the worker that holds the context serves the URL, which a request over the
+     * tab's HTTP/2 connection reaches; on another worker it answers 404.
+     *
+     * ```php
+     * $url = $c->download(function () use ($rows): \Generator {
+     *     foreach ($rows as $row) {
+     *         yield implode(',', $row) . "\n";
+     *     }
+     * }, 'flows.csv', 'text/csv; charset=utf-8');
+     * ```
+     *
+     * @param callable(): (iterable<string>|string)|string $source   a file path, or a callable that returns or yields the content
+     * @param string                                       $filename the name the browser saves the file under
+     * @param string                                       $mimeType its Content-Type, such as 'text/csv; charset=utf-8'
+     *
+     * @throws \InvalidArgumentException for a path that is no readable file, an empty filename or one with control characters, or a malformed MIME type
+     */
+    public function download(callable|string $source, string $filename, string $mimeType): string {
+        $token = $this->app->getApp()->downloads()->register($this->getPageContext(), $source, $filename, $mimeType);
+
+        return $this->app->getSettings()->basePath . DownloadHandler::PATH . $token;
     }
 
     /**

@@ -250,6 +250,9 @@ message that names the new one.
 - **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on every
   worker, where `getLocalContexts()` lists this worker's contexts only. The website's examples use it
   to tell whether anyone is watching.
+- **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
+  what a callable returns or yields, as a download over plain HTTP. It works for the tab's session
+  only and goes with its context, so exports no longer travel through the SSE stream.
 - **The `via.session` request attribute** carries the visitor's session id to middleware on pages,
   actions, SSE and plain routes, so middleware no longer reads the session cookie, whose name
   `withSecureCookie()` changes. A request without the cookie gets the id the page then sets.

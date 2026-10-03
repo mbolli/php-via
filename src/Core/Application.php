@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Http\DownloadHandler;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
@@ -69,6 +70,9 @@ class Application {
 
     /** Whether a client's scopes were too many for the shared registry, which is logged once. */
     private bool $clientScopesOverflowReported = false;
+
+    /** The downloads of Context::download(), created with the first. */
+    private ?DownloadHandler $downloads = null;
 
     /** @var array<string, mixed> Global state shared across all routes and clients */
     private array $globalState = [];
@@ -295,6 +299,15 @@ class Application {
      */
     public function getClients(int $readEpoch = 0): array {
         return $this->clientRegistry?->all($readEpoch) ?? $this->clients;
+    }
+
+    /**
+     * The one-shot downloads of this worker's contexts.
+     *
+     * @internal used by Context::download() and the request handler
+     */
+    public function downloads(): DownloadHandler {
+        return $this->downloads ??= new DownloadHandler($this->logger);
     }
 
     /**
