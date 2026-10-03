@@ -442,8 +442,9 @@ message that names the new one.
   response. Each action has its own request now; see
   [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
 - A tab rebuilt after it was away (revival) lost the attributes middleware set on the request that
-  rebuilt it, so the login example's dashboard answered 500 on every reconnect. See
-  [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival) for per-route middleware.
+  rebuilt it, so the login example's dashboard answered 500 on every reconnect.
+- A stopping worker, on a deploy or a reload, ended its streams and the tabs waited up to 15 s to
+  reconnect. It now asks them to reconnect at once.
 
 ### Tests
 

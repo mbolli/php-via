@@ -443,7 +443,7 @@ class SseHandler {
 
                 if ($this->cookieRetired($stream)) {
                     $context->getPatchManager()->returnPatch($patch);
-                    $this->askToReconnect($stream, $sse, $brotliWrite);
+                    $this->askToReconnect($stream, $sse, $brotliWrite, 'The session cookie of this stream was retired');
 
                     break;
                 }
@@ -522,7 +522,7 @@ class SseHandler {
                 }
 
                 if ($this->cookieRetired($stream)) {
-                    $this->askToReconnect($stream, $sse, $brotliWrite);
+                    $this->askToReconnect($stream, $sse, $brotliWrite, 'The session cookie of this stream was retired');
 
                     break;
                 }
@@ -539,6 +539,11 @@ class SseHandler {
                     $lastWriteNs = hrtime(true);
                 }
             }
+        }
+
+        // A stopping worker sends its tabs to another one at once, not after the client's reconnect interval.
+        if ($synced && $this->via->isShuttingDown() && !$stream->clientGone && $response->isWritable()) {
+            $this->askToReconnect($stream, $sse, $brotliWrite, 'This worker stops');
         }
 
         // Flush the final brotli block so the decompressor sees a complete stream
@@ -612,13 +617,14 @@ class SseHandler {
     }
 
     /**
-     * End a stream whose cookie was retired, asking the tab to reconnect at once: a browser that took the new
-     * cookie keeps its context, and one that holds only the old cookie is refused.
+     * Ask the tab of a stream that ends to reconnect at once: after a rotation retired its cookie, a browser that
+     * took the new cookie keeps its context and one that holds only the old cookie is refused; after this worker
+     * stopped, another one takes the tab.
      *
      * @param null|callable(string): (false|string) $brotliWrite
      */
-    private function askToReconnect(SseStream $stream, SwooleSSEGenerator $sse, ?callable $brotliWrite): void {
-        $this->via->log('debug', 'The session cookie of this stream was retired, asking the tab to reconnect', $stream->context);
+    private function askToReconnect(SseStream $stream, SwooleSSEGenerator $sse, ?callable $brotliWrite, string $why): void {
+        $this->via->log('debug', $why . ', asking the tab to reconnect', $stream->context);
 
         try {
             $this->writeOutput($stream->response, $sse->patchSignals([Bootstrap::RECONNECT_SIGNAL => bin2hex(random_bytes(6))]), $brotliWrite);
