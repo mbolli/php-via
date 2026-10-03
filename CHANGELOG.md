@@ -236,6 +236,12 @@ message that names the new one.
   Passing `InMemoryBroker` explicitly still throws.
 - **`$c->isConnected()`** says whether the tab has an open stream. A component answers for its page.
 - **`$c->getPageContext()`** returns the page a component sits on, or the page itself.
+- **`$app->onError(fn ($e, $c, $phase, $action) => ...)`** sees each throw php-via catches from an
+  action, a render, a timer or a task, with its `ErrorPhase`. It only observes: a failing action
+  still answers 500 and sends the signals it changed, the ones the callback writes included.
+- **`$c->spawn($task)`** runs per-tab work in a coroutine: its throw goes to `onError()`, and a
+  stopping worker waits for it. Once the tab is gone for good, `$c->isDestroyed()` is true and the
+  task's syncs and patches do nothing.
 - **`Signal::ref()`** returns `$` plus the signal id, for Datastar expressions such as `data-text`.
 - **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a context.
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
