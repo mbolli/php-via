@@ -1795,16 +1795,49 @@ docs-toc {
   border-radius: var(--radius-3);
   padding: var(--size-5);
 }
-.ex-intro-icon { font-size: 1.75rem; margin-bottom: var(--size-2); }
 .ex-intro-card h3 { font-size: var(--font-size-2); margin: 0 0 var(--size-2); max-inline-size: unset; }
 .ex-intro-card p  { font-size: var(--font-size-0); color: var(--text-2); margin: 0; max-inline-size: unset; }
 
-.ex-intro-levels { margin-block: var(--size-7) 0; }
-.ex-intro-levels h2 { font-size: var(--font-size-3); margin-bottom: var(--size-4); max-inline-size: unset; }
-.ex-intro-dl { display: flex; flex-direction: column; gap: var(--size-4); }
-.ex-intro-dl > div { display: flex; align-items: baseline; gap: var(--size-3); flex-wrap: wrap; }
-.ex-intro-dl dt { flex-shrink: 0; }
-.ex-intro-dl dd { margin: 0; font-size: var(--font-size-0); color: var(--text-2); max-inline-size: unset; }
+.ex-catalog-hint { font-size: var(--font-size-0); color: var(--text-2); max-inline-size: unset; }
+.ex-catalog-group { margin-block: var(--size-6) 0; }
+.ex-catalog-heading { font-size: var(--font-size-3); margin: 0 0 var(--size-3); max-inline-size: unset; }
+.ex-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--size-3);
+}
+.docs-content .ex-catalog { padding-inline-start: 0; }
+.docs-content .ex-catalog > li { display: flex; margin: 0; padding: 0; }
+.ex-catalog-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+  padding: var(--size-3) var(--size-4);
+  background: var(--surface-2);
+  border: 2px solid var(--border-strong);
+  box-shadow: 3px 3px 0 0 var(--shadow-hard);
+  color: var(--text-1);
+  text-decoration: none;
+  transition: transform 80ms steps(2), box-shadow 80ms steps(2), background 120ms ease;
+}
+.ex-catalog-card:hover { background: var(--surface-3); color: var(--text-1); }
+.ex-catalog-card:hover .ex-catalog-title { color: var(--brand); }
+.ex-catalog-card:active { transform: translate(3px, 3px); box-shadow: 0 0 0 0 var(--shadow-hard); }
+.ex-catalog-title { font-family: var(--font-ui); font-weight: var(--font-weight-7); }
+.ex-catalog-card .badge-multiplayer { align-self: flex-start; margin: auto 0 0; }
+.ex-catalog-blurb { font-size: var(--font-size-0); color: var(--text-2); line-height: var(--font-lineheight-3); }
+.ex-catalog-note {
+  margin-block: var(--size-7) 0;
+  padding-block-start: var(--size-3);
+  border-block-start: 1px solid var(--border);
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+  max-inline-size: unset;
+}
 
 .badge {
   font-family: var(--font-ui);
@@ -1819,7 +1852,9 @@ docs-toc {
 .badge-intermediate  { background: var(--yellow-1); color: var(--yellow-8); }
 .badge-advanced      { background: var(--red-1); color: var(--red-7); }
 :is(.badge-beginner, .badge-intermediate, .badge-advanced) { border: 1px solid currentColor; }
-.badge-multiplayer   { color: var(--violet-ink); border: 1px solid currentColor; text-transform: lowercase; letter-spacing: 0.02em; margin-inline-start: 0.4em; }
+.badge-multiplayer   { color: var(--violet-ink); border: 1px solid currentColor; text-transform: lowercase; letter-spacing: 0.02em; margin-inline-start: 0.4em; vertical-align: middle; white-space: nowrap; }
+.sidebar-heading:has(.badge-multiplayer) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0.4em; }
+.sidebar-heading .badge-multiplayer { font-size: 0.6rem; letter-spacing: 0; padding: 0 0.3em; margin: 0; }
 
 @media (prefers-color-scheme: dark) {
   .badge-beginner     { background: var(--green-9); color: var(--green-2); }
@@ -1867,28 +1902,6 @@ docs-toc {
   font-size: var(--font-size-0);
   color: var(--text-3);
   margin-block: var(--size-2) var(--size-3);
-}
-
-/* ─── Signals debug panel (examples sidebar) ──────────── */
-.signals-debug summary {
-  cursor: pointer;
-  font-size: var(--font-size-0);
-  color: var(--text-3);
-  user-select: none;
-}
-.signals-debug summary:hover { color: var(--text-2); }
-.signals-debug-pre {
-  margin-block-start: var(--size-2);
-  padding: var(--size-3);
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-00);
-  color: var(--text-2);
-  overflow-x: auto;
-  max-height: 20rem;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 
 /* ─── Example page: two-panel layout ───────────────────── */
@@ -2121,10 +2134,8 @@ docs-toc {
 }
 
 .anatomy-badge {
-  font-size: 0.6rem;
+  font-size: 0.7rem;
   font-weight: var(--font-weight-6);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   padding: 0 var(--size-1);
   border-radius: var(--radius-sm);
   line-height: 1.5;
@@ -2138,14 +2149,13 @@ docs-toc {
 }
 .anatomy-badge--default {
   background: var(--surface-3);
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  text-transform: none;
-  letter-spacing: 0;
+  color: var(--text-2);
+  white-space: normal;
 }
 
 /* Scope badges */
-.anatomy-badge--tab {
+.anatomy-badge--tab,
+.anatomy-badge--persist {
   background: color-mix(in srgb, var(--gray-6) 20%, transparent);
   color: var(--text-2);
 }

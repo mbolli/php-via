@@ -122,8 +122,8 @@ final class WizardExample {
                 'anatomy' => [
                     'signals' => [
                         ['name' => 'step', 'type' => 'int', 'scope' => 'Persist', 'default' => '1', 'desc' => '#[Persist]: server-only current step (1 to 3). Drives which step UI is rendered.'],
-                        ['name' => 'error', 'type' => 'string', 'scope' => 'Persist', 'default' => '""', 'desc' => '#[Persist]: server-only validation message set by next() on step-1 failure.'],
-                        ['name' => 'name', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => '#[Signal]: developer name, collected in step 1.'],
+                        ['name' => 'error', 'type' => 'string', 'scope' => 'Persist', 'default' => '', 'desc' => '#[Persist]: server-only validation message set by next() on step-1 failure.'],
+                        ['name' => 'name', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => '#[Signal]: developer name, collected in step 1.'],
                         ['name' => 'role', 'type' => 'string', 'scope' => 'TAB', 'default' => '"Backend Dev"', 'desc' => '#[Signal]: selected role from the step-1 dropdown.'],
                         ['name' => 'years', 'type' => 'int', 'scope' => 'TAB', 'default' => '3', 'desc' => '#[Signal]: years of experience, from the step-1 range slider.'],
                         ['name' => 'sphp … sother', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Eight #[Signal] booleans, one per stack technology, bound to step-2 checkboxes.'],

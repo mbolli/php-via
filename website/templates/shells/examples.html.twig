@@ -1,56 +1,20 @@
 {% extends 'shells/base.html.twig' %}
 
-{% macro navlink(href, label, currentRoute, basePath, multiplayer) %}
+{% macro navlink(href, label, currentRoute, basePath) %}
     <li>
         <a href="{{ basePath }}{{ href }}"
-            {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}>
-            {{ label }}
-            {% if multiplayer %}<span class="badge badge-multiplayer">multiplayer</span>{% endif %}
-        </a>
+            {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}>{{ label }}</a>
     </li>
 {% endmacro %}
 
 {% macro groups(currentRoute, basePath) %}
     {% import _self as m %}
-    {% set groups = [
-        {name: 'Basics', items: [
-            ['examples/counter', 'Counter', false],
-            ['examples/greeter', 'Greeter', false],
-            ['examples/path-params', 'Path Parameters', false],
-            ['examples/live-search', 'Live Search', false],
-            ['examples/components', 'Components', false],
-            ['examples/theme-builder', 'Theme Builder', false],
-        ]},
-        {name: 'Forms and sessions', items: [
-            ['examples/wizard', 'Multi-step Form', false],
-            ['examples/contact-form', 'Contact Form', false],
-            ['examples/login', 'Login Flow', false],
-            ['examples/shopping-cart', 'Shopping Cart', false],
-            ['examples/file-upload', 'SharedWorker Upload', false],
-        ]},
-        {name: 'Shared state', items: [
-            ['examples/all-scopes', 'All Scopes', true],
-            ['examples/todo', 'Todo List', true],
-            ['examples/chat-room', 'Chat Room', true],
-            ['examples/client-monitor', 'Client Monitor', true],
-            ['examples/spreadsheet', 'Spreadsheet', true],
-        ]},
-        {name: 'Live data and games', items: [
-            ['examples/stock-ticker', 'Stock Ticker', true],
-            ['examples/live-auction', 'Live Auction', true],
-            ['examples/game-of-life', 'Game of Life', true],
-            ['examples/type-race', 'Type Race', true],
-        ]},
-        {name: 'Several servers', items: [
-            ['examples/mission-control', 'NATS Visualizer', true],
-        ]},
-    ] %}
-    {% for group in groups %}
+    {% for group in constant('PhpVia\\Website\\ExampleCatalog::GROUPS') %}
         <section class="sidebar-section">
-            <h3 class="sidebar-heading">{{ group.name }}</h3>
+            <h3 class="sidebar-heading"><span>{{ group.name }}</span>{% if group.multiplayer %} <span class="badge badge-multiplayer">multiplayer</span>{% endif %}</h3>
             <ul role="list">
                 {% for item in group.items %}
-                    {{ m.navlink(item[0], item[1], currentRoute, basePath, item[2]) }}
+                    {{ m.navlink(item.route, item.label, currentRoute, basePath) }}
                 {% endfor %}
             </ul>
         </section>
@@ -70,13 +34,6 @@
                 </ul>
             </section>
             {{ m.groups(currentRoute, basePath) }}
-            <section class="sidebar-section">
-                <h3 class="sidebar-heading">Debug</h3>
-                <details class="signals-debug" data-ignore-morph>
-                    <summary>Live signals</summary>
-                    <pre data-json-signals class="signals-debug-pre"></pre>
-                </details>
-            </section>
         </nav>
     </aside>
 

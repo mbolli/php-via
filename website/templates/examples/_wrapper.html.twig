@@ -2,9 +2,18 @@
 
 {% block title %}{{ title }} · php-via Examples{% endblock %}
 
+{% macro scopeLabel(scope) %}{{ {TAB: 'tab scope', ROUTE: 'route scope', SESSION: 'session scope', GLOBAL: 'global scope', Custom: 'custom scope', Persist: 'server only'}[scope] ?? scope }}{% endmacro %}
+
 {% block content %}
+{% import _self as w %}
+{% set multiplayer = false %}
+{% for group in constant('PhpVia\\Website\\ExampleCatalog::GROUPS') %}
+    {% for item in group.items %}
+        {% if group.multiplayer and (currentRoute == '/' ~ item.route or currentRoute starts with '/' ~ item.route ~ '/') %}{% set multiplayer = true %}{% endif %}
+    {% endfor %}
+{% endfor %}
 <div class="example-page-header">
-    <h1>{{ title }}</h1>
+    <h1>{{ title }}{% if multiplayer %} <span class="badge badge-multiplayer">multiplayer</span>{% endif %}</h1>
     <p>{{ description|raw }}</p>
     {% if (summary is defined and summary) or perWorker is defined %}
     <div class="example-summary">
@@ -28,7 +37,7 @@
     <div class="anatomy-github">
         <span class="anatomy-github-label">Source</span>
         {% for link in githubLinks %}
-        <a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.label }} <span class="anatomy-github-ext">.{{ link.url|split('.')|last }}</span> →</a>
+        <a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.label }} <span class="anatomy-github-ext">.{{ link.url|split('.')|last }}</span> <span class="px-ext" aria-hidden="true"></span></a>
         {% endfor %}
     </div>
     {% endif %}
@@ -42,8 +51,8 @@
                 <div class="anatomy-item-header">
                     <code class="anatomy-name">{{ signal.name }}</code>
                     {% if signal.type is defined %}<span class="anatomy-badge anatomy-badge--type">{{ signal.type }}</span>{% endif %}
-                    {% if signal.scope is defined %}<span class="anatomy-badge anatomy-badge--{{ signal.scope|lower|replace({':': '-', ' ': '-'}) }}">{{ signal.scope }}</span>{% endif %}
-                    {% if signal.default is defined %}<span class="anatomy-badge anatomy-badge--default">{{ signal.default }}</span>{% endif %}
+                    {% if signal.scope is defined %}<span class="anatomy-badge anatomy-badge--{{ signal.scope|lower|replace({':': '-', ' ': '-'}) }}">{{ w.scopeLabel(signal.scope) }}</span>{% endif %}
+                    {% if signal.default is defined %}<span class="anatomy-badge anatomy-badge--default">initial: {{ signal.default == '' ? 'empty string' : signal.default }}</span>{% endif %}
                 </div>
                 {% if signal.desc is defined %}<p class="anatomy-desc">{{ signal.desc }}</p>{% endif %}
             </div>
@@ -58,7 +67,7 @@
             <div class="anatomy-item">
                 <div class="anatomy-item-header">
                     <code class="anatomy-name">{{ action.name }}</code>
-                    {% if action.scope is defined %}<span class="anatomy-badge anatomy-badge--{{ action.scope|lower|replace({':': '-', ' ': '-'}) }}">{{ action.scope }}</span>{% endif %}
+                    {% if action.scope is defined %}<span class="anatomy-badge anatomy-badge--{{ action.scope|lower|replace({':': '-', ' ': '-'}) }}">{{ w.scopeLabel(action.scope) }}</span>{% endif %}
                 </div>
                 {% if action.desc is defined %}<p class="anatomy-desc">{{ action.desc }}</p>{% endif %}
             </div>

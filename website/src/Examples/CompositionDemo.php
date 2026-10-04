@@ -68,8 +68,8 @@ final class CompositionDemo {
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'nameInput', 'type' => 'string', 'scope' => 'TAB', 'default' => "''", 'desc' => 'Client-writable input bound via data-bind. Holds the typed name until saveName is called.'],
-                    ['name' => 'name', 'type' => 'string', 'scope' => 'SESSION', 'default' => 'Anonymous', 'desc' => 'Promoted from nameInput by saveName. SESSION scope auto-broadcasts to all tabs of this session.'],
+                    ['name' => 'nameInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Client-writable input bound via data-bind. Holds the typed name until saveName is called.'],
+                    ['name' => 'name', 'type' => 'string', 'scope' => 'SESSION', 'default' => '"Anonymous"', 'desc' => 'Promoted from nameInput by saveName. SESSION scope auto-broadcasts to all tabs of this session.'],
                     ['name' => 'count', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Per-tab counter. Each click adds the current multiplier: grows +1, +2, +3… proving #[Persist] survives between actions.'],
                     ['name' => 'multiplier', 'type' => 'int', 'scope' => 'Persist', 'default' => '1', 'desc' => 'Server-only instance property (not a signal). Invisible to the client. Grows by 1 on each increment call.'],
                     ['name' => 'totalClicks', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Counts every action call by every user. GLOBAL scope auto-broadcasts to all connected sessions.'],

@@ -146,7 +146,7 @@ final class AllScopesExample {
                         'summary' => self::SUMMARY,
                         'anatomy' => [
                             'signals' => [
-                                ['name' => 'personalMessage', 'type' => 'string', 'scope' => 'TAB', 'default' => 'Hello...', 'desc' => 'Per-tab editable message. Private to each browser tab.'],
+                                ['name' => 'personalMessage', 'type' => 'string', 'scope' => 'TAB', 'default' => '"Hello from your personal tab!"', 'desc' => 'Per-tab editable message. Private to each browser tab.'],
                             ],
                             'actions' => [
                                 ['name' => 'updateStatus', 'desc' => 'Randomizes the system status, counts the visit in GlobalState and broadcasts Scope::GLOBAL.'],

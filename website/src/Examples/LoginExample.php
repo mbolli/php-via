@@ -115,9 +115,9 @@ final class LoginExample {
                 'summary' => self::SUMMARY,
                 'anatomy' => [
                     'signals' => [
-                        ['name' => 'username', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Username input bound to the login form.'],
-                        ['name' => 'password', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Password input. Cleared on failure.'],
-                        ['name' => 'error', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Validation error message shown beneath the form.'],
+                        ['name' => 'username', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Username input bound to the login form.'],
+                        ['name' => 'password', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Password input. Cleared on failure.'],
+                        ['name' => 'error', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Validation error message shown beneath the form.'],
                     ],
                     'actions' => [
                         ['name' => 'login', 'desc' => 'Validates credentials. On success, rotates the session cookie, writes auth to sessionData and redirects to the middleware-protected dashboard.'],

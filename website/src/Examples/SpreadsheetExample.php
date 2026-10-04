@@ -602,9 +602,9 @@ final class SpreadsheetExample {
                             ['name' => 'viewRow / viewCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Top-left corner of the visible viewport. Private per tab and server-owned (clientWritable: false), so a POST carrying an older value cannot undo a scroll.'],
                             ['name' => 'focusRow / focusCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Currently focused cell coordinates. Server-owned, so a key pressed before the last move reached the browser still applies from the new cell.'],
                             ['name' => 'editing', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Whether the focused cell is in edit mode. A commit also needs the edit startEdit opened on the server, so a key pressed before the last commit or Escape arrived writes nothing.'],
-                            ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '\"\"', 'desc' => 'Current cell editor input value.'],
+                            ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Current cell editor input value.'],
                             ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted: client-writable action parameters for keyboard and mouse events.'],
-                            ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20×10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
+                            ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20, 10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
                         ],
                         'actions' => [
                             ['name' => 'focusCell', 'desc' => 'Moves cursor to a cell. Commits pending edits, updates selection, broadcasts cursor position.'],

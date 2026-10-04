@@ -51,7 +51,7 @@ final class TodoExample {
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => '#[Signal] draft input, private per tab so your typing doesn\'t leak to others.'],
+                    ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => '#[Signal] draft input, private per tab so your typing doesn\'t leak to others.'],
                 ],
                 'actions' => [
                     ['name' => 'addTodo', 'desc' => 'Appends the trimmed draft to the static list, clears it, and broadcasts to all viewers.'],

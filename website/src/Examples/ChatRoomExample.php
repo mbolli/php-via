@@ -27,7 +27,7 @@ final class ChatRoomExample {
     private const array ANATOMY = [
         'signals' => [
             ['name' => 'username', 'type' => 'string', 'scope' => 'SESSION', 'desc' => 'Persists across tabs. Same identity whether you switch rooms or open new tabs.'],
-            ['name' => 'messageInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Current message draft. Private to this tab.'],
+            ['name' => 'messageInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Current message draft. Private to this tab.'],
             ['name' => 'typingIndicator', 'type' => 'array', 'scope' => 'Custom', 'desc' => 'Custom room scope. Who is typing and when that expires. Shows "User is typing..." to everyone in the same room until the server clears it.'],
         ],
         'actions' => [

@@ -173,7 +173,7 @@ final class LiveSearchExample {
                 ],
                 'anatomy' => [
                     'signals' => [
-                        ['name' => 'query', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Current text in the search box. Injected from the browser before the action closure runs.'],
+                        ['name' => 'query', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Current text in the search box. Injected from the browser before the action closure runs.'],
                         ['name' => 'category', 'type' => 'string', 'scope' => 'TAB', 'default' => '"all"', 'desc' => 'Active category filter. Set via ?cat= query param when the user clicks a filter pill.'],
                     ],
                     'actions' => [

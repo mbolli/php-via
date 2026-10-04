@@ -11,12 +11,6 @@
             There is no separate backend, no compiled JavaScript bundle, and no hydration step:
             just PHP, Twig, and a persistent SSE stream.
         </p>
-        <p>
-            The server runs one worker. Several demos, such as Todo, Stock Ticker and Game of Life, keep their
-            state in PHP statics, which each worker holds on its own. Move that state into scoped signals,
-            GlobalState or a database before you run them with <code>withWorkerNum()</code>; see
-            <a href="/docs/deployment#per-worker">What stays per worker</a>. Each of those demos says so on its page.
-        </p>
     </header>
 
     <section class="ex-intro-grid">
@@ -34,32 +28,31 @@
         </div>
     </section>
 
-    <section class="ex-intro-levels">
-        <h2>Where to start</h2>
-        <dl class="ex-intro-dl">
-            <div>
-                <dt>Basics</dt>
-                <dd>Counter, Greeter, Path Parameters, Live Search, Components and Theme Builder: signals, actions, two-way binding and components, each in a few dozen lines of PHP.</dd>
-            </div>
-            <div>
-                <dt>Forms and sessions</dt>
-                <dd>Multi-step Form, Contact Form, Login Flow, Shopping Cart and SharedWorker Upload: per-session state, server-side validation, PSR-15 middleware, session rotation and file uploads.</dd>
-            </div>
-            <div>
-                <dt>Shared state</dt>
-                <dd>All Scopes, Todo List, Chat Room, Client Monitor and Spreadsheet: state shared by a route, a session or a custom scope. Open them in two tabs.</dd>
-            </div>
-            <div>
-                <dt>Live data and games</dt>
-                <dd>Stock Ticker, Live Auction, Game of Life and Type Race: server timers and broadcasts that every open tab sees at once.</dd>
-            </div>
-            <div>
-                <dt>Several servers</dt>
-                <dd>NATS Visualizer: broadcasts between php-via nodes through NATS.</dd>
-            </div>
-        </dl>
-        <p>Examples marked <span class="badge badge-multiplayer">multiplayer</span> share their state between visitors: open them in two windows to see it.</p>
+    <p class="ex-catalog-hint">Examples marked <span class="badge badge-multiplayer">multiplayer</span> share their state between visitors. Open them in two windows to see it.</p>
+
+    {% for group in constant('PhpVia\\Website\\ExampleCatalog::GROUPS') %}
+    <section class="ex-catalog-group">
+        <h2 class="ex-catalog-heading">{{ group.name }}</h2>
+        <ul class="ex-catalog" role="list">
+            {% for item in group.items %}
+            <li>
+                <a class="ex-catalog-card" href="{{ basePath }}{{ item.route }}">
+                    <span class="ex-catalog-title">{{ item.label }}</span>
+                    <span class="ex-catalog-blurb">{{ item.blurb }}</span>
+                    {% if group.multiplayer %}<span class="badge badge-multiplayer">multiplayer</span>{% endif %}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
     </section>
+    {% endfor %}
+
+    <p class="ex-catalog-note">
+        The server runs one worker. Several demos, such as Todo, Stock Ticker and Game of Life, keep their
+        state in PHP statics, which each worker holds on its own. Move that state into scoped signals,
+        GlobalState or a database before you run them with <code>withWorkerNum()</code>. See
+        <a href="/docs/deployment#per-worker">What stays per worker</a>. Each of those demos says so on its page.
+    </p>
 
 </article>
 {% endblock %}

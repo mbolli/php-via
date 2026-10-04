@@ -118,10 +118,10 @@ final class FileUploadExample {
                 'signals' => [
                     ['name' => 'uploadStatus', 'type' => 'string', 'scope' => 'Custom', 'default' => '"idle"', 'desc' => 'Upload lifecycle: idle | uploading | complete | cancelled.'],
                     ['name' => 'uploadPct', 'type' => 'int', 'scope' => 'Custom', 'default' => '0', 'desc' => 'Upload progress 0 to 100. Authoritative server value: navigation gaps self-heal on next chunk.'],
-                    ['name' => 'uploadFileName', 'type' => 'string', 'scope' => 'Custom', 'default' => '""', 'desc' => 'Filename displayed in the progress bar.'],
+                    ['name' => 'uploadFileName', 'type' => 'string', 'scope' => 'Custom', 'default' => '', 'desc' => 'Filename displayed in the progress bar.'],
                     ['name' => 'uploadTotalBytes', 'type' => 'int', 'scope' => 'Custom', 'default' => '0', 'desc' => 'Total file size in bytes (virtual or real).'],
                     ['name' => 'uploadedBytes', 'type' => 'int', 'scope' => 'Custom', 'default' => '0', 'desc' => 'Bytes transferred so far.'],
-                    ['name' => 'uploadFileInfo', 'type' => 'string', 'scope' => 'Custom', 'default' => '""', 'desc' => 'Human-readable file metadata for real uploads, e.g. "3.2 MB · PDF". Empty for simulated uploads.'],
+                    ['name' => 'uploadFileInfo', 'type' => 'string', 'scope' => 'Custom', 'default' => '', 'desc' => 'Human-readable file metadata for real uploads, e.g. "3.2 MB · PDF". Empty for simulated uploads.'],
                     ['name' => 'uploadMode', 'type' => 'string', 'scope' => 'TAB', 'default' => '"sim"', 'desc' => 'Which form is shown: sim (SharedWorker simulation) or real (multipart upload). TAB-scoped: each tab can differ.'],
                 ],
                 'actions' => [

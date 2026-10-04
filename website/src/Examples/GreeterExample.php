@@ -33,7 +33,7 @@ final class GreeterExample {
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'greeting', 'type' => 'string', 'scope' => 'TAB', 'default' => 'Hello...', 'desc' => '#[Signal] property. The displayed greeting message; both actions write to it.'],
+                    ['name' => 'greeting', 'type' => 'string', 'scope' => 'TAB', 'default' => '"Hello..."', 'desc' => '#[Signal] property. The displayed greeting message; both actions write to it.'],
                 ],
                 'actions' => [
                     ['name' => 'greetBob', 'desc' => '#[Action] method. Sets $this->greeting to "Hello Bob!".'],
