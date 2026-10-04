@@ -20,7 +20,7 @@
                     <span class="flex-1{% if todo.completed %} todo-item-text completed{% endif %}">{{ todo.text }}</span>
                 </div>
                 <button class="danger todo-delete-btn"
-                        data-on:click="@delete('{{ deleteTodo.url }}?id={{ todo.id }}')">🗑️</button>
+                        data-on:click="@delete('{{ deleteTodo.url }}?id={{ todo.id }}')" aria-label="Delete {{ todo.text }}">Delete</button>
             </li>
         {% else %}
             <li class="card todo-empty">
