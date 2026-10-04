@@ -949,13 +949,15 @@ $tab->signal('count');             // 1, the value the browser holds
 $tab->html();                      // the page from server state
 $tab->disconnect(expire: true);    // destroy the context; connect() or action() revives it
 $app->request('GET', '/api/health'); // a plain request, to a route() or a download() URL
-$app->runTasks();                  // run spawn() tasks; $c->setInterval() timers fire meanwhile
+$app->runTasks();                  // run spawn() tasks; setInterval() timers fire meanwhile
 $app->shutdown();
 ```
 
 TestApp runs php-via's own request, action and SSE handlers in the test's process, with no
 server, no port and no `VIA_TEST_MODE`, as one worker, with broadcasts rendered at once.
-`$app->setInterval()` callbacks never fire in a TestApp: call their work directly.
+TestApp arms `$app->setInterval()` timers as worker 0 does; they and `$c->setInterval()` fire
+only while `runTasks()` waits for a task or a broadcast. A test that needs an interval's work
+calls it directly.
 
 ---
 

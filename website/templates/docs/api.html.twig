@@ -1558,7 +1558,7 @@ it('counts clicks', function (): void {
 
     <h3 id="test-app"><code>Testing\TestApp</code></h3>
     <h4 id="test-app-construct"><code>__construct(Config $config, callable $routes)</code></h4>
-    <p>Builds the app: <code>new Via($config)</code>, then <code>$routes</code> with the <code>Via</code>, then the <code>onWorkerStart</code> callbacks as worker 0.</p>
+    <p>Builds the app: <code>new Via($config)</code>, then <code>$routes</code> with the <code>Via</code>, then the <code>onWorkerStart</code> callbacks as worker 0, and arms the <code>setInterval()</code> timers as worker 0 does.</p>
     <h4 id="test-app-open"><code>open(string $path, array $query = [], bool $connect = true): TestTab</code></h4>
     <p>Loads a page in a new browser with a session of its own and, by default, opens its SSE stream. It throws a <code>RuntimeException</code> for a status other than 200.</p>
     <h4 id="test-app-request"><code>request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface</code></h4>
@@ -1570,8 +1570,9 @@ it('counts clicks', function (): void {
     <h4 id="test-app-run-tasks"><code>runTasks(float $timeoutSeconds = 5.0): void</code></h4>
     <p>
         Runs the event loop until the <code>spawn()</code> tasks have ended and their broadcasts have rendered.
-        Timers fire meanwhile, <code>$c-&gt;setInterval()</code> callbacks included; <code>$app-&gt;setInterval()</code>
-        callbacks never fire in a TestApp. A task otherwise runs only up to its first wait.
+        Timers fire meanwhile, <code>$c-&gt;setInterval()</code> and <code>$app-&gt;setInterval()</code> callbacks
+        included: the constructor arms the latter as worker 0 does. With nothing pending it returns at once. A
+        task otherwise runs only up to its first wait.
     </p>
     <h4 id="test-app-via"><code>via(): Via</code></h4>
     <p>The app's <code>Via</code>, for <code>broadcast()</code>, <code>globalState()</code> and the like.</p>

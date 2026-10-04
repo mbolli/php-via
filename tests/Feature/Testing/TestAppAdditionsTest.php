@@ -187,6 +187,16 @@ describe('spawn() and runTasks()', function (): void {
         expect(additionsTaskRun('shutdown'))->toBe(['runningBefore' => 1, 'events' => ['task stopped', 'onWorkerStop'], 'running' => 0, 'logs' => []]);
     });
 
+    test('Via::setInterval() timers are armed as worker 0 arms them and fire while runTasks() runs the loop', function (): void {
+        expect(additionsTaskRun('server-interval'))->toBe([
+            'before' => ['leader' => 0, 'every' => 0],
+            'idleRunFired' => false,
+            'leader' => true,
+            'every' => true,
+            'timersLeft' => 0,
+        ]);
+    });
+
     test('runTasks() throws for a task still running after its timeout, which a later call still runs', function (): void {
         expect(additionsTaskRun('timeout'))->toBe(['error' => '1 Context::spawn() task(s) still running after 0.0 s.', 'running' => 0]);
     });

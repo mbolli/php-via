@@ -1347,24 +1347,7 @@ class Via {
                 // These are registered inside workerStart, so without the gate each of the N
                 // workers armed its own Timer::tick and a "once per server" job ran N times,
                 // and, if it broadcasts, delivered N^2 times.
-                foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
-                    if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
-                        continue;
-                    }
-
-                    $id = Timer::tick($ms, function () use ($callback): void {
-                        try {
-                            $callback();
-                        } catch (\Throwable $e) {
-                            $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
-                            $this->reportError($e, null, ErrorPhase::Timer);
-                        }
-                    });
-
-                    if ($id !== false) {
-                        $this->serverIntervalIds[] = $id;
-                    }
-                }
+                $this->armServerIntervals($workerId);
 
                 // See Config::withGcIntervalMs().
                 $gcIntervalMs = $this->settings->gcIntervalMs;
@@ -2566,7 +2549,8 @@ class Via {
      *
      * Contexts created from now on queue their patches in an array, and an SSE loop running in a
      * Fiber parks on it as it parks on a Channel in a coroutine. The onWorkerStart callbacks run
-     * here, as worker 0; nothing else of a worker start happens, so no timer is armed.
+     * here, as worker 0, and then the setInterval() timers are armed as worker 0 arms them. Nothing
+     * else of a worker start happens: no collector, sweep or heartbeat timer is armed.
      *
      * @internal
      *
@@ -2581,6 +2565,7 @@ class Via {
         foreach ($this->startCallbacks as $callback) {
             $callback($this->workerId);
         }
+        $this->armServerIntervals($this->workerId);
 
         return $this->requestHandler;
     }
@@ -2667,6 +2652,30 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Arm the setInterval() timers this worker runs: every one on the leader, only those for every worker elsewhere.
+     */
+    private function armServerIntervals(int $workerId): void {
+        foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
+            if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
+                continue;
+            }
+
+            $id = Timer::tick($ms, function () use ($callback): void {
+                try {
+                    $callback();
+                } catch (\Throwable $e) {
+                    $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
+                    $this->reportError($e, null, ErrorPhase::Timer);
+                }
+            });
+
+            if ($id !== false) {
+                $this->serverIntervalIds[] = $id;
+            }
+        }
     }
 
     /**
