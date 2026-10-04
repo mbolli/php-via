@@ -2344,6 +2344,8 @@ class Via {
         $isDocument = stripos($html, '<html') !== false;
         if ($isDocument) {
             $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
+        } else {
+            $this->htmlBuilder->checkRootIds($html, $context);
         }
 
         if ($this->devBarInjector === null || stripos($html, '</body>') === false) {

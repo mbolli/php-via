@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Rendering;
 
+use Dom\Element;
+use Dom\HTMLDocument;
+use Dom\Text;
 use Mbolli\PhpVia\Context;
 
 /**
@@ -221,6 +224,37 @@ class HtmlBuilder {
         }
 
         return $html;
+    }
+
+    /**
+     * In dev mode, warn once per route about a page update whose top level has an element without an id or text:
+     * Datastar patches a page view's top-level elements by id, and drops the others.
+     *
+     * @internal called by Via::decorateUpdate() for an update render of a page view that is no whole document
+     */
+    public function checkRootIds(string $content, Context $context): void {
+        $key = $context->getRoute() . "\0ids";
+        if (!$this->devMode || isset($this->checkedDocuments[$key]) || trim($content) === '' || !class_exists(HTMLDocument::class)) {
+            return;
+        }
+        $this->checkedDocuments[$key] = true;
+
+        $body = HTMLDocument::createFromString('<!DOCTYPE html><body>' . $content, LIBXML_NOERROR)->body;
+        if ($body === null) {
+            return;
+        }
+        foreach ($body->childNodes as $node) {
+            $what = match (true) {
+                $node instanceof Element && ($node->getAttribute('id') ?? '') === '' => 'a top-level <' . $node->localName . '> without an id',
+                $node instanceof Text && trim($node->textContent) !== '' => 'text outside any element',
+                default => null,
+            };
+            if ($what !== null) {
+                $this->log('warning', "The view of {$context->getRoute()} renders {$what}, so Datastar drops its updates (PatchElementsNoTargetsFound in the browser console): give the view one root element with an id, such as <div id=\"counter\">...</div>.", $context);
+
+                return;
+            }
+        }
     }
 
     /**

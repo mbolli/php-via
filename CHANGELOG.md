@@ -229,8 +229,9 @@ covers the changes that need more than a rename.
 - **`Testing\TestApp`** runs an app's pages in a test through php-via's own handlers, with no
   server. See [Testing](https://via.zweiundeins.gmbh/docs/getting-started#testing).
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
-- **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
-  logs a hint when every tab of a view rendered the same HTML in one broadcast.
+- **Dev mode** shows a page's exception class and message instead of "Internal Server Error",
+  logs a hint when every tab of a view rendered the same HTML in one broadcast, and warns once per
+  route about a page update whose top-level element has no id, which Datastar drops.
 
 ### Deprecated
 

@@ -1040,8 +1040,8 @@ php-via.
    handler (applies to `countClients()` and to component HTML).
 10. **Variable null in view closure**: add it to both outer and inner `use` lists.
 11. **Stale view after broadcast**: pass the view data as a closure, `$c->view('t', fn (): array => [...])`.
-12. **PatchElementsNoTargetsFound**: the root element of your rendered block must have a
-    unique `id` attribute.
+12. **PatchElementsNoTargetsFound**: the root element of your rendered view or block must have
+    a unique `id` attribute. Dev mode logs a warning once per route for a page update without one.
 13. **Timer fires with no clients**: guard `$app->broadcast()` with
     `if ($app->countClients($scope) === 0) return;`.
 14. **Shell templates ignore Twig**: shell HTML files use string placeholders, not Twig; put

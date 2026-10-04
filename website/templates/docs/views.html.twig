@@ -40,7 +40,9 @@ $c->view('todo.html.twig', fn (): array => ['todos' => $repository->all()]);
     </p>
     <p>
         An update of the page finds its place by id, so give the view's top-level element an id, as
-        <code>counter</code> above. A component needs none: php-via wraps it in an element with an id of its own.
+        <code>counter</code> above. Without one, Datastar drops the update and logs
+        <code>PatchElementsNoTargetsFound</code> in the browser console, and dev mode logs a warning once per
+        route. A component needs none: php-via wraps it in an element with an id of its own.
     </p>
 
     <h2 id="partial-updates">Partial updates with <code>block:</code></h2>

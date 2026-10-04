@@ -587,7 +587,7 @@ $app->page('/', function (Context $c) use ($repo): void {
         </p>
         <p><strong>Why:</strong> An update without a selector morphs the element whose <code>id</code> matches
         the root element of the patch. A block without a single root element that has an <code>id</code>
-        leaves Datastar nothing to match.</p>
+        leaves Datastar nothing to match. Dev mode logs a warning once per route for such an update.</p>
         <p><strong>Fix:</strong> Give the block one root element with a unique <code>id</code>:</p>
         {% code 'twig' %}{% verbatim %}
 {% block demo %}
