@@ -52,7 +52,7 @@ final class LoginExample {
     ];
 
     private const array MIDDLEWARE_ANATOMY = [
-        ['name' => 'AuthMiddleware', 'desc' => 'PSR-15 middleware that checks sessionData(\'auth\') and redirects unauthenticated requests to the login form. Implements SseAwareMiddleware to also protect SSE connections.'],
+        ['name' => 'AuthMiddleware', 'desc' => 'PSR-15 middleware that checks sessionData(\'auth\') and redirects unauthenticated requests to the login form. As route middleware it runs on page loads and when a tab that was away comes back, not on actions or SSE connects: a dashboard tab left open at logout keeps its stream until it reloads.'],
     ];
 
     /** @var array<string, array{password: string, role: string, name: string}> */

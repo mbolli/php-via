@@ -124,12 +124,14 @@ $app->page('/', function (Context $c): void {
     });
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="{$count->ref()}">
-            {$count->int()}
-        </strong></p>
-        <button data-on:click="@post('{$increment->url()}')">
-            +1
-        </button>
+        <div id="counter">
+            <p>Count: <strong data-text="{$count->ref()}">
+                {$count->int()}
+            </strong></p>
+            <button data-on:click="@post('{$increment->url()}')">
+                +1
+            </button>
+        </div>
     HTML);
 });
 
@@ -163,12 +165,14 @@ $app->page('/', function (Context $c): void {
     });
 
     $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="{$count->ref()}">
-            {$count->int()}
-        </strong></p>
-        <button data-on:click="@post('{$increment->url()}')">
-            +1
-        </button>
+        <div id="counter">
+            <p>Count: <strong data-text="{$count->ref()}">
+                {$count->int()}
+            </strong></p>
+            <button data-on:click="@post('{$increment->url()}')">
+                +1
+            </button>
+        </div>
     HTML);
 });
 
@@ -201,12 +205,14 @@ final class Counter {
         $increment = $c->getAction('increment');
 
         $c->view(fn() => <<<HTML
-            <p>Count: <strong data-text="{$count->ref()}">
-                {$count->int()}
-            </strong></p>
-            <button data-on:click="@post('{$increment->url()}')">
-                +1
-            </button>
+            <div id="counter">
+                <p>Count: <strong data-text="{$count->ref()}">
+                    {$count->int()}
+                </strong></p>
+                <button data-on:click="@post('{$increment->url()}')">
+                    +1
+                </button>
+            </div>
         HTML);
     }
 }
@@ -245,12 +251,14 @@ final class Counter {
         $increment = $c->getAction('increment');
 
         $c->view(fn() => <<<HTML
-            <p>Count: <strong data-text="{$count->ref()}">
-                {$count->int()}
-            </strong></p>
-            <button data-on:click="@post('{$increment->url()}')">
-                +1
-            </button>
+            <div id="counter">
+                <p>Count: <strong data-text="{$count->ref()}">
+                    {$count->int()}
+                </strong></p>
+                <button data-on:click="@post('{$increment->url()}')">
+                    +1
+                </button>
+            </div>
         HTML);
     }
 }

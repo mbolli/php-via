@@ -263,6 +263,8 @@ final class ChatRoomExample {
     private static function db(): \SQLite3 {
         if (self::$db === null) {
             self::$db = new \SQLite3(__DIR__ . '/../../chat.db');
+            // Every worker opens the file at start: wait for another worker's lock instead of failing.
+            self::$db->busyTimeout(1000);
             self::$db->exec('PRAGMA journal_mode=WAL');
             self::$db->exec('PRAGMA synchronous=NORMAL');
             self::$db->exec(

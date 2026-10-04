@@ -245,12 +245,14 @@ $tabScopeDemo = function (Context $c): void {
 $routeScopeDemo = function (Context $c) use ($app): void {
     // ROUTE-scoped: shared counter for all visitors on the same route
     $c->scope(Scope::ROUTE);
-    $routeCount = $c->signal($app->globalState('scope_demo_count') ?? 0, 'routeCount', Scope::ROUTE);
-    $incRoute = $c->action(function () use ($app, $routeCount): void {
+    // One counter of record per page, as the ROUTE signal is one per page.
+    $key = 'scope_demo_count:' . $c->getPageContext()->getRoute();
+    $routeCount = $c->signal($app->globalState($key) ?? 0, 'routeCount', Scope::ROUTE);
+    $incRoute = $c->action(function () use ($app, $routeCount, $key): void {
         // GlobalState is the counter of record: it is what survives a restart, and it
         // reseeds the signal above on first mount. Both stores are advanced atomically, so
         // neither drops a click when two workers handle one at the same moment.
-        $routeCount->setValue($app->incrementGlobalState('scope_demo_count'));
+        $routeCount->setValue($app->incrementGlobalState($key));
     }, 'incRoute');
 
     $c->view(fn (): string => <<<HTML
