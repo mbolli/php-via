@@ -1129,16 +1129,15 @@ class Context {
      * The default shell writes it with {{ via_head }}, a custom shell with the same placeholder, a
      * Twig template with {{ via_head() }}, and a closure that returns a full document with this
      * method. Every tag carries the nonce from the page request's 'via.csp_nonce' attribute, which
-     * middleware sets for a Content-Security-Policy. A component returns its page's.
+     * middleware sets for a Content-Security-Policy, except in an update render. A component returns its page's.
      *
      * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
      */
     public function viaHead(): string {
-        $page = $this->getPageContext();
-        $nonce = $page->cspNonce();
+        $nonce = $this->bootstrapNonce();
         $settings = $this->app->getSettings();
 
-        return Bootstrap::head($page->id, $settings->basePath, $settings->importMapTag($nonce), $nonce);
+        return Bootstrap::head($this->getPageContext()->id, $settings->basePath, $settings->importMapTag($nonce), $nonce);
     }
 
     /**
@@ -1149,7 +1148,7 @@ class Context {
      * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
      */
     public function viaFoot(): string {
-        return Bootstrap::foot($this->app->getSettings()->datastarUrl, $this->getPageContext()->cspNonce());
+        return Bootstrap::foot($this->app->getSettings()->datastarUrl, $this->bootstrapNonce());
     }
 
     /**
@@ -1783,6 +1782,16 @@ class Context {
         }
 
         throw new \LogicException("The 'via.csp_nonce' request attribute holds the CSP nonce for via_head and via_foot as a string, got " . get_debug_type($nonce) . '.');
+    }
+
+    /**
+     * The page's CSP nonce, or null in an update render: the browser hid the nonce of the page's tags, and a
+     * morph would write it back where scripts on the page can read it.
+     */
+    private function bootstrapNonce(): ?string {
+        $page = $this->getPageContext();
+
+        return $this->renderingUpdate || $page->renderingUpdate ? null : $page->cspNonce();
     }
 
     /**

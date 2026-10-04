@@ -392,6 +392,10 @@ covers the changes that need more than a rename.
   to reload stay at 10,000.
 - `withStaticDir()` served backup copies of PHP files, such as `x.php~`, `x.php.bak` or `x.php.br`.
 - Under a nonce CSP without `'unsafe-inline'` for styles, the Dev Bar showed unstyled.
+- A view that renders a whole document opened its stream twice on the first sync, the first request
+  aborted: the update dropped the seed tag from `<head>`, so the morph moved via_head's connect onto
+  another tag. Under a nonce CSP that update also wrote the nonce back onto via_head's tags, where the
+  browser had hidden it from scripts. Updates now keep the tags of `<head>` in place and carry no nonce.
 
 ### Tests
 
