@@ -27,6 +27,9 @@ class HtmlBuilder {
                 </aside>
         HTML;
 
+    /** The seed of a document with nothing to seed, and of every update, so the morph finds the tag it had */
+    private const string EMPTY_SEED = '<meta data-signals__ifmissing="{}">';
+
     /** A script whose URL names Datastar, such as via_foot's or a bundle of the page's own */
     private const string DATASTAR_SCRIPT = '/<script\b[^>]*\ssrc\s*=\s*["\']?[^"\'\s>]*datastar/i';
 
@@ -165,53 +168,47 @@ class HtmlBuilder {
      * Complete a view that renders its own `<html>` document.
      *
      * Head and foot includes the document does not already contain go before the first `</head>`
-     * and the last `</body>`. On the initial render a `via_ctx` meta (only when no data-signals
-     * attribute of the document declares via_ctx) and a `data-signals__ifmissing` seed with the values the first sync sends go right after
-     * via_head's via_ctx meta, or without via_head right after the opening `<head>` tag, ahead of the document's
-     * SSE bootstrap. The bootstrap and `datastar.js` are left to the document.
+     * and the last `</body>`. A `via_ctx` meta (only when no data-signals attribute of the document
+     * declares via_ctx) and a `data-signals__ifmissing` seed, with the values the first sync sends on the
+     * initial render and empty on an update, go right after via_head's via_ctx meta, or without via_head
+     * right after the opening `<head>` tag, ahead of the document's SSE bootstrap. The bootstrap and
+     * `datastar.js` are left to the document.
      *
      * @param bool $initial True for the initial page render, false for an SSE update render
      */
     public function injectIntoDocument(string $html, Context $context, bool $initial): string {
         [$headIncludes, $footIncludes] = $this->includes($context);
 
+        // An update carries the same tags in the same places, or Datastar's morph of <head> shifts via_head's tags
+        // onto other elements, and its SSE connect runs again.
         $signals = [];
-        if ($initial) {
-            if (preg_match(self::VIA_CTX_SIGNAL, $html) !== 1) {
-                $signals[] = '<meta data-signals="' . htmlspecialchars(
-                    (string) json_encode(['via_ctx' => $context->getId(), '_disconnected' => false], JSON_UNESCAPED_SLASHES),
-                    ENT_QUOTES,
-                    'UTF-8'
-                ) . '">';
-            }
-            $seedMeta = $this->seedMeta($context);
-            if ($seedMeta !== null) {
-                $signals[] = $seedMeta;
-            }
+        if (preg_match(self::VIA_CTX_SIGNAL, $html) !== 1) {
+            $signals[] = '<meta data-signals="' . htmlspecialchars(
+                (string) json_encode(['via_ctx' => $context->getId(), '_disconnected' => false], JSON_UNESCAPED_SLASHES),
+                ENT_QUOTES,
+                'UTF-8'
+            ) . '">';
         }
+        $signals[] = ($initial ? $this->seedMeta($context) : null) ?? self::EMPTY_SEED;
         $head = $this->missingFrom($html, $headIncludes);
         $foot = $this->missingFrom($html, $footIncludes);
 
-        if ($signals !== [] || $head !== []) {
-            $headEnd = stripos($html, '</head>');
-            if ($headEnd === false) {
-                $this->log('debug', 'Full-document view has no </head>; head content not injected', $context);
-            } else {
-                if ($head !== []) {
-                    $html = substr_replace($html, implode("\n", $head) . "\n", $headEnd, 0);
-                }
-                // Datastar applies attributes in document order, so via_ctx must precede a bootstrap @get in <head>:
-                // right after via_head's via_ctx meta, before its SSE connect, else right after <head>
-                if ($signals !== []) {
-                    $at = $headEnd;
-                    if (preg_match('/<[a-z][^>]*\s' . Bootstrap::MARKER . '(?=[\s=>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd) {
-                        $at = $m[0][1] + \strlen($m[0][0]);
-                    } elseif (preg_match('/<head(?=[\s>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd) {
-                        $at = $m[0][1] + \strlen($m[0][0]);
-                    }
-                    $html = substr_replace($html, "\n" . implode("\n", $signals), $at, 0);
-                }
+        $headEnd = stripos($html, '</head>');
+        if ($headEnd === false) {
+            $this->log('debug', 'Full-document view has no </head>; head content not injected', $context);
+        } else {
+            if ($head !== []) {
+                $html = substr_replace($html, implode("\n", $head) . "\n", $headEnd, 0);
             }
+            // Datastar applies attributes in document order, so via_ctx must precede a bootstrap @get in <head>:
+            // right after via_head's via_ctx meta, before its SSE connect, else right after <head>
+            $at = $headEnd;
+            if (preg_match('/<[a-z][^>]*\s' . Bootstrap::MARKER . '(?=[\s=>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd) {
+                $at = $m[0][1] + \strlen($m[0][0]);
+            } elseif (preg_match('/<head(?=[\s>])[^>]*>/i', $html, $m, PREG_OFFSET_CAPTURE) === 1 && $m[0][1] < $headEnd) {
+                $at = $m[0][1] + \strlen($m[0][0]);
+            }
+            $html = substr_replace($html, "\n" . implode("\n", $signals), $at, 0);
         }
 
         if ($foot !== []) {

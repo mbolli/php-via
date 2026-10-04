@@ -139,4 +139,40 @@ describe('a scope a live context still uses', function (): void {
             ->and($open($workers[1], '/room_/three')->getSignal('count')?->int())->toBe(5, 'a new context adopts the shared value')
         ;
     });
+
+    test('deletes the shared rows once no context on any worker uses the scope', function (): void {
+        $store = new SharedSignalStore(maxRows: 64);
+        $workers = [];
+        foreach ([1, 2] as $n) {
+            $via = createVia();
+            $via->setSharedSignalStore($store);
+            $workers[$n] = $via;
+        }
+        $open = static function (Via $via, string $id, string $room): Context {
+            $context = new Context($id, '/room', $via);
+            $via->contexts[$id] = $context;
+            $via->getApp()->registerContext($context);
+            $via->registerContextInScope($context, Scope::TAB);
+            $context->signal(0, 'count', $room);
+            $context->signal('', 'topic', $room);
+
+            return $context;
+        };
+
+        $other = $open($workers[1], '/room_/other', 'room:other');
+        for ($i = 0; $i < 20; ++$i) {
+            $one = $open($workers[1], "/room_/a{$i}", "room:{$i}");
+            $two = $open($workers[2], "/room_/b{$i}", "room:{$i}");
+            $one->getSignal('count')?->setValue($i + 1);
+            $workers[1]->getApp()->destroyContext($one->getId());
+            expect($store->has("room:{$i}\0" . $two->getSignal('count')?->id()))->toBeTrue('worker 2 still uses the scope');
+            $workers[2]->getApp()->destroyContext($two->getId());
+        }
+
+        expect($store->count())->toBe(2, 'only room:other is left')
+            ->and($store->scopeCount())->toBe(1)
+            ->and($open($workers[2], '/room_/again', 'room:3')->getSignal('count')?->int())->toBe(0, 'a scope declared again starts from its default')
+            ->and($other->getSignal('count')?->int())->toBe(0)
+        ;
+    });
 });

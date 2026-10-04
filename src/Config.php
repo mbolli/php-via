@@ -1061,8 +1061,9 @@ final class Config {
     /**
      * Tune the OpenSwoole\Table that backs scoped signal VALUES in multi-worker mode.
      *
-     * One row per distinct scoped (non-TAB) signal. As with withGlobalStateTableSize(),
-     * $maxRows is a floor rather than a ceiling: size for the count you need.
+     * One row per scoped (non-TAB) signal of a scope some context on any worker uses; the rows of a
+     * scope go when its last context is destroyed. As with withGlobalStateTableSize(), $maxRows is a
+     * floor rather than a ceiling: size for the peak. A write to a full table is dropped and logged.
      *
      * Integer signals are stored in a dedicated atomic column and ignore $maxValueBytes;
      * everything else is PHP-serialized and must fit within it.

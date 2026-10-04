@@ -1464,7 +1464,9 @@ $config->withBroadcastThrottle('import:*', 250);
     <p>
         The shared-memory tables behind global state and scoped signal values with several workers: rows and
         bytes per serialized value, 1024 rows by default. The row count is a floor, not a ceiling, and integers
-        ignore the byte cap. A write past either limit throws an <code>OverflowException</code>.
+        ignore the byte cap. A value past the byte cap throws an <code>OverflowException</code>, and so does a
+        GlobalState write to a full table. A scoped signal write to a full table is dropped and logged as an
+        error. See <a href="/docs/deployment#shared-tables">Deployment</a>.
     </p>
 
     <h4 id="config-with-context-directory-size"><code>withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600, int $maxTabStateBytes = 1024): Config</code></h4>

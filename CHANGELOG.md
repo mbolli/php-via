@@ -312,6 +312,11 @@ covers the changes that need more than a rename.
   now get no row, a warning is logged at most every 10 s per worker, and actions of those tabs that
   reach another worker answer 400. The sweep of expired rows runs at most once a second. See
   [Same machine](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
+- With several workers, the shared table of scoped signal values kept a row for every scoped signal
+  ever declared, so per-entity scopes such as `room:<id>` filled it, and then page views that declared
+  a new one answered 500. A scope's rows now go when the last context that uses it on any worker is
+  destroyed, and a write to a full table is dropped and logged at most every 10 s per worker. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#shared-tables) for sizing.
 - A revival that arrived while a destroyed context's cleanup callbacks ran could be torn down with
   it. Teardown now removes only entries that still belong to the destroyed context.
 - A revival whose page handler threw left the half-built context in its scopes, with its timers
@@ -387,6 +392,10 @@ covers the changes that need more than a rename.
   to reload stay at 10,000.
 - `withStaticDir()` served backup copies of PHP files, such as `x.php~`, `x.php.bak` or `x.php.br`.
 - Under a nonce CSP without `'unsafe-inline'` for styles, the Dev Bar showed unstyled.
+- A view that renders a whole document opened its stream twice on the first sync, the first request
+  aborted: the update dropped the seed tag from `<head>`, so the morph moved via_head's connect onto
+  another tag. Under a nonce CSP that update also wrote the nonce back onto via_head's tags, where the
+  browser had hidden it from scripts. Updates now keep the tags of `<head>` in place and carry no nonce.
 
 ### Tests
 

@@ -962,7 +962,9 @@ class Via {
     public function registerScopedSignal(string $scope, Signal $signal): void {
         // Back the value with shared memory before anything reads it, so a worker mounting a
         // route another worker already serves adopts the live value instead of resetting the
-        // scope to its own declared default.
+        // scope to its own declared default. The hold comes first, so no other worker deletes the
+        // rows of the scope in between.
+        $this->app->holdSharedScope($scope);
         $this->sharedSignalStore?->attachTo($signal);
 
         $this->signalManager->registerSignal($scope, $signal);
@@ -976,6 +978,8 @@ class Via {
      */
     public function setSharedSignalStore(?SharedSignalStore $store): void {
         $this->sharedSignalStore = $store;
+        $this->app->setSharedSignalStore($store);
+        $store?->onTableFull(fn (string $message) => $this->log('error', $message));
 
         // Signals backed by the store read under its epochs, so fan-outs take theirs from it.
         // Contexts keep the epoch of their newest frame, so the new counter continues past the old one.
@@ -1212,6 +1216,7 @@ class Via {
                 $this->setSharedSignalStore(new SharedSignalStore(
                     $this->settings->scopedSignalTableRows,
                     $this->settings->scopedSignalTableValueBytes,
+                    max(16, 2 * $this->settings->workerNum),
                 ));
 
                 // Lets any worker rebuild a context created by any other, which is what turns

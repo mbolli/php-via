@@ -259,7 +259,9 @@ $c->view(fn (): string => '<!DOCTYPE html><html><head><meta charset="UTF-8">' . 
 {% endverbatim %}{% endcode %}
     <p>
         <code>via_html_attrs</code> writes nothing without a nonce, and nothing in an update render, so a
-        morph of the document does not put back the attribute Datastar removed after reading it. Dev mode warns
+        morph of the document does not put back the attribute Datastar removed after reading it. For the same
+        reason the tags of <code>via_head</code> and <code>via_foot</code> carry the nonce only on the page
+        load, where the browser hides it from scripts. Dev mode warns
         once per shell or route whose page has a nonce and no <code>data-nonce</code>. The middleware sends the
         policy as a header on the response it gets back from <code>$handler-&gt;handle()</code>. This setup
         runs in Chromium with a counter, <code>dispatch()</code> and <code>execScript()</code> working and no

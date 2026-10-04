@@ -173,8 +173,10 @@ describe('via_head() and via_foot() in Twig templates', function (): void {
         $html = $via->buildHtmlDocument($ctx);
         $logs = (string) ob_get_clean();
 
+        $head = $ctx->viaHead();
+        $seedAt = (int) strpos($head, '>') + 1;
         expect(substr_count($html, 'via_ctx'))->toBe(1)
-            ->and($html)->toContain('<meta charset="UTF-8">' . $ctx->viaHead())
+            ->and($html)->toContain('<meta charset="UTF-8">' . substr($head, 0, $seedAt) . "\n" . '<meta data-signals__ifmissing="{}">' . substr($head, $seedAt))
             ->and($logs)->not->toContain('via_head')
         ;
     });

@@ -216,8 +216,10 @@ $app->page('/chat/{room}', function (Context $c, string $room): void {
     </p>
     <p>
         With more than one worker, a scoped signal's value also lives in the table the workers share, and it
-        stays there: a tab that declares the signal again, on any worker, gets that value. Each such signal
-        keeps its row, so size the table for them with <code>Config::withScopedSignalTableSize()</code>. Keep a
+        stays there while a context on any worker uses the scope: a tab that declares the signal on another
+        worker gets that value. When the last of them is destroyed, the rows go too. A worker that crashed lets
+        go of its scopes when its replacement starts, and at the latest a minute later. Size the table for the
+        scoped signals in use at peak, see <a href="/docs/deployment#shared-tables">Deployment</a>. Keep a
         value that has to outlive its visitors in GlobalState or your database, and seed the signal from it:
     </p>
     {% code 'php' %}{% verbatim %}
