@@ -1,6 +1,118 @@
 # Contention benchmark results
 
-## 0.14.0 final tree on held clocks, measured 2026-10-03
+## 0.14.0 release tree on held clocks, measured 2026-10-04
+
+F1, F2, F4 and F5 were rerun against fbfa1f6 (feat/api-014-rc2), the 0.14.0
+release tree. Each table compares base 737b2aa, v0.13.0 at dccddd6, 7a49802
+(the tree of the next section) and fbfa1f6, with the change of fbfa1f6 against
+base.
+
+- **Trees, server and clients:** as in the next sections, with each tree's
+  vendor directory and the scripts patched only to take the port and the
+  server's cores from environment variables. Server on cores 2 and 4 held at
+  4.5 GHz, broadcast_storm and idle_sse clients on cores 6 to 11, shared_read
+  and get_clients on core 2. Tree order rotated in every rep.
+- **Gating:** every run started only with the package below 95 °C, the
+  sibling cores 3 and 5 under 10% busy and cores 2 and 4 at 4.4 GHz or more,
+  and would have been rerun had its median clock fallen below 4.4 GHz: 106
+  runs kept, none rerun.
+- **Correctness:** every storm converged with no failed action, every
+  idle_sse broadcast reached all 5000 connections, shared_read had 0
+  mismatched frames and every get_clients flag was true, in every tree.
+
+fbfa1f6 matches 7a49802 within the noise in F1, F4 and F5. In F2 the
+broadcast to 5000 idle streams takes 20.5% longer than on 7a49802, ranges
+apart, and the cycle collector's 100 ms check no longer adds wakeups. Both
+follow from 1bdc2f3, which keeps PHP's own collector runs by default and makes
+the growth-based runs opt-in (see the F2 bisect below).
+
+### F4 shared_read, release tree
+
+Defaults (N=2000, S=5, 20 broadcasts), 5 reps:
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| with store, tab (ms per broadcast) | 48.834 (48.632 to 49.502) | 22.722 (22.388 to 23.304) | 21.69 (21.564 to 21.895) | 21.779 (21.507 to 22.125) | 2.24x lower |
+| with store, route (ms per broadcast) | 20.224 (20.033 to 20.79) | 5.319 (5.236 to 5.458) | 3.633 (3.563 to 3.688) | 3.603 (3.591 to 3.675) | 5.61x lower |
+| no store, tab (ms per broadcast) | 19.808 (19.722 to 20.102) | 20.279 (20.16 to 20.701) | 19.456 (19.426 to 19.759) | 19.497 (19.332 to 19.634) | -1.6% |
+| no store, route (ms per broadcast) | 3.751 (3.727 to 3.84) | 4.556 (4.544 to 4.693) | 2.841 (2.822 to 2.879) | 2.844 (2.81 to 2.898) | -24.2% |
+| peak memory (MB) | 78 (78 to 78) | 48 (48 to 48) | 56 (56 to 56) | 56 (56 to 56) | -28.2% |
+
+The F4 regression check passes: without a store, fbfa1f6 costs what base
+costs per context in tab mode and 24.2% less in route mode, ranges apart.
+Against v0.13.0 it is 3.9% faster in tab mode and 37.6% faster in route mode.
+
+### F5 get_clients, release tree
+
+Default sweep (`--n=100,1000,5000 --fanout-cap=1000 --broadcasts=3
+--timeout=300`), 5 reps (base 3):
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| shared, N=1000, call after one new client (ms) | 4.477 (4.348 to 4.615) | 0.384 (0.367 to 0.386) | 0.373 (0.366 to 0.382) | 0.369 (0.364 to 0.385) | 12.1x lower |
+| shared, N=5000, call after one new client (ms) | 22.377 (22.265 to 22.524) | 2.015 (1.962 to 2.101) | 2.053 (2.002 to 2.182) | 2.035 (1.958 to 2.242) | 11.0x lower |
+| shared, N=100, broadcast to 100 contexts (ms) | 45.19 (44.34 to 47.66) | 0.24 (0.24 to 0.25) | 0.2 (0.19 to 0.21) | 0.2 (0.19 to 0.2) | 226x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | 4533.4 (4459.3 to 4555.6) | 2.24 (2.17 to 2.33) | 1.7 (1.65 to 1.9) | 1.69 (1.68 to 1.72) | 2682x lower |
+| shared, N=5000, broadcast to 1000 contexts (ms) | 23016.2 (22657.1 to 23048.7) | 4.06 (3.77 to 4.18) | 3.28 (3.23 to 3.52) | 3.25 (3.24 to 3.47) | 7082x lower |
+| single, N=100, broadcast to 100 contexts (ms) | 0.86 (0.85 to 0.89) | 0.18 (0.18 to 0.18) | 0.13 (0.12 to 0.13) | 0.13 (0.12 to 0.14) | 6.62x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | 108.1 (107.5 to 109.2) | 1.77 (1.68 to 1.79) | 1.24 (1.19 to 1.29) | 1.26 (1.23 to 1.28) | 85.8x lower |
+| peak memory (MB) | 38.0 (38.0 to 38.0) | 28.0 (28.0 to 28.0) | 28.0 (28.0 to 28.0) | 28.0 (28.0 to 28.0) | -26.3% |
+
+Broadcasts that read the client list take 17 to 29% less time than on
+v0.13.0, ranges apart, and the same as on 7a49802. The rebuild after a new
+client is level with v0.13.0.
+
+### F2 idle_sse, release tree
+
+N=5000 with a 15 s window (`--n=5000 --idle=15 --settle=3`), 1 worker, 5 reps:
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| worker CPU (%) | 7.59 (7.4 to 7.79) | 0.2 (0.13 to 0.2) | 0.13 (0.07 to 0.2) | 0.13 (0.07 to 0.13) | 1 to 2 ticks |
+| wakeups/s | 596.7 (595.7 to 623) | 22.1 (21.3 to 22.3) | 33.5 (30.4 to 34.3) | 24.2 (22.6 to 26.6) | 24.7x lower |
+| broadcast to all connections (ms) | 42.07 (41.69 to 42.55) | 44.27 (43.73 to 48.18) | 39.88 (37.97 to 42.01) | 48.07 (47.36 to 52.23) | +14.3% |
+| shutdown (ms) | 122.9 (120.0 to 124.7) | 124.5 (121.0 to 137.5) | 139.4 (134.2 to 153.4) | 140.4 (138.3 to 152.6) | +14.3% |
+| worker RSS (MB) | 204.9 (203 to 207.8) | 231.3 (230.3 to 233) | 230.4 (229.8 to 230.5) | 229.8 (229.6 to 230) | +12.2% |
+
+The broadcast to all 5000 streams takes 48.1 ms, 20.5% longer than on 7a49802
+and 14.3% longer than on base, ranges apart. Wakeups fall back to the level of
+v0.13.0. Shutdown matches 7a49802, 16 to 18 ms slower than base and v0.13.0.
+
+A bisect between 7a49802 and fbfa1f6, 3 reps per tree in the same gated runs,
+puts the broadcast step at 1bdc2f3: 38.6 ms (38.2 to 40.1) on its parent
+541b691 and 44.9 ms (44.8 to 46.0) on 1bdc2f3, ranges apart, with the wakeups
+falling from 32.5 to 22.9 a second at the same commit. 87c8ff9, the parent of
+85b446e, measured 47.5 ms (46.6 to 49.8) and fbfa1f6 51.3 ms (46.3 to 51.3),
+ranges overlapping, so the later commits add at most a few ms that this run
+could not separate. The likely cause, not isolated: with PHP's runs on, a
+collector run can fall inside the fan-out and walk every live context. `withGcIntervalMs(onGrowth: true)` is
+the opt-in that turns those runs off.
+
+### F1 broadcast_storm, release tree
+
+Defaults (N=1000, K=200, concurrency 50, 1 worker), 5 reps, and low load with
+one actor (`--concurrency=1`, K=1), 7 reps:
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| storm to converge (ms) | 1418.9 (1417.9 to 1437.9) | 33.68 (32.573 to 34.1) | 34.731 (32.854 to 35.56) | 33.903 (33.712 to 34.803) | 41.9x lower |
+| converge after last send (ms) | 357.7 (352.2 to 360.9) | 21.554 (19.551 to 23.652) | 23.367 (21.209 to 24.242) | 22.766 (22.729 to 23.772) | 15.7x lower |
+| action latency p50 (ms) | 354.3 (353.0 to 358.8) | 0.503 (0.493 to 0.526) | 0.622 (0.6 to 0.635) | 0.653 (0.632 to 0.665) | 543x lower |
+| action latency p99 (ms) | 358.9 (356.3 to 363.1) | 10.649 (8.528 to 11.525) | 9.057 (8.735 to 12.516) | 9.199 (9.091 to 9.231) | 39x lower |
+| actions/s | 140.9 (139.1 to 141.1) | 15706.1 (14775.4 to 18995.1) | 17322.2 (13332.4 to 17849.2) | 17049 (16914.6 to 17244.2) | 121x higher |
+| converge after last send, K=1 (ms) | 7.591 (7.397 to 8.069) | 8.455 (8.298 to 8.758) | 8.714 (8.582 to 9.173) | 9.143 (8.824 to 9.87) | +20.4% |
+| action latency, K=1 (ms) | 7.628 (7.435 to 8.191) | 0.267 (0.256 to 0.292) | 0.432 (0.409 to 0.471) | 0.434 (0.402 to 0.459) | 17.6x lower |
+
+The storm converges as fast as on v0.13.0 and 7a49802. At K=1 fbfa1f6
+converges 0.4 ms later than 7a49802, ranges overlapping, 0.7 ms later than
+v0.13.0 and 1.6 ms later than base, ranges apart. The K=1 action latency
+matches 7a49802 and stays 0.17 ms above v0.13.0, and the action latency p50
+at the defaults is 29.8% above v0.13.0, ranges apart, as on 7a49802.
+
+## 7a49802 on held clocks, measured 2026-10-03
+
+**Superseded for 0.14.0 by the section above,** which measures the release
+tree fbfa1f6.
 
 F1, F2, F4 and F5 were rerun against 7a49802 (feat/api-014-mw), the 0.14.0
 tree with forwarding between workers, the cycle collector and the fan-out
@@ -22,7 +134,7 @@ compares base 737b2aa, v0.13.0 at dccddd6, 0.14 before that work at 7ea9875
   idle_sse broadcast reached all 5000 connections, shared_read had 0
   mismatched frames and every get_clients flag was true, in every tree.
 
-### F4 shared_read, final tree
+### F4 shared_read, 7a49802
 
 Defaults (N=2000, S=5, 20 broadcasts), 5 reps:
 
@@ -39,7 +151,7 @@ base costs per context in tab mode and 22.5% less in route mode, ranges apart,
 where 7ea9875 was 6.2% and 45.5% slower than base. Against v0.13.0, 7a49802
 is 5.2% faster in tab mode and 37.9% faster in route mode.
 
-### F5 get_clients, final tree
+### F5 get_clients, 7a49802
 
 Default sweep (`--n=100,1000,5000 --fanout-cap=1000 --broadcasts=3
 --timeout=300`), 5 reps (base 3):
@@ -59,7 +171,7 @@ Broadcasts that read the client list take 25 to 32% less time than on
 7ea9875 and 15 to 28% less than on v0.13.0, ranges apart. The rebuild after a
 new client is 17.7% faster than on 7ea9875 and level with v0.13.0.
 
-### F2 idle_sse, final tree
+### F2 idle_sse, 7a49802
 
 N=5000 with a 15 s window (`--n=5000 --idle=15 --settle=3`), 1 worker, 5 reps:
 
@@ -77,7 +189,7 @@ collector's 100 ms check, and shutdown takes 13 ms longer than on 7ea9875,
 which matches the reconnect signal a stopping worker now sends every stream.
 Neither cause was isolated.
 
-### F1 broadcast_storm, final tree
+### F1 broadcast_storm, 7a49802
 
 Defaults (N=1000, K=200, concurrency 50, 1 worker), 5 reps, and low load with
 one actor (`--concurrency=1`, K=1), 7 reps:
@@ -103,8 +215,9 @@ action latency p50 at the defaults is 24.9% above v0.13.0, ranges apart. The
 
 ## 0.14.0 release candidate on held clocks, measured 2026-10-03
 
-**Superseded for 0.14.0 by the section above,** which measures the final tree:
-its F4 regression check passes and its F1, F2 and F5 figures replace these.
+**Superseded for 0.14.0 by the sections above,** which measure 7a49802 and
+the release tree: their F4 regression check passes and their F1, F2 and F5
+figures replace these.
 
 
 Every F section below was rerun against release/0.14 at 718e51c, the 0.14.0

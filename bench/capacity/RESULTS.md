@@ -1,18 +1,24 @@
 # Capacity results
 
-## 0.14.0, measured 2026-10-02
+## 0.14.0, measured 2026-10-02 and 2026-10-04
 
-Measured with `capacity.php` against the website (`website/app.php`, production mode, Brotli on)
-at commit 62d1e5b: 0.13.1 plus Datastar 1.0.4 and the 0.14.0 hook fixes.
+Measured with `capacity.php` against the website (`website/app.php`, production mode, Brotli on).
+Page views, open tabs, private actions, visitor churn, shared clicks to 500 tabs, the Brotli level
+and two workers were measured on 2026-10-04 at fbfa1f6, the 0.14.0 release tree. Shared clicks to
+2,000 tabs and the held and free clock comparison were measured on 2026-10-02 at 62d1e5b: 0.13.1
+plus Datastar 1.0.4 and the 0.14.0 hook fixes.
 
 - **Server:** two physical P-cores of an Intel i5-13500 (`taskset -c 2,4`) with their hyperthread
   siblings idle, held at 4.35 to 4.5 GHz by an idle-class busy loop on each core (README.md shows
   how). One worker unless noted, PHP 8.5.11, OpenSwoole 26.2.0, opcache on, Brotli level 4 unless
   noted. The checkout is on a local disk.
 - **Harness:** cores 6 to 11. Each scenario starts a fresh server and requests its routes three
-  times before measuring. Every figure is the median of three rounds. Most CPU and memory figures
-  varied by under 5% between rounds and none by more than 15%; latency percentiles varied more.
-- **Calibration reference** (`calibrate.php` on core 2): `brotli 7 ms, php 60 ms`.
+  times before measuring. Every figure is the median of three rounds. On fbfa1f6 every CPU and
+  memory figure varied by under 5% between rounds; latency percentiles varied more. Each run
+  started with the package below 95 °C and the sibling cores idle, and its median clock was 4.4 GHz
+  or more.
+- **Calibration reference** (`calibrate.php` on core 2): `brotli 7 ms, php 60 ms` (61 ms on
+  2026-10-04).
 
 ### Page views without an SSE stream
 
@@ -21,36 +27,40 @@ growth during the run, held until each page's 30 s connect timeout.
 
 | Page | HTML | req/s | CPU per view | Memory |
 |---|---|---|---|---|
-| `/docs/api` | 86 KB | 238 | 4.20 ms | +32 MB (13.6 KB per view) |
-| `/docs/signals` | 21 KB | 797 | 1.27 ms | +266 MB (34.1 KB per view) |
-| `/` | 66 KB | 356 | 2.82 ms | +128 MB (36.8 KB per view) |
+| `/docs/api` | 173 KB | 173 | 5.80 ms | +35 MB (20.4 KB per view) |
+| `/docs/signals` | 35 KB | 508 | 1.98 ms | +215 MB (43.3 KB per view) |
+| `/` | 99 KB | 291 | 3.45 ms | +158 MB (55.3 KB per view) |
+
+The pages grew since 2026-10-02, when they were 86, 21 and 66 KB and cost 4.20, 1.27 and 2.82 ms:
+the 0.14 docs made the API reference and signals templates two and three times longer, and the
+home page's HTML grew by half.
 
 Two 5 s bursts of `/docs/signals` with a 35 s pause between them:
 
 | First burst | Second burst |
 |---|---|
-| 40 → 196 MB (4,592 views) | 196 → 225 MB (3,906 views) |
+| 45 → 171 MB (2,925 views) | 171 → 204 MB (2,499 views) |
 
 ### Open tabs
 
 | | Level 4 | Level 1 | No Brotli |
 |---|---|---|---|
-| Memory per `/docs/api` tab (1,000 open) | 571 KB | 66 KB | 42 KB |
-| Memory per `/` tab (500 open) | 642 KB | 121 KB | 73 KB |
-| CPU to open a `/docs/api` tab | 4.6 ms | 3.9 ms | 3.6 ms |
-| CPU to open a `/` tab | 3.3 ms | 2.7 ms | 2.4 ms |
+| Memory per `/docs/api` tab (1,000 open) | 588 KB | 77 KB | 49 KB |
+| Memory per `/` tab (500 open) | 671 KB | 145 KB | 93 KB |
+| CPU to open a `/docs/api` tab | 6.1 ms | 5.1 ms | 4.6 ms |
+| CPU to open a `/` tab | 4.0 ms | 3.3 ms | 3.0 ms |
 | Idle CPU, 1,000 docs tabs over 30 s | 0.2% of a core | | |
 
 A visitor who opens and closes a tab on `/docs/faq` while 1,000 `/docs/api` tabs stay open, one
-visitor every 1.2 s (50 visitors; 10 for 0.13.0, tag v0.13.0 with its website):
+visitor every 1.2 s (50 visitors; 10 for 0.13.0, tag v0.13.0 with its website, on 2026-10-02):
 
 | | CPU per visitor | Bytes to the open tabs |
 |---|---|---|
 | 0.13.0 | 506 ms | 25.4 KB |
-| 0.14.0 | 5.2 ms | 0.9 KB |
+| 0.14.0 | 6.6 ms | 0.8 KB |
 
 Both figures include what the open tabs cost meanwhile: their keep-alive comments take about 2 ms
-of CPU per 1.2 s and make up most of the 0.9 KB.
+of CPU per 1.2 s and make up most of the 0.8 KB.
 
 ### Actions on the home page
 
@@ -58,16 +68,16 @@ Private actions (the TAB counter), 500 tabs open:
 
 | Rate | CPU per action | p99 response | p99 until the tab's stream shows it |
 |---|---|---|---|
-| 100/s | 0.20 ms | 1.3 ms | 1.3 ms |
-| 300/s | 0.16 ms | 1.2 ms | 1.2 ms |
+| 100/s | 0.14 ms | 1.2 ms | 1.2 ms |
+| 300/s | 0.11 ms | 1.2 ms | 1.2 ms |
 
 Shared clicks (the home counter; "visible" is the time until every observed tab, 100 of them,
-shows the click):
+shows the click). The 2,000-tab rows are from 62d1e5b:
 
 | Tabs and rate | CPU | Visible p50 / p99 | CPU per receiving tab |
 |---|---|---|---|
-| 500 tabs, 5/s | 12% | 18 / 23 ms | 0.048 ms |
-| 500 tabs, 20/s | 46% | 17 / 19 ms | 0.046 ms |
+| 500 tabs, 5/s | 13% | 19 / 22 ms | 0.052 ms |
+| 500 tabs, 20/s | 47% | 18 / 20 ms | 0.047 ms |
 | 2,000 tabs, 2/s | 21% | 71 / 88 ms | 0.053 ms |
 | 2,000 tabs, 5/s | 50% | 70 / 75 ms | 0.050 ms |
 | 2,000 tabs, 10/s | 95% | 68 / 92 ms | 0.048 ms |
@@ -78,9 +88,9 @@ Brotli level on the home page, 500 tabs, 20 shared clicks per second:
 
 | | Memory per tab | Bytes on the wire per tab per second | CPU |
 |---|---|---|---|
-| Level 4 | 642 KB | 0.69 KB | 46% |
-| Level 1 | 121 KB | 10.03 KB | 39% |
-| No Brotli | 73 KB | 23.80 KB | 25% |
+| Level 4 | 671 KB | 0.69 KB | 47% |
+| Level 1 | 145 KB | 10.84 KB | 39% |
+| No Brotli | 93 KB | 25.32 KB | 25% |
 
 ### Two workers
 
@@ -88,12 +98,12 @@ Brotli level on the home page, 500 tabs, 20 shared clicks per second:
 
 | | One worker | Two workers |
 |---|---|---|
-| `/docs/signals` | 797 req/s | 1,390 req/s (16,710 OK in 12 s, 0 errors) |
-| `/docs/api` | 238 req/s | 468 req/s |
+| `/docs/signals` | 508 req/s | 933 req/s (11,255 OK in 12 s, 0 errors) |
+| `/docs/api` | 173 req/s | 344 req/s |
 
 ### Held and free clock
 
-The same build on the same cores without the busy loops, two rounds:
+The same build (62d1e5b) on the same cores without the busy loops, two rounds:
 
 | | Held clock | Free clock |
 |---|---|---|
@@ -113,9 +123,13 @@ clock rises with the load.
 
 - The CPU figures are for this desktop core at full clock; scale them with `calibrate.php` (see
   README.md). The memory figures carry over.
-- Against the superseded figures below, memory, page views, opening tabs and broadcasts to 2,000
-  tabs come out within about 10%. Private actions, visitor churn and shared clicks to 500 tabs fell
-  1.3 to 5.4 times, which the free clock accounts for (see "Held and free clock").
+- Against 62d1e5b, fbfa1f6 costs more per page view and per opened tab, in step with the larger
+  pages, and 3 to 27% more memory per open tab (20 KB more per home tab without Brotli). Private
+  actions cost 0.14 and 0.11 ms instead of 0.20 and 0.16 ms, and a visitor 6.6 ms instead of
+  5.2 ms. Idle CPU and shared clicks to 500 tabs stayed within the noise. These causes were not
+  isolated.
+- Against the superseded figures below, which ran on a free clock, private actions, visitor churn
+  and shared clicks to 500 tabs fell 1.3 to 5.4 times (see "Held and free clock").
 - The memory per open tab is measured about 1.5 s after the tabs open, on streams that carry
   little traffic. A stream's Brotli encoder grows with what it compresses and levels off near
   9 MB at level 4 (575 KB at level 1) after about 8 MB of traffic (PERFORMANCE.md), so busy
