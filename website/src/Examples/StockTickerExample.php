@@ -65,7 +65,7 @@ final class StockTickerExample {
             $c->scope(Scope::ROUTE);
             $c->view('examples/stock_dashboard.html.twig', fn (): array => [
                 'title' => 'Stock Ticker',
-                'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
+                'description' => 'Watch simulated prices change every two seconds, and open a stock for its chart. A server timer moves the prices and broadcasts the ROUTE scope, and one shared render serves every viewer.',
                 'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
@@ -80,7 +80,7 @@ final class StockTickerExample {
             if ($stock === null) {
                 $c->view('examples/stock_not_found.html.twig', [
                     'title' => 'Stock Ticker',
-                    'description' => 'Stock not found.',
+                    'description' => 'There is no stock with this symbol. Go back to the dashboard to pick one.',
                     'perWorker' => 'the prices',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
@@ -100,7 +100,7 @@ final class StockTickerExample {
             // Rendered once: the signals carry every later change.
             $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('examples/stock_detail.html.twig', [
                 'title' => 'Stock Ticker',
-                'description' => $symbol . ' · ' . $stock['name'],
+                'description' => 'Watch the price of ' . $stock['name'] . ' (' . $symbol . ') change every two seconds. The timer writes it into signals in a custom scope per symbol, so the chart updates without rendering the page again.',
                 'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,

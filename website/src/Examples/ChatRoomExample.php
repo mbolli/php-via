@@ -164,7 +164,7 @@ final class ChatRoomExample {
         $c->view('examples/chat_room.html.twig', fn (): array => [
             'title' => 'Chat Room',
             'perWorker' => 'who is in each room',
-            'description' => 'Chat: ' . self::$rooms[$room]['name'],
+            'description' => 'Chat with other visitors in the ' . self::$rooms[$room]['name'] . ' room, or switch rooms in the list. Each room is a custom scope built with <code>Scope::build()</code>, and your username is a SESSION signal.',
             'summary' => self::SUMMARY,
             'anatomy' => self::ANATOMY,
             'githubLinks' => self::GITHUB_LINKS,

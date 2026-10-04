@@ -26,9 +26,9 @@ use PhpVia\Website\Middleware\AuthMiddleware;
 final class LoginExample {
     public const string SLUG = 'login';
 
-    private const string TITLE = '🔐 Login Flow';
+    private const string TITLE = 'Login Flow';
 
-    private const string DESCRIPTION = 'PSR-15 middleware-based authentication. The login form is public; the dashboard and profile routes are protected by <code>AuthMiddleware</code> via <code>Via::group()->middleware()</code>.';
+    private const string DESCRIPTION = 'Log in with one of the demo accounts to reach the dashboard and profile pages, then log out. Those two routes sit in a <code>Via::group()</code> behind a PSR-15 <code>AuthMiddleware</code>; the login form is public.';
 
     private const array SUMMARY = [
         '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code>: one call shields both.',

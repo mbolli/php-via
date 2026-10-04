@@ -106,7 +106,7 @@ final class FileUploadExample {
     private static function meta(): array {
         return [
             'title' => 'Background Upload via SharedWorker',
-            'description' => 'A demonstration of how <code>SharedWorker</code> + <code>extendedLifetime</code> (Chrome 148+) lets an MPA behave like an SPA: background work survives page navigations without a single line of SPA routing code.',
+            'description' => 'Start a simulated or real upload, then open Browse or Settings while it runs. The progress bar follows you. A <code>SharedWorker</code> sends the chunks, <code>extendedLifetime</code> (Chrome 148+) keeps it alive between pages, and session-scoped signals carry the progress.',
             'summary' => [
                 '<strong>The core idea</strong>: in a classic MPA, navigating away tears down the page, kills any in-flight XHR, and resets all client state. A <strong>SharedWorker</strong> partially breaks that rule: it is shared across tabs and not tied to a single page lifecycle. But the browser is still allowed to terminate it the moment all ports disconnect, which happens briefly during every navigation.',
                 '<strong>extendedLifetime</strong> (Chrome 148+) closes the last gap: without it, the browser may terminate the SharedWorker during the brief moment between pages when the port count drops to zero. On Chrome 148+, a real upload continues chunking with zero user friction. On other browsers, that gap can kill the worker, hence the navigation guard.',

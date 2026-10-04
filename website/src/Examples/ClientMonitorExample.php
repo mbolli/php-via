@@ -20,7 +20,7 @@ final class ClientMonitorExample {
             $c->scope(Scope::ROUTE);
             $c->view('examples/client_monitor.html.twig', fn (): array => [
                 'title' => 'Client Monitor',
-                'description' => 'Live dashboard of connected clients, with identicons and masked IP addresses.',
+                'description' => 'See every open connection to this site, with an identicon and a masked IP address. Open another tab and it appears. The <code>onClientConnect</code> and <code>onClientDisconnect</code> hooks broadcast the page\'s ROUTE scope, and <code>getClients()</code> lists the streams.',
                 'summary' => [
                     '<strong>Hook-driven updates</strong>: the client list re-renders only when someone connects or disconnects. No polling, no timer, no wasted cycles.',
                     '<strong>getClients()</strong> returns every open SSE stream, on every worker, with its identicon, IP address, and connection time. Open multiple tabs to see them appear.',

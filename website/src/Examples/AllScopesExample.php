@@ -142,7 +142,7 @@ final class AllScopesExample {
                     return $c->render('examples/all_scopes.html.twig', [
                         'title' => 'All Scopes',
                         'perWorker' => 'the ROUTE counters',
-                        'description' => 'Demonstrates GLOBAL, ROUTE, and TAB scopes side by side.',
+                        'description' => 'Change a status that every visitor sees, a counter shared by everyone on this page, and a message only your tab sees. The three cards are components in GLOBAL, ROUTE and TAB scope; Page A and Page B each get their own ROUTE counter.',
                         'summary' => self::SUMMARY,
                         'anatomy' => [
                             'signals' => [

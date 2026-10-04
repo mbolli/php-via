@@ -261,7 +261,7 @@ final class MissionControlExample {
                 return [
                     'title' => 'NATS Visualizer',
                     'perWorker' => 'the state of the services, the event log and the NATS connection',
-                    'description' => 'Four simulated microservices publish events over NATS. Watch Core pub/sub, JetStream persistence, and KV health heartbeats update in real time.',
+                    'description' => 'Stop and restart four simulated services and watch what happens to their events. Auth and Inventory use Core pub/sub and lose events while stopped; Orders and Payments use JetStream and catch up. A KV heartbeat drives the health tiles.',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,

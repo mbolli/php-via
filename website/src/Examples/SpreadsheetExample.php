@@ -585,7 +585,7 @@ final class SpreadsheetExample {
                     'clientCount' => $app->countClients(self::SCOPE),
                     'title' => 'Spreadsheet',
                     'perWorker' => 'the cursors, the selections and a cache of the cells',
-                    'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
+                    'description' => 'Click a cell and type, move with the arrow keys, and see the cursors of other visitors. Cells are stored in SQLite, only the visible range is rendered, and edits broadcast the custom <code>example:spreadsheet</code> scope.',
                     'summary' => [
                         '<strong>SQLite persistence</strong>: cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
                         '<strong>Virtual scrolling</strong>: only the visible cells are rendered at a time. Arrow keys, Page Up/Down, Home, mouse wheel, and Tab navigate the viewport. The server fetches only the visible range from SQLite on every render.',

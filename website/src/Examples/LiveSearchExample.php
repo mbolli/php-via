@@ -163,7 +163,7 @@ final class LiveSearchExample {
 
             $c->view('examples/live_search.html.twig', fn (): array => [
                 'title' => 'Live Search',
-                'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip, and nobody shipped a line of search logic to the browser.',
+                'description' => 'Type to search PHP functions, and pick a category to narrow the list. The input sends a throttled action, and <code>$c->sync()</code> re-renders the results for this tab only.',
                 'summary' => [
                     '<strong>data-on:input__throttle.100ms.trailing</strong> fires at most once every 100 ms while the user types, and always fires one final time at the end, so the last keystroke is never dropped. No setTimeout written by you.',
                     '<strong>Server-side filtering</strong> is intentional. The query parser, category filter, and result ranking all live in PHP. Swap the hardcoded array for a database query and nothing else changes.',

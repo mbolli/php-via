@@ -110,7 +110,7 @@ final class WizardExample {
 
             return [
                 'title' => 'Multi-step Form',
-                'description' => 'Composition API: client inputs are <code>#[Signal]</code>, while the step and validation error are <code>#[Persist]</code>, server-only state that survives between actions and drives the server-side re-render.',
+                'description' => 'Fill in three steps about yourself and your stack, go back and forth, and see a preview at the end. The inputs are <code>#[Signal]</code> properties; the step and the error message are <code>#[Persist]</code>, server state the client never sees.',
                 'summary' => [
                     '<strong>#[Persist] step &amp; error</strong>: server-controlled state that is never sent to the client and never hydrated from it. Because the class instance lives as long as the tab\'s context, the step survives across Next/Back actions.',
                     '<strong>#[Signal] inputs</strong>: name, role, years, editor and the eight stack booleans are two-way bound via <code>data-bind</code>. They are hydrated onto the instance before each action runs.',

@@ -140,7 +140,7 @@ final class ContactFormExample {
             ): array {
                 return [
                     'title' => 'Contact Form',
-                    'description' => 'Multipart file upload and server-side form validation. The form submits as <code>multipart/form-data</code>; text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>. Per-field errors come back in the form, re-rendered over SSE.',
+                    'description' => 'Fill in the form, attach a file if you like, and send it. Wrong fields show an error next to them. The form posts as <code>multipart/form-data</code>: text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>, and the form comes back re-rendered over SSE.',
                     'summary' => [
                         '<strong>No base64 overhead.</strong> Datastar\'s <code>contentType: \'form\'</code> modifier submits the nearest <code>&lt;form enctype="multipart/form-data"&gt;</code> as a real multipart POST: files travel as binary, not JSON blobs.',
                         '<strong>Two validation layers.</strong> HTML5 <code>required</code> / <code>type="email"</code> / <code>minlength</code> attributes make Datastar call <code>reportValidity()</code> before the request is even sent. The server then re-validates every field independently.',

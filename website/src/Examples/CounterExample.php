@@ -31,7 +31,7 @@ final class CounterExample {
 
             $c->view('examples/counter.html.twig', [
                 'title' => 'Counter',
-                'description' => 'Counter with configurable step. Uses data-bind for two-way input binding.',
+                'description' => 'Count up or down, and type a step size to change how far each click goes. The count and the step are TAB signals, and <code>data-bind</code> keeps the step input and its signal in sync.',
                 'summary' => [
                     '<strong>Signals</strong> hold reactive state. The count and the step are signals, and their new values reach the page over the SSE stream.',
                     '<strong>data-bind</strong> creates two-way binding between an input and a signal. Type a new step value and it syncs to the server automatically.',

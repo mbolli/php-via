@@ -268,7 +268,7 @@ final class TypeRaceExample {
                 return [
                     'title' => 'Type Race',
                     'perWorker' => 'the races',
-                    'description' => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer, no client logic.',
+                    'description' => 'Join a race and type the PHP snippet faster than the other visitors. Each race is a custom scope, and every keystroke updates progress and WPM for all racers.',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,

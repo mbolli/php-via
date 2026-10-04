@@ -68,7 +68,7 @@ final class ShoppingCartExample {
 
             $c->view('examples/shopping_cart.html.twig', fn (): array => [
                 'title' => 'Shopping Cart',
-                'description' => 'Add items across browser tabs: the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
+                'description' => 'Add items to the cart, then open this page in another tab: the cart is already there. It lives in the session data, and a custom <code>cart:</code> scope per session updates every tab of your browser.',
                 'summary' => [
                     '<strong>A cart per session</strong>: every cart page joins a custom <code>cart:</code> scope built from <code>Scope::sessionScope()</code>, so the cart is shared across every tab in your browser. Open a new tab: the cart is already populated.',
                     '<strong>$app->broadcast($cartScope)</strong> pushes the updated cart to all connected tabs of that session simultaneously. No polling, no cache invalidation, no client state sync.',

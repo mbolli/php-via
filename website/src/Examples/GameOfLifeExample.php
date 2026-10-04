@@ -74,7 +74,7 @@ final class GameOfLifeExample {
                 return [
                     'title' => 'Game of Life',
                     'perWorker' => 'the board',
-                    'description' => 'Multiplayer Conway\'s Game of Life. Click to draw, watch patterns evolve.',
+                    'description' => 'Click the board to draw crosses in your colour and watch Conway\'s Game of Life evolve them, together with everyone else on the page. A server timer advances the board every 200 ms and broadcasts the ROUTE scope, with one shared render per tick.',
                     'summary' => [
                         '<strong>Shared board</strong> via ROUTE scope: everyone on this page sees and edits the same 50×50 grid. Click to draw a cross pattern in your color.',
                         '<strong>200ms timer</strong>: a <code>$app->setInterval()</code> callback evolves the board every 200 milliseconds and broadcasts the route. With <code>shareRender: true</code> the board renders once per tick for all viewers.',

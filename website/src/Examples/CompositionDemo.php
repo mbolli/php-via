@@ -57,7 +57,7 @@ final class CompositionDemo {
         // The widgets render with the page, so a page re-render carries their current votes.
         $ctx->view('examples/composition.html.twig', fn (): array => [
             'title' => 'Composition API',
-            'description' => 'Class-based page and component API using PHP attributes: <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code>, and <code>#[Action]</code>.',
+            'description' => 'Save a name for all your tabs, click a counter that adds one more each time, and vote for an animal with every other visitor. The page and its vote widgets are classes built with <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code> and <code>#[Action]</code>.',
             'summary' => [
                 '<strong>#[Signal]</strong> creates a TAB-scoped reactive signal backed by a client-visible store entry. Client-writable via <code>data-bind</code>. Each browser tab has its own isolated copy.',
                 '<strong>#[Persist]</strong> is a plain server-side instance property, not a signal, not visible to the client. Because the class instance lives as long as the tab\'s context, it persists across action calls.',
