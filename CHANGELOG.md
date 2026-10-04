@@ -2,7 +2,7 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [0.14.0] - Unreleased
+## [0.14.0] - 2026-10-04
 
 ### Highlights
 
@@ -32,12 +32,22 @@ All notable changes to php-via will be documented in this file.
   the same action.
 - **Web components.** `Config::withDatastarRocket()` runs Rocket components such as Starbase's on
   php-via pages, and `Config::withImportMap()` pins them with integrity hashes.
+- **Page views no longer leak memory.** A page whose handler called `$c->scope()`, which most do,
+  stayed registered for the life of the worker with its components and its response's Brotli
+  encoder: about 0.6 MB per page view with Brotli on. In a 5 s burst on the website, 0.13.0 grew by
+  2.4 GB and kept it. A page view that never opens its stream now holds 20 to 55 KB until the
+  connect timeout.
+- **An open tab costs less.** A tab no longer keeps its page response's Brotli encoder. In 0.13.0 a
+  docs tab took 2.8 MB and a home page tab 1.3 MB; a tab now takes 590 to 670 KB at Brotli level 4.
+  [Performance](https://via.zweiundeins.gmbh/docs/performance#tab-memory) shows the trade against
+  the Brotli level.
 - **Worker freezes and crashes.** A burst of page views that never opened a stream froze a worker
-  for about a minute once their contexts expired, and on libcurl 8.20 or newer a curl request
-  crashed the worker. Both are fixed.
-- **Cheaper page views and static files.** A small page view costs half the CPU and a cached
-  stylesheet about a quarter, and static files go out with Brotli level 11 whenever ext-brotli is
-  loaded, compressed outside the workers.
+  for about a minute once their contexts expired, on libcurl 8.20 or newer a curl request crashed
+  the worker, and with several workers every page view answered 500 once about 8,000 contexts had
+  been created within the revival window. All three are fixed.
+- **Cheaper page views and static files.** A small page view costs 38% less CPU than on 0.13.0, a
+  cached stylesheet about a quarter, and static files go out with Brotli level 11 whenever
+  ext-brotli is loaded, compressed outside the workers.
 - **The Dev Bar shows the server's figures.** A new Stats panel shows every `getStats()->getAll()`
   figure, which now counts requests, actions and streams for the whole server.
 - **Upgrade guide.** [Upgrading to 0.14](https://via.zweiundeins.gmbh/docs/upgrading) takes a 0.13
@@ -263,7 +273,7 @@ covers the changes that need more than a rename.
   collector when a worker's memory grows by half: 9 runs instead of 25 in a burst of 250,000 page
   views. It is opt-in, because a loop that creates cycles without waiting on I/O can then take a
   worker past `memory_limit`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
-- **Broadcasts cost less per tab:** 38% less than 0.13.0 for tabs that share a render, 5% less for
+- **Broadcasts cost less per tab:** 38% less than 0.13.0 for tabs that share a render, 4% less for
   tabs that render their own view.
 
 ### Security
@@ -291,6 +301,33 @@ covers the changes that need more than a rename.
   contexts expired, and any client could cause it with GET requests.
 - On libcurl 8.20 or newer, a curl request crashed the worker under the default hook flags
   (curl#21558). The default leaves `SWOOLE_HOOK_NATIVE_CURL` out there.
+- Page contexts that called `$c->scope()` were never freed. The registry now remembers every scope a
+  context joined, and teardown removes it from all of them.
+- Components that joined a scope stayed registered after their page was destroyed and kept receiving
+  broadcasts. Their `onCleanup` callbacks now run and their timers stop when the page is destroyed.
+- A response's Brotli encoder lived as long as its tab. It is now created on the first write and
+  released when the response ends.
+- Both maps of context sessions grew by one entry per page view.
+- With several workers, a full context directory turned every page view into a 500. New contexts
+  now get no row, a warning is logged at most every 10 s per worker, and actions of those tabs that
+  reach another worker answer 400. The sweep of expired rows runs at most once a second. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
+- A revival that arrived while a destroyed context's cleanup callbacks ran could be torn down with
+  it. Teardown now removes only entries that still belong to the destroyed context.
+- A revival whose page handler threw left the half-built context in its scopes, with its timers
+  running.
+- Two revivals of one tab at the same moment (an action and the stream reconnect) both registered,
+  leaving one copy running with its timers. The later one now returns the registered context.
+- After a revival, components lost their DOM wrappers because component IDs were random. A
+  component's ID now comes from its namespace, so it is the same every time its page is built.
+- A stream with nothing to send on connect never cleared the reconnect banner after a dropped
+  connection, and sent no headers until its first keep-alive. Every connect now sends
+  `_disconnected: false`.
+- A broadcast that reached a context through another scope, a wildcard or `Scope::GLOBAL`, or a
+  component re-rendered with its page, served the update cached at an earlier broadcast, and a render
+  that started before a broadcast could store its older result over the newer one.
+- A component's actions could not read the request or set cookies. `input()`, `file()`,
+  `cookie()` and `setCookie()` on a component now use its page's request.
 - With `hook_flags` that lack `SWOOLE_HOOK_SLEEP`, an open Dev Bar froze its worker.
 - A page in the browser's back/forward cache kept its Dev Bar stream open. Over HTTP/1.1, a few tabs
   then held all six connections the browser opens to a host, and navigation and actions stalled.
@@ -361,6 +398,8 @@ covers the changes that need more than a rename.
 - Every docs page, the README, PERFORMANCE.md and the LLM references describe 0.14, and the
   website's examples use its APIs.
 - New [Upgrading to 0.14](https://via.zweiundeins.gmbh/docs/upgrading) guide.
+- New [Performance](https://via.zweiundeins.gmbh/docs/performance) page, with the harness in
+  `bench/capacity`.
 - The [API reference](https://via.zweiundeins.gmbh/docs/api) lists every public method with its
   signature.
 - New [Web components](https://via.zweiundeins.gmbh/docs/web-components) page.
@@ -372,72 +411,6 @@ covers the changes that need more than a rename.
   keeps a `<dialog>` open across updates.
 - Deployment shows the live site's Caddy h2c setup, and no longer says Caddy needs response
   buffering turned off for SSE.
-
-## [0.13.1] - 2026-10-02
-
-### Highlights
-
-- **Page views no longer leak memory.** A page whose handler called `$c->scope()`, which most do,
-  stayed registered for the life of the worker together with its components and its response's
-  Brotli encoder: about 0.6 MB per page view with Brotli on. A page view that never opens its stream
-  now holds 13 to 35 KB until the connect timeout. In a 5 s burst on the website, 0.13.0 grew by
-  2.4 GB and kept it; 0.13.1 grows by 147 MB and reuses it.
-- **An open tab costs less.** A tab no longer keeps its page response's Brotli encoder: a docs tab
-  went from 2.8 MB to 574 KB, a home page tab from 1.3 MB to 642 KB. Most of what remains is the
-  live stream's encoder; [Performance](https://via.zweiundeins.gmbh/docs/performance#tab-memory)
-  shows the trade against the Brotli level.
-- **Multi-worker pages keep working when the context directory is full.** Every page view answered
-  500 once about 8,000 contexts had been created within the revival window.
-
-### Fixed
-
-- Page contexts that called `$c->scope()` were never freed. The registry now remembers every scope a
-  context joined, and teardown removes it from all of them.
-- Components that joined a scope stayed registered after their page was destroyed and kept receiving
-  broadcasts. Their `onDisconnect` and `onCleanup` callbacks now run and their timers stop when the
-  page is destroyed; they never ran before. The scope's signals and actions stay for other pages.
-- A response's Brotli encoder lived as long as its tab. It is now created on the first write and
-  released when the response ends.
-- Both maps of context sessions grew by one entry per page view.
-- A revival that arrived while a destroyed context's cleanup callbacks ran could be torn down with
-  it. Teardown now removes only entries that still belong to the destroyed context.
-- A revival whose page handler threw left the half-built context in its scopes, with its timers
-  running.
-- After a revival, components lost their DOM wrappers because component IDs were random. A
-  component created with a name (`$c->component($fn, 'name')`) now gets the same ID every time its
-  page is built.
-- A stream with nothing to send on connect never cleared the reconnect banner after a dropped
-  connection, and sent no headers until its first keep-alive. Every connect now sends
-  `_disconnected: false`.
-- With `worker_num > 1`, a full context directory turned every page view into a 500. New contexts
-  now get no row, a warning is logged at most every 10 s per worker, and those tabs' actions on other
-  workers answer 400. With the revival window at 0, no rows are written, and the sweep of expired
-  rows runs at most once a second. See
-  [Deployment](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
-- A broadcast that reached a context through another scope, a wildcard or `Scope::GLOBAL`, or a
-  component re-rendered with its page, served the update cached at an earlier broadcast, and a render
-  that started before a broadcast could store its older result over the newer one. Each scope still
-  renders once per flush.
-- Two revivals of one tab at the same moment (an action and the stream reconnect) both registered,
-  leaving one copy running with its timers. The later one now returns the registered context.
-- A component's actions could not read the request or set cookies. `input()`, `file()`,
-  `cookie()` and `setCookie()` on a component now use its page's request.
-
-### Known limitations
-
-- An action a component registers in a scope of its own is not found. Register it with
-  `Scope::TAB` and broadcast with `$app->broadcast($scope)`, as
-  [Components](https://via.zweiundeins.gmbh/docs/components#scoped-components) shows.
-- The update cache is keyed by scope alone, so two different views with caching on in one scope
-  receive each other's HTML. See [Views](https://via.zweiundeins.gmbh/docs/views#caching).
-- Signals and actions of a scope stay after its last context leaves, as they did in 0.13.0, so
-  per-entity scopes such as `room:<id>` accumulate for the life of the worker. A scoped action
-  should use the `Context` it receives rather than a captured `$c`, which it would keep alive.
-
-### Docs
-
-- New [Performance](https://via.zweiundeins.gmbh/docs/performance) page, with the harness in
-  `bench/capacity`.
 
 ## [0.13.0] - 2026-10-02
 
