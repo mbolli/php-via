@@ -1328,6 +1328,7 @@ class Context {
 
         $action = new Action($actionId, $this->app->getSettings()->basePath);
         $this->namedActions[$name] = $action;
+        $this->app->retainScope($this, $actionScope);
 
         if ($this->app->getScopedAction($actionScope, $actionId) !== null) {
             $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);

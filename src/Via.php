@@ -368,7 +368,8 @@ class Via {
             $this->logger,
             $this->scopeRegistry,
             $this->signalManager,
-            $this->actionRegistry
+            $this->actionRegistry,
+            $this->viewCache,
         );
         $this->router = new Router();
         // Four rows per session that can hold data: its first cookie, its current one and retired ones in their grace period.
@@ -897,6 +898,15 @@ class Via {
     public function unregisterContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->unregisterContext($context, $scope);
         $this->app->refreshClientScopes($context->getPageContext());
+    }
+
+    /**
+     * Keep a scope's signals and actions while $context lives, without rendering it on the scope's broadcasts.
+     *
+     * @internal Called by Context::scopedAction()
+     */
+    public function retainScope(Context $context, string $scope): void {
+        $this->scopeRegistry->retain($context, $scope);
     }
 
     /**
@@ -2031,7 +2041,7 @@ class Via {
             $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
             // The half-built context may already have joined scopes and started timers.
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
@@ -2042,7 +2052,7 @@ class Via {
         if ($refusal !== null) {
             $this->log('info', "The middleware of {$route} answered {$refusal->getStatusCode()} instead of rebuilding context {$contextId}");
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
@@ -2056,7 +2066,7 @@ class Via {
         $winner = $this->contexts[$contextId] ?? null;
         if ($winner !== null) {
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
 
             return $winner;
         }

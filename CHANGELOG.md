@@ -50,7 +50,10 @@ All notable changes to php-via will be documented in this file.
   the scope as the third argument. A third argument to `action()` throws; `#[Action(scope: ...)]`
   keeps working. See [Upgrading](https://via.zweiundeins.gmbh/docs/upgrading#scopes-signals).
 - **A scoped signal joins its context to its scope,** so its writes reach the tab without
-  `addScope()`. `scope()` replaces only the primary scope, where it replaced the whole list.
+  `addScope()`. A worker clears a scope's signals and actions when the last context that uses the
+  scope is destroyed, so per-entity scopes such as `room:<id>` no longer add up for the life of the
+  worker. See [Scopes](https://via.zweiundeins.gmbh/docs/scopes#scope-lifetime). `scope()` replaces
+  only the primary scope, where it replaced the whole list.
 - **`Scope::ROUTE` and `Scope::SESSION` resolve in every method that takes a scope.**
   `$app->broadcast()` and `getScopedSignalByName()` throw for a bare `Scope::TAB`, `Scope::ROUTE`
   or `Scope::SESSION`: pass `Scope::routeScope('/path')` or `Scope::sessionScope($id)`.
@@ -312,9 +315,6 @@ covers the changes that need more than a rename.
 
 ### Known limitations
 
-- A scope's signals and actions stay in the worker after the last tab in it has disconnected, as in
-  0.13, so per-entity scopes such as `room:<id>` add up. See
-  [Scopes](https://via.zweiundeins.gmbh/docs/scopes#scope-lifetime).
 - With several workers or a broker, a broadcast crosses to the others only for a scope of
   letters, digits and `_ - . : /`. `Scope::ROUTE` on a route with parameters, such as
   `/blog/{slug}`, stays on its worker: use a custom scope such as `'post:' . $slug`.
