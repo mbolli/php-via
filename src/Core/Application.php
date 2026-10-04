@@ -6,6 +6,7 @@ namespace Mbolli\PhpVia\Core;
 
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Http\DownloadHandler;
+use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ScopeRegistry;
@@ -150,6 +151,7 @@ class Application {
         private ScopeRegistry $scopeRegistry,
         private SignalManager $signalManager,
         private ActionRegistry $actionRegistry,
+        private ?ViewCache $viewCache = null,
     ) {
         $this->defer = static function (\Closure $next): void {
             Timer::after(1, $next);
@@ -861,14 +863,34 @@ class Application {
     /**
      * Tear down a component context with its page: run its cleanup and leave its scopes.
      *
-     * The scopes' signals and actions stay: a component is often the only registered member
-     * of a shared scope (GLOBAL, a room) that pages outside the registry still read and act on.
-     *
      * @internal called by Context::cleanup() for each of its components
      */
     public function releaseComponent(Context $component): void {
         $component->cleanup();
-        $this->scopeRegistry->unregisterContextFromAllScopes($component);
+        $this->releaseScopes($component);
+    }
+
+    /**
+     * Remove a context from all its scopes, and clear the signals, actions and shared renders of the scopes no
+     * live context on this worker uses any more. With several workers a scoped signal's value stays in the
+     * shared table, so a context that declares it again adopts what the other workers hold.
+     *
+     * @internal called when a context is destroyed, and when a revival is dropped
+     */
+    public function releaseScopes(Context $context): void {
+        $emptyScopes = $this->scopeRegistry->unregisterContextFromAllScopes($context);
+
+        foreach ($emptyScopes as $scope) {
+            $hadSignals = $this->signalManager->clearScope($scope);
+            $hadActions = $this->actionRegistry->clearScope($scope);
+            $this->viewCache?->invalidate($scope);
+
+            if ($hadSignals || $hadActions) {
+                $this->logger->log('debug', "Cleaned up empty scope with signals/actions: {$scope}");
+            } else {
+                $this->logger->log('debug', "Cleaned up empty scope: {$scope}");
+            }
+        }
     }
 
     /**
@@ -965,24 +987,6 @@ class Application {
         }
 
         return $this->clientScopeIndex;
-    }
-
-    /**
-     * Remove a context from all its scopes and clear the signals and actions of scopes left empty.
-     */
-    private function releaseScopes(Context $context): void {
-        $emptyScopes = $this->scopeRegistry->unregisterContextFromAllScopes($context);
-
-        foreach ($emptyScopes as $scope) {
-            $hadSignals = $this->signalManager->clearScope($scope);
-            $hadActions = $this->actionRegistry->clearScope($scope);
-
-            if ($hadSignals || $hadActions) {
-                $this->logger->log('debug', "Cleaned up empty scope with signals/actions: {$scope}");
-            } else {
-                $this->logger->log('debug', "Cleaned up empty scope: {$scope}");
-            }
-        }
     }
 
     /**

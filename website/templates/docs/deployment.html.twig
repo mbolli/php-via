@@ -514,34 +514,39 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 final class CspNonce implements MiddlewareInterface {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
-        return $handler->handle($request->withAttribute('via.csp_nonce', base64_encode(random_bytes(16))));
+        $nonce = base64_encode(random_bytes(16));
+        $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
+
+        return $response->withHeader('Content-Security-Policy', "default-src 'self'; script-src 'nonce-{$nonce}'; object-src 'none'; base-uri 'none'");
     }
 }
 
 $app->middleware(new CspNonce());
     {% endverbatim %}{% endcode %}
     <p>
-        php-via writes the page response itself, so a header the middleware adds to the response it gets back
-        from <code>$handler-&gt;handle()</code> does not reach the browser. Send the policy as a
-        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head, before <code>via_head</code>.
-        A meta policy cannot set <code>frame-ancestors</code>; <code>withEmbeddable()</code> sends that one as a
-        header.
+        The header the middleware adds to the response it gets back from <code>$handler-&gt;handle()</code> goes
+        out with the page, and so does any other security header. A
+        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head, before <code>via_head</code>,
+        works too, but a meta policy cannot set <code>frame-ancestors</code> or <code>report-to</code>. With
+        <code>withEmbeddable()</code>, php-via sends its <code>frame-ancestors</code> policy in the same header,
+        and the browser enforces both.
     </p>
     <p>
         Datastar reads the nonce from a <code>data-nonce</code> attribute on the <code>&lt;html&gt;</code> element. With it,
         Datastar runs <code>data-*</code> expressions, the scripts of <code>execScript()</code> and <code>dispatch()</code>,
         and the reload php-via sends a tab it cannot rebuild, through script elements that carry the nonce. Without it,
         Datastar compiles expressions with <code>Function()</code>, which needs <code>'unsafe-eval'</code> in
-        <code>script-src</code>, and a nonce policy blocks those scripts. The default shell and shell templates have no
-        placeholder for the attribute, so write the document in a Twig layout and pass the nonce in:
+        <code>script-src</code>, and a nonce policy blocks those scripts. The default shell writes the attribute when the
+        page request carries a nonce. A shell of your own writes it with
+        {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %}, a Twig layout with
+        {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
     </p>
     {% code 'twig' %}{% verbatim %}
 {# layout.html.twig #}
 <!DOCTYPE html>
-<html lang="en" data-nonce="{{ cspNonce }}">
+<html lang="en"{{ via_html_attrs() }}>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{{ cspNonce }}'">
     {{ via_head() }}
 </head>
 <body>
@@ -550,20 +555,17 @@ $app->middleware(new CspNonce());
 </body>
 </html>
     {% endverbatim %}{% endcode %}
-    {% code 'php' %}{% verbatim %}
-$app->page('/', function (Context $c): void {
-    $c->view('home.html.twig', ['cspNonce' => $c->getRequestAttribute('via.csp_nonce')]);
-});
-    {% endverbatim %}{% endcode %}
     <p>
-        Read the nonce once, in the page handler. In an action, <code>getRequestAttribute()</code> returns the
-        action request's own nonce, which the page's policy does not allow.
+        With the policy above, the default shell, a shell with the placeholder and this layout run the counter,
+        <code>dispatch()</code> and <code>execScript()</code> in Chromium with no CSP errors. See
+        <a href="/docs/twig#csp">Templates → Content-Security-Policy</a> for a callable that returns a whole document.
     </p>
 
     <h3 id="security-devbar">Dev Bar in production</h3>
     <p>
         The Dev Bar is off outside dev mode, and its endpoints answer 404. <code>withDevBar(true)</code> turns it on in
-        production, read-only: signal writes stay off whatever <code>withDevBarOptions(writes:)</code> says. Read-only does
+        production, read-only: signal writes stay off whatever <code>withDevBarOptions(writes:)</code> says, and no
+        visitor can clear the trace buffer. Read-only does
         not mean private. Everyone who opens a page sees the traces, logs, scopes and context ids of every visitor's tabs,
         with SESSION scopes as hashes, and the server's request counts and runtime figures in the Stats panel. Its endpoints under <code>/_via/</code> do not pass through
         your middleware, so keep it off on a site where that is too much, or block <code>/_via</code>, <code>/_via/*</code>
@@ -646,7 +648,8 @@ $config = (new Config())
         worker only. Passing a request on adds about 0.04&nbsp;ms to it, and a passed action costs the server
         about twice the CPU of one that reaches the tab's worker (0.18 against 0.09&nbsp;ms in a benchmark of
         TAB actions). An upload goes over as it arrived, so <code>file()</code> and <code>move_uploaded_file()</code>
-        work there.
+        work there. A <code>download()</code> URL names the worker that made it, so once the tab's stream has moved
+        to another worker, the URLs made before answer 404.
     </p>
     <p>
         OpenSwoole hands each connection to one worker, and every request on that connection goes there. So which

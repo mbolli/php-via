@@ -17,6 +17,7 @@ use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Testing\TestApp;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
+use OpenSwoole\Timer;
 
 function tasksApp(callable $routes, ?Config $config = null): TestApp {
     return new TestApp(($config ?? new Config())->withLogLevel('error'), $routes);
@@ -193,6 +194,42 @@ $scenarios = [
         $app->runTasks();
 
         return ['error' => $error, 'running' => $app->via()->runningTasks];
+    },
+
+    'server-interval' => static function (): array {
+        $ticks = ['leader' => 0, 'every' => 0];
+        $app = tasksApp(static function (Via $via) use (&$ticks): void {
+            $via->setInterval(static function () use (&$ticks): void {
+                ++$ticks['leader'];
+            }, 20);
+            $via->onWorkerStart(static function () use ($via, &$ticks): void {
+                $via->setInterval(static function () use (&$ticks): void {
+                    ++$ticks['every'];
+                }, 20, everyWorker: true);
+            });
+            $via->page('/wait', static function (Context $c): void {
+                $c->action(static fn () => $c->spawn(static fn () => Coroutine::usleep(150_000)), 'wait');
+                $c->view(static fn (): string => '<p id="w">w</p>');
+            });
+        });
+        $tab = $app->open('/wait');
+        $before = $ticks;
+        $app->runTasks();
+        $idle = $ticks;
+        $app->runTasks();
+        $afterIdle = $ticks;
+        $tab->action('wait');
+        $app->runTasks();
+        $during = $ticks;
+        $app->shutdown();
+
+        return [
+            'before' => $before,
+            'idleRunFired' => $afterIdle !== $idle,
+            'leader' => $during['leader'] >= 3,
+            'every' => $during['every'] >= 3,
+            'timersLeft' => count(iterator_to_array(Timer::list())),
+        ];
     },
 
     'throttle' => static fn (): array => [

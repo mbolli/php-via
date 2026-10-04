@@ -199,8 +199,10 @@ it('counts clicks', function (): void {
     <p>
         <code>patches()</code> returns what the stream sent since the last call, <code>html()</code> renders the page from
         server state, <code>disconnect(expire: true)</code> and <code>connect()</code> test a revival, and
-        <code>runTasks()</code> runs <code>spawn()</code> tasks, and timers such as <code>$c-&gt;setInterval()</code> fire
-        while it does. <code>$app-&gt;setInterval()</code> callbacks never fire in a TestApp: call their work directly.
+        <code>runTasks()</code> runs <code>spawn()</code> tasks, and timers fire while it does: those of
+        <code>$c-&gt;setInterval()</code> and of <code>$app-&gt;setInterval()</code>, which TestApp arms as worker 0
+        does. With no task or broadcast pending it returns at once and no timer fires, so a test that needs an
+        interval's work calls it directly.
         TestApp runs one worker and renders broadcasts at once, without the broadcast tick.
     </p>
 

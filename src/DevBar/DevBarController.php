@@ -26,6 +26,7 @@ use OpenSwoole\Http\Response;
  *   GET  /_via/scopes      JSON snapshot for the Scopes/Contexts panel
  *   GET  /_via/stats       JSON snapshot for the Stats panel
  *   POST /_via/signal      signal write (devMode + writes-enabled only)
+ *   POST /_via/reset       clear the trace buffer (devMode only)
  *
  * The pure data methods ({@see buildScopesSnapshot()}, {@see buildStatsSnapshot()}, {@see writeSignal()})
  * are split from their HTTP wrappers so they can be unit-tested without
@@ -274,6 +275,14 @@ final class DevBarController {
             return;
         }
 
+        // Outside dev mode the Dev Bar is read-only: one visitor must not clear the traces of everyone.
+        if (!$this->via->getSettings()->devMode) {
+            $response->status(403);
+            $response->end((string) json_encode(['error' => 'Clearing the traces needs dev mode']));
+
+            return;
+        }
+
         $this->via->getTraceStore()?->clear();
 
         $response->status(200);
@@ -352,7 +361,7 @@ final class DevBarController {
         }
         $writes = $this->via->getSettings()->tracingWritesEnabled();
         $config = htmlspecialchars(
-            (string) json_encode(['mode' => 'page', 'base' => $base, 'writes' => $writes]),
+            (string) json_encode(['mode' => 'page', 'base' => $base, 'writes' => $writes, 'devMode' => $this->via->getSettings()->devMode]),
             ENT_QUOTES,
             'UTF-8',
         );

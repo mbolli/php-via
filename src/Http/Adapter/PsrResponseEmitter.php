@@ -85,13 +85,62 @@ class PsrResponseEmitter {
     }
 
     /**
+     * The arguments of OpenSwoole's rawcookie() for a Set-Cookie header line, null for a line without a name.
+     * OpenSwoole keeps one value per header name, so each cookie has to go through rawcookie(). Max-Age becomes
+     * the expiry time; Partitioned and other attributes rawcookie() has no argument for are left out.
+     *
+     * @internal
+     *
+     * @return null|array{0: string, 1: string, 2: int, 3: string, 4: string, 5: bool, 6: bool, 7: string, 8: string}
+     */
+    public static function parseSetCookie(string $line): ?array {
+        $attributes = explode(';', $line);
+        $pair = explode('=', (string) array_shift($attributes), 2);
+        $name = trim($pair[0]);
+        if (\count($pair) < 2 || $name === '') {
+            return null;
+        }
+
+        $cookie = [$name, trim($pair[1]), 0, '', '', false, false, '', ''];
+        $maxAge = null;
+        foreach ($attributes as $attribute) {
+            [$key, $value] = array_map(trim(...), explode('=', $attribute, 2)) + [1 => ''];
+            match (strtolower($key)) {
+                'expires' => $cookie[2] = (int) strtotime($value),
+                'max-age' => $maxAge = (int) $value,
+                'path' => $cookie[3] = $value,
+                'domain' => $cookie[4] = $value,
+                'secure' => $cookie[5] = true,
+                'httponly' => $cookie[6] = true,
+                'samesite' => $cookie[7] = $value,
+                'priority' => $cookie[8] = $value,
+                default => null,
+            };
+        }
+        if ($maxAge !== null) {
+            // An expiry in 1970 deletes the cookie, as Max-Age=0 does.
+            $cookie[2] = $maxAge > 0 ? time() + $maxAge : 1;
+        }
+
+        return $cookie;
+    }
+
+    /**
      * @param Response $swooleResponse
      */
     private static function sendHead(ResponseInterface $psrResponse, object $swooleResponse): void {
         $swooleResponse->status($psrResponse->getStatusCode());
         foreach ($psrResponse->getHeaders() as $name => $values) {
-            foreach ($values as $value) {
-                $swooleResponse->header($name, $value);
+            if (strtolower((string) $name) !== 'set-cookie') {
+                $swooleResponse->header((string) $name, implode(', ', $values));
+
+                continue;
+            }
+            foreach ($values as $line) {
+                $cookie = self::parseSetCookie($line);
+                if ($cookie !== null) {
+                    $swooleResponse->rawcookie(...$cookie);
+                }
             }
         }
     }

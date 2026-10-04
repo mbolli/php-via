@@ -1342,7 +1342,8 @@ $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarInt
         instead of waiting for it; the next render sends them again. Once past it, the stream drops them
         until its backlog is empty. Signals, scripts and <code>patchElements()</code> patches are never
         dropped. 0 turns dropping off. A threshold above half of <code>socket_buffer_size</code> (2&nbsp;MiB
-        by default) acts as half of it.
+        by default) acts as half of it, and <code>start()</code> logs a warning that names the buffer size to
+        set with <code>withSwooleSettings()</code>.
     </p>
 
     <h4 id="config-with-broadcast-tick-ms"><code>withBroadcastTickMs(int $ms): Config</code></h4>
@@ -1507,8 +1508,8 @@ $config->withBroadcastThrottle('import:*', 250);
     <h3 id="html"><code>Rendering\Html</code></h3>
     <h4 id="html-to-string"><code>__toString(): string</code></h4>
     <p>
-        Trusted markup in the template data: <code>via_head</code> and <code>via_foot</code> arrive as
-        <code>Html</code>. An engine prints it unescaped, so an autoescaping engine marks the class safe, as
+        Trusted markup in the template data: <code>via_html_attrs</code>, <code>via_head</code> and
+        <code>via_foot</code> arrive as <code>Html</code>. An engine prints it unescaped, so an autoescaping engine marks the class safe, as
         <code>TwigEngine</code> does. php-via builds these; apps only print them.
     </p>
 
@@ -1520,8 +1521,9 @@ $config->withBroadcastThrottle('import:*', 250);
     <p>
         Twig templates from <code>$templateDir</code>, compiled into <code>$cacheDir</code> or in memory. Templates
         are autoescaped as HTML and strict about undefined variables, and get the functions
-        <code>bind()</code>, <code>dump()</code>, <code>via_head()</code> and <code>via_foot()</code> and the
-        <code>basePath</code> global. <code>environment()</code> is the <code>Twig\Environment</code>, which
+        <code>bind()</code>, <code>dump()</code>, <code>via_html_attrs()</code>, <code>via_head()</code> and
+        <code>via_foot()</code> and the <code>basePath</code> global. <code>via_html_attrs()</code> writes
+        <code>data-nonce</code> for the page's <code>&lt;html&gt;</code> under a CSP nonce. <code>environment()</code> is the <code>Twig\Environment</code>, which
         <code>$app-&gt;getTwig()</code> returns too. The constructor throws a <code>LogicException</code> when
         <code>twig/twig</code> is not installed.
     </p>
@@ -1556,7 +1558,7 @@ it('counts clicks', function (): void {
 
     <h3 id="test-app"><code>Testing\TestApp</code></h3>
     <h4 id="test-app-construct"><code>__construct(Config $config, callable $routes)</code></h4>
-    <p>Builds the app: <code>new Via($config)</code>, then <code>$routes</code> with the <code>Via</code>, then the <code>onWorkerStart</code> callbacks as worker 0.</p>
+    <p>Builds the app: <code>new Via($config)</code>, then <code>$routes</code> with the <code>Via</code>, then the <code>onWorkerStart</code> callbacks as worker 0, and arms the <code>setInterval()</code> timers as worker 0 does.</p>
     <h4 id="test-app-open"><code>open(string $path, array $query = [], bool $connect = true): TestTab</code></h4>
     <p>Loads a page in a new browser with a session of its own and, by default, opens its SSE stream. It throws a <code>RuntimeException</code> for a status other than 200.</p>
     <h4 id="test-app-request"><code>request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface</code></h4>
@@ -1568,8 +1570,9 @@ it('counts clicks', function (): void {
     <h4 id="test-app-run-tasks"><code>runTasks(float $timeoutSeconds = 5.0): void</code></h4>
     <p>
         Runs the event loop until the <code>spawn()</code> tasks have ended and their broadcasts have rendered.
-        Timers fire meanwhile, <code>$c-&gt;setInterval()</code> callbacks included; <code>$app-&gt;setInterval()</code>
-        callbacks never fire in a TestApp. A task otherwise runs only up to its first wait.
+        Timers fire meanwhile, <code>$c-&gt;setInterval()</code> and <code>$app-&gt;setInterval()</code> callbacks
+        included: the constructor arms the latter as worker 0 does. With nothing pending it returns at once. A
+        task otherwise runs only up to its first wait.
     </p>
     <h4 id="test-app-via"><code>via(): Via</code></h4>
     <p>The app's <code>Via</code>, for <code>broadcast()</code>, <code>globalState()</code> and the like.</p>

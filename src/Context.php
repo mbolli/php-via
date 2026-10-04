@@ -56,6 +56,12 @@ class Context {
     /** Whether update renders are shared by every context of this view in its primary scope */
     private bool $shareRender = false;
 
+    /** Set while an update render runs: Datastar read the page's data-nonce at the page load and dropped it */
+    private bool $renderingUpdate = false;
+
+    /** @var null|\Closure(): void runs before the view function on every render, see beforeEachRender() */
+    private ?\Closure $beforeRender = null;
+
     /** Memo of viewKey() */
     private ?string $viewKey = null;
 
@@ -773,6 +779,7 @@ class Context {
         }
         $this->componentManager->clearComponents();
         $this->viewFn = null;
+        $this->beforeRender = null;
     }
 
     public function getRoute(): string {
@@ -1051,6 +1058,18 @@ class Context {
     }
 
     /**
+     * Run $hook before the view function on every render, whichever view() set it, as the composition API copies
+     * the scoped signals' values onto the instance first.
+     *
+     * @internal
+     *
+     * @param \Closure(): void $hook
+     */
+    public function beforeEachRender(\Closure $hook): void {
+        $this->beforeRender = $hook;
+    }
+
+    /**
      * Check if a view has been defined for this context.
      *
      * @internal
@@ -1077,7 +1096,7 @@ class Context {
 
     /**
      * Render a template with this context's data: its named signals and actions, '_via',
-     * contextId, currentRoute, basePath, and via_head and via_foot. Explicit $data wins.
+     * contextId, currentRoute, basePath, via_html_attrs, via_head and via_foot. Explicit $data wins.
      *
      * @param array<string, mixed> $data  Data to pass to the template
      * @param null|string          $block Optional block name to render only that block
@@ -1153,13 +1172,28 @@ class Context {
             throw new \LogicException("view(shareRender: true) on {$this->route} has no scope to share the render in: its primary scope is TAB. Call \$c->scope(...) with the shared scope, or drop shareRender.");
         }
 
-        return $this->app->getViewRenderer()->renderView(
-            $this->viewFn,
-            $isUpdate,
-            $scope,
-            $this,
-            $this->route
-        );
+        $viewFn = $this->viewFn;
+        if ($this->beforeRender !== null) {
+            $before = $this->beforeRender;
+            $viewFn = static function (mixed ...$args) use ($before, $viewFn): string {
+                $before();
+
+                return $viewFn(...$args);
+            };
+        }
+        $this->renderingUpdate = $isUpdate;
+
+        try {
+            return $this->app->getViewRenderer()->renderView(
+                $viewFn,
+                $isUpdate,
+                $scope,
+                $this,
+                $this->route
+            );
+        } finally {
+            $this->renderingUpdate = false;
+        }
     }
 
     /**
@@ -1328,6 +1362,7 @@ class Context {
 
         $action = new Action($actionId, $this->app->getSettings()->basePath);
         $this->namedActions[$name] = $action;
+        $this->app->retainScope($this, $actionScope);
 
         if ($this->app->getScopedAction($actionScope, $actionId) !== null) {
             $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
@@ -1532,8 +1567,9 @@ class Context {
      * A callable that throws is logged and reaches Via::onError() as ErrorPhase::Render, and the browser sees the
      * download fail.
      *
-     * With more than one worker, a request for the URL that reaches another worker is passed to the worker that
-     * holds the context, as an action is (see Config::withContextTimeouts(forwardMs:)).
+     * With more than one worker, the URL carries the id of the worker that made it, and a request for it that reaches
+     * another worker is passed there (see Config::withContextTimeouts(forwardMs:)). Once the tab's stream has moved to
+     * another worker, that worker has destroyed its copy of the context, so the URLs it made answer 404.
      *
      * ```php
      * $url = $c->download(function () use ($rows): \Generator {
@@ -1768,12 +1804,17 @@ class Context {
     }
 
     /**
-     * via_head and via_foot as template data, built only when a template prints them.
+     * via_html_attrs, via_head and via_foot as template data, built only when a template prints them. An update
+     * render leaves data-nonce out, so a morph of the document does not put back what Datastar removed.
      *
-     * @return array{via_head: Html, via_foot: Html}
+     * @return array{via_html_attrs: Html, via_head: Html, via_foot: Html}
      */
     private function documentData(): array {
-        return ['via_head' => new Html($this->viaHead(...)), 'via_foot' => new Html($this->viaFoot(...))];
+        return [
+            'via_html_attrs' => new Html(fn (): string => $this->renderingUpdate ? '' : Bootstrap::htmlAttributes($this->getPageContext()->cspNonce())),
+            'via_head' => new Html($this->viaHead(...)),
+            'via_foot' => new Html($this->viaFoot(...)),
+        ];
     }
 
     /**

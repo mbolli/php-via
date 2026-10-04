@@ -18,13 +18,19 @@
         nothing.
     </p>
     <p>
-        On a page load and an action, php-via writes the response itself once the request reaches it. A
-        response the middleware returns without calling <code>$handler-&gt;handle()</code>, such as a redirect
-        to a login page, goes out as it is. The response that <code>$handler-&gt;handle()</code> returns is a
-        placeholder: headers a middleware adds to it do not reach the browser. Set cookies with
-        <code>$c-&gt;setCookie()</code>, and see <a href="/docs/twig#csp">Content-Security-Policy</a> for a
-        policy with a nonce. On a <a href="#plain-routes">plain route</a> the handler's response goes out as
-        it is, with what middleware added.
+        On a page load and an action, php-via writes the status and the body itself once the request reaches it.
+        A response the middleware returns without calling <code>$handler-&gt;handle()</code>, such as a redirect
+        to a login page, goes out as it is. The response that <code>$handler-&gt;handle()</code> returns has an
+        empty body, and the headers a middleware adds to it go out with php-via's response, such as
+        <code>Content-Security-Policy</code>, <code>Strict-Transport-Security</code> or
+        <code>X-Frame-Options</code>. php-via keeps its own headers: it writes <code>Content-Type</code>,
+        <code>Content-Length</code>, <code>Content-Encoding</code>, <code>Transfer-Encoding</code> and
+        <code>Connection</code>, and the session cookie, a cookie it set and a header it set win over the
+        middleware's. A <code>Vary</code> or <code>Content-Security-Policy</code> header of both goes out with
+        both values, so a browser enforces both policies. Dev mode logs a warning once for each header of the
+        middleware it leaves out. See <a href="/docs/deployment#csp">Content Security Policy</a> for a policy
+        with a nonce. On a <a href="#plain-routes">plain route</a> the handler's response goes out as it is,
+        with what middleware added.
     </p>
     <table>
         <thead>

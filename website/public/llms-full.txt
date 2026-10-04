@@ -361,9 +361,8 @@ final class Counter {
     #[Signal(Scope::ROUTE, atomic: true)] public int $total = 0; // shared, ++ adds across workers
 
     public function view(Context $ctx): void {
-        // Read the signals: a property is this instance's copy, refreshed before each action
-        $ctx->view(fn (): string => '<main id="counter">'
-            . $ctx->getSignal('count')?->int() . ' / ' . $ctx->getSignal('total')?->int() . '</main>');
+        // Properties are hydrated before each action, and scoped ones before each render
+        $ctx->view(fn (): string => '<main id="counter">' . $this->count . ' / ' . $this->total . '</main>');
     }
 
     #[Action]
@@ -776,9 +775,17 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `via_head`, `via_foot` and the Dev Bar carries it. Datastar reads the nonce from
   `<html data-nonce="...">`; without it, it compiles expressions with `Function()`
   (`'unsafe-eval'`) and a nonce policy blocks the scripts of `execScript()` and `dispatch()`.
-  A header middleware adds to the response from `$handler->handle()` does not reach a page:
-  send the policy as `<meta http-equiv="Content-Security-Policy">` in the head, and read the
-  nonce in the page handler, since an action's request carries a nonce of its own.
+  The default shell writes `data-nonce` when the page request has a nonce; a custom shell
+  writes `<html{{ via_html_attrs }}>`, a Twig layout `<html{{ via_html_attrs() }}>`. Both write
+  nothing without a nonce and in update renders. Dev mode warns about a page with a nonce and
+  no `data-nonce`.
+  The middleware sends the policy as a header on the response from `$handler->handle()`, or
+  the layout as `<meta http-equiv="Content-Security-Policy">` in the head. Read the nonce in
+  the page handler, since an action's request carries a nonce of its own.
+- Headers middleware adds to the response from `$handler->handle()` go out with pages and
+  actions. php-via keeps `Content-Type`, `Content-Length`, `Content-Encoding`,
+  `Transfer-Encoding`, `Connection`, its session cookie and any header or cookie it set;
+  `Vary` and `Content-Security-Policy` get both values.
 - `withDevBar(true)` in production is read-only but shows every visitor's traces, scopes and
   context ids, and the server's stats (`/_via/stats`), to anyone who opens a page.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
@@ -853,7 +860,7 @@ Datastar attributes in templates, with ids written from the signal objects:
 `{{ via_head() }}` right after `<meta charset>` and `{{ via_foot() }}` before `</body>`; a
 closure that returns a document writes `$c->viaHead()` and `$c->viaFoot()`. A shell template
 (`withShellTemplate()`) uses string placeholders, not Twig: `{{ via_head }}`, `{{ via_foot }}`,
-`{{ head_content }}`, `{{ content }}`, `{{ foot_content }}`, `{{ base_path }}`,
+`{{ via_html_attrs }}` (on `<html>`), `{{ head_content }}`, `{{ content }}`, `{{ foot_content }}`, `{{ base_path }}`,
 `{{ context_id }}`, and `{{ name }}` / `{{ name.id }}` per signal. A layout that loads its own
 Datastar bundle keeps its script, leaves out `via_foot`, and leaves `withDatastarRocket()` and
 `withImportMap()` off. php-via warns once per shell or route without `via_head`. In a template
@@ -942,13 +949,15 @@ $tab->signal('count');             // 1, the value the browser holds
 $tab->html();                      // the page from server state
 $tab->disconnect(expire: true);    // destroy the context; connect() or action() revives it
 $app->request('GET', '/api/health'); // a plain request, to a route() or a download() URL
-$app->runTasks();                  // run spawn() tasks; $c->setInterval() timers fire meanwhile
+$app->runTasks();                  // run spawn() tasks; setInterval() timers fire meanwhile
 $app->shutdown();
 ```
 
 TestApp runs php-via's own request, action and SSE handlers in the test's process, with no
 server, no port and no `VIA_TEST_MODE`, as one worker, with broadcasts rendered at once.
-`$app->setInterval()` callbacks never fire in a TestApp: call their work directly.
+TestApp arms `$app->setInterval()` timers as worker 0 does; they and `$c->setInterval()` fire
+only while `runTasks()` waits for a task or a broadcast. A test that needs an interval's work
+calls it directly.
 
 ---
 
@@ -1033,8 +1042,8 @@ php-via.
    handler (applies to `countClients()` and to component HTML).
 10. **Variable null in view closure**: add it to both outer and inner `use` lists.
 11. **Stale view after broadcast**: pass the view data as a closure, `$c->view('t', fn (): array => [...])`.
-12. **PatchElementsNoTargetsFound**: the root element of your rendered block must have a
-    unique `id` attribute.
+12. **PatchElementsNoTargetsFound**: the root element of your rendered view or block must have
+    a unique `id` attribute. Dev mode logs a warning once per route for a page update without one.
 13. **Timer fires with no clients**: guard `$app->broadcast()` with
     `if ($app->countClients($scope) === 0) return;`.
 14. **Shell templates ignore Twig**: shell HTML files use string placeholders, not Twig; put

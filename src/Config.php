@@ -561,8 +561,8 @@ final class Config {
      *
      * Once a connection is past the threshold, its element frames are dropped until its
      * backlog is empty, since OpenSwoole wakes a parked write only then. A threshold above
-     * half of socket_buffer_size acts as half of it: frames on their way to the backlog
-     * could otherwise fill the buffer before the backlog shows them.
+     * half of socket_buffer_size acts as half of it, and start() logs a warning: frames on
+     * their way to the backlog could otherwise fill the buffer before the backlog shows them.
      *
      * @param int $bytes threshold in bytes, 1 MiB by default; 0 or less disables dropping entirely
      */

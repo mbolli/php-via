@@ -40,7 +40,9 @@ $c->view('todo.html.twig', fn (): array => ['todos' => $repository->all()]);
     </p>
     <p>
         An update of the page finds its place by id, so give the view's top-level element an id, as
-        <code>counter</code> above. A component needs none: php-via wraps it in an element with an id of its own.
+        <code>counter</code> above. Without one, Datastar drops the update and logs
+        <code>PatchElementsNoTargetsFound</code> in the browser console, and dev mode logs a warning once per
+        route. A component needs none: php-via wraps it in an element with an id of its own.
     </p>
 
     <h2 id="partial-updates">Partial updates with <code>block:</code></h2>
@@ -251,8 +253,11 @@ final class CspNonce implements MiddlewareInterface {
 $app->middleware(new CspNonce());
 {% endverbatim %}{% endcode %}
     <p>
-        A header the middleware adds to the response from <code>$handler-&gt;handle()</code> does not reach a
-        page, so send the policy as a <code>&lt;meta http-equiv&gt;</code> tag:
+        The middleware sends the policy as a header on the response it gets back from
+        <code>$handler-&gt;handle()</code>, or the layout carries it in a <code>&lt;meta http-equiv&gt;</code>
+        tag. Datastar takes the nonce from <code>data-nonce</code> on <code>&lt;html&gt;</code>, which the default
+        shell writes, a custom shell with {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %} and a
+        Twig layout with {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
         <a href="/docs/deployment#csp">Content Security Policy</a> shows the layout.
     </p>
 

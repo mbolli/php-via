@@ -50,7 +50,10 @@ All notable changes to php-via will be documented in this file.
   the scope as the third argument. A third argument to `action()` throws; `#[Action(scope: ...)]`
   keeps working. See [Upgrading](https://via.zweiundeins.gmbh/docs/upgrading#scopes-signals).
 - **A scoped signal joins its context to its scope,** so its writes reach the tab without
-  `addScope()`. `scope()` replaces only the primary scope, where it replaced the whole list.
+  `addScope()`. A worker clears a scope's signals and actions when the last context that uses the
+  scope is destroyed, so per-entity scopes such as `room:<id>` no longer add up for the life of the
+  worker. See [Scopes](https://via.zweiundeins.gmbh/docs/scopes#scope-lifetime). `scope()` replaces
+  only the primary scope, where it replaced the whole list.
 - **`Scope::ROUTE` and `Scope::SESSION` resolve in every method that takes a scope.**
   `$app->broadcast()` and `getScopedSignalByName()` throw for a bare `Scope::TAB`, `Scope::ROUTE`
   or `Scope::SESSION`: pass `Scope::routeScope('/path')` or `Scope::sessionScope($id)`.
@@ -162,6 +165,10 @@ covers the changes that need more than a rename.
   copied from the default shell, and carry the page request's `via.csp_nonce`. php-via warns about
   a shell without `via_head` or with a second Datastar script. See
   [Templates](https://via.zweiundeins.gmbh/docs/twig#bootstrap).
+- **`data-nonce` on `<html>`.** Datastar runs expressions and server scripts under a nonce policy
+  without `'unsafe-eval'` once `<html>` carries the nonce. The default shell writes it when the page
+  request has `via.csp_nonce`, a custom shell with `{{ via_html_attrs }}` and a Twig layout with
+  `{{ via_html_attrs() }}`. See [Templates](https://via.zweiundeins.gmbh/docs/twig#csp).
 - **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine`; `Twig\TwigEngine` is
   php-via's. See [Templates](https://via.zweiundeins.gmbh/docs/twig#own-engine).
 - **`$c->patchElements($html, $selector, $mode)`** sends HTML outside a view render, with a
@@ -220,10 +227,12 @@ covers the changes that need more than a rename.
   `/_via/stats`. The dev-mode `/_stats` reports the same runtime figures. See
   [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#stats).
 - **`Testing\TestApp`** runs an app's pages in a test through php-via's own handlers, with no
-  server. See [Testing](https://via.zweiundeins.gmbh/docs/getting-started#testing).
+  server, and fires `setInterval()` timers while `runTasks()` runs. See
+  [Testing](https://via.zweiundeins.gmbh/docs/getting-started#testing).
 - **Several `#[OnCleanup]` methods** per class, run in declaration order.
-- **Dev mode** shows a page's exception class and message instead of "Internal Server Error", and
-  logs a hint when every tab of a view rendered the same HTML in one broadcast.
+- **Dev mode** shows a page's exception class and message instead of "Internal Server Error",
+  logs a hint when every tab of a view rendered the same HTML in one broadcast, and warns once per
+  route about a page update whose top-level element has no id, which Datastar drops.
 
 ### Deprecated
 
@@ -263,7 +272,8 @@ covers the changes that need more than a rename.
 - A login could not replace the session cookie (session fixation). Call `regenerateSession()` at
   login and logout.
 - `withDevBar(true)` outside dev mode is read-only, but shows every visitor's traces, scopes,
-  context ids and the server's stats. See [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#enabling).
+  context ids and the server's stats. Outside dev mode, `POST /_via/reset` no longer lets any
+  visitor clear the worker's trace buffer. See [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#enabling).
 
 ### Fixed
 
@@ -280,10 +290,19 @@ covers the changes that need more than a rename.
 - `getStats()->getAll()` read 0 for requests, actions, SSE connections and the active counts.
 - A client that read too slowly could park its SSE stream until it disconnected. Its element frames
   are now dropped until its backlog is empty, and the default `socket_buffer_size` is 2 MiB.
+  `start()` warns when `withSseMaxQueuedBytes()` is above half of it, which caps the threshold.
 - For a client that fell behind, appended and prepended element patches went missing. Only view
   updates are dropped now.
+- Headers a middleware added to the response from `$handler->handle()`, such as
+  `Content-Security-Policy` or `Strict-Transport-Security`, never reached a page or an action. They
+  go out now; php-via keeps the headers and cookies it writes itself. See
+  [Middleware](https://via.zweiundeins.gmbh/docs/middleware#how-it-works).
+- A middleware or `route()` response with several `Set-Cookie` headers sent only the last one.
 - `withStaticDir()` served dotfiles such as `.env`, and the source of PHP files. See
   [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused).
+- With several workers or a broker, a broadcast of `Scope::ROUTE` on a route with parameters, such
+  as `/blog/{slug}`, and the writes of its scoped signals never reached the other workers. Scopes
+  with the characters of a URL path cross now, and php-via warns once about a scope that cannot.
 - Static `.json`, `.txt`, `.html` and `.xml` files were served as `application/octet-stream`, and a
   percent-encoded path never found its file.
 - In dev mode, an edited static file was served with its old ETag and content.
@@ -293,6 +312,8 @@ covers the changes that need more than a rename.
   instance, so one tab's click changed another tab's properties.
 - `#[Broadcast]` dropped the scopes of a class's scoped `#[Signal]` properties.
 - Property changes an `#[Action]` method made before it threw were lost.
+- A composition view that read a scoped `#[Signal]` property rendered the tab's stale copy when
+  another tab's write reached it. Scoped properties are hydrated before each render now.
 - `addScope(Scope::ROUTE)` and `addScope(Scope::SESSION)` joined literal `route` and `session`
   scopes, and SESSION-scoped actions were never found.
 - SESSION and custom-scope signals declared in a page closure reached no tab without `addScope()`.
@@ -309,15 +330,6 @@ covers the changes that need more than a rename.
   160 ms. They are destroyed in 10 ms slices now.
 - A stopping worker ended its streams and the tabs waited up to 15 s to reconnect. It now asks them
   to reconnect at once.
-
-### Known limitations
-
-- A scope's signals and actions stay in the worker after the last tab in it has disconnected, as in
-  0.13, so per-entity scopes such as `room:<id>` add up. See
-  [Scopes](https://via.zweiundeins.gmbh/docs/scopes#scope-lifetime).
-- With several workers or a broker, a broadcast crosses to the others only for a scope of
-  letters, digits and `_ - . : /`. `Scope::ROUTE` on a route with parameters, such as
-  `/blog/{slug}`, stays on its worker: use a custom scope such as `'post:' . $slug`.
 
 ### Tests
 

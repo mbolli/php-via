@@ -179,3 +179,73 @@ describe('via_head() and via_foot() in Twig templates', function (): void {
         ;
     });
 });
+
+describe('via_html_attrs: data-nonce on <html>, which Datastar needs under a nonce policy', function (): void {
+    test('the default shell writes it when the page request carries a nonce, and nothing without one', function (): void {
+        $via = createVia();
+        $page = new Context('/_/attrs1', '/', $via);
+        $page->view(fn (): string => '<main id="m">x</main>');
+        $plain = new Context('/_/attrs2', '/', $via);
+        $plain->view(fn (): string => '<main id="m">x</main>');
+        $page->setRequestAttributes(['via.csp_nonce' => 'n"7']);
+
+        expect($via->buildHtmlDocument($page))->toContain("<!DOCTYPE html>\n<html data-nonce=\"n&quot;7\">\n")
+            ->and($via->buildHtmlDocument($plain))->toContain("<!DOCTYPE html>\n<html>\n")
+        ;
+    });
+
+    test('a custom shell has the {{ via_html_attrs }} placeholder', function (): void {
+        $shell = tempnam(sys_get_temp_dir(), 'shell');
+        file_put_contents($shell, '<!DOCTYPE html><html lang="en"{{ via_html_attrs }}><head><meta charset="UTF-8">{{ via_head }}</head><body>{{ content }}{{ via_foot }}</body></html>');
+
+        try {
+            $via = createVia((new Config())->withShellTemplate($shell));
+            $page = new Context('/_/attrs3', '/', $via);
+            $page->setRequestAttributes(['via.csp_nonce' => 'n8']);
+            $page->view(fn (): string => '<main id="m">x</main>');
+
+            expect($via->buildHtmlDocument($page))->toStartWith('<!DOCTYPE html><html lang="en" data-nonce="n8"><head>');
+        } finally {
+            unlink($shell);
+        }
+    });
+
+    test('a Twig layout has via_html_attrs(), which an update render leaves empty', function (): void {
+        $via = createVia((new Config())->withTemplateEngine(arrayTwig([
+            'doc.html.twig' => '<!DOCTYPE html><html lang="en"{{ via_html_attrs() }}><head><meta charset="UTF-8">{{ via_head() }}</head><body><main id="m">{{ via_html_attrs }}</main>{{ via_foot() }}</body></html>',
+        ])));
+        $page = new Context('/_/attrs4', '/doc', $via);
+        $page->setRequestAttributes(['via.csp_nonce' => 'n9']);
+        $page->view('doc.html.twig');
+
+        expect($page->renderView())->toStartWith('<!DOCTYPE html><html lang="en" data-nonce="n9"><head>')
+            ->and($page->renderView())->toContain('<main id="m"> data-nonce="n9"</main>')
+            ->and($page->renderView(isUpdate: true))->toStartWith('<!DOCTYPE html><html lang="en"><head>')
+            ->and($via->getTwig()->createTemplate('<html{{ via_html_attrs() }}>')->render([]))->toBe('<html>')
+        ;
+    });
+
+    test('in dev mode, a page with a nonce whose <html> has no data-nonce is warned about once', function (): void {
+        $shell = tempnam(sys_get_temp_dir(), 'shell');
+        file_put_contents($shell, '<!DOCTYPE html><html><head><meta charset="UTF-8">{{ via_head }}</head><body>{{ content }}{{ via_foot }}</body></html>');
+
+        try {
+            $via = new Via((new Config())->withDevMode(true)->withLogLevel('warn')->withShellTemplate($shell));
+            $logs = '';
+            foreach (['a', 'b'] as $n) {
+                $page = new Context("/_/attrs5{$n}", '/', $via);
+                $page->setRequestAttributes(['via.csp_nonce' => 'n10']);
+                $page->view(fn (): string => '<main id="m">x</main>');
+                ob_start();
+                $via->buildHtmlDocument($page);
+                $logs .= (string) ob_get_clean();
+            }
+
+            expect(substr_count($logs, 'has no data-nonce on <html>'))->toBe(1)
+                ->and($logs)->toContain('write <html{{ via_html_attrs }}>')
+            ;
+        } finally {
+            unlink($shell);
+        }
+    });
+});

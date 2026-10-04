@@ -216,7 +216,7 @@ describe('Component IDs', function (): void {
 });
 
 describe('Scope state after a component is released', function (): void {
-    test('a released component leaves its scope\'s signals for the next page', function (): void {
+    test('a released component leaves its scope\'s signals while another context uses the scope', function (): void {
         $app = createVia();
         $handler = function (Context $c): void {
             $c->component(function (Context $w): void {
@@ -228,11 +228,30 @@ describe('Scope state after a component is released', function (): void {
         };
         $first = teardownMintPage($app, '/a', $handler);
         $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7);
-
-        $app->getApp()->destroyContext($first->getId());
         teardownMintPage($app, '/a', $handler);
 
+        $app->getApp()->destroyContext($first->getId());
+
         expect($app->getScopedSignalByName('widgets', 'clicks', 'widget')?->int())->toBe(7);
+    });
+
+    test('the last component in a scope takes the scope\'s signals with it', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->component(function (Context $w): void {
+                $w->signal(0, 'clicks', 'widgets');
+                $w->view(fn (): string => 'widget');
+            }, 'widget');
+            $c->view(fn (): string => 'page');
+        };
+        $first = teardownMintPage($app, '/a', $handler);
+        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7);
+
+        $app->getApp()->destroyContext($first->getId());
+
+        expect($app->getScopedSignalByName('widgets', 'clicks', 'widget'))->toBeNull();
+        teardownMintPage($app, '/a', $handler);
+        expect($app->getScopedSignalByName('widgets', 'clicks', 'widget')?->int())->toBe(0);
     });
 });
 

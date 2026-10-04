@@ -226,6 +226,9 @@ class Via {
     /** @var array<string, true> Scopes still to be published to the broker */
     private array $unpublishedScopes = [];
 
+    /** @var array<string, true> Scopes warned about that other workers and nodes refuse, see isPublishable() */
+    private array $unwiredScopesWarned = [];
+
     private bool $flushScheduled = false;
 
     /** Set while the scheduled flush waits on a timer (the tick gap) rather than Event::defer. */
@@ -368,7 +371,8 @@ class Via {
             $this->logger,
             $this->scopeRegistry,
             $this->signalManager,
-            $this->actionRegistry
+            $this->actionRegistry,
+            $this->viewCache,
         );
         $this->router = new Router();
         // Four rows per session that can hold data: its first cookie, its current one and retired ones in their grace period.
@@ -389,8 +393,9 @@ class Via {
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
         if ($templateEngine instanceof TwigEngine) {
-            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_head and via_foot.
+            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_html_attrs, via_head and via_foot.
             $templateEngine->environment()->addGlobal('basePath', $this->settings->basePath);
+            $templateEngine->environment()->addGlobal('via_html_attrs', new Html(''));
             $templateEngine->environment()->addGlobal('via_head', new Html($this->settings->importMapTag()));
             $templateEngine->environment()->addGlobal('via_foot', new Html(Bootstrap::foot($this->settings->datastarUrl, null)));
         }
@@ -837,6 +842,10 @@ class Via {
             return;
         }
 
+        if (!$this->isPublishable($scope)) {
+            return;
+        }
+
         $this->publishing = true;
 
         try {
@@ -897,6 +906,15 @@ class Via {
     public function unregisterContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->unregisterContext($context, $scope);
         $this->app->refreshClientScopes($context->getPageContext());
+    }
+
+    /**
+     * Keep a scope's signals and actions while $context lives, without rendering it on the scope's broadcasts.
+     *
+     * @internal Called by Context::scopedAction()
+     */
+    public function retainScope(Context $context, string $scope): void {
+        $this->scopeRegistry->retain($context, $scope);
     }
 
     /**
@@ -1146,6 +1164,13 @@ class Via {
 
             $settings = self::serverSettings($this->settings);
             self::assertHookFlags($settings, $this->broker);
+            $maxQueued = $this->settings->sseMaxQueuedBytes;
+            $socketBuffer = (int) ($settings['socket_buffer_size'] ?? 0);
+            $threshold = SseHandler::dropThreshold($maxQueued, $socketBuffer);
+            if ($threshold < $maxQueued) {
+                $this->log('warning', "withSseMaxQueuedBytes({$maxQueued}) is above half of socket_buffer_size ({$socketBuffer}), so a slow client's element frames are dropped from a backlog of {$threshold} bytes. "
+                    . 'Raise socket_buffer_size with withSwooleSettings() to ' . (2 * $maxQueued) . ' for the threshold you set.');
+            }
             if (((int) ($settings['hook_flags'] ?? 0) & SWOOLE_HOOK_NATIVE_CURL) !== 0 && self::nativeCurlHookCrashes()) {
                 $this->log('warning', 'hook_flags include SWOOLE_HOOK_NATIVE_CURL, and with libcurl 8.20 or newer a curl '
                     . 'request to any hostname crashes the worker. Remove the flag, see https://via.zweiundeins.gmbh/docs/deployment#hooks');
@@ -1322,24 +1347,7 @@ class Via {
                 // These are registered inside workerStart, so without the gate each of the N
                 // workers armed its own Timer::tick and a "once per server" job ran N times,
                 // and, if it broadcasts, delivered N^2 times.
-                foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
-                    if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
-                        continue;
-                    }
-
-                    $id = Timer::tick($ms, function () use ($callback): void {
-                        try {
-                            $callback();
-                        } catch (\Throwable $e) {
-                            $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
-                            $this->reportError($e, null, ErrorPhase::Timer);
-                        }
-                    });
-
-                    if ($id !== false) {
-                        $this->serverIntervalIds[] = $id;
-                    }
-                }
+                $this->armServerIntervals($workerId);
 
                 // See Config::withGcIntervalMs().
                 $gcIntervalMs = $this->settings->gcIntervalMs;
@@ -2031,7 +2039,7 @@ class Via {
             $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
             // The half-built context may already have joined scopes and started timers.
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
@@ -2042,7 +2050,7 @@ class Via {
         if ($refusal !== null) {
             $this->log('info', "The middleware of {$route} answered {$refusal->getStatusCode()} instead of rebuilding context {$contextId}");
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
@@ -2056,7 +2064,7 @@ class Via {
         $winner = $this->contexts[$contextId] ?? null;
         if ($winner !== null) {
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
 
             return $winner;
         }
@@ -2326,6 +2334,8 @@ class Via {
         $isDocument = stripos($html, '<html') !== false;
         if ($isDocument) {
             $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
+        } else {
+            $this->htmlBuilder->checkRootIds($html, $context);
         }
 
         if ($this->devBarInjector === null || stripos($html, '</body>') === false) {
@@ -2539,7 +2549,8 @@ class Via {
      *
      * Contexts created from now on queue their patches in an array, and an SSE loop running in a
      * Fiber parks on it as it parks on a Channel in a coroutine. The onWorkerStart callbacks run
-     * here, as worker 0; nothing else of a worker start happens, so no timer is armed.
+     * here, as worker 0, and then the setInterval() timers are armed as worker 0 arms them. Nothing
+     * else of a worker start happens: no collector, sweep or heartbeat timer is armed.
      *
      * @internal
      *
@@ -2554,6 +2565,7 @@ class Via {
         foreach ($this->startCallbacks as $callback) {
             $callback($this->workerId);
         }
+        $this->armServerIntervals($this->workerId);
 
         return $this->requestHandler;
     }
@@ -2640,6 +2652,30 @@ class Via {
      */
     public function generateIdenticon(string $clientId): string {
         return IdGenerator::generateIdenticon($clientId);
+    }
+
+    /**
+     * Arm the setInterval() timers this worker runs: every one on the leader, only those for every worker elsewhere.
+     */
+    private function armServerIntervals(int $workerId): void {
+        foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
+            if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
+                continue;
+            }
+
+            $id = Timer::tick($ms, function () use ($callback): void {
+                try {
+                    $callback();
+                } catch (\Throwable $e) {
+                    $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
+                    $this->reportError($e, null, ErrorPhase::Timer);
+                }
+            });
+
+            if ($id !== false) {
+                $this->serverIntervalIds[] = $id;
+            }
+        }
     }
 
     /**
@@ -3451,6 +3487,22 @@ class Via {
      * Publish every pending scope. Only one coroutine per worker publishes at a time, so a broker
      * connection is never shared by two coroutines.
      */
+    /**
+     * Whether a scope crosses to other workers and nodes: they refuse one that Scope::isValidWireScope() refuses,
+     * which is warned about once per scope, for the first 100.
+     */
+    private function isPublishable(string $scope): bool {
+        if ($this->broker instanceof InMemoryBroker || Scope::isValidWireScope($scope)) {
+            return true;
+        }
+        if (\count($this->unwiredScopesWarned) < 100 && !isset($this->unwiredScopesWarned[$scope])) {
+            $this->unwiredScopesWarned[$scope] = true;
+            $this->log('warning', "Broadcasts of scope \"{$scope}\" stay on this worker: other workers and nodes take only scopes of letters, digits and _ - . ~ : / @ % ! \$ & ' ( ) + , ; = { }, up to 256 bytes.");
+        }
+
+        return false;
+    }
+
     private function publishPending(): void {
         if ($this->publishing) {
             return;
@@ -3463,6 +3515,10 @@ class Via {
                 $this->unpublishedScopes = [];
 
                 foreach ($scopes as $scope => $_) {
+                    if (!$this->isPublishable($scope)) {
+                        continue;
+                    }
+
                     try {
                         $this->broker->publish($scope);
                     } catch (\Throwable $e) {

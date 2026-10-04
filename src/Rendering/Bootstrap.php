@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Rendering;
 
 /**
- * The tags behind via_head and via_foot, which connect a page to php-via.
+ * The tags behind via_head and via_foot, which connect a page to php-via, and the <html> attributes of via_html_attrs.
  *
  * @internal used by Context::viaHead() and viaFoot(), and by the Dev Bar for the nonce
  */
@@ -60,6 +60,14 @@ final class Bootstrap {
      */
     public static function foot(string $datastarUrl, ?string $nonce): string {
         return '<script type="module" src="' . htmlspecialchars($datastarUrl, ENT_QUOTES, 'UTF-8') . '"' . self::nonceAttribute($nonce) . '></script>';
+    }
+
+    /**
+     * The attributes the page's <html> element needs: ' data-nonce="..."' under a CSP nonce, which Datastar reads
+     * to run expressions and the scripts the server sends as nonced scripts, or ''.
+     */
+    public static function htmlAttributes(?string $nonce): string {
+        return $nonce === null || $nonce === '' ? '' : ' data-nonce="' . htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8') . '"';
     }
 
     /**

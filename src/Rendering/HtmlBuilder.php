@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Rendering;
 
+use Dom\Element;
+use Dom\HTMLDocument;
+use Dom\Text;
 use Mbolli\PhpVia\Context;
 
 /**
@@ -99,6 +102,8 @@ class HtmlBuilder {
                 ]);
             }
 
+            $this->checkNonce($this->checkedDocuments, $route . "\0nonce", $content, $context, "The document rendered for {$route} has no data-nonce on <html>, so Datastar runs expressions through Function(), which a CSP with a nonce blocks: write <html{{ via_html_attrs() }}> (Twig).");
+
             return $this->checkImportMaps($this->injectIntoDocument($content, $context, initial: true), $context);
         }
 
@@ -132,6 +137,7 @@ class HtmlBuilder {
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
+            '{{ via_html_attrs }}' => str_contains($shell, '{{ via_html_attrs }}') ? Bootstrap::htmlAttributes($context->cspNonce()) : '',
             '{{ via_head }}' => str_contains($shell, '{{ via_head }}') ? $context->viaHead() : '',
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
@@ -150,6 +156,7 @@ class HtmlBuilder {
                 "Shell {$shellPath} loads a Datastar script of its own next to via_head's import map, which maps 'datastar' to Config::getDatastarUrl(), so modules that import 'datastar' start a second Datastar engine: write {{ via_foot }} in place of the script.",
             ]);
         }
+        $this->checkNonce($this->checkedShells, $shellPath . "\0nonce", $html, $context, "Shell {$shellPath} has no data-nonce on <html>, so Datastar runs expressions through Function(), which a CSP with a nonce blocks: write <html{{ via_html_attrs }}>.");
 
         return $this->checkImportMaps($html, $context);
     }
@@ -220,6 +227,37 @@ class HtmlBuilder {
     }
 
     /**
+     * In dev mode, warn once per route about a page update whose top level has an element without an id or text:
+     * Datastar patches a page view's top-level elements by id, and drops the others.
+     *
+     * @internal called by Via::decorateUpdate() for an update render of a page view that is no whole document
+     */
+    public function checkRootIds(string $content, Context $context): void {
+        $key = $context->getRoute() . "\0ids";
+        if (!$this->devMode || isset($this->checkedDocuments[$key]) || trim($content) === '' || !class_exists(HTMLDocument::class)) {
+            return;
+        }
+        $this->checkedDocuments[$key] = true;
+
+        $body = HTMLDocument::createFromString('<!DOCTYPE html><body>' . $content, LIBXML_NOERROR)->body;
+        if ($body === null) {
+            return;
+        }
+        foreach ($body->childNodes as $node) {
+            $what = match (true) {
+                $node instanceof Element && ($node->getAttribute('id') ?? '') === '' => 'a top-level <' . $node->localName . '> without an id',
+                $node instanceof Text && trim($node->textContent) !== '' => 'text outside any element',
+                default => null,
+            };
+            if ($what !== null) {
+                $this->log('warning', "The view of {$context->getRoute()} renders {$what}, so Datastar drops its updates (PatchElementsNoTargetsFound in the browser console): give the view one root element with an id, such as <div id=\"counter\">...</div>.", $context);
+
+                return;
+            }
+        }
+    }
+
+    /**
      * Warn once per key about a page without via_head, or with a Datastar script other than via_foot's
      * next to via_head's import map, and in dev mode with via_head and no Datastar script, which a
      * bundle whose URL does not name Datastar would set off. Outside dev mode a sound page is not
@@ -244,6 +282,20 @@ class HtmlBuilder {
             $this->warnOnce($checked, $key, $problem, $context);
         } elseif (!$this->devMode) {
             $checked[$key] = true;
+        }
+    }
+
+    /**
+     * In dev mode, warn once per key about a page whose request carries a CSP nonce and whose <html> has no data-nonce.
+     *
+     * @param array<string, true> $checked keys warned about
+     */
+    private function checkNonce(array &$checked, string $key, string $html, Context $context, string $message): void {
+        if (!$this->devMode || isset($checked[$key]) || ($context->cspNonce() ?? '') === '') {
+            return;
+        }
+        if (preg_match('/<html\b[^>]*\sdata-nonce\s*=/i', $html) !== 1) {
+            $this->warnOnce($checked, $key, $message, $context);
         }
     }
 

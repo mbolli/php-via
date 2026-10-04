@@ -42,6 +42,9 @@ final class Scope {
      */
     public const string GLOBAL = 'global';
 
+    /** The characters a scope crosses workers and nodes with, see isValidWireScope() */
+    private const string WIRE_CHARS = "[A-Za-z0-9_\\-.~:\\/@%!$&'()+,;={}]";
+
     /**
      * Parse a scope string into its components.
      *
@@ -187,14 +190,12 @@ final class Scope {
     /**
      * Validate a scope string received from the message broker wire.
      *
-     * Accepts:
-     * - Built-in names: tab, route, session, global
-     * - Route-qualified: route:/any/path
-     * - Custom scopes: colon-separated segments of [a-zA-Z0-9_\-.*:/], max 256 chars
+     * Accepts, up to 256 bytes, the characters of a URL path and of a route pattern: letters, digits,
+     * `_ - . ~ : / @ % ! $ & ' ( ) + , ; =` and the `{` `}` of a route parameter, so the route scope of
+     * /blog/{slug} crosses too. One `*` after the first character makes a pattern broadcast, such as room:*.
      *
-     * Rejects NUL bytes, shell metacharacters, overly long strings, or strings that
-     * don't match the expected scope grammar. This prevents a compromised or
-     * misconfigured broker from injecting arbitrary strings into syncLocally().
+     * Rejects whitespace, control characters, quotes, backslashes, angle brackets and anything else, so a
+     * compromised or misconfigured broker cannot pass arbitrary strings into syncLocally().
      *
      * @internal
      */
@@ -203,14 +204,6 @@ final class Scope {
             return false;
         }
 
-        // Built-in single-word scopes.
-        if (self::isBuiltIn($scope)) {
-            return true;
-        }
-
-        // All other scopes: colon-separated segments where each segment consists only
-        // of safe characters. Wildcards (*) are allowed for pattern-broadcast scopes
-        // (e.g. "room:*"). Slashes are required for route-qualified scopes (route:/path).
-        return (bool) preg_match('/^[a-zA-Z0-9_\-.:\/]+(?:\*[a-zA-Z0-9_\-.:\/]*)?$/', $scope);
+        return (bool) preg_match('/^' . self::WIRE_CHARS . '+(?:\*' . self::WIRE_CHARS . '*)?$/', $scope);
     }
 }

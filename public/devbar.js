@@ -187,6 +187,7 @@ class ViaDevBar extends HTMLElement {
     this.base = cfg.base || '/';
     this.mode = cfg.mode || 'overlay';
     this.writes = !!cfg.writes;
+    this.devMode = !!cfg.devMode;
     this.contextId = cfg.context || '';
     this.route = cfg.route || '';
     this.signals = Array.isArray(cfg.signals) ? cfg.signals : [];
@@ -379,7 +380,7 @@ class ViaDevBar extends HTMLElement {
     this.traces = [];
     this.sseEvents = [];
     this.render();
-    fetch(this.base + '_via/reset', { method: 'POST' }).catch(() => {});
+    if (this.devMode) fetch(this.base + '_via/reset', { method: 'POST' }).catch(() => {});
   }
 
   selectTab(id) {

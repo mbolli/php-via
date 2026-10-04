@@ -26,6 +26,13 @@ final class PageMount {
     private static ?\WeakMap $scopedRunners = null;
 
     /**
+     * The instances running an #[Action] method, with how many: their properties may hold writes not synced back yet.
+     *
+     * @var null|\WeakMap<object, int>
+     */
+    private static ?\WeakMap $acting = null;
+
+    /**
      * Build a setup closure for the given class metadata.
      *
      * @param ClassMetadata             $meta    Reflection metadata for the page/component class
@@ -107,6 +114,15 @@ final class PageMount {
                 $viewArgs[] = TypeCaster::cast($raw, $paramType);
             }
             $instance->view(...$viewArgs);
+
+            // Another tab's write reaches this tab as a broadcast render, so a scoped property is read again first.
+            if ($meta->scopedSignals !== []) {
+                $ctx->beforeEachRender(static function () use ($instance, $meta, $ctx): void {
+                    if (!isset(self::acting()[$instance])) {
+                        self::hydrateScoped($instance, $meta, $ctx);
+                    }
+                });
+            }
         };
     }
 
@@ -123,12 +139,20 @@ final class PageMount {
             // Record what the action starts from, so syncBack() can tell an
             // untouched property from a changed one and size an atomic delta.
             $before = self::snapshot($instance, $meta, $ctx);
+            $acting = self::acting();
+            $acting[$instance] = ($acting[$instance] ?? 0) + 1;
 
             try {
                 $instance->{$method}($ctx);
             } finally {
                 // A closure action's signal writes stay when it throws, so these do too.
-                self::syncBack($instance, $meta, $ctx, $before);
+                try {
+                    self::syncBack($instance, $meta, $ctx, $before);
+                } finally {
+                    if (--$acting[$instance] <= 0) {
+                        unset($acting[$instance]);
+                    }
+                }
             }
 
             // Flush TAB signal changes to the current client
@@ -192,6 +216,13 @@ final class PageMount {
     }
 
     /**
+     * @return \WeakMap<object, int>
+     */
+    private static function acting(): \WeakMap {
+        return self::$acting ??= new \WeakMap();
+    }
+
+    /**
      * Reactive property names: TAB #[Signal] plus scoped #[Signal(Scope::X)].
      * #[Persist] properties are excluded: they live only on the instance.
      *
@@ -212,6 +243,18 @@ final class PageMount {
      */
     private static function hydrate(object $instance, ClassMetadata $meta, Context $ctx): void {
         foreach (self::reactiveProps($meta) as $prop) {
+            $signal = $ctx->getSignal($prop);
+            if ($signal !== null) {
+                $instance->{$prop} = $signal->getValue();
+            }
+        }
+    }
+
+    /**
+     * Copy the current values of the scoped signals onto their properties, which other tabs and workers write.
+     */
+    private static function hydrateScoped(object $instance, ClassMetadata $meta, Context $ctx): void {
+        foreach ($meta->scopedSignals as ['prop' => $prop]) {
             $signal = $ctx->getSignal($prop);
             if ($signal !== null) {
                 $instance->{$prop} = $signal->getValue();
