@@ -73,13 +73,13 @@ final class CompositionDemo {
                     ['name' => 'count', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Per-tab counter. Each click adds the current multiplier: grows +1, +2, +3… proving #[Persist] survives between actions.'],
                     ['name' => 'multiplier', 'type' => 'int', 'scope' => 'Persist', 'default' => '1', 'desc' => 'Server-only instance property (not a signal). Invisible to the client. Grows by 1 on each increment call.'],
                     ['name' => 'totalClicks', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Counts every action call by every user. GLOBAL scope auto-broadcasts to all connected sessions.'],
-                    ['name' => 'votes (VoteWidget)', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Per-animal vote counter. SignalFactory namespaces the ID: global_cats_votes____kn, global_dogs_votes____kn, global_parrots_votes____kn. Persistent and shared across all users.'],
+                    ['name' => 'votes (VoteWidget)', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Per-animal vote counter. SignalFactory namespaces the ID: global_cats_votes____kn, global_dogs_votes____kn, global_parrots_votes____kn. Shared across all users, and back to 0 once no context uses the GLOBAL scope.'],
                 ],
                 'actions' => [
                     ['name' => 'increment', 'desc' => 'Adds multiplier to count, then bumps both multiplier and totalClicks.'],
                     ['name' => 'reset-tab', 'desc' => 'Resets count and multiplier for this tab only. Custom slug via #[Action(name: \'reset-tab\')].'],
                     ['name' => 'saveName', 'desc' => 'Copies nameInput → name (SESSION signal). Auto-broadcasts to all of this user\'s tabs.'],
-                    ['name' => 'vote', 'desc' => 'VoteWidget action. Independent per instance: cats.vote, dogs.vote, parrots.vote. Votes persist globally across all users.'],
+                    ['name' => 'vote', 'desc' => 'VoteWidget action. Independent per instance: cats.vote, dogs.vote, parrots.vote. Every user sees the same votes.'],
                 ],
                 'views' => [
                     ['name' => 'composition.html.twig', 'desc' => 'Page shell. Renders all signals and three embedded VoteWidget components.'],
