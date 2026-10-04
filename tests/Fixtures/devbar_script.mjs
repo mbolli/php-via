@@ -13,9 +13,13 @@ class EventSourceStub {
 
 const stubElement = () => ({ innerHTML: '', addEventListener() {}, querySelector: () => stubElement(), querySelectorAll: () => [] });
 
+class CSSStyleSheetStub {
+  replaceSync(text) { this.text = text; }
+}
+
 class HTMLElementStub {
   getAttribute() { return '{}'; }
-  attachShadow() { this.shadowRoot = stubElement(); return this.shadowRoot; }
+  attachShadow() { this.shadowRoot = { ...stubElement(), adoptedStyleSheets: [] }; return this.shadowRoot; }
 }
 
 const elements = {};
@@ -29,6 +33,7 @@ vm.runInNewContext(readFileSync(new URL('../../public/devbar.js', import.meta.ur
   document: { addEventListener() {} },
   HTMLElement: HTMLElementStub,
   EventSource: EventSourceStub,
+  CSSStyleSheet: CSSStyleSheetStub,
   customElements: { define: (name, cls) => { elements[name] = cls; } },
   fetch: async () => ({ ok: true, json: async () => ({}) }),
   setInterval: () => 1,
@@ -40,7 +45,12 @@ const fire = (type, event) => (listeners[type] ?? []).forEach((fn) => fn(event))
 const bar = new elements['via-dev-bar']();
 bar.connectedCallback();
 
-const out = { streamsAtStart: streams.length };
+const out = {
+  streamsAtStart: streams.length,
+  // A nonce CSP without 'unsafe-inline' refuses a <style> element and style attributes, not a constructed sheet.
+  stylesAdopted: bar.shadowRoot.adoptedStyleSheets.length === 1 && bar.shadowRoot.adoptedStyleSheets[0].text.includes(':host')
+    && !bar.shadowRoot.innerHTML.includes('<style'),
+};
 fire('pagehide', { persisted: true });
 out.closedOnHide = streams[0].closed;
 fire('pageshow', { persisted: true });
@@ -51,6 +61,9 @@ out.streamsAfterFirstShow = streams.length;
 
 bar.scopes = { worker: 3, scopes: [], totalContexts: 0, activeSse: 0, clients: 0 };
 out.scopesNameWorker = bar.renderScopes().includes('worker 3');
+
+bar.traces = [{ spans: [{ id: 1, name: 'render', category: 'app', offsetMs: 0, durationMs: 2, attributes: {} }], totalDurationMs: 2, label: 'GET /', status: 'ok', spanCount: 1, wallClockStartMs: 0, traceId: 'abc' }];
+out.tracesWithoutStyleAttribute = !bar.renderTraces().includes('style=');
 
 bar.disconnectedCallback();
 out.pageListenersLeft = (listeners.pagehide ?? []).length + (listeners.pageshow ?? []).length;

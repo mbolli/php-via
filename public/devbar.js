@@ -203,7 +203,15 @@ class ViaDevBar extends HTMLElement {
     this.statsTimer = null;
 
     this.attachShadow({ mode: 'open' });
-    this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="root"></div>`;
+    // A constructed stylesheet is not inline style, so a nonce CSP without 'unsafe-inline' applies it.
+    if ('adoptedStyleSheets' in this.shadowRoot) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(STYLES);
+      this.shadowRoot.adoptedStyleSheets = [sheet];
+      this.shadowRoot.innerHTML = `<div class="root"></div>`;
+    } else {
+      this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="root"></div>`;
+    }
     this.root = this.shadowRoot.querySelector('.root');
 
     this.render();
@@ -402,6 +410,12 @@ class ViaDevBar extends HTMLElement {
       stats: () => this.renderStats(),
       logs: () => this.renderLogs(),
     }[this.activeTab] || (() => ''))();
+    // Set through the CSSOM, which a CSP without 'unsafe-inline' allows where a style attribute is refused.
+    body.querySelectorAll('.span-bar').forEach((bar) => {
+      bar.style.left = `${bar.dataset.left}%`;
+      bar.style.width = `${bar.dataset.width}%`;
+      bar.style.background = bar.dataset.color;
+    });
 
     if (this.activeTab === 'signals' && this.writes) {
       body.querySelectorAll('input[data-signal]').forEach((inp) =>
@@ -429,7 +443,7 @@ class ViaDevBar extends HTMLElement {
             <div class="span-row">
               <span class="span-name" title="${esc(s.name)}">${esc(s.name)}</span>
               <span class="span-track">
-                <span class="span-bar" style="left:${left}%;width:${width}%;background:${color}"></span>
+                <span class="span-bar" data-left="${left}" data-width="${width}" data-color="${color}"></span>
               </span>
               <span class="span-ms">${fmtMs(s.durationMs)}</span>
             </div>
@@ -512,7 +526,7 @@ class ViaDevBar extends HTMLElement {
       ['route', this.route],
       ['context', this.contextId],
       ...Object.entries(attrs),
-      ['last duration', lastReq ? fmtMs(lastReq.totalDurationMs) : '—'],
+      ['last duration', lastReq ? fmtMs(lastReq.totalDurationMs) : '-'],
     ];
     return `<table class="kv"><tbody>${rows.map(([k, v]) =>
       `<tr><td class="k">${esc(k)}</td><td>${esc(fmtVal(v))}</td></tr>`).join('')}</tbody></table>`;
@@ -537,8 +551,8 @@ class ViaDevBar extends HTMLElement {
     if (!this.stats) return `<div class="empty">Loading stats…</div>`;
     const s = this.stats.stats || {};
     const rt = this.stats.runtime || {};
-    const num = (v) => (v == null ? '—' : String(v));
-    const ms = (v) => (v == null ? '—' : fmtMs(v));
+    const num = (v) => (v == null ? '-' : String(v));
+    const ms = (v) => (v == null ? '-' : fmtMs(v));
     const groups = [
       ['server', 'every worker', [
         ['requests', num(s.requests)],
@@ -550,7 +564,7 @@ class ViaDevBar extends HTMLElement {
         ['active_sse', num(s.active_sse)],
         ['active_contexts', num(s.active_contexts)],
         ['render_count', num(s.render_count)],
-        ['avg_render_time', s.avg_render_time == null ? '—' : fmtMs(s.avg_render_time * 1000)],
+        ['avg_render_time', s.avg_render_time == null ? '-' : fmtMs(s.avg_render_time * 1000)],
         ['gc_runs', num(s.gc_runs)],
         ['gc_cycles_freed', num(s.gc_cycles_freed)],
       ]],
@@ -627,7 +641,7 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function safeJSON(s, fallback) { try { return JSON.parse(s); } catch (_) { return fallback; } }
-function fmtMs(ms) { if (ms == null) return '—'; return ms >= 100 ? ms.toFixed(0) + 'ms' : ms.toFixed(2) + 'ms'; }
+function fmtMs(ms) { if (ms == null) return '-'; return ms >= 100 ? ms.toFixed(0) + 'ms' : ms.toFixed(2) + 'ms'; }
 function fmtVal(v) {
   if (v === null || v === undefined) return String(v);
   if (typeof v === 'object') return JSON.stringify(v);
