@@ -297,6 +297,9 @@ covers the changes that need more than a rename.
 - A middleware or `route()` response with several `Set-Cookie` headers sent only the last one.
 - `withStaticDir()` served dotfiles such as `.env`, and the source of PHP files. See
   [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused).
+- With several workers or a broker, a broadcast of `Scope::ROUTE` on a route with parameters, such
+  as `/blog/{slug}`, and the writes of its scoped signals never reached the other workers. Scopes
+  with the characters of a URL path cross now, and php-via warns once about a scope that cannot.
 - Static `.json`, `.txt`, `.html` and `.xml` files were served as `application/octet-stream`, and a
   percent-encoded path never found its file.
 - In dev mode, an edited static file was served with its old ETag and content.
@@ -322,12 +325,6 @@ covers the changes that need more than a rename.
   160 ms. They are destroyed in 10 ms slices now.
 - A stopping worker ended its streams and the tabs waited up to 15 s to reconnect. It now asks them
   to reconnect at once.
-
-### Known limitations
-
-- With several workers or a broker, a broadcast crosses to the others only for a scope of
-  letters, digits and `_ - . : /`. `Scope::ROUTE` on a route with parameters, such as
-  `/blog/{slug}`, stays on its worker: use a custom scope such as `'post:' . $slug`.
 
 ### Tests
 

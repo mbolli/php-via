@@ -199,8 +199,11 @@ $app->page('/chat/{room}', function (Context $c, string $room): void {
     <p>
         A pattern with <code>*</code> reaches every matching scope in a broadcast, so <code>'room:*'</code>
         renders every room. With more than one worker or server, a broadcast crosses to the others only for a
-        scope made of letters, digits and <code>_ - . : /</code>, so build custom scopes from keys you control.
-        See the <a href="/examples">chat room example</a> for a full implementation.
+        scope of up to 256 bytes made of the characters of a URL path: letters, digits,
+        <code>_ - . ~ : / @ % ! $ &amp; ' ( ) + , ; =</code>, and the <code>{ }</code> of a route parameter.
+        Any other scope, one with a space for example, stays on its worker, and php-via logs a warning once.
+        Build custom scopes from keys you control. See the <a href="/examples">chat room example</a> for a full
+        implementation.
     </p>
 
     <h2 id="scope-lifetime">When a scope's signals go</h2>

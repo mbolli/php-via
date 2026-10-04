@@ -226,6 +226,9 @@ class Via {
     /** @var array<string, true> Scopes still to be published to the broker */
     private array $unpublishedScopes = [];
 
+    /** @var array<string, true> Scopes warned about that other workers and nodes refuse, see isPublishable() */
+    private array $unwiredScopesWarned = [];
+
     private bool $flushScheduled = false;
 
     /** Set while the scheduled flush waits on a timer (the tick gap) rather than Event::defer. */
@@ -836,6 +839,10 @@ class Via {
             // Another coroutine owns the broker connection; it sends this before it stops.
             $this->unpublishedScopes[$scope] = true;
 
+            return;
+        }
+
+        if (!$this->isPublishable($scope)) {
             return;
         }
 
@@ -3462,6 +3469,22 @@ class Via {
      * Publish every pending scope. Only one coroutine per worker publishes at a time, so a broker
      * connection is never shared by two coroutines.
      */
+    /**
+     * Whether a scope crosses to other workers and nodes: they refuse one that Scope::isValidWireScope() refuses,
+     * which is warned about once per scope, for the first 100.
+     */
+    private function isPublishable(string $scope): bool {
+        if ($this->broker instanceof InMemoryBroker || Scope::isValidWireScope($scope)) {
+            return true;
+        }
+        if (\count($this->unwiredScopesWarned) < 100 && !isset($this->unwiredScopesWarned[$scope])) {
+            $this->unwiredScopesWarned[$scope] = true;
+            $this->log('warning', "Broadcasts of scope \"{$scope}\" stay on this worker: other workers and nodes take only scopes of letters, digits and _ - . ~ : / @ % ! \$ & ' ( ) + , ; = { }, up to 256 bytes.");
+        }
+
+        return false;
+    }
+
     private function publishPending(): void {
         if ($this->publishing) {
             return;
@@ -3474,6 +3497,10 @@ class Via {
                 $this->unpublishedScopes = [];
 
                 foreach ($scopes as $scope => $_) {
+                    if (!$this->isPublishable($scope)) {
+                        continue;
+                    }
+
                     try {
                         $this->broker->publish($scope);
                     } catch (\Throwable $e) {
