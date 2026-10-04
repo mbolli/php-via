@@ -6,11 +6,14 @@
 <div class="example-page-header">
     <h1>{{ title }}</h1>
     <p>{{ description|raw }}</p>
-    {% if summary is defined and summary %}
+    {% if (summary is defined and summary) or perWorker is defined %}
     <div class="example-summary">
-        {% for paragraph in summary %}
+        {% for paragraph in summary|default([]) %}
         <div class="example-summary-col">{{ paragraph|raw }}</div>
         {% endfor %}
+        {% if perWorker is defined %}
+        <div class="example-summary-col"><strong>One worker</strong>: this demo keeps {{ perWorker }} in PHP statics, which each worker holds on its own. See <a href="/docs/deployment#per-worker">What stays per worker</a> before you run it with <code>withWorkerNum()</code>.</div>
+        {% endif %}
     </div>
     {% endif %}
 </div>

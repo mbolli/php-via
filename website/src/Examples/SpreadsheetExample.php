@@ -584,6 +584,7 @@ final class SpreadsheetExample {
                     'myHue' => self::hueForSession($sessionId),
                     'clientCount' => $app->countClients(self::SCOPE),
                     'title' => '📊 Spreadsheet',
+                    'perWorker' => 'the cursors, the selections and a cache of the cells',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
                     'summary' => [
                         '<strong>SQLite persistence</strong>: cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
