@@ -56,7 +56,7 @@ $config = (new Config())
             <tr><td><strong>Signals</strong></td><td>This page's named signals, grouped by scope, with their live values. Editable when writes are on.</td></tr>
             <tr><td><strong>SSE</strong></td><td>The wire: every <code>datastar-fetch</code> event, with the patch it carried (elements or signals) expandable inline.</td></tr>
             <tr><td><strong>Request</strong></td><td>Route, context id and the request span's attributes (method, status, byte size).</td></tr>
-            <tr><td><strong>Scopes</strong></td><td>The worker's scopes, the contexts in each and the connection counts: who shares what.</td></tr>
+            <tr><td><strong>Scopes</strong></td><td>The scopes of the worker that answered, named at the top, with the contexts in each and the connection counts: who shares what. With several workers, a tab whose stream is on another worker is not in the list.</td></tr>
             <tr><td><strong>Stats</strong></td><td>Every figure of <code>getStats()-&gt;getAll()</code>, the broadcast tick, and the hook flags, AIO threads and event loop lag of the worker that answered. See <a href="{{ basePath }}docs/dev-bar#stats">Server statistics</a>.</td></tr>
             <tr><td><strong>Logs</strong></td><td>Server log lines, filtered by level, plus errors from the browser. See <a href="{{ basePath }}docs/dev-bar#logs">Server logs</a>.</td></tr>
         </tbody>

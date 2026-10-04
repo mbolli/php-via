@@ -9,6 +9,8 @@ use Mbolli\PhpVia\DevBar\SignalManifest;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Http\Request;
+use Tests\Support\FakeStaticResponse;
 
 /*
  * End-to-end behaviour of the Dev Bar: overlay injection gating, the signal
@@ -157,6 +159,24 @@ describe('DevBarController::buildScopesSnapshot()', function (): void {
         expect($scopesByName)->toHaveKey('room:lobby');
         expect($scopesByName['room:lobby']['contextCount'])->toBe(1);
         expect($snap['totalContexts'])->toBe(1);
+    });
+
+    test('names the worker that answered, since each worker lists only its own scopes', function (): void {
+        $app = devBarVia();
+        $app->getApp()->claimWorker(2);
+
+        expect((new DevBarController($app))->buildScopesSnapshot()['worker'])->toBe(2);
+    });
+});
+
+describe('the Dev Console', function (): void {
+    test('declares an icon, so the browser asks for no /favicon.ico', function (): void {
+        $response = new FakeStaticResponse();
+        (new DevBarController(devBarVia()))->handle('/_via', new Request(), $response);
+
+        expect($response->body)->toContain('<link rel="icon" href="data:,">')
+            ->and($response->body)->toContain('<via-dev-bar')
+        ;
     });
 });
 

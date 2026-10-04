@@ -129,9 +129,9 @@ final class DevBarController {
     }
 
     /**
-     * Snapshot of active scopes and their contexts for the Scopes/Contexts panel.
+     * Snapshot of the active scopes and their contexts for the Scopes panel, from the worker that answers.
      *
-     * @return array{scopes: list<array{scope: string, contextCount: int, contextIds: list<string>}>, totalContexts: int, activeSse: int, clients: int}
+     * @return array{worker: int, scopes: list<array{scope: string, contextCount: int, contextIds: list<string>}>, totalContexts: int, activeSse: int, clients: int}
      */
     public function buildScopesSnapshot(): array {
         $registry = $this->via->getScopeRegistry();
@@ -147,6 +147,7 @@ final class DevBarController {
         }
 
         return [
+            'worker' => $this->via->getApp()->workerIdentity()[0],
             'scopes' => $scopes,
             'totalContexts' => \count($this->via->contexts),
             'activeSse' => array_sum($this->via->activeSseCount),
@@ -363,6 +364,7 @@ final class DevBarController {
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Via Dev Console</title>
+                <link rel="icon" href="data:,">
                 <link rel="stylesheet" href="{$base}_via/devbar.css">
                 <script>window.__VIA_TRACES__ = {$initial};</script>
             </head>

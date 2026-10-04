@@ -56,8 +56,12 @@ const STYLES = `
     display: flex; align-items: center; gap: 4px; padding: 6px 8px;
     background: var(--bg2); border-bottom: 1px solid var(--border); flex: 0 0 auto;
   }
-  header .brand { color: var(--fg-dim); padding: 0 6px; font-weight: 600; letter-spacing: .04em; }
+  header .brand { color: var(--fg-dim); padding: 0 6px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
   .tabs { display: flex; gap: 2px; flex: 1 1 auto; overflow-x: auto; }
+  @media (max-width: 600px) {
+    header .brand { display: none; }
+    .tabs { flex-wrap: wrap; }
+  }
   .tab {
     background: none; border: none; color: var(--fg-dim); cursor: pointer;
     padding: 4px 9px; border-radius: 5px; font: inherit; white-space: nowrap;
@@ -205,9 +209,18 @@ class ViaDevBar extends HTMLElement {
     this.connectStream();
     this.listenDatastar();
     this.listenErrors();
+
+    // A page in the back/forward cache keeps its connections open, and over HTTP/1.1 a browser
+    // opens only six per host: close the stream while the page is hidden.
+    this.onPageHide = () => { this.es?.close(); this.es = null; };
+    this.onPageShow = (e) => { if (e.persisted && !this.es) this.connectStream(); };
+    window.addEventListener('pagehide', this.onPageHide);
+    window.addEventListener('pageshow', this.onPageShow);
   }
 
   disconnectedCallback() {
+    window.removeEventListener('pagehide', this.onPageHide);
+    window.removeEventListener('pageshow', this.onPageShow);
     this.es?.close();
     if (this.scopeTimer) clearInterval(this.scopeTimer);
     this.stopStats();
@@ -508,6 +521,7 @@ class ViaDevBar extends HTMLElement {
     if (!this.scopes) return `<div class="empty">Loading scope snapshot…</div>`;
     const sc = this.scopes;
     const summary = `<table class="kv"><tbody>
+      <tr class="group"><td colspan="2">worker ${esc(sc.worker ?? '?')}<span class="note">the worker that answered</span></td></tr>
       <tr><td class="k">contexts</td><td>${sc.totalContexts}</td></tr>
       <tr><td class="k">active SSE</td><td>${sc.activeSse}</td></tr>
       <tr><td class="k">clients</td><td>${sc.clients}</td></tr>
