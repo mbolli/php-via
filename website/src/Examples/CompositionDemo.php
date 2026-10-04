@@ -64,7 +64,7 @@ final class CompositionDemo {
                 '<strong>#[Signal(Scope::SESSION)]</strong> is a SESSION-scoped signal. Shared across all open tabs of the same browser session. Saving a name here broadcasts it to the other tabs.',
                 '<strong>#[Signal(Scope::GLOBAL)]</strong> is a GLOBAL-scoped signal. Shared across every connected user. The <code>totalClicks</code> counter increments for all users simultaneously, regardless of which tab triggered it.',
                 '<strong>#[Action]</strong> marks a public method as a client-callable action. The optional <code>name:</code> argument overrides the URL slug: <code>resetTab</code> is exposed as <code>/_action/reset-tab</code>.',
-                '<strong>Components + GLOBAL signals</strong>: <code>VoteWidget</code> is mounted three times with <code>#[Signal(Scope::GLOBAL)] votes</code>. SignalFactory puts the component namespace into scoped signal IDs, giving each animal its own persistent global counter: <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>, <code>global_parrots_votes____kn</code>.',
+                '<strong>Components + GLOBAL signals</strong>: <code>VoteWidget</code> is mounted three times with <code>#[Signal(Scope::GLOBAL)] votes</code>. SignalFactory puts the component namespace into scoped signal IDs, giving each animal its own global counter: <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>, <code>global_parrots_votes____kn</code>.',
             ],
             'anatomy' => [
                 'signals' => [
