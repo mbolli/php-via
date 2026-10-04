@@ -40,6 +40,8 @@ $config = (new Config())
     // Signal editing stays hard-disabled here (devMode is off in prod); it is
     // re-enabled below for local dev only.
     ->withDevBar(true)
+    // The site has no CPU-bound loops that make cycles, so it takes the growth-based collector.
+    ->withGcIntervalMs(30_000, onGrowth: true)
 
     // GlobalState lives in shared memory, which dies with the process. The poll tallies
     // and the ROUTE-scope demo counter are visitor-contributed, so without this every
