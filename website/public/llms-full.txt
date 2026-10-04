@@ -578,8 +578,8 @@ same php-via version.
 ### Capacity and memory
 
 Measured on the website with 0.14.0 (one worker, two cores at full clock, Brotli level 4): a page
-view costs 2.0 to 5.8 ms of CPU and 20 to 55 KB until its stream connects or the connect timeout
-(30 s) passes; an open tab costs 590 to 670 KB with Brotli level 4, 75 to 145 KB at level 1 and 50
+view costs 1.5 to 5.8 ms of CPU with the onGrowth collector below, and 20 to 55 KB until its stream
+connects or the connect timeout (30 s) passes; an open tab costs 590 to 670 KB with Brotli level 4, 75 to 145 KB at level 1 and 50
 to 95 KB without Brotli, mostly the stream encoder's window; a private action 0.11 to 0.14 ms; a
 broadcast about 0.05 ms per receiving tab. A broadcast to a page's scope re-renders every component
 on the page, so give busy widgets a custom scope and broadcast to it, keep presence indicators out of

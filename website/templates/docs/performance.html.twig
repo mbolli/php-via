@@ -11,7 +11,8 @@
     </p>
     <p class="note">
         Measured on two physical cores of an Intel i5-13500 held at full clock, with one worker, PHP 8.5,
-        OpenSwoole 26.2, opcache on and Brotli level 4. A virtual server's core is usually slower: scale
+        OpenSwoole 26.2, opcache on and Brotli level 4. Page views ran with the growth-based cycle collector
+        this website uses (<a href="#cycle-collector">below</a>). A virtual server's core is usually slower: scale
         the CPU figures as described in <a href="#measure">measuring your own app</a>. Memory figures carry over.
     </p>
 
@@ -19,7 +20,7 @@
     <table>
         <thead><tr><th>Unit</th><th>CPU</th><th>Memory</th></tr></thead>
         <tbody>
-            <tr><td>Page view (35 to 173&nbsp;KB of HTML)</td><td>2.0 to 5.8&nbsp;ms</td><td>20 to 55&nbsp;KB until the stream connects or 30&nbsp;s pass</td></tr>
+            <tr><td>Page view (35 to 173&nbsp;KB of HTML)</td><td>1.5 to 5.8&nbsp;ms</td><td>20 to 55&nbsp;KB until the stream connects or 30&nbsp;s pass</td></tr>
             <tr><td>Opening a tab (page view plus stream)</td><td>3.0 to 6.1&nbsp;ms</td><td>see the next row</td></tr>
             <tr><td>Open tab, Brotli level 4</td><td>none while idle</td><td>590 to 670&nbsp;KB</td></tr>
             <tr><td>Open tab, Brotli level 1</td><td>none while idle</td><td>75 to 145&nbsp;KB</td></tr>
@@ -165,8 +166,8 @@ $app->page('/docs/install', function (Context $c): void {
 
     <h2 id="workers">More workers</h2>
     <p>
-        With <code>withWorkerNum(2)</code> on two cores, page views per second rose from 508 to 933 for
-        <code>/docs/signals</code> and from 173 to 344 for <code>/docs/api</code>, over HTTP/1.1. Scoped signals, session data
+        With <code>withWorkerNum(2)</code> on two cores, page views per second rose from 680 to 1,308 for
+        <code>/docs/signals</code> and from 177 to 348 for <code>/docs/api</code>, over HTTP/1.1. Scoped signals, session data
         and the client list are shared between workers, and the shared context directory has to be sized for your
         traffic: <a href="/docs/deployment#same-machine">Deployment</a> gives the rule.
     </p>

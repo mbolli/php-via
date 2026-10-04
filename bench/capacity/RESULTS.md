@@ -3,8 +3,10 @@
 ## 0.14.0, measured 2026-10-02 and 2026-10-04
 
 Measured with `capacity.php` against the website (`website/app.php`, production mode, Brotli on).
-Page views, open tabs, private actions, visitor churn, shared clicks to 500 tabs, the Brotli level
-and two workers were measured on 2026-10-04 at fbfa1f6, the 0.14.0 release tree. Shared clicks to
+Page views and two workers were measured on 2026-10-04 at 7388732: the 0.14.0 release with the
+website's growth-based cycle collector (`withGcIntervalMs(30_000, onGrowth: true)`), as the site
+ships. Open tabs, private actions, visitor churn, shared clicks to 500 tabs and the Brotli level
+were measured on 2026-10-04 at fbfa1f6, the 0.14.0 release tree before that change. Shared clicks to
 2,000 tabs and the held and free clock comparison were measured on 2026-10-02 at 62d1e5b: 0.13.1
 plus Datastar 1.0.4 and the 0.14.0 hook fixes.
 
@@ -16,7 +18,8 @@ plus Datastar 1.0.4 and the 0.14.0 hook fixes.
   times before measuring. Every figure is the median of three rounds. On fbfa1f6 every CPU and
   memory figure varied by under 5% between rounds; latency percentiles varied more. Each run
   started with the package below 95 °C and the sibling cores idle, and its median clock was 4.4 GHz
-  or more.
+  or more. The page view runs on 7388732 varied by under 3%; their median clocks were 4.42 to
+  4.65 GHz, but other load on the machine kept the package at 96 to 100 °C.
 - **Calibration reference** (`calibrate.php` on core 2): `brotli 7 ms, php 60 ms` (61 ms on
   2026-10-04).
 
@@ -27,19 +30,41 @@ growth during the run, held until each page's 30 s connect timeout.
 
 | Page | HTML | req/s | CPU per view | Memory |
 |---|---|---|---|---|
-| `/docs/api` | 173 KB | 173 | 5.80 ms | +35 MB (20.4 KB per view) |
-| `/docs/signals` | 35 KB | 508 | 1.98 ms | +215 MB (43.3 KB per view) |
-| `/` | 99 KB | 291 | 3.45 ms | +158 MB (55.3 KB per view) |
-
-The pages grew since 2026-10-02, when they were 86, 21 and 66 KB and cost 4.20, 1.27 and 2.82 ms:
-the 0.14 docs made the API reference and signals templates two and three times longer, and the
-home page's HTML grew by half.
+| `/docs/api` | 173 KB | 174 | 5.76 ms | +35 MB (20.3 KB per view) |
+| `/docs/signals` | 35 KB | 660 | 1.53 ms | +281 MB (43.5 KB per view) |
+| `/` | 99 KB | 306 | 3.27 ms | +166 MB (55.3 KB per view) |
 
 Two 5 s bursts of `/docs/signals` with a 35 s pause between them:
 
 | First burst | Second burst |
 |---|---|
-| 45 → 171 MB (2,925 views) | 171 → 204 MB (2,499 views) |
+| 46 → 199 MB (3,471 views) | 199 → 251 MB (3,430 views) |
+
+#### Against the earlier run
+
+On 2026-10-02 the same pages cost 1.27, 2.82 and 4.20 ms, on 62d1e5b with the website before its
+redesign. A paired run on 2026-10-04 interleaved four builds over three rounds (median CPU per view):
+
+| Build | `/docs/signals` | `/` | `/docs/api` |
+|---|---|---|---|
+| D: 62d1e5b and its website | 1.26 ms | 2.84 ms | 4.25 ms |
+| A: 7388732 with 62d1e5b's website | 1.36 ms | 2.87 ms | 4.27 ms |
+| B: 0cee1c7, PHP's own collector runs | 2.02 ms | 3.45 ms | 5.90 ms |
+| C: 7388732, `onGrowth` collector | 1.53 ms | 3.27 ms | 5.76 ms |
+| HTML, old and new website | 22 and 35 KB | 68 and 99 KB | 88 and 173 KB |
+
+- D reproduces the earlier figures. The framework changes (A against D) add 0.1 ms on
+  `/docs/signals` and nothing measurable on the larger pages.
+- Most of the rest is the redesigned website (B against A): its pages are 1.6, 1.5 and 2.0 times
+  larger, and each view renders them and compresses them with Brotli.
+- With PHP's own collector, every run walks the page contexts that wait for their connect timeout,
+  and at 500 views per second that costs `/docs/signals` 0.5 ms per view (B against C), `/` and
+  `/docs/api` 0.1 to 0.2 ms. The `onGrowth` collector removes it and holds 1 to 2 KB more per view.
+- A is 62d1e5b's website on 7388732, with the calls 0.14 removed changed to their replacements:
+  `via_head()` and `via_foot()` in the shell, an explicit scope on the shared signals and
+  `onWorkerStart()`. Each build had its own Twig cache directory: the website's
+  (`sys_get_temp_dir()/php-via-twig-cache`) keys compiled templates by relative path, so two
+  checkouts that share it render each other's templates.
 
 ### Open tabs
 
@@ -98,8 +123,11 @@ Brotli level on the home page, 500 tabs, 20 shared clicks per second:
 
 | | One worker | Two workers |
 |---|---|---|
-| `/docs/signals` | 508 req/s | 933 req/s (11,255 OK in 12 s, 0 errors) |
-| `/docs/api` | 173 req/s | 344 req/s |
+| `/docs/signals` | 680 req/s | 1,308 req/s (13,095 OK in 10 s, 0 errors) |
+| `/docs/api` | 177 req/s | 348 req/s |
+
+Both columns come from one paired run on 7388732; its one-worker figures are 2 to 3% above the
+page view table's, which ran in another session.
 
 ### Held and free clock
 
@@ -123,11 +151,11 @@ clock rises with the load.
 
 - The CPU figures are for this desktop core at full clock; scale them with `calibrate.php` (see
   README.md). The memory figures carry over.
-- Against 62d1e5b, fbfa1f6 costs more per page view and per opened tab, in step with the larger
-  pages, and 3 to 27% more memory per open tab (20 KB more per home tab without Brotli). Private
-  actions cost 0.14 and 0.11 ms instead of 0.20 and 0.16 ms, and a visitor 6.6 ms instead of
-  5.2 ms. Idle CPU and shared clicks to 500 tabs stayed within the noise. These causes were not
-  isolated.
+- Against 62d1e5b, fbfa1f6 costs more per opened tab, in step with the larger pages, and 3 to 27%
+  more memory per open tab (20 KB more per home tab without Brotli). Private actions cost 0.14 and
+  0.11 ms instead of 0.20 and 0.16 ms, and a visitor 6.6 ms instead of 5.2 ms. Idle CPU and shared
+  clicks to 500 tabs stayed within the noise. Only the page view costs were isolated (see "Against
+  the earlier run").
 - Against the superseded figures below, which ran on a free clock, private actions, visitor churn
   and shared clicks to 500 tabs fell 1.3 to 5.4 times (see "Held and free clock").
 - The memory per open tab is measured about 1.5 s after the tabs open, on streams that carry
