@@ -270,7 +270,8 @@ covers the changes that need more than a rename.
 - A login could not replace the session cookie (session fixation). Call `regenerateSession()` at
   login and logout.
 - `withDevBar(true)` outside dev mode is read-only, but shows every visitor's traces, scopes,
-  context ids and the server's stats. See [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#enabling).
+  context ids and the server's stats. Outside dev mode, `POST /_via/reset` no longer lets any
+  visitor clear the worker's trace buffer. See [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#enabling).
 
 ### Fixed
 

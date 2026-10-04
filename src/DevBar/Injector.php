@@ -38,6 +38,7 @@ final class Injector {
             'context' => $context->getId(),
             'route' => $context->getRoute(),
             'writes' => $this->settings->tracingWritesEnabled(),
+            'devMode' => $this->settings->devMode,
             'signals' => SignalManifest::build($context),
         ]);
         if ($config === false) {
