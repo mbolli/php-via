@@ -76,7 +76,6 @@ beforeEach(function (): void {
     ssReset('extentCache', null);
     ssReset('cursors', []);
     ssReset('selections', []);
-    ssReset('positions', []);
 });
 
 afterEach(function (): void {
@@ -164,7 +163,7 @@ test('clients on different viewports each get their own range query', function (
     $spans = spreadsheetFanoutSpans(3, function (array $contexts): void {
         // Scroll each client to a distinct viewport — the data genuinely differs.
         foreach ($contexts as $i => $ctx) {
-            $ctx->getSignal('viewRow')->setValue($i * 40, broadcast: false);
+            $ctx->getSignal('viewRow')->setValue($i * 40);
         }
     });
 

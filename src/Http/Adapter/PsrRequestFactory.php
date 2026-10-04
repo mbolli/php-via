@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http\Adapter;
 
 use Nyholm\Psr7\Factory\Psr17Factory;
+use Nyholm\Psr7\UploadedFile;
 use OpenSwoole\Http\Request;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\UploadedFileInterface;
 
 /**
  * Converts an OpenSwoole Request into a PSR-7 ServerRequest.
@@ -22,7 +24,7 @@ class PsrRequestFactory {
     }
 
     /**
-     * @param string $requestType One of 'page', 'action', 'sse'
+     * @param string $requestType One of 'page', 'action', 'sse', 'route'
      */
     public function create(Request $swooleRequest, string $requestType = 'page'): ServerRequestInterface {
         $server = $swooleRequest->server ?? [];
@@ -61,6 +63,11 @@ class PsrRequestFactory {
             $psrRequest = $psrRequest->withParsedBody($swooleRequest->post);
         }
 
+        // Uploaded files (multipart)
+        if (!empty($swooleRequest->files)) {
+            $psrRequest = $psrRequest->withUploadedFiles(self::uploadedFiles($swooleRequest->files));
+        }
+
         // Raw body
         $rawContent = $swooleRequest->rawContent();
         if ($rawContent !== false && $rawContent !== '') {
@@ -72,5 +79,54 @@ class PsrRequestFactory {
         $psrRequest = $psrRequest->withAttribute('via.openswoole_request', $swooleRequest);
 
         return $psrRequest->withAttribute('via.request_type', $requestType);
+    }
+
+    /**
+     * OpenSwoole's files by field name, nested as the field names nest ('docs[]'), as UploadedFile objects.
+     * An entry that is no file, such as one with a malformed error code, is left out.
+     *
+     * @param array<array-key, mixed> $files
+     *
+     * @return array<array-key, mixed>
+     */
+    private static function uploadedFiles(array $files): array {
+        $uploaded = [];
+        foreach ($files as $field => $file) {
+            if (!\is_array($file)) {
+                continue;
+            }
+            if (!\is_array($file['error'] ?? null) && \array_key_exists('error', $file)) {
+                $one = self::uploadedFile($file);
+                if ($one !== null) {
+                    $uploaded[$field] = $one;
+                }
+
+                continue;
+            }
+            $uploaded[$field] = self::uploadedFiles($file);
+        }
+
+        return $uploaded;
+    }
+
+    /**
+     * @param array<array-key, mixed> $file one entry: tmp_name, size, error, name, type
+     */
+    private static function uploadedFile(array $file): ?UploadedFileInterface {
+        $tmpName = $file['tmp_name'] ?? '';
+        $name = $file['name'] ?? null;
+        $type = $file['type'] ?? null;
+
+        try {
+            return new UploadedFile(
+                \is_string($tmpName) ? $tmpName : '',
+                (int) ($file['size'] ?? 0),
+                (int) $file['error'],
+                \is_string($name) ? $name : null,
+                \is_string($type) ? $type : null,
+            );
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
     }
 }

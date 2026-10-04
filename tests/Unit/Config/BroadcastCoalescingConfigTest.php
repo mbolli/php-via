@@ -3,25 +3,47 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\Stats;
+use Mbolli\PhpVia\Via;
 
 describe('Config broadcast coalescing', function (): void {
     test('coalescing is on by default with a 25 ms tick', function (): void {
         $config = new Config();
 
-        expect($config->isBroadcastCoalescingEnabled())->toBeTrue();
-        expect($config->getBroadcastTickMs())->toBe(25);
+        expect($config->freeze()->broadcastCoalescingEnabled)->toBeTrue();
+        expect($config->freeze()->broadcastTickMs)->toBe(25);
     });
 
     test('withBroadcastCoalescing(false) turns it off', function (): void {
-        expect((new Config())->withBroadcastCoalescing(false)->isBroadcastCoalescingEnabled())->toBeFalse();
-        expect((new Config())->withBroadcastCoalescing()->isBroadcastCoalescingEnabled())->toBeTrue();
+        expect((new Config())->withBroadcastCoalescing(false)->freeze()->broadcastCoalescingEnabled)->toBeFalse();
+        expect((new Config())->withBroadcastCoalescing()->freeze()->broadcastCoalescingEnabled)->toBeTrue();
+    });
+
+    test('new Via() warns that turning coalescing off is deprecated, and stays quiet with it on', function (): void {
+        $boot = static function (Config $config): string {
+            ob_start();
+
+            try {
+                new Via($config->withLogLevel('warn'));
+
+                return (string) ob_get_contents();
+            } finally {
+                ob_end_clean();
+            }
+        };
+
+        expect($boot((new Config())->withBroadcastCoalescing(false)))
+            ->toContain('Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15')
+            ->toContain('$app->flushBroadcasts()')
+            ->and($boot(new Config()))->not->toContain('withBroadcastCoalescing')
+        ;
     });
 
     test('withBroadcastTickMs() sets the tick, 0 keeps no gap and negatives clamp to 0', function (): void {
-        expect((new Config())->withBroadcastTickMs(50)->getBroadcastTickMs())->toBe(50);
-        expect((new Config())->withBroadcastTickMs(0)->getBroadcastTickMs())->toBe(0);
-        expect((new Config())->withBroadcastTickMs(-10)->getBroadcastTickMs())->toBe(0);
+        expect((new Config())->withBroadcastTickMs(50)->freeze()->broadcastTickMs)->toBe(50);
+        expect((new Config())->withBroadcastTickMs(0)->freeze()->broadcastTickMs)->toBe(0);
+        expect((new Config())->withBroadcastTickMs(-10)->freeze()->broadcastTickMs)->toBe(0);
     });
 });
 
@@ -51,4 +73,34 @@ describe('broadcast flush stats', function (): void {
         $stats->reset();
         expect($stats->getBroadcastStats()['flushes'])->toBe(0);
     });
+});
+
+describe('Config::withBroadcastThrottle()', function (): void {
+    test('sets an interval per scope or pattern, the longest matching one applies, and 0 removes it', function (): void {
+        $settings = (new Config())
+            ->withBroadcastThrottle('import:*', 250)
+            ->withBroadcastThrottle('import:big', 1000)
+            ->withBroadcastThrottle('route:/live', 50)
+            ->withBroadcastThrottle('room:1', 10)
+            ->withBroadcastThrottle('room:1', 0)
+            ->freeze()
+        ;
+
+        expect($settings->broadcastThrottles)->toBe(['import:*' => 250, 'import:big' => 1000, 'route:/live' => 50])
+            ->and($settings->broadcastThrottleMs('import:7'))->toBe(250)
+            ->and($settings->broadcastThrottleMs('import:big'))->toBe(1000)
+            ->and($settings->broadcastThrottleMs('route:/live'))->toBe(50)
+            ->and($settings->broadcastThrottleMs('room:1'))->toBe(0)
+            ->and((new Config())->freeze()->broadcastThrottleMs('import:7'))->toBe(0)
+        ;
+    });
+
+    test('throws for a scope that needs a context to resolve, or a negative interval', function (string $scope, int $ms): void {
+        (new Config())->withBroadcastThrottle($scope, $ms);
+    })->throws(InvalidArgumentException::class)->with([
+        'tab' => [Scope::TAB, 100],
+        'route' => [Scope::ROUTE, 100],
+        'session' => [Scope::SESSION, 100],
+        'negative' => ['import:*', -1],
+    ]);
 });

@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /_
+Disallow: /pair/
 
 # LLM crawlers: explicitly welcome
 User-agent: GPTBot

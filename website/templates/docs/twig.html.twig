@@ -4,101 +4,194 @@
 <article>
     <h1>Templates</h1>
     <p>
-        php-via supports two rendering paths that serve different purposes and can be mixed freely in the same app.
+        A php-via page has two layers. The outer document carries the doctype, the head, the scripts that
+        connect the page and your site's chrome. The view is the part that renders again on every update.
+        The outer document is either a shell, a plain HTML file with placeholders, or a template that renders
+        the whole document. The view is a PHP callable that returns HTML, or a template that a template
+        engine renders. php-via has an adapter for Twig, which you install yourself.
     </p>
 
-    <h2 id="two-paths">Two rendering paths</h2>
+    <h2 id="two-paths">Shells and views</h2>
     <div class="code-result-split" style="align-items: start;">
         <div>
             <h3 style="margin-block-start:0">Shell: <code>shell.html</code></h3>
             <p>
-                A static <code>.html</code> file set with <code>withShellTemplate()</code>.
-                php-via performs a simple string replacement of
-                {% verbatim %}<code>{{ placeholder }}</code>{% endverbatim %} tokens,
-                <strong>not Twig</strong>.
-                Besides the ones below it fills {% verbatim %}<code>{{ name }}</code>{% endverbatim %}
-                with a signal's JSON value (HTML-escaped) and {% verbatim %}<code>{{ name.id }}</code>{% endverbatim %}
-                with its id, where <code>name</code> is the name passed to <code>signal()</code>. The shell is sent once per page load and never re-sent over SSE.
-                Use it for the outer chrome: doctype, nav, scripts, footer.
+                A static HTML file set with <code>withShellTemplate()</code>. php-via replaces its
+                {% verbatim %}<code>{{ placeholder }}</code>{% endverbatim %} tokens with plain string
+                replacement, <strong>not Twig</strong>. The shell goes out once per page load and never
+                over SSE. Use it for the outer chrome: doctype, nav, footer, stylesheets.
             </p>
             {% code 'html' %}{% verbatim %}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta data-signals='{{ signals_json }}'>
+    {{ via_head }}
     {{ head_content }}
 </head>
 <body>
     {{ content }}
-    <script type="module"
-        src=".../datastar.js"></script>
     {{ foot_content }}
+    {{ via_foot }}
 </body>
 </html>
             {% endverbatim %}{% endcode %}
         </div>
         <div>
-            <h3 style="margin-block-start:0">Views: Twig or closure</h3>
+            <h3 style="margin-block-start:0">View: callable or template</h3>
             <p>
-                The page content, set with <code>$c-&gt;view()</code>.
-                Re-rendered on every SSE update. Can be a Twig template
-                (requires <code>withTemplateDir()</code>) or a plain PHP closure.
+                The page content, set with <code>$c-&gt;view()</code> and rendered again on every update. A
+                callable needs nothing else; a template name needs a template engine.
             </p>
             {% code 'php' %}{% verbatim %}
-// Twig template: signals & actions auto-injected by name
-$c->view('counter.html.twig');
-
-// PHP closure: no Twig needed, access via use()
+// PHP callable: no engine needed
 $c->view(function () use ($count): string {
-    return '<p>' . $count->int() . '</p>';
+    return '<p id="count">' . $count->int() . '</p>';
 });
+
+// Twig template: signals and actions come in by name
+$c->view('counter.html.twig');
             {% endverbatim %}{% endcode %}
         </div>
     </div>
 
-    <h3 id="twig-shell">Alternative: Twig as the shell</h3>
+    <h2 id="engines">Template engines</h2>
     <p>
-        Instead of a static <code>shell.html</code>, you can create your own Twig base template that
-        defines the full outer document using Twig blocks. When a view extends it, Twig renders
-        the complete <code>&lt;html&gt;...&lt;/html&gt;</code> document. php-via detects this and skips
-        the plain-HTML shell entirely.
+        A template view, <code>$c-&gt;view('page.html.twig')</code>, and <code>$c-&gt;render()</code> go through
+        the <code>TemplateEngine</code> registered with <code>Config::withTemplateEngine()</code>. Without one,
+        views are callables, and a template view, <code>render()</code> or <code>$app-&gt;getTwig()</code> throws
+        a <code>LogicException</code> that names the fix.
+    </p>
+
+    <h3 id="setup">Twig</h3>
+    <p>
+        <code>twig/twig</code> does not come with php-via. Install it, then point php-via at the template
+        directory:
+    </p>
+    {% code 'bash' %}{% verbatim %}
+composer require twig/twig
+    {% endverbatim %}{% endcode %}
+    {% code 'php' %}{% verbatim %}
+$app = new Via(
+    (new Config())
+        ->withTemplateDir(__DIR__ . '/templates')    // Twig views
+        ->withTwigCacheDir(__DIR__ . '/var/twig')    // optional: compiled templates on disk
+        ->withShellTemplate(__DIR__ . '/shell.html') // optional: your own shell
+);
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>withTemplateDir($dir)</code> is short for
+        <code>withTemplateEngine(new TwigEngine($dir))</code>, and <code>new Via()</code> throws when Twig is
+        not installed. Templates are autoescaped as HTML and strict about undefined variables. Besides
+        Twig's own, they get the functions <code>bind()</code>, <code>dump()</code>, <code>via_head()</code> and
+        <code>via_foot()</code>, and the global <code>basePath</code>.
     </p>
     <p>
-        php-via then completes the document instead of wrapping it. On the initial render it adds, right
-        after the opening <code>&lt;head&gt;</code> tag and so ahead of your SSE bootstrap, a
-        <code>via_ctx</code> meta (only when the document contains no <code>via_ctx</code> at all) and a
-        <code>data-signals__ifmissing</code> meta with the signal values the first SSE sync sends, so
-        <code>$count</code> has its value before the stream opens. A value your layout sets in its own
-        <code>data-signals</code> wins. A TAB signal marked synced is not
-        seeded; scoped signals always are, since every sync sends them.
-        Includes from <code>appendToHead()</code> and <code>appendToFoot()</code> go before the first
-        <code>&lt;/head&gt;</code> and the last <code>&lt;/body&gt;</code>, on the initial render and
-        on every SSE update, since the update morphs <code>&lt;head&gt;</code> too. An include whose
-        exact markup is already in the document is skipped.
+        <code>$app-&gt;getTwig()</code> returns the <code>Twig\Environment</code>, for extensions, globals and
+        templates held as strings. Register extensions right after <code>new Via()</code>, before the first
+        render.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->getTwig()->addExtension(new MyExtension());
+$html = $app->getTwig()->createTemplate('<p>{{ greeting }}</p>')->render(['greeting' => 'Hello']);
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="own-engine">Another engine</h3>
+    <p>
+        Any engine works behind the <code>Rendering\TemplateEngine</code> interface: <code>render()</code> gets
+        the template name, the data and, when <code>supportsBlocks()</code> says so, a block name.
+        <code>via_head</code> and <code>via_foot</code> arrive in the data as <code>Rendering\Html</code>
+        objects. Print them unescaped: an autoescaping engine marks <code>Html</code> as safe markup.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Rendering\TemplateEngine;
+
+final class PhpTemplates implements TemplateEngine {
+    public function __construct(private string $dir) {}
+
+    public function render(string $template, array $data, ?string $block = null): string {
+        extract($data);
+        ob_start();
+        require $this->dir . '/' . $template;
+
+        return (string) ob_get_clean();
+    }
+
+    public function supportsBlocks(): bool {
+        return false; // view(..., block:) then throws
+    }
+}
+
+$config->withTemplateEngine(new PhpTemplates(__DIR__ . '/views'));
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="bootstrap">The page bootstrap: via_head and via_foot</h2>
+    <p>
+        Every page needs a few tags to connect to php-via: the <code>via_ctx</code> signal that names its
+        context, the import map when there is one, the SSE connect with its reconnect, the beacon that closes
+        the context when the tab goes, and Datastar. <code>via_head</code> writes the first four and belongs
+        right after <code>&lt;meta charset&gt;</code>; <code>via_foot</code> writes the Datastar module script,
+        loaded from <code>Config::getDatastarUrl()</code>, and belongs before <code>&lt;/body&gt;</code>.
+    </p>
+    <ul>
+        <li>In a shell: <code>{% verbatim %}{{ via_head }}{% endverbatim %}</code> and <code>{% verbatim %}{{ via_foot }}{% endverbatim %}</code>.</li>
+        <li>In a Twig layout: <code>{% verbatim %}{{ via_head() }}{% endverbatim %}</code> and <code>{% verbatim %}{{ via_foot() }}{% endverbatim %}</code>.</li>
+        <li>In a callable that returns a whole document: <code>$c-&gt;viaHead()</code> and <code>$c-&gt;viaFoot()</code>.</li>
+    </ul>
+    <p>
+        Every tag carries the page request's CSP nonce when middleware sets one (see
+        <a href="#csp">Content-Security-Policy</a>). A page that loads its own Datastar bundle leaves
+        <code>via_foot</code> out.
     </p>
     <p>
-        Your layout still has to carry the SSE bootstrap: the <code>@get('_sse')</code> meta, the
-        <code>sendBeacon</code> meta for closing the session and <code>datastar.js</code>. php-via never
-        injects them into a full document, because a second copy would break the page. Copy them from
-        the default <code>shell.html</code>.
+        php-via logs a warning once per shell, and once per route whose view renders a whole document, in two
+        cases: the page has no <code>via_head</code>, so it never opens its stream, or it loads a Datastar
+        script of its own next to an import map, which starts a second Datastar engine. Dev mode also warns
+        about <code>via_head</code> without any Datastar script and about a page with more than one import map.
+    </p>
+
+    <h2 id="shell">Shells</h2>
+    <p>
+        Without <code>withShellTemplate()</code>, php-via uses its default shell, which loads
+        <code>/via.css</code> and, in dev mode, shows a Live Signals panel. Your own shell replaces it for every
+        page, and <code>$c-&gt;setShellTemplate()</code> for one page. These placeholders are filled:
+    </p>
+    <ul>
+        {% verbatim %}
+        <li><code>{{ via_head }}</code> and <code>{{ via_foot }}</code>: the bootstrap above</li>
+        <li><code>{{ via_html_attrs }}</code>: the attributes of <code>&lt;html&gt;</code>, <code>data-nonce</code> under a nonce (see <a href="#csp">Content-Security-Policy</a>)</li>
+        <li><code>{{ content }}</code>: the rendered view</li>
+        <li><code>{{ head_content }}</code> and <code>{{ foot_content }}</code>: what <code>appendToHead()</code> and <code>appendToFoot()</code> added, plus the seed of the signals' initial values</li>
+        <li><code>{{ base_path }}</code>: the base path from <code>withBasePath()</code>, ending in <code>/</code></li>
+        <li><code>{{ context_id }}</code>: the context's id</li>
+        <li><code>{{ dev_sidebar }}</code>: the Live Signals panel in dev mode, empty otherwise</li>
+        <li><code>{{ name }}</code> and <code>{{ name.id }}</code>: a signal's JSON value (HTML-escaped) and its id, where <code>name</code> is the name passed to <code>signal()</code></li>
+        {% endverbatim %}
+    </ul>
+    <p>
+        Twig tags in a shell come out as text. A worker reads each shell once; in dev mode it reads an edited
+        shell again, and outside dev mode a changed shell needs a reload of the server.
+    </p>
+
+    <h2 id="twig-shell">Layouts that render the whole document</h2>
+    <p>
+        Instead of a shell, a Twig base template can define the whole document, and page templates extend it.
+        When a view renders an <code>&lt;html&gt;</code> document, php-via skips the shell and completes the
+        document instead.
     </p>
     {% code 'twig' %}{% verbatim %}
-{# templates/base.html.twig: you create this #}
+{# templates/base.html.twig #}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta data-signals='{"via_ctx":"{{ contextId }}","_disconnected":false}'>
-    <meta data-indicator="_connecting"
-        data-on-interval__duration.15s.leading="!$_connecting && @get('{{ basePath }}_sse')">
-    <meta data-init="window.addEventListener('beforeunload', () => { navigator.sendBeacon('{{ basePath }}_session/close', '{{ contextId }}'); });">
+    {{ via_head() }}
     <title>{% block title %}{% endblock %}</title>
 </head>
 <body>
     <nav>...shared nav...</nav>
     <main>{% block content %}{% endblock %}</main>
-    <script type="module" src="{{ basePath }}datastar.js"></script>
+    {{ via_foot() }}
 </body>
 </html>
     {% endverbatim %}{% endcode %}
@@ -113,139 +206,205 @@ $c->view(function () use ($count): string {
 {% endblock %}
     {% endverbatim %}{% endcode %}
     <p>
-        The key variable is <code>{% verbatim %}{{ contextId }}{% endverbatim %}</code>, which is injected
-        automatically by <code>Context::render()</code>. Don't confuse it with
-        <code>{% verbatim %}{{ context_id }}{% endverbatim %}</code>, which is the <code>HtmlBuilder</code>
-        placeholder for the plain-HTML shell path.
+        On the page load php-via adds the seed of the signals' initial values right after
+        <code>via_head</code>'s first tag, so expressions have their values before the stream opens; a value
+        the layout sets in its own <code>data-signals</code> wins. It adds what <code>appendToHead()</code> and
+        <code>appendToFoot()</code> collected before the first <code>&lt;/head&gt;</code> and the last
+        <code>&lt;/body&gt;</code>, on the page load and on every update, unless the exact markup is already
+        there.
     </p>
     <p>
-        This path is a good fit when you want Twig inheritance across multiple pages but don't need
-        a separate static shell file.
-        The downside: the base template is re-rendered on every SSE update (unlike a shell,
-        which is sent once), so keep it lightweight.
+        The whole template renders again on every update, unlike a shell, which goes out once. Send only the
+        part that changes with <a href="#block-updates"><code>block:</code></a>. A callable view can return a
+        whole document too:
     </p>
-
-    <h2 id="setup">Setup</h2>
-    <p>Configure the template directory and optional shell in <code>Config</code>:</p>
     {% code 'php' %}{% verbatim %}
-$app = new Via(
-    (new Config())
-        ->withTemplateDir(__DIR__ . '/templates')    // Twig views
-        ->withShellTemplate(__DIR__ . '/shell.html') // optional plain-HTML shell
-);
+$c->view(fn (): string => '<!DOCTYPE html><html><head><meta charset="UTF-8">' . $c->viaHead()
+    . '<title>Report</title></head><body><main id="report">...</main>' . $c->viaFoot() . '</body></html>');
     {% endverbatim %}{% endcode %}
-    <p>Skip <code>withTemplateDir()</code> if you use only PHP closures for views, and skip <code>withShellTemplate()</code> if your views extend <code>base.html.twig</code>.</p>
-
-    <h2 id="passing-data">Passing data to templates</h2>
     <p>
-        Signals and actions are <strong>auto-injected</strong> into every Twig render. You don't need to pass them
-        manually. Just register them and they're available by name:
+        A template rendered outside a context, such as a 404 page from <code>$app-&gt;notFound()</code>
+        through <code>$app-&gt;getTwig()</code>, can extend the same layout: there <code>via_head()</code> and
+        <code>via_foot()</code> write only the import map and the Datastar script.
+    </p>
+
+    <h2 id="csp">Content-Security-Policy</h2>
+    <p>
+        A middleware that sets the <code>via.csp_nonce</code> request attribute puts its nonce on every tag
+        <code>via_head</code> and <code>via_foot</code> write, the import map included, and on the Dev Bar's
+        tags. Datastar needs the nonce too. It reads it from a <code>data-nonce</code> attribute on the
+        <code>&lt;html&gt;</code> element, and then runs <code>data-*</code> expressions and the scripts the
+        server sends, from <code>execScript()</code>, <code>dispatch()</code> or a reload, as scripts with that
+        nonce. Without <code>data-nonce</code> it compiles expressions with the <code>Function</code>
+        constructor, which a policy blocks without <code>'unsafe-eval'</code>.
+    </p>
+    <p>
+        The default shell writes <code>data-nonce</code> on <code>&lt;html&gt;</code> when the page request
+        carries a nonce. A shell of your own writes it with
+        {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %}, a Twig layout with
+        {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
+    </p>
+    {% code 'twig' %}{% verbatim %}
+<!DOCTYPE html>
+<html lang="en"{{ via_html_attrs() }}>
+<head>
+    <meta charset="UTF-8">
+    {{ via_head() }}
+</head>
+<body>
+    {% block content %}{% endblock %}
+    {{ via_foot() }}
+</body>
+</html>
+{% endverbatim %}{% endcode %}
+    <p>
+        <code>via_html_attrs</code> writes nothing without a nonce, and nothing in an update render, so a
+        morph of the document does not put back the attribute Datastar removed after reading it. For the same
+        reason the tags of <code>via_head</code> and <code>via_foot</code> carry the nonce only on the page
+        load, where the browser hides it from scripts. Dev mode warns
+        once per shell or route whose page has a nonce and no <code>data-nonce</code>. The middleware sends the
+        policy as a header on the response it gets back from <code>$handler-&gt;handle()</code>. This setup
+        runs in Chromium with a counter, <code>dispatch()</code> and <code>execScript()</code> working and no
+        CSP errors:
+    </p>
+    {% code 'php' %}{% verbatim %}
+final class CspNonce implements MiddlewareInterface {
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        $nonce = base64_encode(random_bytes(16));
+        $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
+
+        return $response->withHeader('Content-Security-Policy', "default-src 'self'; script-src 'nonce-{$nonce}'; object-src 'none'; base-uri 'none'");
+    }
+}
+
+$app->middleware(new CspNonce());
+$app->page('/', fn (Context $c) => $c->view('home.html.twig'));
+    {% endverbatim %}{% endcode %}
+    <p>
+        A <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> before <code>via_head</code> works too,
+        but it cannot set <code>frame-ancestors</code>: <code>Config::withEmbeddable()</code> sends that one as a
+        header, next to the middleware's. A callable that returns a whole document writes the attribute itself,
+        with the nonce the page handler reads:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->page('/report', function (Context $c): void {
+    $nonce = htmlspecialchars((string) $c->getRequestAttribute('via.csp_nonce'));
+    $c->view(fn (): string => "<!DOCTYPE html><html data-nonce=\"{$nonce}\"><head><meta charset=\"UTF-8\">"
+        . $c->viaHead() . '</head><body><main id="report">...</main>' . $c->viaFoot() . '</body></html>');
+});
+    {% endverbatim %}{% endcode %}
+
+    <h2 id="passing-data">Data in templates</h2>
+    <p>
+        A template gets the context's named signals as <code>Signal</code> objects and its named actions as
+        <code>Action</code> objects, an action named <code>add-todo</code> as <code>addTodo</code>. It also
+        gets <code>contextId</code>, <code>currentRoute</code> (the route pattern), <code>basePath</code>,
+        <code>via_html_attrs</code>, <code>via_head</code>, <code>via_foot</code> and <code>_via</code>, which
+        lists the names of both. What you pass in <code>$data</code> wins.
     </p>
     {% code 'php' %}{% verbatim %}
 $count = $c->signal(0, 'count');
-$inc   = $c->action(fn() => $count->setValue($count->int() + 1), 'inc');
+$inc   = $c->action(fn () => $count->setValue($count->int() + 1), 'inc');
 
-// Signal 'count' → {{ count }}  (a Signal object, call .int, .string, .id(), .url(), …)
-// Action 'inc'   → {{ inc }}    (an Action object, call .url)
-$c->view('counter.html.twig'); // no data needed
+// Signal 'count' → {{ count }}, a Signal: count.int, count.ref, count.id
+// Action 'inc'   → {{ inc }}, an Action: inc.url
+$c->view('counter.html.twig');
 
-// Only pass data that isn't a signal or action:
+// Pass only what is neither a signal nor an action:
 $c->view('todo.html.twig', ['todos' => $todos]);
     {% endverbatim %}{% endcode %}
+
+    <h3 id="cache-updates">Data read on every render</h3>
     <p>
-        Explicit entries in the <code>$data</code> array take priority over auto-injected values,
-        useful when you need to pass a derived or renamed value for a specific render.
+        An array passed to <code>view()</code> is built once, when the page handler runs. When the view reads
+        state from elsewhere, such as a database or <code>countClients()</code>, pass a callable, which runs on
+        every render:
     </p>
+    {% code 'php' %}{% verbatim %}
+$c->view('presence.html.twig', fn (): array => ['count' => $app->countClients(Scope::routeScope('/'))]);
+    {% endverbatim %}{% endcode %}
 
     <h2 id="reactive-text">Reactive text</h2>
-    <p>Use <code>data-text</code> to keep an element in sync with a signal. Always seed the initial value to avoid a flash:</p>
-    {% code 'html' %}{% verbatim %}
-<!-- counter.html.twig: count is auto-injected as a Signal object -->
-<span data-text="${{ count.id() }}">{{ count.int }}</span>
+    <p>Use <code>data-text</code> to keep an element in step with a signal. Render the current value inside it, so the page shows it before the stream opens:</p>
+    {% code 'twig' %}{% verbatim %}
+<span data-text="{{ count.ref }}">{{ count.int }}</span>
     {% endverbatim %}{% endcode %}
-
-    <p>Or use <code>$signal-&gt;text()</code> in PHP to generate the span directly, then output with <code>| raw</code>:</p>
+    <p>In a PHP view, <code>$signal-&gt;ref()</code> gives the same reference:</p>
     {% code 'php' %}{% verbatim %}
-$c->view('counter.html.twig', [
-    'count_span' => $count->text(), // '<span data-text="$count"></span>'
-]);
-    {% endverbatim %}{% endcode %}
-    {% code 'html' %}{% verbatim %}
-{{ count_span | raw }}
+$c->view(fn (): string => <<<HTML
+    <span data-text="{$count->ref()}">{$count->int()}</span>
+    HTML);
     {% endverbatim %}{% endcode %}
 
     <h2 id="two-way-binding">Two-way binding</h2>
-    <p>Use <code>data-bind</code> for inputs that should reflect <em>and update</em> a signal:</p>
-    {% code 'html' %}{% verbatim %}
-<!-- name is auto-injected as a Signal object -->
-<input data-bind="{{ name.id() }}" type="text">
-
-<!-- Or use the bind() Twig function with the auto-injected Signal: -->
+    <p>Use <code>data-bind</code> for inputs that show a signal and update it:</p>
+    {% code 'twig' %}{% verbatim %}
 <input {{ bind(name) }} type="text">
+{# or by hand: <input data-bind="{{ name.id }}" type="text"> #}
     {% endverbatim %}{% endcode %}
+    <p>
+        Datastar 1.0.4 updates a bound checkbox or radio on <code>input</code>, not <code>change</code>, so a
+        script that sets one has to dispatch <code>input</code>. On a web component, bind a property:
+        <code>{% verbatim %}{{ bind(volume, 'value') }}{% endverbatim %}</code> renders
+        <code>data-bind__prop.value</code>. See <a href="/docs/web-components#binding">Web components</a>.
+    </p>
 
     <h2 id="actions">Triggering actions</h2>
-    <p>Use Datastar's event attributes to POST to an action URL:</p>
-    {% code 'html' %}{% verbatim %}
-<!-- inc is auto-injected as an Action object -->
+    <p>Use Datastar's event attributes to post to an action's URL:</p>
+    {% code 'twig' %}{% verbatim %}
 <button data-on:click="@post('{{ inc.url }}')">+1</button>
 
-<!-- Pass data via query params -->
+{# Pass data in the query string, read with $c->input('option') #}
 <button data-on:click="@post('{{ vote.url }}?option=tab')">Vote TAB</button>
     {% endverbatim %}{% endcode %}
+    <p>
+        Datastar 1.0.4 cancels a request still in flight when any element sends another one with the same
+        method and URL. Two elements that post the same action at the same time need a query each, such as
+        <code>?from=button</code>. See <a href="/docs/actions#cancellation">Actions → Cancellation</a>.
+    </p>
 
     <h2 id="template-inheritance">Template inheritance</h2>
-    <p>Standard Twig inheritance works as expected:</p>
+    <p>Twig inheritance works inside views as everywhere:</p>
     {% code 'twig' %}{% verbatim %}
-{# base.html.twig #}
+{# section.html.twig #}
 <nav><a href="/">Home</a></nav>
-<main>{% block content %}{% endblock %}</main>
+<div id="section">{% block content %}{% endblock %}</div>
     {% endverbatim %}{% endcode %}
     {% code 'twig' %}{% verbatim %}
 {# page.html.twig #}
-{% extends "base.html.twig" %}
+{% extends "section.html.twig" %}
 {% block content %}
     <h1>My page</h1>
 {% endblock %}
     {% endverbatim %}{% endcode %}
 
-    <h3 id="block-updates">Blocks as SSE update targets</h3>
+    <h3 id="block-updates">Blocks as update targets</h3>
     <p>
-        When you name a Twig block, you can tell <code>$c-&gt;view()</code> to send <em>only</em> that
-        block on SSE updates while still rendering the full template on the initial page load:
+        Name a block, and <code>view()</code> sends only that block on updates while the page load renders the
+        whole template:
     </p>
     {% code 'php' %}{% verbatim %}
-$c->view(fn () => $c->render('page.html.twig', $data), block: 'demo');
+$c->view('page.html.twig', fn (): array => ['items' => $repo->all()], block: 'demo');
     {% endverbatim %}{% endcode %}
     <p>
-        This keeps SSE payloads small: the outer layout, nav, and static content are sent once on
-        page load and never re-transmitted. Wrap the block content in
-        <code>&lt;div id="via-block-{name}"&gt;</code> so Datastar can target it.
-        See <a href="/docs/views#partial-updates">Views → Partial updates</a> for details.
+        The layout, nav and static content then go out once. Give the block a single root element with an
+        <code>id</code> that is unique on the page, also against the shell (the default shell uses
+        <code>content</code>): Datastar morphs the element with that id. See
+        <a href="/docs/views#partial-updates">Views → Partial updates</a>.
     </p>
-
-    <h2 id="cache-updates">Disabling view caching</h2>
-    <p>
-        php-via caches view renders and skips re-rendering if signals haven't changed.
-        Disable this when your view reads external state (e.g. <code>getClients()</code>), and read that
-        state inside a closure: an array passed to <code>view()</code> is built once, when the page handler runs.
-    </p>
-    {% code 'php' %}{% verbatim %}
-$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
-    {% endverbatim %}{% endcode %}
 
     <h2 id="debugging">Debugging</h2>
-    <p>The <code>dump()</code> Twig function renders any variable as a <code>&lt;pre&gt;</code> block:</p>
-    {% code 'html' %}{% verbatim %}
+    <p>The <code>dump()</code> function renders its arguments as a <code>&lt;pre&gt;</code> block:</p>
+    {% code 'twig' %}{% verbatim %}
 {{ dump(some_variable) }}
     {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/signals">Signals</a>: reactive state primitives</li>
-        <li><a href="/docs/actions">Actions</a>: server-side event handlers</li>
-        <li><a href="/docs/views">Views</a>: view lifecycle and caching</li>
-        <li><a href="/docs/api">API Reference</a>: complete method signatures</li>
+        <li><a href="/docs/views">Views</a>: updates, blocks and shared renders</li>
+        <li><a href="/docs/web-components">Web components</a>: the import map and Rocket components</li>
+        <li><a href="/docs/middleware">Middleware</a>: request attributes such as <code>via.csp_nonce</code></li>
+        <li><a href="/docs/api#templates">API reference</a>: <code>TemplateEngine</code>, <code>Html</code> and <code>TwigEngine</code></li>
     </ul>
 </article>
 {% endblock %}

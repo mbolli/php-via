@@ -8,11 +8,11 @@
     <div class="fu-mode-toggle">
         <button class="fu-mode-btn{{ uploadMode.string == 'sim' ? ' active' : '' }}"
                 data-on:click="@post('{{ setMode.url }}?mode=sim')">
-            🎲 Simulate
+            Simulate
         </button>
         <button class="fu-mode-btn{{ uploadMode.string == 'real' ? ' active' : '' }}"
                 data-on:click="@post('{{ setMode.url }}?mode=real')">
-            📁 Real file
+            Real file
         </button>
     </div>
 
@@ -56,11 +56,11 @@
                 </div>
             </div>
 
-            <button class="fu-start-btn" onclick="handleStart()">📤 Start Upload</button>
+            <button class="fu-start-btn" onclick="handleStart()">Start upload</button>
         </div>
 
         <p class="fu-tip">
-            💡 <strong>Try it:</strong> start the upload, then click <strong>Browse</strong>
+            <strong>Try it:</strong> start the upload, then click <strong>Browse</strong>
             or <strong>Settings</strong> above. The bar never stops.
         </p>
     </div>
@@ -79,7 +79,7 @@
               class="fu-form"
               enctype="multipart/form-data"
               onsubmit="window.handleRealUpload(this); return false">
-            <input type="hidden" name="via_ctx" value="{{ ctxId }}">
+            <input type="hidden" name="via_ctx" value="{{ contextId }}">
 
             <div class="fu-field">
                 <label for="fu-file">Choose file <span class="fu-optional">(max {{ realMaxMb }} MB)</span></label>
@@ -107,7 +107,7 @@
                 {% endif %}
             </div>
 
-            <button type="submit" class="fu-start-btn">📁 Upload file</button>
+            <button type="submit" class="fu-start-btn">Upload file</button>
         </form>
     </div>
 
@@ -117,7 +117,6 @@
 
     {# ── Uploading state ───────────────────────────────────────────────────── #}
     <div class="fu-status-panel">
-        <div class="fu-status-icon">📤</div>
         <h3>Uploading…</h3>
         <p>
             Navigate to
@@ -138,8 +137,7 @@
 
     {# ── Complete state ────────────────────────────────────────────────────── #}
     <div class="fu-status-panel">
-        <div class="fu-status-icon">✅</div>
-        <h3>Upload complete!</h3>
+        <h3>Upload complete</h3>
         <p>
             <strong>{{ uploadFileName.string|e }}</strong>
             uploaded successfully.
@@ -147,8 +145,8 @@
         {% if uploadFileInfo.string != '' %}
         <p class="fu-file-meta">{{ uploadFileInfo.string|e }}</p>
         {% endif %}
-        <button class="fu-start-btn secondary" onclick="handleReset('{{ resetUpload.url }}', '{{ ctxId }}')">
-            ↺ Upload another file
+        <button class="fu-start-btn secondary" onclick="handleReset('{{ resetUpload.url }}', '{{ contextId }}')">
+            Upload another file
         </button>
     </div>
 
@@ -156,10 +154,9 @@
 
     {# ── Cancelled state ───────────────────────────────────────────────────── #}
     <div class="fu-status-panel">
-        <div class="fu-status-icon">🚫</div>
         <h3>Upload cancelled</h3>
-        <button class="fu-start-btn" onclick="handleReset('{{ resetUpload.url }}', '{{ ctxId }}')">
-            ↺ Start a new upload
+        <button class="fu-start-btn" onclick="handleReset('{{ resetUpload.url }}', '{{ contextId }}')">
+            Start a new upload
         </button>
     </div>
 
@@ -207,7 +204,6 @@
     padding: 6px 14px; display: inline-block; margin-bottom: 12px;
 }
 .fu-status-panel { text-align: center; padding: 32px 16px; }
-.fu-status-icon { font-size: 3rem; margin-bottom: 12px; }
 .fu-status-panel h3 { margin: 0 0 8px; font-size: 1.25rem; }
 .fu-status-panel p { color: var(--text-2, #64748b); margin: 4px 0 16px; }
 .fu-bytes-info { font-variant-numeric: tabular-nums; font-size: 0.9rem; }

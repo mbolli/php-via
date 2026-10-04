@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use PhpVia\Website\Support\Sqlite;
 
 final class ChatRoomExample {
     public const string SLUG = 'chat-room';
@@ -16,9 +17,9 @@ final class ChatRoomExample {
     private const array SUMMARY = [
         '<strong>Custom scopes</strong> isolate each room. Messages in "lobby" never leak to "general": each room has its own broadcast channel built with <code>Scope::build()</code>.',
         '<strong>Session-scoped usernames</strong> persist across tabs. Your username is stored in SESSION scope, so switching rooms or opening a new tab keeps the same identity.',
-        '<strong>Presence + typing</strong> indicators update in real time. When a user disconnects, the <code>onDisconnect</code> hook removes them from the room\'s user list.',
-        '<strong>addScope()</strong> lets a context join a broadcast channel mid-flight. The room page starts in TAB scope for private input, then adds the room scope for shared messages.',
-        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code> and the last 50 are loaded on connect, no in-memory state required.',
+        '<strong>Presence + typing</strong> indicators update in real time. When a tab closes, the <code>onCleanup</code> hook removes its user from the room\'s list.',
+        '<strong>addScope()</strong> joins the room\'s scope, so the room\'s broadcasts re-render the page. The page itself stays in TAB scope, which keeps the message draft private.',
+        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code>, and the view loads the last 50 on every render.',
         '<strong>Multi-room architecture</strong>: open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
     ];
 
@@ -26,7 +27,7 @@ final class ChatRoomExample {
     private const array ANATOMY = [
         'signals' => [
             ['name' => 'username', 'type' => 'string', 'scope' => 'SESSION', 'desc' => 'Persists across tabs. Same identity whether you switch rooms or open new tabs.'],
-            ['name' => 'messageInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Current message draft. Private to this tab.'],
+            ['name' => 'messageInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Current message draft. Private to this tab.'],
             ['name' => 'typingIndicator', 'type' => 'array', 'scope' => 'Custom', 'desc' => 'Custom room scope. Who is typing and when that expires. Shows "User is typing..." to everyone in the same room until the server clears it.'],
         ],
         'actions' => [
@@ -34,7 +35,7 @@ final class ChatRoomExample {
             ['name' => 'updateTyping', 'desc' => 'Sets the typing indicator with username and broadcasts to room. The server clears it 5 s after the last keystroke.'],
         ],
         'views' => [
-            ['name' => 'chat_room.html.twig', 'desc' => 'Sidebar room list + chat panel with message list, user presence, and typing indicator. Uses onDisconnect for cleanup.'],
+            ['name' => 'chat_room.html.twig', 'desc' => 'Sidebar room list + chat panel with message list, user presence, and typing indicator. Uses onCleanup for cleanup.'],
         ],
     ];
 
@@ -56,7 +57,7 @@ final class ChatRoomExample {
         'random' => ['name' => 'Random'],
     ];
 
-    /** @var array<string, array<string, string>> room => [sessionId => username] */
+    /** @var array<string, array<string, string>> room => [contextId => username] */
     private static array $roomUsers = [];
 
     /** @var array<string, string> room => contextId that typed there last on this worker */
@@ -106,29 +107,33 @@ final class ChatRoomExample {
         $wasNewUser = !isset(self::$roomUsers[$room][$contextId]);
         self::$roomUsers[$room][$contextId] = $username;
 
-        $messageInput = $c->signal('', 'messageInput');
+        $c->signal('', 'messageInput');
         $roomScope = Scope::build('example:chat', $room);
         $c->addScope($roomScope);
-        $typingIndicator = $c->signal(self::NOBODY_TYPING, 'typingIndicator', $roomScope, false);
+        // Broadcast by hand: mutate() broadcasts even when it keeps the value, and only a change needs one.
+        $c->signal(self::NOBODY_TYPING, 'typingIndicator', $roomScope, autoBroadcast: false);
 
-        $sendMessage = $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
+        $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
             $message = trim($ctx->getSignal('messageInput')->getValue());
             if ($message === '') {
                 return;
             }
 
             // Time the INSERT as a `db.*` span in the Dev Bar trace.
-            $ctx->span('db.insert_message', fn () => self::addMessage($room, $username, $message), ['room' => $room]);
+            if (!$ctx->span('db.insert_message', fn (): bool => self::addMessage($room, $username, $message), ['room' => $room])) {
+                // The draft stays in the input, so Enter sends it again.
+                self::$app?->log('warn', "Chat message not stored in room {$room}: chat.db stayed locked");
+
+                return;
+            }
 
             $ctx->getSignal('messageInput')->setValue('');
             self::$lastSent[$contextId] = $message;
             self::stopTyping($room, $roomScope, $username);
-            // Send the clear now: a keyup post landing before the room flush would put the old text back.
-            $ctx->syncSignals();
             self::$app?->broadcast($roomScope);
         }, 'sendMessage');
 
-        $updateTyping = $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
+        $c->action(function (Context $ctx) use ($room, $username, $roomScope, $contextId): void {
             $draft = trim($ctx->getSignal('messageInput')->getValue());
             // A letter released after Enter posts a keyup carrying the sent text, or '' once the clear arrived.
             if ($draft === '' || $draft === (self::$lastSent[$contextId] ?? null)) {
@@ -140,7 +145,7 @@ final class ChatRoomExample {
             self::$app?->broadcast($roomScope);
         }, 'updateTyping');
 
-        $c->onDisconnect(function () use ($room, $roomScope, $contextId, $username): void {
+        $c->onCleanup(function () use ($room, $roomScope, $contextId, $username): void {
             unset(self::$lastSent[$contextId]);
             $changed = false;
             if (isset(self::$roomUsers[$room][$contextId])) {
@@ -156,13 +161,10 @@ final class ChatRoomExample {
             }
         });
 
-        // Per-client render, declared: the view embeds this user's name, their context ID and
-        // their TAB signal IDs, so one client's HTML must never be served to another. Today the
-        // TAB primary scope already disables the update cache and this is a no-op: the point is
-        // that promoting $roomScope with scope() can no longer silently start sharing it.
-        $c->view(fn (): string => $c->render('examples/chat_room.html.twig', [
-            'title' => '💬 Chat Room',
-            'description' => 'Chat: ' . self::$rooms[$room]['name'],
+        $c->view('examples/chat_room.html.twig', fn (): array => [
+            'title' => 'Chat Room',
+            'perWorker' => 'who is in each room',
+            'description' => 'Chat with other visitors in the ' . self::$rooms[$room]['name'] . ' room, or switch rooms in the list. Each room is a custom scope built with <code>Scope::build()</code>, and your username is a SESSION signal.',
             'summary' => self::SUMMARY,
             'anatomy' => self::ANATOMY,
             'githubLinks' => self::GITHUB_LINKS,
@@ -178,14 +180,9 @@ final class ChatRoomExample {
             ),
             'roomName' => self::$rooms[$room]['name'],
             'username' => $username,
-            'contextId' => $contextId,
             'messages' => $c->span('db.select_messages', fn () => self::getMessages($room), ['room' => $room, 'limit' => 50]),
-            'messageInputId' => $messageInput->id(),
-            'typingIndicatorId' => $typingIndicator->id(),
             'users' => array_values(array_unique(self::$roomUsers[$room] ?? [])),
-            'sendMessageUrl' => $sendMessage->url(),
-            'updateTypingUrl' => $updateTyping->url(),
-        ]), block: 'demo', cacheUpdates: false);
+        ], block: 'demo');
 
         // The worker whose timer would clear the indicator may have restarted since.
         self::watchTyping($room, $roomScope);
@@ -271,25 +268,22 @@ final class ChatRoomExample {
     }
 
     private static function db(): \SQLite3 {
-        if (self::$db === null) {
-            self::$db = new \SQLite3(__DIR__ . '/../../chat.db');
-            self::$db->exec('PRAGMA journal_mode=WAL');
-            self::$db->exec('PRAGMA synchronous=NORMAL');
-            self::$db->exec(
-                'CREATE TABLE IF NOT EXISTS messages (
-                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                    room      TEXT    NOT NULL,
-                    username  TEXT    NOT NULL,
-                    message   TEXT    NOT NULL,
-                    timestamp TEXT    NOT NULL
-                )'
-            );
-        }
-
-        return self::$db;
+        return self::$db ??= Sqlite::open(
+            __DIR__ . '/../../chat.db',
+            'CREATE TABLE IF NOT EXISTS messages (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                room      TEXT    NOT NULL,
+                username  TEXT    NOT NULL,
+                message   TEXT    NOT NULL,
+                timestamp TEXT    NOT NULL
+            )'
+        );
     }
 
-    private static function addMessage(string $room, string $username, string $message): void {
+    /**
+     * Store a message. Returns false when another worker held the database too long.
+     */
+    private static function addMessage(string $room, string $username, string $message): bool {
         $stmt = self::db()->prepare(
             'INSERT INTO messages (room, username, message, timestamp) VALUES (:room, :username, :message, :timestamp)'
         );
@@ -297,7 +291,8 @@ final class ChatRoomExample {
         $stmt->bindValue(':username', $username, SQLITE3_TEXT);
         $stmt->bindValue(':message', $message, SQLITE3_TEXT);
         $stmt->bindValue(':timestamp', date('H:i:s'), SQLITE3_TEXT);
-        $stmt->execute();
+
+        return Sqlite::retry(static fn () => $stmt->execute()) !== null;
     }
 
     /**

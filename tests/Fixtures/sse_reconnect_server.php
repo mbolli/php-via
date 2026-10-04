@@ -25,28 +25,20 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
+use Tests\Support\FixturePort;
 
 $mode = (string) ($argv[1] ?? 'h2');
 $marker = sys_get_temp_dir() . '/via_sse_reconnect_' . getmypid();
 @unlink($marker);
 
-// enable_reuse_port would let a second server share a busy port without an error.
-for ($i = 0; $i < 150; ++$i) {
-    $port = 4600 + ((getmypid() + $i) % 150);
-    $probe = @stream_socket_server("tcp://127.0.0.1:{$port}");
-    if ($probe !== false) {
-        fclose($probe);
-
-        break;
-    }
-}
+$port = FixturePort::pick(4600, 150);
 
 $config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error');
 if ($mode === 'h2') {
     $config = $config->withH2c();
 } else {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker())
-        ->withContextCleanupDelay(300)->withContextRevivalWindow(2000)->withContextDirectorySize(4096, 1024, 60)
+        ->withContextTimeouts(cleanupDelayMs: 300, revivalWindowMs: 2000)->withContextDirectorySize(4096, 1024, 60)
     ;
 }
 $app = new Via($config);
@@ -57,7 +49,7 @@ $app->page('/room', function (Context $c) use (&$bumps): void {
     $hit = $c->action(static function (): void {}, 'hit');
     $c->view(function () use ($c, $hit, &$bumps): string {
         return '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':N:' . $bumps . ':END</div>';
-    }, cacheUpdates: false);
+    });
 });
 
 $app->page('/bump', function (Context $c) use ($app, &$bumps): void {
@@ -68,7 +60,7 @@ $app->page('/bump', function (Context $c) use ($app, &$bumps): void {
 
 $app->page('/count', function (Context $c) use ($app): void {
     $c->view(static fn (): string => 'CLIENTS:' . implode(',', array_column($app->getClients(), 'context_id'))
-        . ':SCOPE:' . implode(',', array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope('room:lobby')))
+        . ':SCOPE:' . implode(',', array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts('room:lobby')))
         . ':PID:' . getmypid() . ':END');
 });
 

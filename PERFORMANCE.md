@@ -1,11 +1,30 @@
 # php-via Performance Profile
 
-Measured April 2026 on a single-process dev build (`APP_ENV=dev php website/app.php`),
-OpenSwoole 22.13.0, PHP 8.4.19, port 3000 (HTTPS/TLS, self-signed cert).
+## Current figures (0.14.0)
 
-> **Runtime note.** php-via now requires `ext-openswoole ^26`. Everything below except the
-> explicitly re-measured multi-worker section was recorded on OpenSwoole 22.13.0 and has not
-> been re-run since.
+The figures to plan with are on the website's [Performance](https://via.zweiundeins.gmbh/docs/performance)
+page, measured on 0.14.0 with the harness in `bench/capacity` (`bench/capacity/RESULTS.md`), and in
+`bench/contention/RESULTS.md`. In short, for one worker on a core held at full clock:
+
+- A page view of 21 to 86 KB of HTML costs 1.3 to 4.2 ms of CPU, and its context 14 to 37 KB until
+  the stream connects or the connect timeout (30 s) passes.
+- An open tab costs 570 to 650 KB with Brotli level 4, 65 to 125 KB at level 1 and 40 to 75 KB
+  without Brotli, mostly the stream encoder's window. A busy stream's encoder grows to about 9 MB at
+  level 4 (see the Brotli section below).
+- A private action with a `sync()` costs 0.16 to 0.20 ms, a broadcast about 0.05 ms per receiving
+  tab. A view renders once per broadcast for all tabs only with `view(..., shareRender: true)`.
+- A storm of 200 actions on 1,000 connected tabs converges in 34 ms (base before coalescing: 1.46 s).
+- A static file comes from worker memory, a 91 KB stylesheet at 0.054 ms of CPU with Brotli level 11,
+  which never runs in a worker.
+- With several workers, an action that reaches another worker than its tab's is passed there, at
+  about twice the CPU of one that does not. Behind an h2c proxy all clients share one worker until the
+  proxy's connection carries 1,280 streams; over HTTP/1.1 they spread, and about (N-1)/N of a tab's
+  actions are passed on. See [Same machine](https://via.zweiundeins.gmbh/docs/deployment#tab-worker).
+
+The sections below are the earlier record, each with its date, version and setup. The first ones
+were measured in April 2026 on a single-process dev build (`APP_ENV=dev php website/app.php`),
+OpenSwoole 22.13.0, PHP 8.4.19, port 3000 (HTTPS/TLS, self-signed cert), and were not re-run on
+OpenSwoole 26, which php-via requires since 0.13.0.
 
 ---
 
@@ -95,7 +114,7 @@ requests were processed server-side but clients had already dropped; this is
 TCP-level loss, not application-level corruption. State remained internally
 consistent throughout.
 
-**Note:** Results at this concurrency level vary run-to-run (~15–45% OK) depending
+**Note:** Results at this concurrency level vary run-to-run (about 15 to 45% OK) depending
 on OS scheduler, system load, and whether the backlog has recovered from a prior run.
 
 ---
@@ -153,6 +172,9 @@ To test the multi-worker path, the website was configured with:
     ->withBroker(new RedisBroker())          // localhost Redis, pub/sub channel
     ->withSwooleSettings(['worker_num' => \OpenSwoole\Util::getCpuNum()])  // 16 workers
 ```
+
+Since 0.14.0, `start()` throws for a `worker_num` in `withSwooleSettings()` that differs from
+`withWorkerNum()`, so this configuration no longer starts.
 
 Redis was already running locally (`redis-server`, default port 6379).
 `\OpenSwoole\Util::getCpuNum()` returns 16 on this machine.
@@ -216,11 +238,11 @@ accessor therefore stayed switched off:
 | gated on `getWorkerNum() > 1` | state during the run |
 |---|---|
 | session-affinity dispatch (`dispatch_mode`, `dispatch_func`) | never configured |
-| `SharedTable` allocation (`Via.php`) | never allocated — `GlobalState` stayed per-worker |
+| `SharedTable` allocation (`Via.php`) | never allocated: `GlobalState` stayed per-worker |
 | the multi-worker broker guard | never armed |
 
 So the run measured **16 workers on OpenSwoole's default fd-based dispatch with per-worker
-global state** — not php-via's multi-worker path. fd dispatch is per-connection sticky, so
+global state**, not php-via's multi-worker path. fd dispatch is per-connection sticky, so
 a keep-alive client stays on one worker; that is why the numbers look as good as they do.
 
 This also means the Analysis above misattributes the cause. The 99.9% → 89.7% drop is
@@ -230,7 +252,7 @@ latency-shaped. It is *not* evidence about session affinity, which never ran.
 
 ### Re-measured on the real multi-worker path
 
-Different machine and runtime from the run above — 20 cores, PHP 8.5.9,
+Different machine and runtime from the run above: 20 cores, PHP 8.5.9,
 **ext-openswoole 26.2.0**, no Redis available, so `SwooleBroker` (the same-machine
 broker) instead of `RedisBroker`. Absolute numbers are therefore not comparable with the
 tables above; the shape across worker counts is the finding.
@@ -248,7 +270,7 @@ above was meant to exercise. 1,000 actions, concurrency 100, `/bench/counter`:
 
 **Before the fix, action success tracked `1/worker_num` exactly.** Every failure was
 `HTTP 400 "Invalid context"`: a context was created on the worker that served the page,
-and `ActionHandler` — unlike `SseHandler` — made no attempt to revive one it had not
+and `ActionHandler`, unlike `SseHandler`, made no attempt to revive one it had not
 seen, so an action only succeeded when it happened to land back on the originating worker.
 
 **Fixed.** `ActionHandler` now rebuilds an unknown context by re-running its route handler,
@@ -259,7 +281,7 @@ copy nobody is watching. The "after" column is 1,000 actions at concurrency 100,
 end to end: 200 actions spread across 4 workers leave the shared counter at exactly 200.
 
 > **Note on the load harness.** `action_hammer` at 16 workers/concurrency 100 reports a
-> variable 80–100%, while a direct probe at the same concurrency gets 1000/1000. The
+> variable 80 to 100%, while a direct probe at the same concurrency gets 1000/1000. The
 > difference is the harness holding 50 SSE observers alongside the action connections, so
 > that residual is client-side, not routing.
 
@@ -268,7 +290,7 @@ end to end: 200 actions spread across 4 workers leave the shared counter at exac
 Hardware and runtime as in the section above (20 cores, PHP 8.5.9, ext-openswoole 26.2.0,
 `SwooleBroker`). `tests/Load/bench_app.php` with `VIA_BENCH_SCOPE=route` at every worker count,
 so all rows measure a shared ROUTE-scoped counter rather than a per-tab one. Worker counts are
-verified per row (`procs = workers + 2`) — an overlapping server from a previous run silently
+verified per row (`procs = workers + 2`): an overlapping server from a previous run silently
 makes every row measure the same process tree, which is exactly how an earlier draft of this
 table came out flat.
 
@@ -293,7 +315,7 @@ table came out flat.
 | 16 | 13,861 req/s |
 
 **IO-bound action** (`/bench/io`, 2 ms coroutine sleep): flat at 10-16k req/s across all worker
-counts, as expected — coroutines already provide IO concurrency inside one worker.
+counts, as expected: coroutines already provide IO concurrency inside one worker.
 
 HTTP OK was 100% and net increment exact at every worker count in all three.
 
@@ -303,7 +325,7 @@ broadcast-bound ones where each action already fans out to every worker. Pick th
 from what the handlers actually do.
 
 > **The benchmark indicted itself first.** With the action written as
-> `setValue($sig->int() + 1)` — a read-modify-write — net increment fell below HTTP OK as
+> `setValue($sig->int() + 1)`, a read-modify-write, net increment fell below HTTP OK as
 > workers rose: 2000 / 1951 / 1922 / 1879 / 1840 at 1 / 2 / 4 / 8 / 16. That is the lost-update
 > behaviour `Signal::increment()` exists to avoid; switching the harness to it gives exactly
 > 2000 at every worker count. A load test that quietly under-counts is worse than useless, so
@@ -325,7 +347,7 @@ Measured 2026-08-26 with ext-brotli 0.21.0 against **real captured Game-of-Life 
 | 11 | 31,474 KB | 60.0 GB | 75.3:1 | **94,551 µs** |
 
 **The encoder is lazy but saturating.** At init it costs ~7 KB. It grows as the stream feeds it
-and plateaus after roughly 8 MB of traffic — measured identical at 8 MB, 64 MB and 256 MB fed —
+and plateaus after roughly 8 MB of traffic (measured identical at 8 MB, 64 MB and 256 MB fed)
 and never shrinks. So the cost is driven by traffic, not connection count: an idle stream stays
 near 7 KB, and the 2,000-connection column above only applies to 2,000 *busy* streams.
 
@@ -338,15 +360,17 @@ save memory nor raising it for the compression gains Anders Murphy reports is po
 upstream extension change. The lever php-via has is the quality level, and it has a cliff: level 1
 costs 15× less memory and 3× less CPU than the default for 37% more bytes on the wire.
 
-**Level 11 must never be used for streaming** — 94 ms of CPU per frame, on the event loop.
-php-via uses it only for static assets, which are one-shot and cached per file+mtime, so that
-cost is paid once per asset rather than per request.
+**Level 11 must never be used for streaming**: 94 ms of CPU per frame, on the event loop.
+php-via uses it only for static assets, and since 0.14.0 never in a worker: files of up to 128 KiB
+are compressed in the master process before the port opens and shared by all workers, bigger ones by
+a low-priority helper process, and a worker sends a file the helper has not finished at level 4.
+See [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
 
 ---
 
 ### When multi-worker helps (and when it doesn't)
 
-At 1–2k SSE connections on a single machine with a localhost Redis broker,
+At 1,000 to 2,000 SSE connections on a single machine with a localhost Redis broker,
 **single-worker is faster and more reliable**. The coroutine scheduler handles thousands
 of concurrent SSE connections without process-switch overhead.
 
@@ -383,8 +407,8 @@ response-code monitoring will under-count successful operations under extreme lo
 ### Real-world headroom
 
 A typical real-world page has:
-- 1–5 SSE connections per user (one per open tab)
-- Bursts of 1–10 actions/second per active user
+- 1 to 5 SSE connections per user (one per open tab)
+- Bursts of 1 to 10 actions/second per active user
 - At 200 concurrent HTTP connections, that supports **thousands of simultaneous users**
   whose actions arrive in a natural Poisson distribution, not all at once
 
@@ -396,18 +420,19 @@ single Via instance can serve 2,000+ active browser sessions simultaneously.
 
 ## Path to 30k Concurrent Requests
 
-Getting from ~200 to 30k concurrent requests requires changes at multiple layers.
+Getting from ~200 to 30k concurrent requests requires changes at multiple layers. This plan was
+written in April 2026, before 0.13.0 made several workers work; its code samples are updated for
+0.14.0.
 
-### 1. OpenSwoole server tuning (easy wins, ~5–10×)
+### 1. OpenSwoole server tuning (easy wins, about 5 to 10×)
 
 ```php
 (new Config())
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum())  // one worker per core; never worker_num below
     ->withSwooleSettings([
-        'worker_num'          => swoole_cpu_num(),   // one worker per core
         'max_coroutine'       => 100_000,
-        'backlog'             => 8192,               // OS accept queue depth
-        'max_conn'            => 50_000,
-        'open_http2_protocol' => false,              // HTTP/1.1 is faster for SSE
+        'backlog'             => 8192,               // OS accept queue depth (php-via sets 4096)
+        'max_conn'            => 50_000,             // php-via sets 10,000
         'buffer_output_size'  => 4 * 1024 * 1024,   // 4 MB per connection
     ]);
 ```
@@ -427,17 +452,16 @@ OpenSwoole `worker_num > 1` runs N worker processes, each with their own event
 loop. Each worker can handle ~200 concurrent connections independently.
 With 8 workers on an 8-core machine: ~1600 concurrent connections.
 
-**Caveat for Via**: ROUTE/SESSION/GLOBAL scoped signals and the SSE broadcast
-channel currently live in shared memory within a single process. With multiple
-workers, cross-worker broadcast requires the pluggable `MessageBroker` system
-(already implemented: `SwooleBroker`, `RedisBroker`, `NatsBroker`). TAB-scoped
-routes work without any broker.
+**Caveat for Via**: since 0.13.0, scoped signal values, session data, GlobalState, the client list
+and a context directory live in shared memory, and `SwooleBroker` carries broadcasts between the
+workers; 0.14.0 uses it without `withBroker()`. An action that reaches a worker other than the one
+holding its tab is passed there, which costs about twice the CPU of an action that does not.
 
 > **Caveats that remain.** Actions, scoped signal values and the client list now cross
 > workers, and multi-worker is measured as a real win for CPU-bound handlers (7.8x on 16
-> workers) — see "Re-measured again after items 6-10". Two things do not cross. Mutating a scoped signal by reading it and calling
-> `setValue()` loses updates under concurrency — measured 129 of 240 list appends
-> surviving across 4 workers — so use `Signal::increment()` for counters and
+> workers), see "Re-measured again after items 6-10". Two things do not cross. Mutating a scoped signal by reading it and calling
+> `setValue()` loses updates under concurrency (measured 129 of 240 list appends
+> surviving across 4 workers), so use `Signal::increment()` for counters and
 > `Signal::mutate()` for everything else, which take the shared-memory paths that are
 > race-free (240 of 240). And PHP statics in your own handlers are per-process, so a
 > simulation kept in one diverges per worker. The server logs both at start-up whenever
@@ -447,9 +471,10 @@ routes work without any broker.
 
 Modern browsers multiplex multiple requests over a single TCP connection with
 HTTP/2. A user with 10 in-flight requests would use 1 connection instead of 10,
-reducing instantaneous concurrency by ~10×. OpenSwoole supports HTTP/2 natively
-but SSE over HTTP/2 has edge-case support issues in some browsers; test before
-enabling in production.
+reducing instantaneous concurrency by ~10×. The website serves its SSE over HTTP/2 to browsers.
+Between a proxy and php-via, OpenSwoole hands each connection to one worker, so an h2c upstream
+puts every client on one worker until the connection carries 1,280 streams; an HTTP/1.1 upstream
+spreads them across workers.
 
 ### 4. Reverse proxy (offload TLS + static assets)
 
@@ -459,16 +484,20 @@ or nginx:
 - Allows keep-alive connection pooling between proxy and Via
 - Enables HTTP/2 at the edge without changing Via's HTTP/1.1 internals
 
-The deploy scripts already include Caddy configs (`deploy/*.caddy`).
+[Deployment](https://via.zweiundeins.gmbh/docs/deployment#caddy) has the Caddy configuration.
 
 ### 5. PatchManager channel tuning
 
+Since 0.14.0 a full queue drops a view update first, which the next render sends again, and
+never a `patchElements()` patch, a signal or a script. `withSseMaxQueuedBytes()` drops view frames
+for a client whose unsent backlog passes 1 MB.
+
 `Channel(50)` was sized conservatively. At high fan-out (hundreds of observers
 per route), consider making the capacity configurable per-context. At 30k
-connections with large GLOBAL-scoped broadcasts, a channel of 500–1,000
+connections with large GLOBAL-scoped broadcasts, a channel of 500 to 1,000
 prevents drops under burst. The trade-off is memory: each Channel slot holds a
-serialized SSE frame (~100–500 bytes), so Channel(1000) × 30k connections =
-~3–15 GB RAM in the worst case. Keep it small for TAB-scoped; increase only for
+serialized SSE frame (about 100 to 500 bytes), so Channel(1000) × 30k connections =
+about 3 to 15 GB RAM in the worst case. Keep it small for TAB-scoped; increase only for
 ROUTE/GLOBAL.
 
 ### 6. Horizontal scaling (30k+ target)
@@ -485,14 +514,15 @@ To reach 30k concurrent connections:
 ```
 
 With 15 nodes × 2,000 connections each = 30,000. The broker ensures a signal
-mutation on node 1 fans out to SSE connections on nodes 2–15. Redis pub/sub
+mutation on node 1 fans out to SSE connections on nodes 2 to 15. Redis pub/sub
 latency is ~0.5ms; NATS is ~0.1ms.
 
 **The broker is already implemented.** The remaining infrastructure work is:
 - A deploy config for each Via node
 - A Redis/NATS cluster (or single instance for moderate load)
-- A session-sticky load balancer for SSE connections (so a user's SSE and their
-  action POST reach the same node, optional but reduces broker traffic)
+- A cookie-sticky load balancer, so that a user's page, SSE stream and actions reach the same
+  node: contexts, scoped signal values and GlobalState are shared between the workers of one
+  machine, not between nodes
 
 ### Realistic targets by approach
 
@@ -512,7 +542,7 @@ The broker is already the hardest piece, and it's done.
 ## OPcache / JIT Tuning
 
 Measured May 2026. PHP 8.4.20, OpenSwoole 25.2.0, WSL2 Linux 6.6.87.2.  
-Test tool: `tests/Load/bench_opcache.php` — 5,000 actions × cold + warm pass (bench_app);
+Test tool: `tests/Load/bench_opcache.php`: 5,000 actions × cold + warm pass (bench_app);
 2,000 actions × cold + warm pass (spreadsheet-live / spreadsheet-raw-live, website app).
 Run with `--app=bench` or `--app=website`.
 
@@ -540,33 +570,33 @@ Four workloads, seven profiles:
 | jit-function | 4,519 | 2,608 | **431** ⚠️ |
 | jit-tracing | **4,980** | **2,875** | 4,522 |
 | opcache-preload | SKIPPED† | | |
-| multi-worker-4w | — ‡ | — ‡ | — ‡ |
+| multi-worker-4w | n/a ‡ | n/a ‡ | n/a ‡ |
 
 † OPcache preloading causes SIGSEGV in OpenSwoole worker fork on this host (known incompatibility with POOL_MODE).  
 ‡ No usable result: ~83-90% of requests failed with 403 because the context was not registered on all workers. Measured before 0.13.0 made contexts reachable from every worker, and not re-run since. See "Re-measured on the real multi-worker path" above.
 
 #### Spreadsheet live workload (1,000 actions, concurrency=50, website/app.php)
 
-`navigate` action against `/examples/spreadsheet` — full Twig render, SQLite query, real SpreadsheetExample.php logic.
+`navigate` action against `/examples/spreadsheet`: full Twig render, SQLite query, real SpreadsheetExample.php logic.
 
 | Profile | Cold req/s | Warm req/s | vs baseline | Cold OK% |
 |---------|------------|------------|-------------|----------|
-| no-opcache (baseline) | 279 | 190 | — | 100% |
+| no-opcache (baseline) | 279 | 190 | n/a | 100% |
 | opcache-default-cli | 247 | 265 | +39.5% | 100% |
 | opcache-tuned | 314 | 260 | +36.8% | 100% |
 | jit-function | 299 | 247 | +30.0% | 100% |
 | jit-tracing | **385** | **242** | **+27.4%** | 100% |
 | opcache-preload | SKIPPED† | | | |
-| multi-worker-4w | — ‡ | — ‡ | | |
+| multi-worker-4w | n/a ‡ | n/a ‡ | | |
 
 #### Spreadsheet raw live workload (2,000 actions, concurrency=100, website/app.php)
 
-`navigate` action against `/examples/spreadsheet-raw` — raw PHP string building on SSE update path, Twig only for initial page load.
+`navigate` action against `/examples/spreadsheet-raw`: raw PHP string building on SSE update path, Twig only for initial page load.
 Numbers updated after Step 6 (grid extent cache); all measurements at concurrency=100, 2,000 actions.
 
 | Profile | Cold req/s | Warm req/s | vs baseline | Cold OK% |
 |---------|------------|------------|-------------|----------|
-| no-opcache (baseline) | 1,149 | 827 | — | 100% |
+| no-opcache (baseline) | 1,149 | 827 | n/a | 100% |
 | opcache-default-cli | 911 | 919 | +11.1% ¹ | 100% |
 | opcache-tuned | 1,187 | 1,082 | +30.8% | 100% |
 | jit-function | 1,108 | 969 | +17.2% ¹ | 100% |
@@ -580,17 +610,17 @@ Numbers updated after Step 6 (grid extent cache); all measurements at concurrenc
 **JIT is transformative for CPU-bound code.**  
 `jit=tracing` lifts the Mandelbrot workload from 366 → 2,875 req/s (**+685%**, ~7.9×). The tight float loop is exactly what tracing JIT compiles best. `jit=function` gives a comparable gain (+612%) but is unsafe in OpenSwoole (see below).
 
-**`jit=function` breaks OpenSwoole's coroutine hooks — avoid it.**  
-IO throughput collapsed from 4,009 → 431 req/s (−89%) with `jit=function`. Root cause: function-mode JIT compiles `usleep()` as a regular function call, bypassing OpenSwoole's `SWOOLE_HOOK_ALL` coroutine hook that makes `usleep()` yield instead of blocking the thread. At 2ms blocking sleep, max throughput = 500 req/s — matching the observed 431. `jit=tracing` does not have this regression.
+**`jit=function` breaks OpenSwoole's coroutine hooks: avoid it.**  
+IO throughput collapsed from 4,009 → 431 req/s (−89%) with `jit=function`. Root cause: function-mode JIT compiles `usleep()` as a regular function call, bypassing OpenSwoole's `SWOOLE_HOOK_ALL` coroutine hook that makes `usleep()` yield instead of blocking the thread. At 2ms blocking sleep, max throughput = 500 req/s, matching the observed 431. `jit=tracing` does not have this regression.
 
-**OPcache alone gives +75–120% on CPU-bound work, modest gains elsewhere.**  
-For applications without tight loops, opcache-tuned adds ~17% on the counter workload and ~19% on spreadsheet-live — free gains from eliminating parse overhead.
+**OPcache alone gives +75 to 120% on CPU-bound work, modest gains elsewhere.**  
+For applications without tight loops, opcache-tuned adds ~17% on the counter workload and ~19% on spreadsheet-live, free gains from eliminating parse overhead.
 
 **IO-bound workloads are unaffected by OPcache/JIT.**  
-All profiles hover within ±10% for the IO workload (except the `jit=function` anomaly above). If your bottleneck is database queries, external API calls, or network IO, OPcache/JIT won't help — invest in connection pooling and query optimisation instead.
+All profiles hover within ±10% for the IO workload (except the `jit=function` anomaly above). If your bottleneck is database queries, external API calls, or network IO, OPcache/JIT won't help: invest in connection pooling and query optimisation instead.
 
-**Real-app (Twig + SQLite): OPcache gives consistent +30–40%; JIT advantage narrows at higher concurrency.**  
-The spreadsheet-live workload runs full Twig `renderBlock` + SQLite per action. After Twig file caching and partial block rendering were applied, throughput rose substantially from the April 2026 baseline. All OPcache profiles deliver ~+30–40% warm gain over interpreted. `jit-tracing` cold (385 req/s) is the best single-pass number, but at concurrency=100 the warm pass (242) falls below opcache-tuned (260) — SQLite I/O saturation masks the JIT advantage under sustained load. The raw comparison makes the real bottleneck clear: removing Twig from the SSE update path gives **3–4× throughput** (827–1,143 req/s raw vs 190–265 req/s Twig on this host at concurrency=50), making it the single largest optimization available — larger than JIT and larger than all other Twig optimizations combined.
+**Real-app (Twig + SQLite): OPcache gives consistent +30 to 40%; JIT advantage narrows at higher concurrency.**  
+The spreadsheet-live workload runs full Twig `renderBlock` + SQLite per action. After Twig file caching and partial block rendering were applied, throughput rose substantially from the April 2026 baseline. All OPcache profiles deliver about +30 to 40% warm gain over interpreted. `jit-tracing` cold (385 req/s) is the best single-pass number, but at concurrency=100 the warm pass (242) falls below opcache-tuned (260): SQLite I/O saturation masks the JIT advantage under sustained load. The raw comparison makes the real bottleneck clear: removing Twig from the SSE update path gives **3 to 4× throughput** (827 to 1,143 req/s raw vs 190 to 265 req/s Twig on this host at concurrency=50), making it the single largest optimization available, larger than JIT and larger than all other Twig optimizations combined.
 
 ### Recommendations
 
@@ -598,7 +628,7 @@ The spreadsheet-live workload runs full Twig `renderBlock` + SQLite per action. 
 |----------|-------------------------------|
 | Application with CPU-heavy actions (templates, data transformation, crypto) | `opcache.jit=tracing`<br>`opcache.jit_buffer_size=64M`<br>`opcache.enable_cli=1` |
 | Framework-heavy, mostly IO | `opcache.enable_cli=1`<br>`opcache.memory_consumption=128`<br>`opcache.validate_timestamps=0` (production only) |
-| **Never use** in an OpenSwoole app | `opcache.jit=function` — destroys `usleep()`/`sleep()` coroutine yields |
+| **Never use** in an OpenSwoole app | `opcache.jit=function`: destroys `usleep()`/`sleep()` coroutine yields |
 
 Minimal production-safe config for a Via application:
 

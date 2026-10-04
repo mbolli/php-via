@@ -470,3 +470,44 @@ test('the dev-mode /_stats endpoint reports the worker\'s broadcast flush stats'
     // JSON turns the 0.0 timings into 0.
     expect(json_decode($response->body, true)['broadcast_stats'] ?? null)->toEqual(['tick_ms' => 40, ...$via->getStats()->getBroadcastStats()]);
 });
+
+describe('Config::withBroadcastThrottle()', function (): void {
+    test('renders a scope that broadcasts every 5 ms once per interval, with the last state, and leaves other scopes alone', function (): void {
+        $r = coalescingCase('throttle-burst');
+
+        // 400 ms of broadcasts with a 100 ms throttle: the leading render and one per interval after it.
+        expect($r['renders'])->toBeGreaterThanOrEqual(4)->toBeLessThanOrEqual(6)
+            ->and($r['minGapMs'])->toBeGreaterThanOrEqual(99.0)
+            ->and($r['lastSeen'])->toBe($r['final'], 'the last broadcast in the burst is delivered')
+            ->and($r['freeRenders'])->toBeGreaterThan(20)
+            ->and($r['flags'])->toBe(COALESCE_IDLE)
+            ->and($r['throttleTimer'])->toBeNull()
+        ;
+    });
+
+    test('renders the first broadcast at once and holds one right after it until the interval is over', function (): void {
+        $r = coalescingCase('throttle-trailing');
+
+        expect($r['renders'])->toBe(2)
+            ->and($r['trailingAfterMs'])->toBeGreaterThanOrEqual(99.0)->toBeLessThan(160.0)
+        ;
+    });
+
+    test('throttles the broadcasts of scoped signal writes', function (): void {
+        // Five writes 10 ms apart: the leading render and the trailing one 100 ms later.
+        expect(coalescingCase('throttle-signal-writes')['renders'])->toBe(2);
+    });
+
+    test('flushBroadcasts() renders a held broadcast at once', function (): void {
+        expect(coalescingCase('throttle-flush'))->toBe(['first' => 1, 'held' => 1, 'flushed' => 2, 'final' => 2]);
+    });
+
+    test('throttles broadcasts received from other workers', function (): void {
+        // 250 ms of received broadcasts with a 100 ms throttle: at 0, 100 and 200 ms, and the trailing one.
+        expect(coalescingCase('throttle-received')['renders'])->toBeGreaterThanOrEqual(3)->toBeLessThanOrEqual(4);
+    });
+
+    test('coalesces a throttled scope under withBroadcastCoalescing(false), which renders the others at once', function (): void {
+        expect(coalescingCase('throttle-coalescing-off'))->toBe(['sync' => ['free' => 5], 'final' => ['free' => 5, 'imp' => 1]]);
+    });
+});

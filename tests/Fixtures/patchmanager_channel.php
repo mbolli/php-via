@@ -26,7 +26,7 @@ use OpenSwoole\Coroutine;
 
 Coroutine::run(static function (): void {
     // The poll interval paces only the Dev Bar stream now; the keep-alive bounds the park.
-    $app = new Via((new Config())->withLogLevel('error')->withSsePollIntervalMs(1)->withSseKeepAliveMs(20));
+    $app = new Via((new Config())->withLogLevel('error')->withDevBarOptions(pollMs: 1)->withSseKeepAliveMs(20));
     $context = new Context('fixture', '/test', $app);
     $pm = $context->getPatchManager();
 

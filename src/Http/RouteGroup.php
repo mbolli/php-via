@@ -38,7 +38,11 @@ class RouteGroup {
         return $this;
     }
 
-    /** @return list<RouteDefinition> */
+    /**
+     * @return list<RouteDefinition>
+     *
+     * @internal
+     */
     public function getDefinitions(): array {
         return $this->definitions;
     }

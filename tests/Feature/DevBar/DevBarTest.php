@@ -9,6 +9,8 @@ use Mbolli\PhpVia\DevBar\SignalManifest;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Http\Request;
+use Tests\Support\FakeStaticResponse;
 
 /*
  * End-to-end behaviour of the Dev Bar: overlay injection gating, the signal
@@ -22,9 +24,9 @@ afterEach(function (): void {
 });
 
 function devBarVia(bool $writes = false): Via {
-    $config = (new Config())->withLogLevel('error')->withDevMode()->withTracing(true);
+    $config = (new Config())->withLogLevel('error')->withDevMode()->withDevBar(true);
     if ($writes) {
-        $config->withTracingWrites(true);
+        $config->withDevBarOptions(writes: true);
     }
 
     return createVia($config);
@@ -46,6 +48,37 @@ describe('overlay injection', function (): void {
         expect(strpos($html, '<via-dev-bar'))->toBeLessThan(strpos($html, '</body>'));
         // signal manifest rides along
         expect($html)->toContain('count');
+    });
+
+    test('gives its stylesheet and script the nonce from via.csp_nonce, also on an update render', function (): void {
+        $app = devBarVia();
+        $ctx = new Context('nonce_/1', '/demo', $app);
+        $ctx->setRequestAttributes(['via.csp_nonce' => 'n0nce"<']);
+        $ctx->view(fn () => '<div id="x">hi</div>');
+
+        foreach ([$app->buildHtmlDocument($ctx), $app->decorateUpdate('<html><head></head><body></body></html>', $ctx)] as $html) {
+            expect($html)->toContain('href="/_via/devbar.css" nonce="n0nce&quot;&lt;">')
+                ->and($html)->toContain('src="/_via/devbar.js" nonce="n0nce&quot;&lt;"></script>')
+            ;
+        }
+
+        $plain = new Context('nonce_/2', '/demo', $app);
+        $plain->view(fn () => '<div id="x">hi</div>');
+        expect($app->buildHtmlDocument($plain))->not->toContain('nonce=');
+    });
+
+    test('decorates each tab of a fan-out on its own, also after an update it left as it was', function (): void {
+        $app = devBarVia();
+        $a = new Context('fan-1', '/demo', $app);
+        $b = new Context('fan-2', '/demo', $app);
+        $fragment = '<div id="x">hi</div>';
+        $document = '<html><head></head><body><div id="x">hi</div></body></html>';
+
+        expect($app->decorateUpdate($fragment, $a))->toBe($fragment)
+            ->and($app->decorateUpdate($fragment, $b))->toBe($fragment)
+            ->and($app->decorateUpdate($document, $a))->toContain('<via-dev-bar')->toContain('fan-1')
+            ->and($app->decorateUpdate($document, $b))->toContain('<via-dev-bar')->toContain('fan-2')->not->toContain('fan-1')
+        ;
     });
 
     test('does not inject when tracing is disabled', function (): void {
@@ -127,6 +160,24 @@ describe('DevBarController::buildScopesSnapshot()', function (): void {
         expect($scopesByName['room:lobby']['contextCount'])->toBe(1);
         expect($snap['totalContexts'])->toBe(1);
     });
+
+    test('names the worker that answered, since each worker lists only its own scopes', function (): void {
+        $app = devBarVia();
+        $app->getApp()->claimWorker(2);
+
+        expect((new DevBarController($app))->buildScopesSnapshot()['worker'])->toBe(2);
+    });
+});
+
+describe('the Dev Console', function (): void {
+    test('declares an icon, so the browser asks for no /favicon.ico', function (): void {
+        $response = new FakeStaticResponse();
+        (new DevBarController(devBarVia()))->handle('/_via', new Request(), $response);
+
+        expect($response->body)->toContain('<link rel="icon" href="data:,">')
+            ->and($response->body)->toContain('<via-dev-bar')
+        ;
+    });
 });
 
 describe('Context::span() wiring', function (): void {
@@ -158,5 +209,111 @@ describe('Context::span() wiring', function (): void {
         $ctx = new Context('sp_/2', '/demo', $app);
 
         expect($ctx->span('db.noop', fn () => 42))->toBe(42);
+    });
+});
+
+describe('DevBarController::assetResponse()', function (): void {
+    beforeEach(function (): void {
+        $this->assetDir = sys_get_temp_dir() . '/via_devbar_assets_' . getmypid() . '_' . bin2hex(random_bytes(4));
+        mkdir($this->assetDir);
+        file_put_contents($this->assetDir . '/devbar.js', 'console.log("v1");');
+        touch($this->assetDir . '/devbar.js', 1_700_000_000);
+    });
+
+    afterEach(function (): void {
+        @unlink($this->assetDir . '/devbar.js');
+        @rmdir($this->assetDir);
+    });
+
+    test('serves the shipped assets with an ETag, Last-Modified and no-cache', function (): void {
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)));
+
+        foreach (['devbar.js' => 'application/javascript', 'devbar.css' => 'text/css; charset=utf-8'] as $file => $type) {
+            $r = $controller->assetResponse($file, $type, []);
+
+            expect($r['status'])->toBe(200);
+            expect($r['body'])->toBe(file_get_contents(dirname(__DIR__, 3) . '/public/' . $file));
+            expect($r['headers']['Content-Type'])->toBe($type);
+            expect($r['headers']['Cache-Control'])->toBe('no-cache');
+            expect($r['headers']['ETag'])->toMatch('#^W/"[0-9a-f]{16}"$#');
+            expect($r['headers'])->toHaveKey('Last-Modified');
+            expect($r['headers'])->not->toHaveKey('Content-Encoding');
+        }
+    });
+
+    test('answers a matching If-None-Match with an empty 304 and a stale one with the body', function (): void {
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)));
+        $etag = $controller->assetResponse('devbar.js', 'application/javascript', [])['headers']['ETag'];
+
+        foreach ([$etag, '"other", ' . $etag, substr($etag, 2)] as $ifNoneMatch) {
+            $r = $controller->assetResponse('devbar.js', 'application/javascript', ['if-none-match' => $ifNoneMatch]);
+
+            expect($r['status'])->toBe(304);
+            expect($r['body'])->toBe('');
+            expect($r['headers']['ETag'])->toBe($etag);
+        }
+
+        $stale = $controller->assetResponse('devbar.js', 'application/javascript', ['if-none-match' => 'W/"0000000000000000"']);
+        expect($stale['status'])->toBe(200);
+        expect($stale['body'])->not->toBe('');
+    });
+
+    test('404s for a missing file', function (): void {
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)), $this->assetDir);
+
+        expect($controller->assetResponse('missing.js', 'application/javascript', [])['status'])->toBe(404);
+    });
+
+    test('serves from memory outside dev mode, even after the file changes', function (): void {
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)), $this->assetDir);
+        $first = $controller->assetResponse('devbar.js', 'application/javascript', []);
+
+        file_put_contents($this->assetDir . '/devbar.js', 'console.log("version two");');
+        touch($this->assetDir . '/devbar.js', 1_700_000_100);
+        $second = $controller->assetResponse('devbar.js', 'application/javascript', []);
+
+        expect($second['body'])->toBe('console.log("v1");');
+        expect($second['headers']['ETag'])->toBe($first['headers']['ETag']);
+    });
+
+    test('re-reads an edited file in dev mode, with a new ETag', function (): void {
+        $controller = new DevBarController(devBarVia(), $this->assetDir);
+        $first = $controller->assetResponse('devbar.js', 'application/javascript', []);
+
+        file_put_contents($this->assetDir . '/devbar.js', 'console.log("version two");');
+        touch($this->assetDir . '/devbar.js', 1_700_000_100);
+        $second = $controller->assetResponse('devbar.js', 'application/javascript', ['if-none-match' => $first['headers']['ETag']]);
+
+        expect($second['status'])->toBe(200);
+        expect($second['body'])->toBe('console.log("version two");');
+        expect($second['headers']['ETag'])->not->toBe($first['headers']['ETag']);
+    });
+
+    test('sends Brotli at the static level, without withBrotli(), when the client accepts it', function (): void {
+        if (!function_exists('brotli_uncompress')) {
+            $this->markTestSkipped('ext-brotli required');
+        }
+
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)));
+        $file = (string) file_get_contents(dirname(__DIR__, 3) . '/public/devbar.js');
+
+        $br = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'gzip, deflate, br']);
+        expect($br['headers']['Content-Encoding'] ?? null)->toBe('br');
+        expect($br['headers']['Vary'] ?? null)->toBe('Accept-Encoding');
+        expect(brotli_uncompress($br['body']))->toBe($file);
+        expect(strlen($br['body']))->toBeLessThan(strlen($file));
+
+        $plain = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'gzip']);
+        expect($plain['headers'])->not->toHaveKey('Content-Encoding');
+        expect($plain['headers']['Vary'] ?? null)->toBe('Accept-Encoding');
+        expect($plain['body'])->toBe($file);
+    });
+
+    test('never sends Brotli with a static level of 0', function (): void {
+        $controller = new DevBarController(createVia((new Config())->withDevBar(true)->withBrotli(true, staticLevel: 0)));
+        $r = $controller->assetResponse('devbar.js', 'application/javascript', ['accept-encoding' => 'br']);
+
+        expect($r['headers'])->not->toHaveKey('Content-Encoding');
+        expect($r['headers'])->not->toHaveKey('Vary');
     });
 });

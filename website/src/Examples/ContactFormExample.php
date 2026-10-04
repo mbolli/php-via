@@ -32,8 +32,6 @@ final class ContactFormExample {
             // Plain PHP references: nothing here is client-reactive, so Signal
             // would be the wrong abstraction. The block re-renders server-side
             // on every sync() call and Twig reads the current values directly.
-            // TODO: replace with $c->state() once the framework ships a
-            //       lightweight ephemeral container without signal machinery.
             $nameError = '';
             $emailError = '';
             $messageError = '';
@@ -43,7 +41,7 @@ final class ContactFormExample {
             $submittedFileInfo = ''; // e.g. "PDF · 42 kB"
 
             // ── Submit action ─────────────────────────────────────────────
-            $submit = $c->action(function () use (
+            $c->action(function () use (
                 $c,
                 &$nameError,
                 &$emailError,
@@ -131,8 +129,7 @@ final class ContactFormExample {
                 $c->sync();
             }, 'submit');
 
-            $c->view(function () use (
-                $c,
+            $c->view('examples/contact-form.html.twig', function () use (
                 &$nameError,
                 &$emailError,
                 &$messageError,
@@ -140,11 +137,10 @@ final class ContactFormExample {
                 &$submitted,
                 &$submittedFile,
                 &$submittedFileInfo,
-                $submit,
-            ): string {
-                return $c->render('examples/contact-form.html.twig', [
-                    'title' => '📬 Contact Form',
-                    'description' => 'Multipart file upload and server-side form validation. The form submits as <code>multipart/form-data</code>; text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>. Per-field error signals are pushed back via SSE.',
+            ): array {
+                return [
+                    'title' => 'Contact Form',
+                    'description' => 'Fill in the form, attach a file if you like, and send it. Wrong fields show an error next to them. The form posts as <code>multipart/form-data</code>: text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>, and the form comes back re-rendered over SSE.',
                     'summary' => [
                         '<strong>No base64 overhead.</strong> Datastar\'s <code>contentType: \'form\'</code> modifier submits the nearest <code>&lt;form enctype="multipart/form-data"&gt;</code> as a real multipart POST: files travel as binary, not JSON blobs.',
                         '<strong>Two validation layers.</strong> HTML5 <code>required</code> / <code>type="email"</code> / <code>minlength</code> attributes make Datastar call <code>reportValidity()</code> before the request is even sent. The server then re-validates every field independently.',
@@ -158,7 +154,7 @@ final class ContactFormExample {
                             ['name' => 'submit', 'desc' => 'Validates all fields server-side. Mutates shared PHP reference variables on failure or on success, then calls $c->sync() to trigger a block re-render via SSE.'],
                         ],
                         'views' => [
-                            ['name' => 'contact-form.html.twig', 'desc' => 'Form with inline error signals and a success panel. Submitted as multipart/form-data via Datastar contentType: form.'],
+                            ['name' => 'contact-form.html.twig', 'desc' => 'Form with inline errors and a success panel. Submitted as multipart/form-data via Datastar contentType: form, with the context id in a hidden via_ctx field.'],
                         ],
                     ],
                     'githubLinks' => [
@@ -172,10 +168,8 @@ final class ContactFormExample {
                     'submitted' => $submitted,
                     'submittedFile' => $submittedFile,
                     'submittedFileInfo' => $submittedFileInfo,
-                    'ctxId' => $c->getId(),
-                    'submit' => $submit,
-                ]);
-            }, block: 'demo', cacheUpdates: false);
+                ];
+            }, block: 'demo');
         });
     }
 }

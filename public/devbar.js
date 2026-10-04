@@ -4,7 +4,7 @@
 // runtime can interfere. Boot data arrives as data-* attributes from the
 // server-side Injector; live traces stream over EventSource('/_via/stream').
 //
-// Tabs: Traces · Signals · SSE/Patches · Request · Scopes · Errors.
+// Tabs: Traces · Signals · SSE · Request · Scopes · Stats · Logs.
 
 const CATEGORY_COLORS = {
   request: '#8b949e',
@@ -56,8 +56,12 @@ const STYLES = `
     display: flex; align-items: center; gap: 4px; padding: 6px 8px;
     background: var(--bg2); border-bottom: 1px solid var(--border); flex: 0 0 auto;
   }
-  header .brand { color: var(--fg-dim); padding: 0 6px; font-weight: 600; letter-spacing: .04em; }
+  header .brand { color: var(--fg-dim); padding: 0 6px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
   .tabs { display: flex; gap: 2px; flex: 1 1 auto; overflow-x: auto; }
+  @media (max-width: 600px) {
+    header .brand { display: none; }
+    .tabs { flex-wrap: wrap; }
+  }
   .tab {
     background: none; border: none; color: var(--fg-dim); cursor: pointer;
     padding: 4px 9px; border-radius: 5px; font: inherit; white-space: nowrap;
@@ -117,6 +121,11 @@ const STYLES = `
   .kv input:focus { outline: none; border-color: var(--accent); }
   .tag { font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--bg3); color: var(--fg-dim); }
   .tag.rw { background: #1f6feb33; color: var(--accent); }
+  .kv tr.group td {
+    color: var(--fg-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    padding-top: 12px; border-bottom-color: var(--bg3);
+  }
+  .kv tr.group td .note { text-transform: none; letter-spacing: 0; padding: 0 0 0 8px; }
 
   /* Server/client log records */
   .log { font-size: 11px; }
@@ -178,6 +187,7 @@ class ViaDevBar extends HTMLElement {
     this.base = cfg.base || '/';
     this.mode = cfg.mode || 'overlay';
     this.writes = !!cfg.writes;
+    this.devMode = !!cfg.devMode;
     this.contextId = cfg.context || '';
     this.route = cfg.route || '';
     this.signals = Array.isArray(cfg.signals) ? cfg.signals : [];
@@ -186,23 +196,43 @@ class ViaDevBar extends HTMLElement {
     this.logs = [];
     this.logFilter = 'info';
     this.scopes = null;
+    this.stats = null;
     this.activeTab = 'traces';
     this.expanded = this.mode === 'page';
     this.scopeTimer = null;
+    this.statsTimer = null;
 
     this.attachShadow({ mode: 'open' });
-    this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="root"></div>`;
+    // A constructed stylesheet is not inline style, so a nonce CSP without 'unsafe-inline' applies it.
+    if ('adoptedStyleSheets' in this.shadowRoot) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(STYLES);
+      this.shadowRoot.adoptedStyleSheets = [sheet];
+      this.shadowRoot.innerHTML = `<div class="root"></div>`;
+    } else {
+      this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="root"></div>`;
+    }
     this.root = this.shadowRoot.querySelector('.root');
 
     this.render();
     this.connectStream();
     this.listenDatastar();
     this.listenErrors();
+
+    // A page in the back/forward cache keeps its connections open, and over HTTP/1.1 a browser
+    // opens only six per host: close the stream while the page is hidden.
+    this.onPageHide = () => { this.es?.close(); this.es = null; };
+    this.onPageShow = (e) => { if (e.persisted && !this.es) this.connectStream(); };
+    window.addEventListener('pagehide', this.onPageHide);
+    window.addEventListener('pageshow', this.onPageShow);
   }
 
   disconnectedCallback() {
+    window.removeEventListener('pagehide', this.onPageHide);
+    window.removeEventListener('pageshow', this.onPageShow);
     this.es?.close();
     if (this.scopeTimer) clearInterval(this.scopeTimer);
+    this.stopStats();
   }
 
   // ── data sources ──────────────────────────────────────────────────────────
@@ -268,6 +298,26 @@ class ViaDevBar extends HTMLElement {
     if (!this.scopeTimer) this.scopeTimer = setInterval(load, 2000);
   }
 
+  // Polled only while the Stats tab is open: each answer comes from one worker.
+  startStats() {
+    if (this.statsTimer) return;
+    const load = async () => {
+      try {
+        const r = await fetch(this.base + '_via/stats', { headers: { Accept: 'application/json' } });
+        if (!r.ok) return;
+        this.stats = await r.json();
+        if (this.expanded && this.activeTab === 'stats') this.renderBody();
+      } catch (_) { /* ignore */ }
+    };
+    load();
+    this.statsTimer = setInterval(load, 2000);
+  }
+
+  stopStats() {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
+  }
+
   // ── rendering ───────────────────────────────────────────────────────────────
 
   render() {
@@ -279,6 +329,7 @@ class ViaDevBar extends HTMLElement {
       ['sse', 'SSE', this.sseEvents.length],
       ['request', 'Request', null],
       ['scopes', 'Scopes', null],
+      ['stats', 'Stats', null],
       ['logs', 'Logs', this.errorCount() || null],
     ];
     const cls = this.mode === 'page' ? 'page' : 'overlay';
@@ -325,6 +376,8 @@ class ViaDevBar extends HTMLElement {
 
   toggle(on) {
     this.expanded = on;
+    if (on && this.activeTab === 'stats') this.startStats();
+    if (!on) this.stopStats();
     this.render();
   }
 
@@ -335,12 +388,13 @@ class ViaDevBar extends HTMLElement {
     this.traces = [];
     this.sseEvents = [];
     this.render();
-    fetch(this.base + '_via/reset', { method: 'POST' }).catch(() => {});
+    if (this.devMode) fetch(this.base + '_via/reset', { method: 'POST' }).catch(() => {});
   }
 
   selectTab(id) {
     this.activeTab = id;
     if (id === 'scopes' && !this.scopeTimer) this.pollScopes();
+    if (id === 'stats') this.startStats(); else this.stopStats();
     this.render();
   }
 
@@ -353,8 +407,15 @@ class ViaDevBar extends HTMLElement {
       sse: () => this.renderSse(),
       request: () => this.renderRequest(),
       scopes: () => this.renderScopes(),
+      stats: () => this.renderStats(),
       logs: () => this.renderLogs(),
     }[this.activeTab] || (() => ''))();
+    // Set through the CSSOM, which a CSP without 'unsafe-inline' allows where a style attribute is refused.
+    body.querySelectorAll('.span-bar').forEach((bar) => {
+      bar.style.left = `${bar.dataset.left}%`;
+      bar.style.width = `${bar.dataset.width}%`;
+      bar.style.background = bar.dataset.color;
+    });
 
     if (this.activeTab === 'signals' && this.writes) {
       body.querySelectorAll('input[data-signal]').forEach((inp) =>
@@ -382,7 +443,7 @@ class ViaDevBar extends HTMLElement {
             <div class="span-row">
               <span class="span-name" title="${esc(s.name)}">${esc(s.name)}</span>
               <span class="span-track">
-                <span class="span-bar" style="left:${left}%;width:${width}%;background:${color}"></span>
+                <span class="span-bar" data-left="${left}" data-width="${width}" data-color="${color}"></span>
               </span>
               <span class="span-ms">${fmtMs(s.durationMs)}</span>
             </div>
@@ -410,7 +471,7 @@ class ViaDevBar extends HTMLElement {
     if (!this.signals.length) return `<div class="empty">No named signals on this context.</div>`;
     const note = this.writes
       ? `<div class="note">Editing enabled: values write back to the server.</div>`
-      : `<div class="note">Read-only. Enable Config::withTracingWrites() in devMode to edit.</div>`;
+      : `<div class="note">Read-only. Enable Config::withDevBarOptions(writes: true) in dev mode to edit.</div>`;
     const rows = this.signals.map((s) => {
       const editable = this.writes && s.clientWritable;
       const val = editable
@@ -465,7 +526,7 @@ class ViaDevBar extends HTMLElement {
       ['route', this.route],
       ['context', this.contextId],
       ...Object.entries(attrs),
-      ['last duration', lastReq ? fmtMs(lastReq.totalDurationMs) : '—'],
+      ['last duration', lastReq ? fmtMs(lastReq.totalDurationMs) : '-'],
     ];
     return `<table class="kv"><tbody>${rows.map(([k, v]) =>
       `<tr><td class="k">${esc(k)}</td><td>${esc(fmtVal(v))}</td></tr>`).join('')}</tbody></table>`;
@@ -475,6 +536,7 @@ class ViaDevBar extends HTMLElement {
     if (!this.scopes) return `<div class="empty">Loading scope snapshot…</div>`;
     const sc = this.scopes;
     const summary = `<table class="kv"><tbody>
+      <tr class="group"><td colspan="2">worker ${esc(sc.worker ?? '?')}<span class="note">the worker that answered</span></td></tr>
       <tr><td class="k">contexts</td><td>${sc.totalContexts}</td></tr>
       <tr><td class="k">active SSE</td><td>${sc.activeSse}</td></tr>
       <tr><td class="k">clients</td><td>${sc.clients}</td></tr>
@@ -483,6 +545,51 @@ class ViaDevBar extends HTMLElement {
     const rows = sc.scopes.map((s) =>
       `<tr><td class="k">${esc(s.scope)}</td><td>${s.contextCount} ctx</td></tr>`).join('');
     return summary + `<table class="kv"><tbody>${rows}</tbody></table>`;
+  }
+
+  renderStats() {
+    if (!this.stats) return `<div class="empty">Loading stats…</div>`;
+    const s = this.stats.stats || {};
+    const rt = this.stats.runtime || {};
+    const num = (v) => (v == null ? '-' : String(v));
+    const ms = (v) => (v == null ? '-' : fmtMs(v));
+    const groups = [
+      ['server', 'every worker', [
+        ['requests', num(s.requests)],
+        ['avg_request_time', ms(s.avg_request_time)],
+        ['actions', num(s.actions)],
+        ['sse_connections', num(s.sse_connections)],
+      ]],
+      [`worker ${this.stats.worker}`, 'the worker that answered', [
+        ['active_sse', num(s.active_sse)],
+        ['active_contexts', num(s.active_contexts)],
+        ['render_count', num(s.render_count)],
+        ['avg_render_time', s.avg_render_time == null ? '-' : fmtMs(s.avg_render_time * 1000)],
+        ['gc_runs', num(s.gc_runs)],
+        ['gc_cycles_freed', num(s.gc_cycles_freed)],
+      ]],
+      ['broadcasts', 'this worker', [
+        ['tick_ms', num(this.stats.broadcast_tick_ms)],
+        ['broadcasts_scheduled', num(s.broadcasts_scheduled)],
+        ['broadcasts_coalesced', num(s.broadcasts_coalesced)],
+        ['broadcast_flushes', num(s.broadcast_flushes)],
+        ['broadcast_flush_overruns', num(s.broadcast_flush_overruns)],
+        ['broadcast_flush_last_ms', ms(s.broadcast_flush_last_ms)],
+        ['broadcast_flush_max_ms', ms(s.broadcast_flush_max_ms)],
+        ['broadcast_flush_total_ms', ms(s.broadcast_flush_total_ms)],
+      ]],
+      ['runtime', 'this worker', [
+        ['hook_flags', `${num(rt.hook_flags)} ${(this.stats.hook_flag_names || []).join(' ')}`],
+        ['aio_worker_num', num(rt.aio_worker_num)],
+        ['aio_task_num', num(rt.aio_task_num)],
+        ['event_loop_lag_ms', ms(rt.event_loop_lag_ms)],
+        ['event_loop_lag_max_ms', ms(rt.event_loop_lag_max_ms)],
+        ['event_loop_lag_avg_ms', ms(rt.event_loop_lag_avg_ms)],
+      ]],
+    ];
+    return `<table class="kv"><tbody>${groups.map(([name, scope, rows]) =>
+      `<tr class="group"><td colspan="2">${esc(name)}<span class="note">${esc(scope)}</span></td></tr>`
+      + rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td data-stat="${esc(k)}">${esc(v)}</td></tr>`).join('')).join('')}</tbody></table>`;
   }
 
   renderLogs() {
@@ -534,7 +641,7 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function safeJSON(s, fallback) { try { return JSON.parse(s); } catch (_) { return fallback; } }
-function fmtMs(ms) { if (ms == null) return '—'; return ms >= 100 ? ms.toFixed(0) + 'ms' : ms.toFixed(2) + 'ms'; }
+function fmtMs(ms) { if (ms == null) return '-'; return ms >= 100 ? ms.toFixed(0) + 'ms' : ms.toFixed(2) + 'ms'; }
 function fmtVal(v) {
   if (v === null || v === undefined) return String(v);
   if (typeof v === 'object') return JSON.stringify(v);

@@ -4,40 +4,60 @@
 <article>
     <h1>Views</h1>
     <p>
-        A view is the HTML a context renders for its client. php-via re-renders and patches it automatically
-        whenever signals change, no manual DOM manipulation required.
+        A view is the HTML a context renders for its tab. php-via renders it for the page load, again on every
+        SSE connect, and whenever the tab syncs or a broadcast reaches it. Datastar morphs the new HTML into
+        the page, so only the elements that differ change.
     </p>
 
     <h2 id="defining">Defining a view</h2>
-    <p>Call <code>$c-&gt;view()</code> once per context. It accepts either a Twig template name or a callable:</p>
+    <p>Call <code>$c-&gt;view()</code> once per context, with a callable or a template name:</p>
     {% code 'php' %}{% verbatim %}
-// Twig template: signals and actions are auto-injected; only pass non-signal data
-$c->view('counter.html.twig');
+// A closure that returns HTML needs nothing but php-via
+$c->view(fn (): string => <<<HTML
+    <div id="counter">
+        <p>Count: <span data-text="{$count->ref()}">{$count->int()}</span></p>
+        <button data-on:click="@post('{$increment->url()}')">+1</button>
+    </div>
+    HTML);
 
-// With extra data (e.g. PHP arrays, scalars that aren't signals):
+// A template gets the context's signals and actions by name: pass only the rest
+$c->view('counter.html.twig');
 $c->view('todo.html.twig', ['todos' => $todos]);
 
-// Callable (inline)
-$c->view(function () use ($count, $increment): string {
-    return "<p>Count: {$count->int()}</p>"
-         . "<button data-on:click=\"@post('{$increment->url()}')\">&gt;+1</button>";
-});
+// A callable as data runs on every render
+$c->view('todo.html.twig', fn (): array => ['todos' => $repository->all()]);
 {% endverbatim %}{% endcode %}
+    <p>
+        The signature is <code>view($view, $data = [], ?string $block = null, bool $shareRender = false)</code>.
+        <code>$data</code> and <code>block:</code> go with a template name: a callable view with either throws,
+        and so does a string of HTML in place of a template name.
+    </p>
+    <p>
+        A template view needs a template engine. <code>Config::withTemplateDir()</code> sets up Twig, after
+        <code>composer require twig/twig</code>, and <code>Config::withTemplateEngine()</code> takes any
+        <code>Rendering\TemplateEngine</code>. Without one, <code>view('page.html.twig')</code> throws and names
+        the command. See <a href="/docs/twig">Twig templates</a>.
+    </p>
+    <p>
+        An update of the page finds its place by id, so give the view's top-level element an id, as
+        <code>counter</code> above. Without one, Datastar drops the update and logs
+        <code>PatchElementsNoTargetsFound</code> in the browser console, and dev mode logs a warning once per
+        route. A component needs none: php-via wraps it in an element with an id of its own.
+    </p>
 
     <h2 id="partial-updates">Partial updates with <code>block:</code></h2>
     <p>
-        By default, every SSE update re-renders the <em>entire</em> Twig template and sends it to
-        the browser. When your template uses Twig blocks, you can tell php-via to send only a named
-        block on updates, keeping the initial page load complete while making SSE patches smaller
-        and faster:
+        By default, every SSE update re-renders the <em>entire</em> template and sends it to the browser. When
+        your template uses Twig blocks, you can tell php-via to send only a named block on updates, keeping the
+        initial page load complete while making SSE patches smaller and faster:
     </p>
     {% code 'php' %}{% verbatim %}
 // On initial load: renders the full template (layout, nav, content)
 // On SSE updates:  renders only {% block demo %}
 // addTodo (action) is auto-injected; only pass non-signal data explicitly
-$c->view(fn () => $c->render('todo.html.twig', [
+$c->view('todo.html.twig', fn (): array => [
     'todos' => self::$todos,
-]), block: 'demo', cacheUpdates: false);
+], block: 'demo');
 {% endverbatim %}{% endcode %}
     {% code 'twig' %}{% verbatim %}
 {# todo.html.twig #}
@@ -59,13 +79,13 @@ $c->view(fn () => $c->render('todo.html.twig', [
 {% endblock %}
 {% endverbatim %}{% endcode %}
 
-    <p>The <code>block:</code> parameter works with both string and callable views:</p>
+    <p>Pass the data as an array, or as a callable that builds it on every render:</p>
     {% code 'php' %}{% verbatim %}
-// String view: block auto-applied on updates
+// Data fixed when the view is defined
 $c->view('todo.html.twig', ['todos' => $todos], block: 'demo');
 
-// Callable view: same behavior, block auto-applied when $c->render() is called
-$c->view(fn () => $c->render('todo.html.twig', ['todos' => $todos]), block: 'demo');
+// Data read again on every render
+$c->view('todo.html.twig', fn (): array => ['todos' => self::$todos], block: 'demo');
 {% endverbatim %}{% endcode %}
 
     <h3>When to use <code>block:</code></h3>
@@ -75,11 +95,11 @@ $c->view(fn () => $c->render('todo.html.twig', ['todos' => $todos]), block: 'dem
         <li><strong>Give block content a root element with a unique <code>id</code></strong>:
             Datastar uses the root element's <code>id</code> to find the morph target in the DOM.
             Any unique ID works (e.g. <code>todo-list</code>, <code>game-grid</code>).</li>
-        <li><strong>Don't need it</strong> for signal-only updates (<code>syncSignals()</code>): no
-            HTML is re-rendered at all.</li>
+        <li><strong>Don't need it</strong> when only signals change: they reach the page without a render.</li>
         <li><strong>Don't need it</strong> for <a href="/docs/components">components</a>: each
             component already patches only its own <code>&lt;div&gt;</code>.</li>
     </ul>
+    <p>Twig renders single blocks. With a template engine that cannot, <code>block:</code> throws.</p>
 
     <details>
         <summary>Advanced: the <code>$isUpdate</code> parameter</summary>
@@ -101,66 +121,179 @@ $c->view(function (bool $isUpdate) use ($c, $data): string {
 });
 {% endverbatim %}{% endcode %}
         <p>
-            On a page with <a href="/docs/components">components</a>, give each component a name
-            (<code>$c->component($fn, 'cart')</code>). A named component gets the same id every time its page
-            is built, so a revived tab's component updates find the elements the browser still has, even when
-            the page returns <code>''</code> on updates. An unnamed component gets a new id on revival, and only
-            a page frame that renders it again can put that id into the page.
+            On a page with <a href="/docs/components">components</a>, each component has a namespace
+            (<code>$c->component($fn, 'cart')</code>), so it gets the same id every time its page is built. A
+            revived tab's component updates then find the elements the browser still has, even when the page
+            returns <code>''</code> on updates.
         </p>
     </details>
 
-    <h2 id="update-cycle">How updates work</h2>
-    <p>When a signal changes inside an action:</p>
-    <ol>
-        <li><code>$c-&gt;sync()</code> is called (either explicitly or via auto-broadcast on scoped signals)</li>
-        <li>php-via re-renders the view callable/template with fresh values</li>
-        <li>The new HTML is diffed against the previous render and patched to the browser via SSE</li>
-        <li>Datastar morphs only the changed DOM nodes, no full page reload</li>
-    </ol>
-
-    <h2 id="sync-vs-sync-signals">sync() vs syncSignals()</h2>
+    <h2 id="update-cycle">When a view renders</h2>
+    <p>A view renders again, and its HTML goes to the tab, when:</p>
+    <ul>
+        <li>code of the tab calls <code>$c-&gt;sync()</code>,</li>
+        <li>a broadcast reaches the tab: <code>$app-&gt;broadcast()</code>, <code>$c-&gt;broadcast()</code>, or a
+            write to a scoped signal of a scope the tab is in,</li>
+        <li>the tab's SSE stream connects, the first time and on every reconnect.</li>
+    </ul>
     <p>
-        <code>$c-&gt;sync()</code> re-renders the view <em>and</em> pushes signal values.
-        If only signal values changed (no structural HTML change), use <code>$c-&gt;syncSignals()</code>. It skips
-        view re-rendering and is faster:
+        The signals an action changes go to the tab without a render. Each render reads the state as it is
+        then, and Datastar compares the new HTML with the page and morphs only the nodes that differ.
+    </p>
+
+    <h3 id="preserve-attr">Attributes the browser sets</h3>
+    <p>
+        A morph sets each element's attributes to those of the server's markup, and every stream connect,
+        the first and each <a href="/docs/lifecycle#reconnect">reconnect</a>, renders the view again. So an
+        attribute the browser set by itself goes: the <code>open</code> that <code>showModal()</code> puts on
+        a <code>&lt;dialog&gt;</code> closes the dialog at the next update. List such attributes in
+        <code>data-preserve-attr</code>, and Datastar leaves them as the browser has them:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<dialog id="confirm" data-preserve-attr="open">
+    <p>Delete {{ count }} rows?</p>
+    <button data-on:click="@post('{{ delete_url }}')">Delete</button>
+</dialog>
+<button data-on:click="document.getElementById('confirm').showModal()">Delete rows</button>
+    {% endverbatim %}{% endcode %}
+    <p>
+        The dialog stays open and modal across updates and reconnects, and its content still updates. The
+        attribute takes several names separated by spaces, and it belongs in the markup the server renders:
+        Datastar reads it from the new HTML. <code>data-ignore-morph</code> instead keeps the whole element,
+        content included, as it is.
+    </p>
+
+    <h2 id="sync-vs-sync-signals">sync() and syncSignals()</h2>
+    <p>
+        <code>$c-&gt;sync()</code> renders the view <em>and</em> sends the changed signals.
+        <code>$c-&gt;syncSignals()</code> sends only the signals: the TAB signals that changed and the values of
+        the tab's scoped signals. An action's changed TAB signals go out by themselves when it returns, so
+        <code>syncSignals()</code> is for code where no action runs, such as a timer or a <code>spawn()</code>
+        task:
     </p>
     {% code 'php' %}{% verbatim %}
-// Only a signal label changed: no need to re-render the whole view
-$c->action(function (Context $c) use ($status): void {
-    $status->setValue('Saved!');
+// Only a value changes: no need to render the view
+$c->setInterval(function () use ($c, $clock): void {
+    $clock->setValue(date('H:i:s'));
     $c->syncSignals();
-}, 'save');
+}, 1000);
     {% endverbatim %}{% endcode %}
 
-    <h2 id="caching">View caching</h2>
+    <h2 id="caching">Sharing one render</h2>
     <p>
-        Update renders are cached per scope: when a broadcast reaches a scope, the first context renders its
-        view and every other context in the scope receives the same HTML. A broadcast drops the cached update
-        of every context it reaches, whether through its primary scope, another scope, a wildcard or
-        <code>Scope::GLOBAL</code>, so a view that reads state outside signals, such as
-        <code>$app->getClients()</code>, is current after each broadcast.
+        Each tab renders its own update. A view that is the same for every tab in its scope can pass
+        <code>shareRender: true</code>: when a broadcast reaches the scope, the first context renders the view,
+        and every other context with the same primary scope, route and component receives the same HTML. The
+        primary scope is the one <code>scope()</code> set. On a context whose primary scope is TAB,
+        <code>shareRender: true</code> throws when the view renders, and a full-document view never shares
+        its render.
     </p>
     <p>
-        Turn caching off with <code>cacheUpdates: false</code> when the view differs per client (it reads TAB
-        signals, the session or a cookie), or when contexts with different views share the scope. The cache is
-        keyed by the scope alone, so they would receive each other's HTML:
+        Only views without anything per tab can share: no TAB signal ids, no visitor's name and no components,
+        whose wrapper ids are unique to their tab. A broadcast drops the shared render of every context it
+        reaches, so a view that reads state outside signals, such as <code>$app-&gt;getClients()</code>, is
+        current after each broadcast.
     </p>
     {% code 'php' %}{% verbatim %}
-// Every tab in this scope shows its own cart, so each one renders for itself
-$c->view(fn (): string => $twig->render('cart.html.twig', [
-    'items' => $cart->forSession($c->getSessionId()),
-]), cacheUpdates: false);
+// Every tab on this route shows the same board, so it renders once per broadcast
+$c->scope(Scope::ROUTE);
+$c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], block: 'board', shareRender: true);
 {% endverbatim %}{% endcode %}
+
+    <h2 id="full-documents">Views that render the whole document</h2>
+    <p>
+        A view that returns a whole document, from <code>&lt;!DOCTYPE html&gt;</code> to
+        <code>&lt;/html&gt;</code>, takes the shell's place. It writes the tags that connect the page itself:
+        <code>via_head</code> right after <code>&lt;meta charset&gt;</code>, and <code>via_foot</code> before
+        <code>&lt;/body&gt;</code>. A closure writes them with <code>$c-&gt;viaHead()</code> and
+        <code>$c-&gt;viaFoot()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->view(fn (): string => <<<HTML
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        {$c->viaHead()}
+        <title>Counter</title>
+    </head>
+    <body>
+        <main id="counter">
+            <span data-text="{$count->ref()}">{$count->int()}</span>
+            <button data-on:click="@post('{$increment->url()}')">+1</button>
+        </main>
+        {$c->viaFoot()}
+    </body>
+    </html>
+    HTML);
+{% endverbatim %}{% endcode %}
+    <p>
+        A Twig layout writes {% verbatim %}<code>{{ via_head() }}</code>{% endverbatim %} and
+        {% verbatim %}<code>{{ via_foot() }}</code>{% endverbatim %}, and a custom shell
+        {% verbatim %}<code>{{ via_head }}</code>{% endverbatim %} and
+        {% verbatim %}<code>{{ via_foot }}</code>{% endverbatim %}. <code>via_head</code> writes the tab's id,
+        the SSE connect with its reconnect, the beacon that closes the context when the tab goes and, with
+        <code>withDatastarRocket()</code> or <code>withImportMap()</code> entries, the import map.
+        <code>via_foot</code> loads Datastar from <code>Config::getDatastarUrl()</code>. php-via logs a warning
+        once per shell or route that has no <code>via_head</code>, or loads a second Datastar next to it. See
+        <a href="/docs/web-components#own-shell">Web components</a> for custom shells.
+    </p>
+    <p>
+        Under a <code>Content-Security-Policy</code> with a nonce, have a middleware set the nonce as the
+        <code>via.csp_nonce</code> request attribute. Every tag <code>via_head</code> and <code>via_foot</code>
+        write carries it, and so do the Dev Bar's:
+    </p>
+    {% code 'php' %}{% verbatim %}
+final class CspNonce implements MiddlewareInterface {
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        return $handler->handle($request->withAttribute('via.csp_nonce', base64_encode(random_bytes(16))));
+    }
+}
+
+$app->middleware(new CspNonce());
+{% endverbatim %}{% endcode %}
+    <p>
+        The middleware sends the policy as a header on the response it gets back from
+        <code>$handler-&gt;handle()</code>, or the layout carries it in a <code>&lt;meta http-equiv&gt;</code>
+        tag. Datastar takes the nonce from <code>data-nonce</code> on <code>&lt;html&gt;</code>, which the default
+        shell writes, a custom shell with {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %} and a
+        Twig layout with {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
+        <a href="/docs/deployment#csp">Content Security Policy</a> shows the layout.
+    </p>
+
+    <h2 id="patch-elements">Patching HTML outside the view</h2>
+    <p>
+        <code>$c-&gt;patchElements($html, $selector, $mode)</code> sends HTML to the page without rendering the
+        view, for a modal, a toast or chunks of streamed output. The mode is a <code>PatchMode</code> case, one
+        per Datastar mode. <code>Outer</code>, the default, and <code>Replace</code> find their target by the id
+        of the HTML's top-level element. <code>Inner</code>, <code>Prepend</code>, <code>Append</code>,
+        <code>Before</code>, <code>After</code> and <code>Remove</code> need a selector, and <code>Remove</code>
+        needs no HTML:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\PatchMode;
+
+$c->patchElements('<li>' . htmlspecialchars($line) . '</li>', '#log', PatchMode::Append);
+$c->patchElements('<div id="toast">Saved</div>');              // Outer, by id
+$c->patchElements(selector: '#toast', mode: PatchMode::Remove);
+{% endverbatim %}{% endcode %}
+    <p>
+        Patches wait for the tab's stream like <code>sync()</code>, and none is dropped: a client that falls
+        behind gets them all. A component's patches go to its page. The next render of the view morphs the
+        view's own elements back to its HTML, so patch elements outside the view, or keep what you add in the
+        state the view renders.
+    </p>
 
     <h2 id="components">Views in components</h2>
     <p>
-        Each <a href="/docs/components">component</a> defines its own view. Component views update independently
-        from the parent context: only the signals owned by that component need to change for it to re-render.
+        Each <a href="/docs/components">component</a> defines its own view. A component's update patches only
+        its own wrapper element, and a sync of the page renders a component again only when the page view
+        embeds it or its signals changed:
     </p>
     {% code 'php' %}{% verbatim %}
 $counter = $c->component(function (Context $c): void {
     $n   = $c->signal(0, 'n');
-    $inc = $c->action(fn() => $n->setValue($n->int() + 1) & $c->sync(), 'inc');
+    $inc = $c->action(fn () => $n->increment(), 'inc');
     // n and inc are auto-injected into counter.html.twig
     $c->view('counter.html.twig');
 }, 'counter');
@@ -168,18 +301,22 @@ $counter = $c->component(function (Context $c): void {
 $c->view(fn (): string => $c->render('page.html.twig', ['counter' => $counter()]));
 {% endverbatim %}{% endcode %}
 
-    <h2 id="exec-script">Executing scripts on update</h2>
+    <h2 id="exec-script">Events and scripts</h2>
     <p>
-        To run JavaScript as part of an update (e.g. open a modal or trigger an animation),
-        use <code>$c-&gt;execScript()</code> inside an action:
+        <code>$c-&gt;dispatch()</code> fires a <code>CustomEvent</code> on <code>window</code>, with a detail
+        php-via JSON-encodes, so no value breaks out of the script. For anything else, such as starting an
+        animation, <code>$c-&gt;execScript()</code> runs a script you write:
     </p>
     {% code 'php' %}{% verbatim %}
 $c->action(function (Context $c) use ($msg): void {
     $msg->setValue('Saved!');
-    $c->execScript('document.querySelector(".toast").classList.add("visible")');
-    $c->sync();
+    $c->dispatch('toast', ['text' => 'Saved!']);
+    $c->execScript('document.querySelector(".card").animate([{opacity: 0.5}, {opacity: 1}], 300)');
 }, 'save');
 {% endverbatim %}{% endcode %}
+    {% code 'html' %}{% verbatim %}
+<div id="toast" data-on:toast__window="el.textContent = evt.detail.text"></div>
+    {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>

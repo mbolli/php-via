@@ -73,3 +73,28 @@ test('everyWorker: true opts back in to one timer per worker', function (): void
     expect($r['pids'])->toBe(4, 'the opt-in must arm every worker');
     expect($r['fires'])->toBeGreaterThan($r['expected'], 'N workers must produce roughly N times the firings');
 });
+
+test('onWorkerStart() and onWorkerStop() run in every worker and pass its id', function (): void {
+    $fixture = dirname(__DIR__) . '/Fixtures/server_interval_workers.php';
+    $tally = tempnam(sys_get_temp_dir(), 'via_interval_');
+    $hookLog = tempnam(sys_get_temp_dir(), 'via_worker_hooks_');
+
+    try {
+        @unlink($hookLog);
+        shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($fixture) . ' 3 100 600 '
+            . escapeshellarg($tally) . ' 0 ' . escapeshellarg($hookLog) . ' > /dev/null 2>&1');
+        $lines = array_filter(explode("\n", (string) @file_get_contents($hookLog)));
+    } finally {
+        @unlink($tally);
+        @unlink($hookLog);
+    }
+
+    $starts = array_values(array_filter($lines, static fn (string $l): bool => str_starts_with($l, 'start ')));
+    $stops = array_values(array_filter($lines, static fn (string $l): bool => str_starts_with($l, 'stop ')));
+    sort($starts);
+    sort($stops);
+
+    expect($starts)->toBe(['start 0 0', 'start 1 1', 'start 2 2'])
+        ->and($stops)->toBe(['stop 0 0', 'stop 1 1', 'stop 2 2'])
+    ;
+});

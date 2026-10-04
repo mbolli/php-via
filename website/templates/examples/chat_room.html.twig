@@ -51,17 +51,17 @@
             </div>
 
             <div class="chat-typing"
-                 data-text="${{ typingIndicatorId }}.user && ${{ typingIndicatorId }}.user !== '{{ username }}' ? ${{ typingIndicatorId }}.user + ' is typing...' : ''"></div>
+                 data-text="{{ typingIndicator.ref }}.user && {{ typingIndicator.ref }}.user !== '{{ username }}' ? {{ typingIndicator.ref }}.user + ' is typing...' : ''"></div>
 
             <div class="chat-input-row">
                 <input type="text"
                        placeholder="Type a message..."
-                       data-bind="{{ messageInputId }}"
-                       data-on:keyup__throttle.500ms="evt.key != 'Enter' && @post('{{ updateTypingUrl }}')"
-                       data-on:keydown="evt.key === 'Enter' && @post('{{ sendMessageUrl }}')"
+                       {{ bind(messageInput) }}
+                       data-on:keyup__throttle.500ms="evt.key != 'Enter' && @post('{{ updateTyping.url }}')"
+                       data-on:keydown="evt.key === 'Enter' && @post('{{ sendMessage.url }}')"
                        autofocus
                        class="flex-1">
-                <button class="secondary" data-on:click="@post('{{ sendMessageUrl }}')">Send</button>
+                <button class="secondary" data-on:click="@post('{{ sendMessage.url }}')">Send</button>
             </div>
         </div>
 

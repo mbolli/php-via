@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\PatchMode;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
+use Mbolli\PhpVia\Support\DomId;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
+use starfederation\datastar\enums\ElementPatchMode;
 
 /**
  * PatchManager - Manages patch queue and signal syncing.
@@ -21,7 +24,7 @@ use OpenSwoole\Coroutine\Channel;
  * - Script execution
  * - Signal nesting/flattening
  *
- * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, confirm?: callable(): void}
+ * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, mode?: PatchMode|ElementPatchMode, confirm?: callable(): void}
  */
 class PatchManager {
     private const int CHANNEL_CAPACITY = 50;
@@ -36,22 +39,49 @@ class PatchManager {
     private array|Channel|null $patchChannel = null;
     private bool $useArray = false;
 
+    /** Via::serveInProcess() runs the app: the array queue behaves as a Channel whose consumer parks in a Fiber. */
+    private bool $inProcess = false;
+
+    /**
+     * In process: the SSE loop's fiber, parked in getPatch() on an empty queue.
+     *
+     * @var null|\Fiber<mixed, mixed, mixed, mixed>
+     */
+    private ?\Fiber $parked = null;
+
+    /** In process: closePatchChannel() ran and recreatePatchChannel() has not since, as with a closed Channel. */
+    private bool $closed = false;
+
     /** Blocking-pop timeout in seconds: the keep-alive interval, which bounds how long an idle SSE loop parks. */
     private float $pollTimeout = 15.0;
 
     /** Whether the last getPatch() found the channel closed rather than merely idle. */
     private bool $channelClosed = false;
 
+    /**
+     * Per action coroutine: the TAB signals a sync queued during the action, with their write count then.
+     *
+     * @var array<int, \WeakMap<Signal, int>>
+     */
+    private array $queuedInAction = [];
+
+    private string $contextId;
+
+    /**
+     * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
+     */
     public function __construct(
-        private Context $context,
+        private \WeakReference $context,
         private Via $app,
         private SignalFactory $signalFactory,
         private ComponentManager $componentManager,
     ) {
+        $this->contextId = $context->get()?->getId() ?? '';
         // In test mode (no OpenSwoole server running), use array instead of Channel
-        $inTestMode = getenv('VIA_TEST_MODE') === '1';
+        $this->inProcess = $app->isInProcess();
+        $inTestMode = $this->inProcess || getenv('VIA_TEST_MODE') === '1';
 
-        $keepAliveMs = $app->getConfig()->getSseKeepAliveMs();
+        $keepAliveMs = $app->getSettings()->sseKeepAliveMs;
         $this->pollTimeout = ($keepAliveMs > 0 ? $keepAliveMs : self::IDLE_BACKSTOP_MS) / 1000;
 
         if ($inTestMode) {
@@ -83,11 +113,20 @@ class PatchManager {
         }
 
         if ($this->useArray) {
+            if ($this->closed) {
+                $this->app->log('debug', "Patch rejected (channel closed) for context {$this->contextId}");
+
+                return;
+            }
+
             // Array-based queue for tests
             if (\count($this->patchChannel) >= self::CHANNEL_CAPACITY) {
                 $this->patchChannel = $this->evictOne($this->patchChannel);
             }
             $this->patchChannel[] = $patch;
+            if ($this->parked !== null) {
+                $this->resumeParked();
+            }
         } else {
             // OpenSwoole Channel for production
             $channel = $this->getPatchChannel();
@@ -106,7 +145,7 @@ class PatchManager {
                 // dropped with no signal to the caller at all.
                 $this->app->log(
                     'debug',
-                    "Patch rejected (channel closed) for context {$this->context->getId()}"
+                    "Patch rejected (channel closed) for context {$this->contextId}"
                 );
             }
         }
@@ -136,8 +175,16 @@ class PatchManager {
         $this->channelClosed = false;
 
         if ($this->useArray) {
+            $fiber = $this->inProcess && $this->patchChannel === [] && !$this->closed ? \Fiber::getCurrent() : null;
+            if ($fiber !== null) {
+                $this->parked = $fiber;
+                \Fiber::suspend();
+            }
+
             // Array-based queue for tests
             if (empty($this->patchChannel)) {
+                $this->channelClosed = $this->closed;
+
                 return null;
             }
 
@@ -162,7 +209,12 @@ class PatchManager {
      * The channel stays open, so patches queued afterwards still carry over to the next stream.
      */
     public function wakeConsumers(): void {
-        if ($this->useArray || !$this->patchChannel instanceof Channel || Coroutine::getCid() <= 0) {
+        if ($this->useArray) {
+            $this->resumeParked();
+
+            return;
+        }
+        if (!$this->patchChannel instanceof Channel || Coroutine::getCid() <= 0) {
             return;
         }
 
@@ -210,31 +262,37 @@ class PatchManager {
      * Sync current view and signals to the browser.
      */
     public function sync(): void {
-        if ($this->isHeldForSeed()) {
+        $context = $this->context();
+        $page = $this->componentManager->getParentPageContext() ?? $context;
+        if ($this->isHeldForSeed($page)) {
             return;
         }
 
         // Skip sync if view is not defined (e.g., during broadcast before client connects)
-        if (!$this->context->hasView()) {
+        if (!$context->hasView()) {
             // Still sync signals even without a view
-            $this->app->log('debug', "Context {$this->context->getId()} has no view, syncing signals only");
-            $this->syncSignals();
+            $this->app->log('debug', "Context {$this->contextId} has no view, syncing signals only");
+            $this->syncSignalsOf($context);
 
             return;
         }
 
         $isPage = !$this->componentManager->isComponent();
-        $render = fn (): string => $this->context->renderView(isUpdate: true);
-        [$viewHtml, $renderedWithPage] = $isPage ? $this->componentManager->renderCollecting($render) : [$render(), []];
+        // Only a page with components has to know which of them its view rendered.
+        if ($isPage && $this->componentManager->getComponents() !== []) {
+            [$viewHtml, $renderedWithPage] = $this->componentManager->renderCollecting(static fn (): string => $context->renderView(isUpdate: true));
+        } else {
+            $viewHtml = $context->renderView(isUpdate: true);
+            $renderedWithPage = [];
+        }
 
         // A full document morphs <head> too: re-add the includes and the Dev Bar.
-        $viewHtml = $this->app->decorateUpdate($viewHtml, $this->context);
+        $viewHtml = $this->app->decorateUpdate($viewHtml, $context);
         $pageFrame = null;
 
         if (!empty(trim($viewHtml))) {
             if (!$isPage) {
-                // Create valid CSS ID by replacing slashes and prefixing with 'c-'
-                $cssId = 'c-' . str_replace(['/', '_'], '-', $this->context->getId());
+                $cssId = DomId::component($this->contextId);
                 $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
                 $this->queuePatch([
                     'type' => 'elements',
@@ -252,7 +310,9 @@ class PatchManager {
         }
 
         // Sync signals
-        $this->syncSignals();
+        if (!$this->isHeldForSeed($page)) {
+            $this->syncSignalsOf($context);
+        }
 
         // For page (non-component) contexts, also sync all registered component sub-contexts.
         // Component patches are automatically forwarded to this page's channel via queuePatch().
@@ -265,9 +325,9 @@ class PatchManager {
                     continue;
                 }
 
-                // Skip components with no dirty signals whose view is a pure function
-                // of those signals (cacheUpdates=true). Components with cacheUpdates=false
-                // may read external state (e.g. globalState), so always sync them.
+                // Skip components with no dirty signals: their view is taken to be a pure
+                // function of those signals. One that reads other state syncs itself
+                // (sync() on its own context) or is reached by a broadcast of its scope.
                 //
                 // A component that declares NO signals must never be skipped: an empty
                 // set makes hasChangedSignals() permanently false, so the component would
@@ -275,9 +335,7 @@ class PatchManager {
                 // would freeze on its first-render value. No signals means we cannot prove
                 // the view is a pure function of signals, so fall back to syncing.
                 $componentSignals = $component->getSignalFactory();
-                if ($component->shouldCacheUpdates()
-                    && $componentSignals->hasSignals()
-                    && !$componentSignals->hasChangedSignals()) {
+                if ($componentSignals->hasSignals() && !$componentSignals->hasChangedSignals()) {
                     continue;
                 }
                 $component->sync();
@@ -289,37 +347,56 @@ class PatchManager {
      * Sync only signals to the browser.
      */
     public function syncSignals(): void {
-        if ($this->isHeldForSeed()) {
+        $context = $this->context();
+        if ($this->isHeldForSeed($this->componentManager->getParentPageContext() ?? $context)) {
             return;
         }
 
-        /** @var list<Signal> $pending */
-        $pending = [];
-        $updatedSignals = $this->prepareSignalsForPatch($pending);
+        $this->syncSignalsOf($context);
+    }
 
-        if (!empty($updatedSignals)) {
-            // Acknowledgement is deferred to delivery. Marking these synced here,
-            // at queue time, meant that any patch destroyed before transmission
-            // (evicted when the queue filled, or discarded wholesale by
-            // recreatePatchChannel() on an SSE reconnect) was never resent, leaving
-            // the client permanently stale on a delta it never received.
-            //
-            // Because the confirm callback only runs after a successful write, a
-            // patch that dies in the queue leaves its signals dirty and the next
-            // syncSignals() re-includes them. Loss becomes self-healing.
-            $this->queuePatch([
-                'type' => 'signals',
-                'content' => $updatedSignals,
-                'confirm' => static function () use ($pending): void {
-                    foreach ($pending as $signal) {
-                        $signal->markSynced();
-                    }
-                },
-            ]);
+    /**
+     * Start tracking which TAB signals the action running in this coroutine syncs itself.
+     *
+     * @internal called by ActionHandler on the page context before the action runs
+     */
+    public function beginAction(): void {
+        $this->queuedInAction[Coroutine::getCid()] = new \WeakMap();
+    }
+
+    /**
+     * Send the TAB signals of this page and its components that changed and that no sync during
+     * the action already queued unchanged, so an action needs no trailing syncSignals().
+     *
+     * @internal called by ActionHandler on the page context after the action, also when it threw
+     */
+    public function syncSignalsAfterAction(): void {
+        $cid = Coroutine::getCid();
+        $queued = $this->queuedInAction[$cid] ?? null;
+        unset($this->queuedInAction[$cid]);
+
+        if ($this->isHeldForSeed($this->componentManager->getParentPageContext() ?? $this->context())) {
+            return;
         }
 
-        // Also sync scoped signals for all scopes this context belongs to
-        $this->syncScopedSignals();
+        $flat = [];
+
+        /** @var list<Signal> $pending */
+        $pending = [];
+        self::collectChangedTabSignals($this->context(), $queued, $flat, $pending);
+        if ($flat === []) {
+            return;
+        }
+
+        $this->queuePatch([
+            'type' => 'signals',
+            'content' => $this->flatToNested($flat),
+            'confirm' => static function () use ($pending): void {
+                foreach ($pending as $signal) {
+                    $signal->markSynced();
+                }
+            },
+        ]);
     }
 
     /**
@@ -354,6 +431,10 @@ class PatchManager {
     public function closePatchChannel(): void {
         if (!$this->useArray) {
             $this->patchChannel->close();
+        } elseif ($this->inProcess) {
+            // As a closed Channel: the consumer takes what is queued, then sees the close.
+            $this->closed = true;
+            $this->resumeParked();
         } else {
             $this->patchChannel = [];
         }
@@ -383,20 +464,138 @@ class PatchManager {
 
             $this->app->log(
                 'debug',
-                "Recreated patch channel for context {$this->context->getId()} (carried " . \count($carried) . ' pending)'
+                "Recreated patch channel for context {$this->contextId} (carried " . \count($carried) . ' pending)'
             );
         } else {
             // In test mode the queue is a plain array; carry it across unchanged.
             $this->patchChannel = array_values($this->patchChannel);
+            $this->closed = false;
         }
+    }
+
+    /**
+     * Take the queued patches that no render sends again (isOneShot()), for the worker a tab moved to, with their
+     * mode as its value. The other patches are dropped: the new worker's first sync sends view and signals.
+     *
+     * @return list<array{type: string, content: string, selector?: string, mode?: string}>
+     */
+    public function takeOneShotPatches(): array {
+        if ($this->useArray) {
+            /** @var list<QueuedPatch> $queued */
+            $queued = \is_array($this->patchChannel) ? $this->patchChannel : [];
+            $this->patchChannel = [];
+        } else {
+            $queued = $this->patchChannel instanceof Channel ? $this->drainChannel($this->patchChannel) : [];
+        }
+
+        $taken = [];
+        foreach ($queued as $patch) {
+            if (!self::isOneShot($patch) || !\is_string($patch['content'])) {
+                continue;
+            }
+            $one = ['type' => $patch['type'], 'content' => $patch['content']];
+            if (isset($patch['selector'])) {
+                $one['selector'] = $patch['selector'];
+            }
+            if (isset($patch['mode'])) {
+                $one['mode'] = $patch['mode']->value;
+            }
+            $taken[] = $one;
+        }
+
+        return $taken;
+    }
+
+    /**
+     * The values of this page's and its components' TAB signals that the worker a tab moved to cannot get from the
+     * browser: those not yet sent to it, and with $serverOwned also those it does not send back. They count as sent
+     * here, so a later call returns only values written since.
+     *
+     * @return array<string, mixed> by signal id
+     */
+    public function takeHandOverSignals(bool $serverOwned): array {
+        $values = [];
+        self::collectHandOverSignals($this->context(), $serverOwned, $values);
+
+        return $values;
+    }
+
+    /**
+     * Write the TAB signal values the worker that held the tab handed over that differ from this copy's, as the
+     * server's, and send them with the view; see takeHandOverSignals().
+     *
+     * @param array<string, mixed> $values by signal id
+     */
+    public function applyHandedOverSignals(array $values): void {
+        $written = false;
+        foreach (self::tabSignalsById($this->context()) as $id => $signal) {
+            if (\array_key_exists($id, $values) && $signal->getValue() !== $values[$id]) {
+                $signal->setValue($values[$id]);
+                $written = true;
+            }
+        }
+
+        if ($written) {
+            $this->sync();
+        }
+    }
+
+    /**
+     * Whether a patch has no re-send path, so that dropping it changes the page: a script, or an element
+     * patch with a mode, as Context::patchElements() queues. Its target, such as a toast or a modal, may
+     * lie outside the view, and a dropped Remove or Append is never repaired.
+     *
+     * The view frames sync() queues carry no mode, and a later sync renders their target again.
+     *
+     * @internal read by the queue's eviction and by the SSE loop's backlog drop
+     *
+     * @param QueuedPatch $patch
+     */
+    public static function isOneShot(array $patch): bool {
+        if ($patch['type'] !== 'elements') {
+            return $patch['type'] === 'script';
+        }
+
+        return isset($patch['mode']);
+    }
+
+    private function syncSignalsOf(Context $context): void {
+        /** @var list<Signal> $pending */
+        $pending = [];
+        $updatedSignals = $this->prepareSignalsForPatch($pending);
+
+        if (!empty($updatedSignals)) {
+            $this->noteQueuedInAction($pending);
+
+            // Acknowledgement is deferred to delivery. Marking these synced here,
+            // at queue time, meant that any patch destroyed before transmission
+            // (evicted when the queue filled, or discarded wholesale by
+            // recreatePatchChannel() on an SSE reconnect) was never resent, leaving
+            // the client permanently stale on a delta it never received.
+            //
+            // Because the confirm callback only runs after a successful write, a
+            // patch that dies in the queue leaves its signals dirty and the next
+            // syncSignals() re-includes them. Loss becomes self-healing.
+            $this->queuePatch([
+                'type' => 'signals',
+                'content' => $updatedSignals,
+                'confirm' => static function () use ($pending): void {
+                    foreach ($pending as $signal) {
+                        $signal->markSynced();
+                    }
+                },
+            ]);
+        }
+
+        // Also sync scoped signals for all scopes this context belongs to
+        $this->syncScopedSignals($context);
     }
 
     /**
      * Whether the page this manager feeds waits for its SSE connect to seed it. Its signals still
      * hold the defaults a revival declared, and anything queued now reaches the tab before the seed.
      */
-    private function isHeldForSeed(): bool {
-        $page = $this->componentManager->getParentPageContext() ?? $this->context;
+    private function isHeldForSeed(Context $page): bool {
         if (!$page->isAwaitingSeed()) {
             return false;
         }
@@ -404,6 +603,10 @@ class PatchManager {
         $this->app->log('debug', "Sync held until the SSE connect seeds context {$page->getId()}");
 
         return true;
+    }
+
+    private function context(): Context {
+        return $this->context->get() ?? throw new \LogicException("Patch manager of freed context {$this->contextId}");
     }
 
     /**
@@ -418,7 +621,7 @@ class PatchManager {
             }
         }
 
-        foreach ($this->context->getScopes() as $scope) {
+        foreach ($this->context()->getScopes() as $scope) {
             if ($scope === Scope::TAB) {
                 continue;
             }
@@ -437,18 +640,78 @@ class PatchManager {
     }
 
     /**
+     * The changed TAB signals of $context and, recursively, its components, minus those queued
+     * during the action at their current write count.
+     *
+     * @param null|\WeakMap<Signal, int> $queued
+     * @param array<string, mixed>       $flat
+     * @param list<Signal>               $pending
+     */
+    private static function collectChangedTabSignals(Context $context, ?\WeakMap $queued, array &$flat, array &$pending): void {
+        foreach ($context->getSignalFactory()->getTabSignals() as $id => $signal) {
+            if ($signal->hasChanged() && ($queued[$signal] ?? null) !== $signal->writeCount()) {
+                $flat[$id] = $signal->getValue();
+                $pending[] = $signal;
+            }
+        }
+
+        foreach ($context->getComponentManager()->getComponents() as $component) {
+            self::collectChangedTabSignals($component, $queued, $flat, $pending);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    private static function collectHandOverSignals(Context $context, bool $serverOwned, array &$values): void {
+        foreach (self::tabSignalsById($context) as $id => $signal) {
+            if ($signal->hasChanged() || ($serverOwned && !$signal->isClientWritable())) {
+                $values[$id] = $signal->getValue();
+                $signal->markSynced();
+            }
+        }
+    }
+
+    /**
+     * The TAB signals of $context and, recursively, its components.
+     *
+     * @return array<string, Signal>
+     */
+    private static function tabSignalsById(Context $context): array {
+        $signals = $context->getSignalFactory()->getTabSignals();
+        foreach ($context->getComponentManager()->getComponents() as $component) {
+            $signals += self::tabSignalsById($component);
+        }
+
+        return $signals;
+    }
+
+    /**
+     * Record signals a sync queued while an action of this page runs in this coroutine.
+     *
+     * @param list<Signal> $signals
+     */
+    private function noteQueuedInAction(array $signals): void {
+        $page = $this->componentManager->getParentPageContext()?->getPatchManager() ?? $this;
+        $queued = $page->queuedInAction[Coroutine::getCid()] ?? null;
+        if ($queued === null) {
+            return;
+        }
+
+        foreach ($signals as $signal) {
+            $queued[$signal] = $signal->writeCount();
+        }
+    }
+
+    /**
      * Choose and remove one victim from a full queue.
      *
-     * Drop-oldest used to be type-blind. 'elements' patches are idempotent
-     * full-fragment morphs where the latest supersedes the rest, so evicting one is
-     * harmless. 'script' patches are one-shot side effects with no re-send path: a
-     * dropped redirect is a broken login flow (LoginExample uses execScript for
-     * post-login navigation), so they are evicted only as a last resort, when the
-     * queue holds nothing else.
-     *
-     * 'signals' patches are safe to drop since acknowledgement moved to delivery
-     * (see syncSignals()): an undelivered signal stays dirty and is resent. They are
-     * still preferred over scripts, which cannot self-heal.
+     * View frames go first: a later sync renders the same target again. Signal patches are
+     * next, since an undelivered signal stays dirty and is resent (acknowledgement happens at
+     * delivery, see syncSignals()). One-shot patches (isOneShot()) have no re-send path: a
+     * dropped redirect is a broken login flow, a dropped Append chunk a gap in the output, a
+     * dropped Remove a toast that never goes. The oldest of them goes only when the queue
+     * holds nothing else.
      *
      * @param list<QueuedPatch> $patches
      *
@@ -457,11 +720,11 @@ class PatchManager {
     private function evictOne(array $patches): array {
         foreach (['elements', 'signals'] as $preferredType) {
             foreach ($patches as $i => $patch) {
-                if ($patch['type'] === $preferredType) {
+                if ($patch['type'] === $preferredType && !self::isOneShot($patch)) {
                     unset($patches[$i]);
                     $this->app->log(
                         'debug',
-                        "Evicted oldest {$preferredType} patch for context {$this->context->getId()} - queue full"
+                        "Evicted oldest {$preferredType} patch for context {$this->contextId} - queue full"
                     );
 
                     return array_values($patches);
@@ -469,11 +732,10 @@ class PatchManager {
             }
         }
 
-        // Nothing idempotent left to sacrifice: the queue is entirely scripts.
-        array_shift($patches);
+        $dropped = array_shift($patches)['type'] ?? 'none';
         $this->app->log(
             'warning',
-            "Queue full of script patches for context {$this->context->getId()} - dropped the oldest side effect"
+            "Queue full of one-shot patches for context {$this->contextId} - dropped the oldest ({$dropped})"
         );
 
         return $patches;
@@ -509,6 +771,19 @@ class PatchManager {
     }
 
     /**
+     * In process: run the parked SSE loop until it parks again, as a Channel push or close resumes a parked consumer.
+     */
+    private function resumeParked(): void {
+        $fiber = $this->parked;
+        if ($fiber === null || !$fiber->isSuspended()) {
+            return;
+        }
+
+        $this->parked = null;
+        $fiber->resume();
+    }
+
+    /**
      * Push previously drained patches back, preserving order.
      *
      * @param list<QueuedPatch> $patches
@@ -518,7 +793,7 @@ class PatchManager {
             if ($channel->isFull() || !$channel->push($patch)) {
                 $this->app->log(
                     'warning',
-                    "Lost a patch refilling the queue for context {$this->context->getId()}"
+                    "Lost a patch refilling the queue for context {$this->contextId}"
                 );
             }
         }
@@ -527,10 +802,10 @@ class PatchManager {
     /**
      * Sync scoped signals for all scopes this context belongs to.
      */
-    private function syncScopedSignals(): void {
+    private function syncScopedSignals(Context $context): void {
         $flat = [];
 
-        foreach ($this->context->getScopes() as $scope) {
+        foreach ($context->getScopes() as $scope) {
             // Skip TAB scope - already handled by prepareSignalsForPatch
             if ($scope === Scope::TAB) {
                 continue;
@@ -591,7 +866,7 @@ class PatchManager {
         $nested = [];
 
         foreach ($flat as $key => $value) {
-            if (mb_strpos($key, '.') !== false) {
+            if (str_contains($key, '.')) {
                 // Namespaced signal - convert to nested structure
                 $parts = explode('.', $key);
                 $current = &$nested;
@@ -623,10 +898,6 @@ class PatchManager {
      * @return Channel|list<QueuedPatch>
      */
     private function getPatchChannel(): array|Channel {
-        if ($this->componentManager->isComponent()) {
-            return $this->componentManager->getParentPageContext()->getPatchManager()->patchChannel;
-        }
-
-        return $this->patchChannel;
+        return $this->componentManager->getParentPageContext()?->getPatchManager()->patchChannel ?? $this->patchChannel;
     }
 }

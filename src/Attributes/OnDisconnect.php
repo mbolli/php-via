@@ -5,23 +5,13 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Attributes;
 
 /**
- * Marks a method as the disconnect handler for a composition page/component.
+ * Removed in php-via 0.14: use #[OnCleanup], which runs at the same moment.
  *
- * The method is registered via Context::onDisconnect() and runs when the SSE
- * connection closes and stays closed (or the browser sends a close beacon).
- * It receives the Context as its only argument. At most one method per class
- * may carry this attribute.
+ * The class stays for one release because PHP silently ignores an attribute whose class does
+ * not exist, so deleting it would drop the cleanup without a sound. Mounting a class that
+ * still carries it throws a LogicException naming #[OnCleanup].
  *
- * Instance reactive properties are NOT re-hydrated before the handler runs:
- * disconnect handlers typically do cleanup (presence updates, broadcasts)
- * rather than read live signal values.
- *
- * @example
- * #[OnDisconnect]
- * public function leave(Context $ctx): void {
- *     Room::$members[$this->room]--;
- *     $ctx->broadcast();
- * }
+ * @deprecated since 0.14, use {@see OnCleanup}
  */
 #[\Attribute(\Attribute::TARGET_METHOD)]
 final class OnDisconnect {}

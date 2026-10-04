@@ -176,7 +176,7 @@ function observer(Via $app, string $id, string $scope, CoalesceState $state): Co
         $state->renders[$id] = ($state->renders[$id] ?? 0) + 1;
 
         return "<div id=\"{$id}\">v={$state->value}</div>";
-    }, cacheUpdates: false);
+    });
 
     return $ctx;
 }
@@ -219,7 +219,7 @@ function slowObservers(Via $app, string $scope, int $count, int $ioMs, CoalesceS
             $state->renders[$id] = ($state->renders[$id] ?? 0) + 1;
 
             return "<div id=\"{$id}\">x</div>";
-        }, cacheUpdates: false);
+        });
     }
 }
 
@@ -250,7 +250,7 @@ function timedObserver(Via $app, string $scope, array &$flushes, callable $rende
         }
 
         return '<div id="obs">x</div>';
-    }, cacheUpdates: false);
+    });
 
     // A first render loads classes, which would delay the first timed flush and shorten its gap.
     $app->broadcast($scope);
@@ -289,7 +289,7 @@ function writesDuringRenders(bool $coalescing, bool $selfBroadcast, int $writes 
         }
 
         return "<div id=\"load\">{$seen}</div>";
-    }, cacheUpdates: false);
+    });
 
     inCoroutine(static function () use ($app, $scope, $writes, $writerInAction, $shutdown, &$value, $rendering, $written): void {
         if ($shutdown) {
@@ -426,12 +426,14 @@ $cases = [
         $app = app((new Config())->withBroker($broker));
         $state = new CoalesceState();
         observer($app, 'obs', 'room:many', $state);
+        $tab = new Context('tab', '/t', $app);
+        $tab->view(static fn (): string => '<p>tab</p>');
 
-        inCoroutine(static function () use ($app): void {
+        inCoroutine(static function () use ($app, $tab): void {
             for ($i = 0; $i < 5; ++$i) {
                 Coroutine::create(static fn () => $app->broadcast('room:many'));
             }
-            $app->broadcast(Scope::TAB);
+            $tab->broadcast();
         });
 
         return ['renders' => $state->renders, 'published' => $broker->published()];
@@ -692,9 +694,9 @@ $cases = [
             $state->order[] = $state->value;
 
             return "<div id=\"obs\">v={$state->value}</div>";
-        }, cacheUpdates: false);
+        });
         // Runs after the channels close.
-        $app->onShutdown(static function () use ($state): void {
+        $app->onWorkerStop(static function () use ($state): void {
             $state->order[] = 'callback';
         });
 
@@ -731,7 +733,7 @@ $cases = [
             while (hrtime(true) - $start < 8_000_000);
 
             return '<div id="slow">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app): void {
             for ($i = 0; $i < 3; ++$i) {
@@ -860,7 +862,7 @@ $cases = [
                     }
 
                     return '<div id="ctx' . $i . '">x</div>';
-                }, cacheUpdates: false);
+                });
             }
 
             $other = new Context('other', '/split', $app);
@@ -869,7 +871,7 @@ $cases = [
                 $state->order[] = 'other';
 
                 return '<div id="other">x</div>';
-            }, cacheUpdates: false);
+            });
 
             inCoroutine(static function () use ($app, $scope, $trigger): void {
                 $app->broadcast($scope);
@@ -899,7 +901,7 @@ $cases = [
             $app->broadcast('room:self');
 
             return '<div id="self">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:self'));
 
@@ -918,7 +920,7 @@ $cases = [
             $app->broadcast('room:self');
 
             return '<div id="self">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:self'));
 
@@ -957,7 +959,7 @@ $cases = [
             }
 
             return '<div id="lazy">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:lazy'));
 
@@ -978,7 +980,7 @@ $cases = [
             }
 
             return '<div id="spawn">x</div>';
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static fn () => $app->broadcast('room:spawn'));
 
@@ -1010,7 +1012,7 @@ $cases = [
             $lastSeen = $seen;
 
             return "<div id=\"steps\">{$seen}</div>";
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app, $scope, &$value, $rendering, $written): void {
             Coroutine::create(static fn () => $app->broadcast($scope));
@@ -1045,7 +1047,7 @@ $cases = [
             }
 
             return "<div id=\"c\">{$seen}</div>";
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app, &$value, $waiting, $overtaken): void {
             Coroutine::create(static fn () => $app->broadcast('room:slow'));
@@ -1076,7 +1078,7 @@ $cases = [
                 $app->broadcast('room:' . $theirs);
 
                 return "<div id=\"{$mine}\">x</div>";
-            }, cacheUpdates: false);
+            });
         }
         observer($app, 'calm', 'room:calm', $state);
 
@@ -1159,7 +1161,7 @@ $cases = [
     'shutdown' => static function (): array {
         $broker = new CoalesceBroker();
         $app = app((new Config())->withBroker($broker));
-        $app->onShutdown(static fn () => $app->broadcast('room:bye'));
+        $app->onWorkerStop(static fn () => $app->broadcast('room:bye'));
 
         inCoroutine(static fn () => (new ReflectionMethod($app, 'runWorkerShutdown'))->invoke($app));
 
@@ -1219,7 +1221,7 @@ $cases = [
             }
 
             return "<div id=\"slow\">v={$state->value}</div>";
-        }, cacheUpdates: false);
+        });
         $obs = observer($app, 'obs', 'room:own', $state);
 
         inCoroutine(static function () use ($app, $state, $obs): void {
@@ -1257,7 +1259,7 @@ $cases = [
             }
 
             return '<div id="hung">x</div>';
-        }, cacheUpdates: false);
+        });
 
         $seen = inCoroutine(static function () use ($app, $reply, &$renders): array {
             Coroutine::create(static fn () => $app->broadcast('room:hung'));
@@ -1299,7 +1301,7 @@ $cases = [
                 $lastSeen[$i] = $seen;
 
                 return "<div id=\"y{$i}\">{$seen}</div>";
-            }, cacheUpdates: false);
+            });
         }
 
         inCoroutine(static function () use ($app, &$value): void {
@@ -1336,7 +1338,7 @@ $cases = [
             $app->broadcast('room:b');
 
             return "<div id=\"a\">{$value}</div>";
-        }, cacheUpdates: false);
+        });
 
         $b = new Context('b', '/b', $app);
         $b->scope('room:b');
@@ -1345,7 +1347,7 @@ $cases = [
             $bSeen[] = $value;
 
             return "<div id=\"b\">{$value}</div>";
-        }, cacheUpdates: false);
+        });
 
         inCoroutine(static function () use ($app, &$value): void {
             $until = hrtime(true) + 400_000_000;
@@ -1394,7 +1396,7 @@ $cases = [
         $broker = new CoalesceBroker();
         $broker->yieldUs = 50_000;
         $app = app((new Config())->withBroker($broker));
-        $app->onShutdown(static fn () => $app->broadcast('room:bye'));
+        $app->onWorkerStop(static fn () => $app->broadcast('room:bye'));
 
         inCoroutine(static function () use ($app): void {
             $app->broadcast('room:busy');
@@ -1414,7 +1416,7 @@ $cases = [
         slowObservers($app, 'room:io', 10, 50, $state);
         $start = 0;
         $callbackAt = null;
-        $app->onShutdown(static function () use (&$callbackAt): void {
+        $app->onWorkerStop(static function () use (&$callbackAt): void {
             $callbackAt = hrtime(true);
         });
 
@@ -1438,7 +1440,7 @@ $cases = [
     },
 
     'trace-schedule' => static function (): array {
-        $app = app((new Config())->withTracing(true));
+        $app = app((new Config())->withDevBar(true));
         $state = new CoalesceState();
         observer($app, 'obs', 'room:trace', $state);
 
@@ -1455,6 +1457,152 @@ $cases = [
         }
 
         return ['traces' => $traces];
+    },
+
+    'throttle-burst' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(5)->withBroadcastThrottle('import:*', 100));
+        $value = 0;
+        $starts = [];
+        $seen = [];
+        $ctx = new Context('imp', '/imp', $app);
+        $ctx->scope('import:42');
+        $app->contexts['imp'] = $ctx;
+        $ctx->view(static function () use (&$value, &$starts, &$seen): string {
+            if (Coroutine::getCid() > 0) {
+                $starts[] = hrtime(true);
+                $seen[] = $value;
+            }
+
+            return "<div id=\"imp\">{$value}</div>";
+        });
+        $state = new CoalesceState();
+        observer($app, 'free', 'room:free', $state);
+
+        inCoroutine(static function () use ($app, &$value): void {
+            $until = hrtime(true) + 400_000_000;
+            while (hrtime(true) < $until) {
+                ++$value;
+                $app->broadcast('import:42');
+                $app->broadcast('room:free');
+                Coroutine::usleep(5_000);
+            }
+        });
+
+        $gaps = [];
+        for ($i = 1; $i < count($starts); ++$i) {
+            $gaps[] = ($starts[$i] - $starts[$i - 1]) / 1e6;
+        }
+
+        return [
+            'renders' => count($starts),
+            'minGapMs' => $gaps === [] ? null : min($gaps),
+            'lastSeen' => end($seen),
+            'final' => $value,
+            'freeRenders' => $state->renders['free'] ?? 0,
+            'flags' => flags($app),
+            'throttleTimer' => (new ReflectionProperty(Via::class, 'throttleTimerId'))->getValue($app),
+            'throttledAt' => (new ReflectionProperty(Via::class, 'throttledAt'))->getValue($app),
+        ];
+    },
+
+    'throttle-trailing' => static function (): array {
+        $app = app((new Config())->withBroadcastThrottle('import:1', 100));
+        $starts = [];
+        $ctx = new Context('imp', '/imp', $app);
+        $ctx->scope('import:1');
+        $app->contexts['imp'] = $ctx;
+        $ctx->view(static function () use (&$starts): string {
+            $starts[] = hrtime(true);
+
+            return '<div id="imp">x</div>';
+        });
+
+        $sentAt = inCoroutine(static function () use ($app): int {
+            $app->broadcast('import:1');
+            Coroutine::usleep(10_000);
+            $sentAt = hrtime(true);
+            $app->broadcast('import:1');
+
+            return $sentAt;
+        });
+
+        return [
+            'renders' => count($starts),
+            'leadingMs' => isset($starts[0]) ? ($sentAt - $starts[0]) / 1e6 : null,
+            'trailingAfterMs' => isset($starts[1]) ? ($starts[1] - $starts[0]) / 1e6 : null,
+        ];
+    },
+
+    'throttle-flush' => static function (): array {
+        $app = app((new Config())->withBroadcastThrottle('import:*', 1000));
+        $state = new CoalesceState();
+        observer($app, 'imp', 'import:9', $state);
+
+        $renders = inCoroutine(static function () use ($app, $state): array {
+            $app->broadcast('import:9');
+            Coroutine::usleep(5_000);
+            $first = $state->renders['imp'] ?? 0;
+            $app->broadcast('import:9');
+            Coroutine::usleep(20_000);
+            $held = $state->renders['imp'] ?? 0;
+            $app->flushBroadcasts();
+
+            return ['first' => $first, 'held' => $held, 'flushed' => $state->renders['imp'] ?? 0];
+        });
+
+        return [...$renders, 'final' => $state->renders['imp'] ?? 0];
+    },
+
+    'throttle-received' => static function (): array {
+        $broker = new CoalesceBroker();
+        $app = app((new Config())->withBroker($broker)->withBroadcastTickMs(5)->withBroadcastThrottle('import:*', 100));
+        $state = new CoalesceState();
+        observer($app, 'imp', 'import:7', $state);
+
+        inCoroutine(static function () use ($broker): void {
+            $until = hrtime(true) + 250_000_000;
+            while (hrtime(true) < $until) {
+                ($broker->handler)('import:7');
+                Coroutine::usleep(5_000);
+            }
+        });
+
+        return ['renders' => $state->renders['imp'] ?? 0];
+    },
+
+    'throttle-signal-writes' => static function (): array {
+        $app = app((new Config())->withBroadcastTickMs(5)->withBroadcastThrottle('import:*', 100));
+        $state = new CoalesceState();
+        $actor = new Context('actor', '/actor', $app);
+        $progress = $actor->signal(0, 'progress', 'import:5');
+        observer($app, 'o1', 'import:5', $state);
+
+        inCoroutine(static function () use ($progress): void {
+            for ($i = 1; $i <= 5; ++$i) {
+                $progress->setValue($i);
+                Coroutine::usleep(10_000);
+            }
+        });
+
+        return ['renders' => $state->renders['o1'] ?? 0];
+    },
+
+    'throttle-coalescing-off' => static function (): array {
+        $app = app((new Config())->withBroadcastCoalescing(false)->withBroadcastThrottle('import:*', 100));
+        $state = new CoalesceState();
+        observer($app, 'imp', 'import:3', $state);
+        observer($app, 'free', 'room:free', $state);
+
+        $sync = inCoroutine(static function () use ($app, $state): array {
+            for ($i = 0; $i < 5; ++$i) {
+                $app->broadcast('import:3');
+                $app->broadcast('room:free');
+            }
+
+            return $state->renders;
+        });
+
+        return ['sync' => $sync, 'final' => $state->renders];
     },
 ];
 

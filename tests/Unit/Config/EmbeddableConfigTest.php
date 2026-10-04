@@ -15,30 +15,30 @@ describe('Config::withEmbeddable()', function (): void {
     test('sets SameSite=None, Secure, partitioned, and frame-ancestors', function (): void {
         $config = (new Config())->withEmbeddable('https://x.example');
 
-        expect($config->getSessionCookieSameSite())->toBe('None');
-        expect($config->getSecureCookie())->toBeTrue();
-        expect($config->isSessionCookiePartitioned())->toBeTrue();
-        expect($config->getFrameAncestors())->toBe(['https://x.example']);
+        expect($config->freeze()->sessionCookieSameSite)->toBe('None');
+        expect($config->freeze()->secureCookie)->toBeTrue();
+        expect($config->freeze()->sessionCookiePartitioned)->toBeTrue();
+        expect($config->freeze()->frameAncestors)->toBe(['https://x.example']);
     });
 
     test('normalizes a string frame-ancestor to a list', function (): void {
-        expect((new Config())->withEmbeddable('https://a.example')->getFrameAncestors())
+        expect((new Config())->withEmbeddable('https://a.example')->freeze()->frameAncestors)
             ->toBe(['https://a.example'])
         ;
     });
 
     test('normalizes an array of frame-ancestors to a list', function (): void {
-        expect((new Config())->withEmbeddable(['https://a.example', 'https://b.example'])->getFrameAncestors())
+        expect((new Config())->withEmbeddable(['https://a.example', 'https://b.example'])->freeze()->frameAncestors)
             ->toBe(['https://a.example', 'https://b.example'])
         ;
     });
 
     test('null frame-ancestors emits no restriction', function (): void {
-        expect((new Config())->withEmbeddable()->getFrameAncestors())->toBeNull();
+        expect((new Config())->withEmbeddable()->freeze()->frameAncestors)->toBeNull();
     });
 
     test('partitioned can be disabled', function (): void {
-        expect((new Config())->withEmbeddable(null, partitioned: false)->isSessionCookiePartitioned())
+        expect((new Config())->withEmbeddable(null, partitioned: false)->freeze()->sessionCookiePartitioned)
             ->toBeFalse()
         ;
     });
@@ -46,9 +46,9 @@ describe('Config::withEmbeddable()', function (): void {
     test('defaults leave a non-embeddable app unchanged', function (): void {
         $config = new Config();
 
-        expect($config->getSessionCookieSameSite())->toBe('Lax');
-        expect($config->isSessionCookiePartitioned())->toBeFalse();
-        expect($config->getFrameAncestors())->toBeNull();
-        expect($config->getSecureCookie())->toBeFalse();
+        expect($config->freeze()->sessionCookieSameSite)->toBe('Lax');
+        expect($config->freeze()->sessionCookiePartitioned)->toBeFalse();
+        expect($config->freeze()->frameAncestors)->toBeNull();
+        expect($config->freeze()->secureCookie)->toBeFalse();
     });
 });

@@ -10,7 +10,7 @@ declare(strict_types=1);
  *
  * argv[1] = db path, argv[2] = value to write ("-" to only read)
  * argv[3] = flush interval ms (default 100), argv[4] = worker count (default 1)
- * argv[5] = "shutdown" to write from the last worker's onShutdown, after the leader has stopped,
+ * argv[5] = "shutdown" to write from the last worker's onWorkerStop, after the leader has stopped,
  *           or "doubleterm" to stop with two SIGTERMs to the master instead of shutdown()
  */
 
@@ -24,6 +24,7 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $path = (string) ($argv[1] ?? '');
 $write = (string) ($argv[2] ?? '-');
@@ -36,7 +37,7 @@ $doubleTerm = ($argv[5] ?? '') === 'doubleterm';
 $app = new Via(
     (new Config())
         ->withHost('127.0.0.1')
-        ->withPort(3900 + (getmypid() % 90))
+        ->withPort(FixturePort::pick(3900, 90))
         ->withLogLevel('error')
         ->withWorkerNum($workers)
         ->withBroker($workers > 1 ? new SwooleBroker() : new InMemoryBroker())
@@ -45,7 +46,7 @@ $app = new Via(
 
 $app->page('/', fn () => null);
 
-$app->onStart(static function () use ($app, $write, $writeOnShutdown, $doubleTerm): void {
+$app->onWorkerStart(static function () use ($app, $write, $writeOnShutdown, $doubleTerm): void {
     if ($app->getServer()?->getWorkerId() !== 0) {
         return;
     }
@@ -76,7 +77,7 @@ $app->onStart(static function () use ($app, $write, $writeOnShutdown, $doubleTer
     });
 });
 
-$app->onShutdown(static function () use ($app, $write, $writeOnShutdown, $workers): void {
+$app->onWorkerStop(static function () use ($app, $write, $writeOnShutdown, $workers): void {
     if ($writeOnShutdown && $write !== '-' && $app->getServer()?->getWorkerId() === $workers - 1) {
         Coroutine::usleep(200_000);
         $app->setGlobalState('counter', $write);

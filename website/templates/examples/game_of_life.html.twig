@@ -3,7 +3,7 @@
 {% block demo %}
 <div id="game-grid">
     <p class="gol-hint">
-        Click cells to draw patterns. Multiple users can draw simultaneously! 👥 {{ clientCount }} connected
+        Click cells to draw patterns. Several people can draw at once. {{ clientCount }} connected.
     </p>
 
     <p class="gol-generation">
@@ -11,8 +11,8 @@
     </p>
 
     <div class="flex gap-1 mb-2">
-        <button data-on:click="@post('{{ toggleUrl }}')">{{ runningEmoji }} {{ runningText }}</button>
-        <button class="secondary" data-on:click="@post('{{ resetUrl }}')">🔄 Reset</button>
+        <button data-on:click="@post('{{ toggleUrl }}')" aria-label="{{ runningText }} the game">{{ runningText }}</button>
+        <button class="secondary" data-on:click="@post('{{ resetUrl }}')" aria-label="Reset the board">Reset board</button>
     </div>
 
     <div class="gol-board" data-on:pointerdown="@post('{{ tapUrl }}?id=' + event.target.dataset.id)">

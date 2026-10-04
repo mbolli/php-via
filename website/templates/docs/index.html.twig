@@ -11,23 +11,30 @@
     <p>Start with the tutorial. It walks you through building a reactive counter from scratch and introduces all three core primitives (signals, actions, views).</p>
     <p><a href="/docs/getting-started" class="btn btn-primary" style="display: inline-flex;">Getting Started →</a></p>
 
+    <h2>Upgrading from 0.13?</h2>
+    <p><a href="/docs/upgrading">Upgrading to 0.14</a> takes a 0.13 app to 0.14 in the order the errors appear, with a worked example.</p>
+
     <h2>Understand the concepts</h2>
     <ul>
         <li><a href="/docs/signals">Signals</a>: reactive state and how it binds to the DOM</li>
         <li><a href="/docs/actions">Actions</a>: server-side event handlers</li>
-        <li><a href="/docs/views">Views</a>: Twig templates and inline rendering</li>
+        <li><a href="/docs/views">Views</a>: what a tab shows, how it updates and when tabs share a render</li>
         <li><a href="/docs/scopes">Scopes</a>: TAB, ROUTE, SESSION, GLOBAL, and custom</li>
         <li><a href="/docs/components">Components</a>: isolated sub-contexts for composable UI</li>
         <li><a href="/docs/composition">Composition</a>: class-based pages and components with PHP attributes</li>
         <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to groups of clients</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, intervals, cleanup</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, revival, timers and cleanup</li>
     </ul>
 
     <h2>Guides</h2>
     <ul>
-        <li><a href="/docs/middleware">Middleware</a>: PSR-15 middleware, auth, CORS, security</li>
-        <li><a href="/docs/twig">Twig templates</a></li>
-        <li><a href="/docs/deployment">Deployment with OpenSwoole + Caddy</a></li>
+        <li><a href="/docs/middleware">Middleware</a>: PSR-15 middleware, auth, plain routes, security</li>
+        <li><a href="/docs/twig">Templates</a>: shells, the page bootstrap, Twig and other engines, CSP</li>
+        <li><a href="/docs/web-components">Web components</a>: Rocket and Starbase components on php-via pages</li>
+        <li><a href="/docs/dev-bar">Dev Bar</a>: traces, signals, patches and logs in the page</li>
+        <li><a href="/docs/development">Development</a>: the dev server, hot reload and tests</li>
+        <li><a href="/docs/deployment">Deployment with OpenSwoole and Caddy</a></li>
+        <li><a href="/docs/broker">Multi-node broker</a>: broadcasts across workers and servers</li>
         <li><a href="/docs/performance">Performance</a>: what a page view, a tab, an action and a broadcast cost, and how many fit on a server</li>
     </ul>
 
@@ -38,7 +45,7 @@
 
     <h2>Reference</h2>
     <ul>
-        <li><a href="/docs/api">API reference</a>: full Via and Context method signatures</li>
+        <li><a href="/docs/api">API reference</a>: every public method with its signature</li>
         <li><a href="/docs/comparisons">Comparison with other frameworks</a></li>
         <li><a href="/docs/faq">Common pitfalls</a>: bugs that are easy to hit and hard to diagnose</li>
         <li><a href="https://github.com/mbolli/php-via/blob/master/CHANGELOG.md" target="_blank" rel="noopener">Changelog ↗</a></li>

@@ -33,21 +33,43 @@ use OpenSwoole\Table;
  *
  * Every change bumps a version shared by all workers. Each worker keeps the list it built last
  * and returns it until the version moves, then rebuilds it, reusing the identicons it already made.
+ *
+ * The scopes a broadcast reaches each tab through, for Via::countClients(), live in a second table
+ * under the same key, as many whole scopes as fit in SCOPES_BYTES, with a version of their own: getClients()
+ * neither reads them nor rebuilds its list when they change.
  */
 final class SharedClientRegistry {
+    /** Room for a client's scopes, separated by newlines. */
+    public const int SCOPES_BYTES = 512;
+
     /** Most scans a removal makes while other workers keep writing to the table. */
     private const int MAX_REMOVAL_SCANS = 5;
 
     private Table $table;
 
+    /** The packed scopes of each row of $table, under its key. */
+    private Table $scopeTable;
+
     /** Bumped after every change to the table, by any worker. */
     private Long $version;
+
+    /** Bumped after every change to the scopes, by any worker. */
+    private Long $scopeVersion;
 
     /** Worker ID this process registers under; set by claimWorker(). */
     private int $workerId = 0;
 
     /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string, context_id: string}> */
     private array $snapshot = [];
+
+    /** @var array<string, array<string, true>> Scope => the connected context ids in it */
+    private array $scopeIndex = [];
+
+    /** @var null|array{int, int} the version and the scope version the index was read at; null before the first read */
+    private ?array $scopeIndexVersion = null;
+
+    /** Read epoch that reuses $scopeIndex without checking the version; 0 for none. */
+    private int $scopePinnedEpoch = 0;
 
     /** Version $snapshot was read at; -1 before the first read. */
     private int $snapshotVersion = -1;
@@ -72,6 +94,12 @@ final class SharedClientRegistry {
         $table->create();
         $this->table = $table;
         $this->version = new Long(0);
+
+        $scopeTable = new Table($maxRows);
+        $scopeTable->column('scopes', Table::TYPE_STRING, self::SCOPES_BYTES);
+        $scopeTable->create();
+        $this->scopeTable = $scopeTable;
+        $this->scopeVersion = new Long(0);
     }
 
     /**
@@ -114,11 +142,15 @@ final class SharedClientRegistry {
     /**
      * Record a connected client, owned by this process.
      *
+     * @param list<string> $scopes the scopes a broadcast reaches it through; those past SCOPES_BYTES are left out
+     *
      * @return bool false when the table is full, which costs an inaccurate list and must not fail the SSE connection
      */
-    public function register(string $contextId, string $clientId, string $ip, int $connectedAt): bool {
+    public function register(string $contextId, string $clientId, string $ip, int $connectedAt, array $scopes = []): bool {
+        $key = self::key($contextId, $this->workerId, getmypid());
+
         try {
-            $this->table->set(self::key($contextId, $this->workerId, getmypid()), [
+            $this->table->set($key, [
                 'ctx' => $contextId,
                 'id' => $clientId,
                 'ip' => $ip,
@@ -129,9 +161,47 @@ final class SharedClientRegistry {
         } catch (Exception) {
             return false;
         }
+        $this->writeScopes($key, $scopes);
         $this->changed();
 
         return true;
+    }
+
+    /**
+     * Replace the scopes of the client this process registered for a context.
+     *
+     * @param list<string> $scopes as for register()
+     */
+    public function setScopes(string $contextId, array $scopes): void {
+        $key = self::key($contextId, $this->workerId, getmypid());
+        if (!$this->table->exists($key)) {
+            return;
+        }
+        $this->writeScopes($key, $scopes);
+        $this->scopesChanged();
+    }
+
+    /**
+     * The connected clients by scope. Read epochs work as for all(), with a pin of their own.
+     *
+     * @param int $readEpoch as for all()
+     *
+     * @return array<string, array<string, true>> scope => context ids
+     */
+    public function scopeIndex(int $readEpoch = 0): array {
+        if ($readEpoch !== 0 && $readEpoch === $this->scopePinnedEpoch) {
+            return $this->scopeIndex;
+        }
+
+        // Read before scanning, as in all().
+        $version = [$this->version->get(), $this->scopeVersion->get()];
+        if ($version !== $this->scopeIndexVersion) {
+            $this->scopeIndex = $this->scanScopes();
+            $this->scopeIndexVersion = $version;
+        }
+        $this->scopePinnedEpoch = $readEpoch;
+
+        return $this->scopeIndex;
     }
 
     /**
@@ -139,7 +209,9 @@ final class SharedClientRegistry {
      * same context, as when the tab reconnected to another worker before this stream ended, stays.
      */
     public function unregister(string $contextId): void {
-        if ($this->table->del(self::key($contextId, $this->workerId, getmypid()))) {
+        $key = self::key($contextId, $this->workerId, getmypid());
+        if ($this->table->del($key)) {
+            $this->scopeTable->del($key);
             $this->changed();
         }
     }
@@ -206,6 +278,7 @@ final class SharedClientRegistry {
 
             foreach ($stale as $key) {
                 if ($this->table->del($key)) {
+                    $this->scopeTable->del($key);
                     ++$removed;
                 }
             }
@@ -255,10 +328,73 @@ final class SharedClientRegistry {
         return $clients;
     }
 
+    /**
+     * @return array<string, array<string, true>> scope => context ids, each tab in the scopes of its newer connection
+     */
+    private function scanScopes(): array {
+        /** @var array<string, array{int, string}> $newest context id => connected at, row key */
+        $newest = [];
+        foreach ($this->table as $key => $row) {
+            $contextId = (string) $row['ctx'];
+            $connectedAt = (int) $row['at'];
+            if (!isset($newest[$contextId]) || $newest[$contextId][0] <= $connectedAt) {
+                $newest[$contextId] = [$connectedAt, (string) $key];
+            }
+        }
+
+        $index = [];
+        foreach ($newest as $contextId => [, $key]) {
+            $packed = $this->scopeTable->get($key, 'scopes');
+            if (!\is_string($packed) || $packed === '') {
+                continue;
+            }
+            foreach (explode("\n", $packed) as $scope) {
+                $index[$scope][$contextId] = true;
+            }
+        }
+
+        return $index;
+    }
+
+    /**
+     * @param list<string> $scopes
+     */
+    private function writeScopes(string $key, array $scopes): void {
+        try {
+            $this->scopeTable->set($key, ['scopes' => self::packScopes($scopes)]);
+        } catch (Exception) {
+            // As big as $table, so full only when it is: countClients() then leaves the tab out.
+        }
+    }
+
+    /**
+     * The scopes joined by newlines, as many whole ones as fit in SCOPES_BYTES.
+     *
+     * @param list<string> $scopes
+     */
+    private static function packScopes(array $scopes): string {
+        $packed = '';
+        foreach ($scopes as $scope) {
+            $next = $packed === '' ? $scope : $packed . "\n" . $scope;
+            if (\strlen($next) <= self::SCOPES_BYTES) {
+                $packed = $next;
+            }
+        }
+
+        return $packed;
+    }
+
     /** After a write by this process: tell every worker, and stop reusing a pinned list. */
     private function changed(): void {
         $this->version->add(1);
         $this->pinnedEpoch = 0;
+        $this->scopePinnedEpoch = 0;
+    }
+
+    /** After a write by this process to the scopes only, which leaves the list of all() as it is. */
+    private function scopesChanged(): void {
+        $this->scopeVersion->add(1);
+        $this->scopePinnedEpoch = 0;
     }
 
     private static function key(string $contextId, int $workerId, int $pid): string {

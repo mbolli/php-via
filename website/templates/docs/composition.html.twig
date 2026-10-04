@@ -5,27 +5,27 @@
     <h1>Composition</h1>
     <p>
         The composition API lets you define reactive pages and components as plain PHP classes annotated
-        with attributes, instead of writing imperative closure-based setup code. It is fully additive:
-        the existing closure API is unchanged.
+        with attributes, instead of writing closure-based setup code. php-via turns each class into the same
+        page handler or component closure you would write by hand, so both styles mix on one page.
     </p>
     <p>
-        Reactive state is declared with a single <code>#[Signal]</code> attribute whose scope is a
-        parameter. Server-only state, the page broadcast scope, actions, and lifecycle hooks each have
-        their own attribute:
+        Properties carry the state. <code>#[Signal]</code> declares a reactive property, with its scope as a
+        parameter, and <code>#[Persist]</code> a server-only one:
     </p>
     <table>
-        <thead><tr><th>Attribute</th><th>Kind</th><th>Client-writable</th><th>Auto-broadcasts</th></tr></thead>
+        <thead><tr><th>Property attribute</th><th>Declares</th><th>Browser can write it</th><th>A change reaches</th></tr></thead>
         <tbody>
-            <tr><td><code>#[Signal]</code></td><td>TAB signal</td><td>yes</td><td>—</td></tr>
-            <tr><td><code>#[Signal(Scope::ROUTE)]</code></td><td>ROUTE signal</td><td>no</td><td>yes → same route</td></tr>
-            <tr><td><code>#[Signal(Scope::SESSION)]</code></td><td>SESSION signal</td><td>no</td><td>yes → user's tabs</td></tr>
-            <tr><td><code>#[Signal(Scope::GLOBAL)]</code></td><td>GLOBAL signal</td><td>no</td><td>yes → all users</td></tr>
-            <tr><td><code>#[Persist]</code></td><td>server-only property</td><td>no</td><td>—</td></tr>
-            <tr><td><code>#[Broadcast(Scope::X)]</code></td><td>class: primary scope</td><td>—</td><td>—</td></tr>
-            <tr><td><code>#[Action]</code></td><td>method: action</td><td>—</td><td>—</td></tr>
-            <tr><td><code>#[OnDisconnect]</code> / <code>#[OnCleanup]</code></td><td>method: lifecycle</td><td>—</td><td>—</td></tr>
+            <tr><td><code>#[Signal]</code></td><td>a TAB signal</td><td>yes</td><td>this tab</td></tr>
+            <tr><td><code>#[Signal(Scope::ROUTE)]</code></td><td>a ROUTE signal</td><td>no</td><td>every tab on the route</td></tr>
+            <tr><td><code>#[Signal(Scope::SESSION)]</code></td><td>a SESSION signal</td><td>no</td><td>the session's tabs</td></tr>
+            <tr><td><code>#[Signal(Scope::GLOBAL)]</code></td><td>a GLOBAL signal</td><td>no</td><td>every tab</td></tr>
+            <tr><td><code>#[Persist]</code></td><td>a server-only property</td><td>no</td><td>no tab</td></tr>
         </tbody>
     </table>
+    <p>
+        On the class, <code>#[Broadcast(Scope::X)]</code> sets the primary scope. On methods,
+        <code>#[Action]</code> marks an action and <code>#[OnCleanup]</code> a cleanup hook.
+    </p>
 
     <h2 id="mount">Mounting a page</h2>
     <p>
@@ -70,18 +70,21 @@ $app->mount(Counter::class, '/counter');
     {% code 'html' %}{% verbatim %}
 {# counter.html.twig #}
 <div id="counter">
-    <p>Count: <span data-text="${{ count.id }}">{{ count.int }}</span></p>
-    <label>Step: <input type="number" data-bind="{{ step.id }}"></label>
+    <p>Count: <span data-text="{{ count.ref }}">{{ count.int }}</span></p>
+    <label>Step: <input type="number" {{ bind(step) }}></label>
     <button data-on:click="@post('{{ increment.url }}')">+</button>
     <button data-on:click="@post('{{ reset.url }}')">Reset</button>
 </div>
     {% endverbatim %}{% endcode %}
+    <p>
+        <code>view()</code> may also define a closure view, as a page handler does; a template needs
+        <code>twig/twig</code> (see <a href="/docs/views#defining">Views</a>).
+    </p>
 
     <h2 id="components">Class-based components</h2>
     <p>
-        Pass a class name string to <code>$ctx->component()</code> to use the same API for reusable
-        sub-contexts. Mounting the same class multiple times with different namespaces gives each instance
-        independent signal IDs:
+        Pass a class name to <code>$ctx-&gt;component()</code> to use the same API for reusable sub-contexts.
+        Each mount needs its own namespace on the page, and gets signal ids and action URLs of its own:
     </p>
     {% code 'php' %}{% verbatim %}
 public function view(Context $ctx): void {
@@ -121,11 +124,11 @@ public string $username = 'Anonymous';
 public int $totalVisitors = 0;
     {% endverbatim %}{% endcode %}
     <p>
-        By default TAB signals take the value the browser posts with each action, so
-        <code>data-bind</code> works on them. Non-TAB scopes are server-authoritative: the client
-        cannot overwrite them, and they auto-broadcast to every context in the scope whenever an
-        action changes the value. No manual <code>$ctx->broadcast()</code> is needed for
-        scoped-signal changes.
+        TAB signals take the value the browser posts with each action, so <code>data-bind</code> works on them.
+        The value must fit the property's declared type: <code>'5'</code> from a text field is stored as
+        <code>5</code> in an <code>int</code> property, and a value that does not convert is refused. Scoped
+        signals belong to the server: the browser cannot write them, and a change in an action broadcasts the
+        scope, so every tab in it renders again without a <code>$ctx-&gt;broadcast()</code>.
     </p>
     <p>
         <code>clientWritable</code> overrides the write rule in either direction:
@@ -140,8 +143,7 @@ public string $note = '';
     <p>
         With <code>Config::withStrictTabSignals()</code>, a TAB <code>#[Signal]</code> without the
         argument is server-owned, so a property bound with <code>data-bind</code> needs
-        <code>clientWritable: true</code>. See <a href="/docs/api#context-signal">signal()</a> for the
-        details.
+        <code>clientWritable: true</code>. See <a href="/docs/signals#client-writes">Values the browser sends</a>.
     </p>
     <p>
         <code>atomic: true</code> makes a shared integer property safe to change from several workers at once.
@@ -160,9 +162,10 @@ public int $votes = 0;
     <h2 id="persist">Server-only state</h2>
     <p>
         <code>#[Persist]</code> marks a server-only instance property. No signal is created; the value
-        never reaches the browser. Because the class instance lives for the entire tab connection, the
-        value persists across all action calls. Use it for accumulators, flags, or route params stored
-        in <code>view()</code>.
+        never reaches the browser. The instance lives as long as the tab's context, so the value persists
+        across all action calls. Use it for accumulators, flags, or route params stored in <code>view()</code>.
+        A <a href="/docs/lifecycle#revival">revival</a> builds a new instance, which starts from the
+        property's default; keep what has to survive in <code>$ctx-&gt;setTabState()</code>.
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Attributes\Persist;
@@ -178,16 +181,15 @@ public function increment(Context $ctx): void {
     {% endverbatim %}{% endcode %}
     <p>
         Plain <code>static</code> class properties also work without any attribute: the framework
-        ignores them. They are process-global (shared across every instance and tab). After mutating
-        static data in an action, call <code>$ctx->broadcast()</code> to push a fresh render (see below).
+        ignores them. They are process-global (shared across every instance and tab on the worker). After
+        changing static data in an action, broadcast the scope whose tabs show it, as below.
     </p>
 
     <h2 id="broadcast">Primary scope with #[Broadcast]</h2>
     <p>
         <code>#[Broadcast(Scope::X)]</code> on the class sets the context's primary scope, the target
-        of <code>$ctx->broadcast()</code> when called with no argument. Use it when an action mutates
-        non-signal state (a static array, a database row) and needs to push a re-render to everyone in
-        the scope:
+        of <code>$ctx-&gt;broadcast()</code>. Use it when an action changes non-signal state (a static array, a
+        database row) and every tab in the scope has to render again:
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Attributes\Broadcast;
@@ -202,7 +204,7 @@ final class TodoList {
     private static array $todos = [];
 
     public function view(Context $ctx): void {
-        $ctx->view('todo.html.twig', ['todos' => self::$todos], cacheUpdates: false);
+        $ctx->view('todo.html.twig', fn (): array => ['todos' => self::$todos]);
     }
 
     #[Action]
@@ -216,18 +218,18 @@ final class TodoList {
 }
     {% endverbatim %}{% endcode %}
     <p>
-        <strong>Important:</strong> <code>#[Broadcast]</code> only controls the broadcast target. It does
-        <em>not</em> change the scope of <code>#[Signal]</code> properties: each signal keeps the scope
-        it declares. A <code>#[Signal]</code> with no scope stays TAB-private even on a
-        <code>#[Broadcast(Scope::ROUTE)]</code> class.
+        <code>#[Broadcast]</code> only sets the broadcast target. Each <code>#[Signal]</code> keeps the scope
+        it declares, so a <code>#[Signal]</code> with no scope stays TAB-private on a
+        <code>#[Broadcast(Scope::ROUTE)]</code> class. Without <code>#[Broadcast]</code> the primary scope is
+        TAB, and <code>$ctx-&gt;broadcast()</code> renders the acting tab only.
     </p>
 
     <h2 id="actions">Actions</h2>
     <p>
         <code>#[Action]</code> marks a public method as a client-callable action. The method name
         becomes the URL slug as-is (<code>saveName</code> → <code>/_action/saveName</code>). Use the
-        optional <code>name:</code> parameter to override it, and <code>scope:</code> to register a
-        scoped action:
+        optional <code>name:</code> parameter to override it, and <code>scope:</code> to register one action
+        for a whole scope:
     </p>
     {% code 'php' %}{% verbatim %}
 #[Action]
@@ -237,35 +239,64 @@ public function increment(Context $ctx): void { }       // /_action/increment
 public function resetTab(Context $ctx): void { }        // /_action/reset-tab
 
 #[Action(scope: Scope::SESSION)]
-public function setUsername(Context $ctx): void { }     // session-scoped action
+public function setUsername(Context $ctx): void { }     // one action for the session's tabs
     {% endverbatim %}{% endcode %}
     <p>
-        Each action method receives exactly one parameter: the <code>Context</code> for the current
-        tab. The framework re-hydrates all reactive properties from their current signal values before
-        calling the method, and syncs changed values back to signals afterwards.
+        Each action method receives exactly one parameter: the <code>Context</code> of the tab that posted
+        it. The framework re-hydrates all reactive properties from their current signal values before calling
+        the method, and writes changed values back to their signals afterwards, also when the method throws.
+        The changed TAB signals then go to the tab, as for any action.
+    </p>
+    <p>
+        Before each render, the scoped properties are hydrated too, so a view that reads
+        <code>$this-&gt;total</code> shows what another tab or worker wrote when its broadcast reaches this
+        tab. A render inside an action of the same instance, such as one from <code>$ctx-&gt;sync()</code>, shows
+        the action's own changes instead, which are written back when the method returns.
+    </p>
+    <p>
+        A scoped action runs on the instance of the tab that posts it, so one tab's click never changes another
+        tab's properties. A SESSION or custom scope is joined by the context that declares it. In a component,
+        its URL starts with the namespace, as a per-tab action's does (<code>/_action/cats-vote</code>), so two
+        mounts of one class keep their actions apart.
     </p>
 
     <h2 id="lifecycle">Lifecycle hooks</h2>
     <p>
-        Annotate a method with <code>#[OnDisconnect]</code> or <code>#[OnCleanup]</code> to run cleanup
-        when the connection closes. The method receives the <code>Context</code>. At most one method per
-        class may carry each attribute. Handlers are not re-hydrated first. They typically broadcast
-        presence changes or release resources rather than read live signals:
+        Annotate a method with <code>#[OnCleanup]</code> to run cleanup when the context is destroyed.
+        The method receives the <code>Context</code>. Several methods may carry the attribute; they run in
+        declaration order, after reactive properties are re-hydrated from their signals. A class that still uses
+        <code>#[OnDisconnect]</code> throws at <code>mount()</code> and <code>component()</code>:
+        <code>#[OnCleanup]</code> runs at the same moment.
     </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Attributes\OnDisconnect;
+use Mbolli\PhpVia\Attributes\OnCleanup;
 
-#[OnDisconnect]
-public function leave(Context $ctx): void {
-    --Room::$members[$this->room];
-    $ctx->broadcast();
+final class ChatPage {
+    #[Persist]
+    public string $room = '';
+
+    public function __construct(private Via $app) {}
+
+    // view(), signals and actions ...
+
+    #[OnCleanup]
+    public function leave(Context $ctx): void {
+        --Room::$members[$this->room];
+        $this->app->broadcast('room:' . $this->room);
+    }
 }
     {% endverbatim %}{% endcode %}
+    <p>
+        The cleanup broadcasts the room's scope with <code>$app-&gt;broadcast()</code>: the context being
+        destroyed has no tab left to render, and on a class without <code>#[Broadcast]</code>
+        <code>$ctx-&gt;broadcast()</code> would reach only that tab. The factory below hands the class its
+        <code>Via</code>.
+    </p>
 
     <h2 id="factory">Dependency injection</h2>
     <p>
         <code>Via::mount()</code> accepts an optional third argument: a factory callable invoked once
-        per client connection. Use it to inject services that the zero-arg constructor cannot reach:
+        per context. Use it to inject services that the zero-arg constructor cannot reach:
     </p>
     {% code 'php' %}{% verbatim %}
 // Without factory (zero-arg constructor used):
@@ -275,15 +306,15 @@ $app->mount(Counter::class, '/counter');
 $app->mount(
     ChatPage::class,
     '/chat/{room}',
-    fn(): ChatPage => new ChatPage($db, $mailer, $app)
+    fn (): ChatPage => new ChatPage($app)
 );
     {% endverbatim %}{% endcode %}
 
     <h2 id="route-params">Route parameters</h2>
     <p>
         Declare route parameters as typed arguments on <code>view()</code> after <code>Context $ctx</code>.
-        The framework injects them automatically by name, using the same type-casting logic as
-        <code>$app->page()</code>. Store them on a <code>#[Persist]</code> property to make them
+        The framework injects them by name, percent-decoded and cast to the type, as for
+        <code>$app-&gt;page()</code>. Store them on a <code>#[Persist]</code> property to make them
         available in all action methods:
     </p>
     {% code 'php' %}{% verbatim %}
@@ -312,15 +343,15 @@ $app->mount(BlogPost::class, '/blog/{slug}');
     <h2 id="templates">Twig templates</h2>
     <p>
         Composition classes produce exactly the same named signals and actions as the closure API.
-        Template syntax is identical: <code>&#123;&#123; count.id &#125;&#125;</code>, <code>&#123;&#123; increment.url &#125;&#125;</code>,
-        <code>data-bind="&#123;&#123; step.id &#125;&#125;"</code>. No template changes are needed when converting a
+        Template syntax is identical: <code>&#123;&#123; count.ref &#125;&#125;</code>, <code>&#123;&#123; increment.url &#125;&#125;</code>,
+        <code>&#123;&#123; bind(step) &#125;&#125;</code>. No template changes are needed when converting a
         closure-based page to a class.
     </p>
     <p>
         Actions registered via <code>#[Action]</code> are injected under their resolved name
-        (the <code>name:</code> parameter if set, otherwise the method name). The method is
-        converted to camelCase in the template variable: <code>saveName</code> is available as
-        <code>&#123;&#123; saveName.url &#125;&#125;</code>.
+        (the <code>name:</code> parameter if set, otherwise the method name), in camelCase:
+        <code>reset-tab</code> is available as <code>&#123;&#123; resetTab.url &#125;&#125;</code>, and
+        <code>saveName</code> as <code>&#123;&#123; saveName.url &#125;&#125;</code>.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

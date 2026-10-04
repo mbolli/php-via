@@ -43,13 +43,13 @@ describe('Broadcast Sync Behavior', function (): void {
         $ctx3->renderView();
 
         // Verify all contexts are registered in ROUTE scope
-        $routeContexts = $app->getContextsByScope('route:/test');
+        $routeContexts = $app->getLocalContexts('route:/test');
         expect($routeContexts)->toHaveCount(3);
 
         // Simulate data change and broadcast
         expect($sharedCount)->toBe(0);
         $sharedCount = 1;
-        $app->broadcast(Scope::ROUTE);
+        $app->broadcast(Scope::routeScope('/test'));
 
         // Now check that ALL three contexts have patches queued
         $patch1 = $ctx1->getPatch();
@@ -99,7 +99,7 @@ describe('Broadcast Sync Behavior', function (): void {
 
         // Simulate adding an item and broadcasting
         $items[] = 'New Item';
-        $app->broadcast(Scope::ROUTE);
+        $app->broadcast(Scope::routeScope('/todo'));
 
         // Both contexts should have patches
         $patch1 = $ctx1->getPatch();
@@ -129,11 +129,11 @@ describe('Broadcast Sync Behavior', function (): void {
 
         // Trigger multiple rapid broadcasts
         $value = 1;
-        $app->broadcast(Scope::ROUTE);
+        $app->broadcast(Scope::routeScope('/multi'));
         $value = 2;
-        $app->broadcast(Scope::ROUTE);
+        $app->broadcast(Scope::routeScope('/multi'));
         $value = 3;
-        $app->broadcast(Scope::ROUTE);
+        $app->broadcast(Scope::routeScope('/multi'));
 
         // Check that patches are queued (might have dropped some if channel is full)
         $patches = [];

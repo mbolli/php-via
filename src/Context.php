@@ -9,14 +9,24 @@ use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Context\ComponentManager;
 use Mbolli\PhpVia\Context\ContextLifecycle;
 use Mbolli\PhpVia\Context\PatchManager;
+use Mbolli\PhpVia\Context\RequestScope;
 use Mbolli\PhpVia\Context\SignalFactory;
+use Mbolli\PhpVia\Core\RequestSession;
+use Mbolli\PhpVia\Http\DownloadHandler;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\Html;
+use Mbolli\PhpVia\Rendering\TemplateEngine;
+use Mbolli\PhpVia\Rendering\ViewCache;
+use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Tracing\Tracer;
 use OpenSwoole\Timer;
+use starfederation\datastar\enums\ElementPatchMode;
 
 /**
  * Context represents a living bridge between PHP and the browser.
  *
  * It holds runtime state, defines actions, manages reactive signals, and defines UI through View.
+ * Not designed for extension.
  */
 class Context {
     private string $id;
@@ -43,17 +53,23 @@ class Context {
 
     private ?string $namespace = null;
 
-    /** Whether to cache update renders (default true for performance) */
-    private bool $cacheUpdates = true;
+    /** Whether update renders are shared by every context of this view in its primary scope */
+    private bool $shareRender = false;
 
-    /** Twig block name to render on SSE updates instead of the full template */
-    private ?string $updateBlock = null;
+    /** Set while an update render runs: Datastar read the page's data-nonce at the page load and dropped it */
+    private bool $renderingUpdate = false;
 
-    /** Whether we are currently inside an SSE update render */
-    private bool $isUpdating = false;
+    /** @var null|\Closure(): void runs before the view function on every render, see beforeEachRender() */
+    private ?\Closure $beforeRender = null;
+
+    /** Memo of viewKey() */
+    private ?string $viewKey = null;
 
     /** @var array<string> Explicit scopes for this context (can have multiple) */
     private array $scopes = [];
+
+    /** @var array<string, true> the scopes addScope() joined, which scope() keeps */
+    private array $joinedScopes = [];
 
     /** @var array<string, string> Path parameters extracted from route */
     private array $routeParams = [];
@@ -70,20 +86,36 @@ class Context {
     /** @var array<string> Per-context additions before </body> */
     private array $contextFootIncludes = [];
 
-    /** @var array<string, mixed> PSR-7 request attributes set by middleware */
+    /** @var array<string, mixed> PSR-7 request attributes the middleware of the page request set */
     private array $requestAttributes = [];
 
-    /** @var array<string, mixed> HTTP query/post params for the current request */
-    private array $requestInput = [];
+    /** @var array<string, mixed> Query of the page request, which the context record keeps for a rebuild */
+    private array $pageInput = [];
 
-    /** @var array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> Uploaded files for the current action request */
-    private array $requestFiles = [];
+    /**
+     * Tab state this page keeps itself: with one worker, and with several until its directory row exists.
+     *
+     * @var array<string, array<string, string>> key bucket ('' for the page, 'component:<namespace>' for a component) => key => serialized value
+     */
+    private array $tabState = [];
 
-    /** @var array<string, string> Cookies from the current request */
+    /** @var array<string, string> Cookies of the page request, or of the request that rebuilt the page */
     private array $requestCookies = [];
 
-    /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued to be sent with the next response */
+    /** @var list<array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string}> Cookies queued outside an action, sent with the next response */
     private array $pendingCookies = [];
+
+    /** Whether regenerateSession() asked outside an action for a new session cookie with the next response */
+    private bool $rotateSession = false;
+
+    /** The session of the page request while its handler runs and until its response goes out */
+    private ?RequestSession $pageSession = null;
+
+    /** A session cookie a rotation issued for a response that never reached the browser, for the next one */
+    private ?string $pendingSessionToken = null;
+
+    /** Whether broadcast() has warned that it no longer reaches the scopes this TAB-primary context joined */
+    private bool $tabBroadcastWarned = false;
 
     /** Read epoch of the newest broadcast frame queued for this context; see syncFanOut() */
     private int $fanOutEpoch = 0;
@@ -96,11 +128,17 @@ class Context {
      */
     private ?array $seedWait = null;
 
+    /** Set by cleanup(): from then on sync(), syncSignals(), patchElements(), execScript() and spawn() do nothing */
+    private bool $destroyed = false;
+
     private ContextLifecycle $lifecycle;
     private SignalFactory $signalFactory;
     private ComponentManager $componentManager;
     private PatchManager $patchManager;
 
+    /**
+     * @internal pages, mount() and component() create contexts
+     */
     public function __construct(string $id, string $route, Via $app, ?string $namespace = null, ?string $sessionId = null) {
         $this->id = $id;
         $this->route = $route;
@@ -108,11 +146,12 @@ class Context {
         $this->namespace = $namespace;
         $this->sessionId = $sessionId;
 
-        // Initialize managers
-        $this->lifecycle = new ContextLifecycle($this, $app);
-        $this->signalFactory = new SignalFactory($this, $app);
-        $this->componentManager = new ComponentManager($this, $app);
-        $this->patchManager = new PatchManager($this, $app, $this->signalFactory, $this->componentManager);
+        // Weak, so that the last reference to a context frees it without PHP's cycle collector.
+        $self = \WeakReference::create($this);
+        $this->lifecycle = new ContextLifecycle($self, $app);
+        $this->signalFactory = new SignalFactory($self, $app);
+        $this->componentManager = new ComponentManager($self, $app);
+        $this->patchManager = new PatchManager($self, $app, $this->signalFactory, $this->componentManager);
 
         // Default scope is TAB (per-context isolation)
         $this->scopes = [Scope::TAB];
@@ -176,6 +215,197 @@ class Context {
         }
 
         $this->app->clearSessionData($this->sessionId, $key);
+    }
+
+    /**
+     * Give this session a new cookie with the response to the current action or page load, as a login should,
+     * so a cookie someone planted or read before it stops reaching the session.
+     *
+     * The session keeps its id, its data, its SESSION signals and its other tabs. The rotation happens at the call:
+     * from then on a page load, a route() request or a download with the old cookie gets a new session. For 2 more
+     * seconds the old cookie still reaches the actions and streams of the tabs that exist, for the requests other
+     * tabs sent before the browser had the new one; then a stream opened with it ends. A tab whose browser has the
+     * new cookie reconnects at once. Call it after slow work such as a password check and before the login writes
+     * anything, so a throw leaves the visitor logged out.
+     *
+     * In an action, and in the spawn() tasks it starts until it answers, the new cookie goes out with that action's
+     * response, and in a page handler with the page. Called later, or outside a request such as in a timer, the
+     * rotation waits for the tab's next action. Pair it with clearSessionData() for a logout. Middleware and route()
+     * handlers use Via::regenerateSession().
+     *
+     * @throws \OverflowException when the rotation table is full of sessions that need their rows
+     */
+    public function regenerateSession(): void {
+        if ($this->sessionId === null) {
+            return;
+        }
+
+        $request = RequestScope::current($this);
+        $session = $request !== null ? ($request->isAnswered() ? null : $request->session) : $this->requestOwner()->pageSession;
+        if ($session !== null && !$session->written) {
+            $this->app->getSessionManager()->rotateNow($session);
+
+            return;
+        }
+
+        $this->app->getSessionManager()->tokens()->reserve();
+        if ($request !== null) {
+            $this->app->log('warn', "regenerateSession() ran after its action had answered, so the new cookie goes out with the tab's next action response", $this);
+        }
+        $this->requestOwner()->rotateSession = true;
+    }
+
+    /**
+     * Bind the session of the page request while its handler runs, so regenerateSession() rotates it; null unbinds.
+     *
+     * @internal called by RequestHandler
+     */
+    public function bindPageSession(?RequestSession $session): void {
+        $this->pageSession = $session;
+    }
+
+    /**
+     * Queue a cookie of a response that never reached the browser for the tab's next action response.
+     *
+     * @internal called by Via when the worker that passed an action here gave up waiting
+     *
+     * @param array{name: string, value: string, expires: int, path: string, domain: string, secure: bool, httpOnly: bool, sameSite: string} $cookie
+     */
+    public function queueCookieForNextResponse(array $cookie): void {
+        $this->requestOwner()->pendingCookies[] = $cookie;
+    }
+
+    /**
+     * Keep a session cookie a rotation issued for a response that never reached the browser, for the next one.
+     *
+     * @internal called by Via when the worker that passed an action here gave up waiting
+     */
+    public function requeueSessionCookie(string $token): void {
+        $this->requestOwner()->pendingSessionToken = $token;
+    }
+
+    /**
+     * The session cookie requeueSessionCookie() keeps, once.
+     *
+     * @internal called by the action handler
+     */
+    public function takePendingSessionToken(): ?string {
+        $owner = $this->requestOwner();
+        $token = $owner->pendingSessionToken;
+        $owner->pendingSessionToken = null;
+
+        return $token;
+    }
+
+    /**
+     * Whether regenerateSession() asked outside an action for a new cookie since the last call.
+     *
+     * @internal called by the handlers that answer a request of this context
+     */
+    public function takeSessionRotation(): bool {
+        $owner = $this->requestOwner();
+        $rotate = $owner->rotateSession;
+        $owner->rotateSession = false;
+
+        return $rotate;
+    }
+
+    /**
+     * Get a server-side value of this tab, kept across a revival.
+     *
+     * Tab state is for what the page needs to rebuild the tab but the browser does not hold, such as
+     * the last query result or a cursor: it never reaches the browser, and the handler that runs again
+     * on a revival reads it back. It lives as long as the tab's context and then for the revival window
+     * (Config::withContextTimeouts()).
+     * A component has keys of its own. Values are copies: change one and write it again.
+     *
+     * @param string $key     Key
+     * @param mixed  $default Value returned if the key is not set
+     */
+    public function tabState(string $key, mixed $default = null): mixed {
+        $page = $this->getPageContext();
+        $app = $this->app->getApp();
+        $state = $app->sharedTabState($page->id) ?? ($page->destroyed ? $app->destroyedTabState($page->id) : $page->tabState);
+        $serialized = $state[$this->tabStateBucket()][$key] ?? null;
+
+        return $serialized === null ? $default : unserialize($serialized);
+    }
+
+    /**
+     * Set a server-side value of this tab, kept across a revival; null removes the key.
+     *
+     * With one worker, the values live in its memory, and the revival records of destroyed tabs keep
+     * up to 64 MiB of them: past that, the oldest records that hold tab state are evicted. With more than
+     * one worker, every worker reads the same values from the shared context directory, which caps a tab's
+     * serialized values at the $maxTabStateBytes of Config::withContextDirectorySize(), 1024 bytes by default.
+     * Once the context is destroyed, a write from a spawn() task or an onCleanup() callback goes to its
+     * revival record, or to the context that revived it, so the tab reads it on its return.
+     *
+     * @throws \InvalidArgumentException if the value cannot be serialized, such as a closure, a resource or an array holding one
+     * @throws \OverflowException        with worker_num > 1, if the tab's values would exceed maxTabStateBytes
+     * @throws \RuntimeException         with worker_num > 1, if the tab's lock is not taken within about 7 s
+     */
+    public function setTabState(string $key, mixed $value): void {
+        if (self::holdsResource($value)) {
+            throw new \InvalidArgumentException("Tab state \"{$key}\" cannot be serialized: it holds a resource, which would read back as 0.");
+        }
+
+        try {
+            $serialized = $value === null ? null : serialize($value);
+        } catch (\Throwable $e) {
+            throw new \InvalidArgumentException("Tab state \"{$key}\" cannot be serialized: {$e->getMessage()}", 0, $e);
+        }
+
+        $bucket = $this->tabStateBucket();
+        $change = static function (array $state) use ($bucket, $key, $serialized): array {
+            if ($serialized !== null) {
+                $state[$bucket][$key] = $serialized;
+            } elseif (isset($state[$bucket][$key])) {
+                unset($state[$bucket][$key]);
+                if ($state[$bucket] === []) {
+                    unset($state[$bucket]);
+                }
+            }
+
+            return $state;
+        };
+
+        $page = $this->getPageContext();
+        $app = $this->app->getApp();
+        if ($app->changeSharedTabState($page->id, $change, "\"{$key}\"")) {
+            return;
+        }
+        if ($page->destroyed) {
+            $app->changeDestroyedTabState($page->id, $change);
+
+            return;
+        }
+
+        $state = $change($page->tabState);
+        $app->assertTabStateFits($state, "\"{$key}\"");
+        $page->tabState = $state;
+    }
+
+    /**
+     * The tab state this page keeps itself.
+     *
+     * @internal read by Application for the revival record and the directory row
+     *
+     * @return array<string, array<string, string>>
+     */
+    public function localTabState(): array {
+        return $this->tabState;
+    }
+
+    /**
+     * Replace the tab state this page keeps itself.
+     *
+     * @internal set by Via from a revival record, and by Application once the directory row holds it
+     *
+     * @param array<string, array<string, string>> $state
+     */
+    public function importTabState(array $state): void {
+        $this->tabState = $state;
     }
 
     /**
@@ -262,7 +492,7 @@ class Context {
     }
 
     /**
-     * Set PSR-7 request attributes from middleware.
+     * Set the PSR-7 attributes the middleware of the page request set.
      *
      * @internal called by RequestHandler after middleware pipeline runs
      *
@@ -273,58 +503,74 @@ class Context {
     }
 
     /**
-     * Get a request attribute set by middleware.
+     * Get a request attribute set by middleware with $request->withAttribute(), such as the signed-in user.
      *
-     * Middleware can store data (e.g. authenticated user, locale) as PSR-7
-     * request attributes via $request->withAttribute(). These are bridged
-     * into the Context so page handlers can access them.
+     * In an action it is an attribute of that action's request, which global middleware sets: per-route
+     * middleware runs on page loads only. Anywhere else it is one of the page request (see input()).
      */
     public function getRequestAttribute(string $name, mixed $default = null): mixed {
-        return $this->requestOwner()->requestAttributes[$name] ?? $default;
+        return $this->getRequestAttributes()[$name] ?? $default;
     }
 
     /**
-     * Get all request attributes set by middleware.
+     * Get all request attributes set by middleware, from the same request as getRequestAttribute().
      *
      * @return array<string, mixed>
      */
     public function getRequestAttributes(): array {
-        return $this->requestOwner()->requestAttributes;
+        return RequestScope::current($this)->attributes ?? $this->requestOwner()->requestAttributes;
     }
 
     /**
-     * Set HTTP request input (query + post params + files) for the current action request.
+     * Set the query of the page request.
      *
-     * @internal called by ActionHandler before executing an action
+     * @internal called by RequestHandler on a page load, and by Via when it rebuilds the context from its record
      *
-     * @param array<string, mixed>                                                                      $query GET query parameters
-     * @param array<string, mixed>                                                                      $post  POST body parameters
-     * @param array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}> $files Uploaded files (from multipart/form-data)
+     * @param array<string, mixed> $query
      */
-    public function setRequestInput(array $query, array $post, array $files = []): void {
-        $this->requestInput = array_merge($query, $post);
-        $this->requestFiles = $files;
+    public function setPageInput(array $query): void {
+        $this->pageInput = $query;
     }
 
     /**
-     * Get an HTTP request parameter from the current action request.
+     * The query of the page request.
      *
-     * Reads from merged GET + POST parameters. Use this instead of \$_GET/\$_POST
-     * superglobals, which are not safe in OpenSwoole's coroutine model.
+     * @internal read by Application for the context record
+     *
+     * @return array<string, mixed>
+     */
+    public function getPageInput(): array {
+        return $this->pageInput;
+    }
+
+    /**
+     * Get an HTTP request parameter of the request the running code serves:
+     * - in an action, in the renders it runs and in the coroutines it starts while it runs, the action
+     *   request's merged GET and POST parameters, so two actions of one tab that run at once each read their own
+     * - in a spawn() task, the request that started the task, also after it was answered
+     * - anywhere else, such as the page handler, a timer, the SSE connect or a broadcast render, the page's query
+     *
+     * A context rebuilt after its tab was away (revival) or on another worker sees the page's query again,
+     * up to 512 bytes of it: a longer query is dropped from the rebuild with a warning, so keep state that
+     * has to survive in a path parameter, a signal or tabState().
+     *
+     * Use this instead of \$_GET/\$_POST superglobals, which are not safe in OpenSwoole's coroutine model.
      *
      * @param string $name    Parameter name
      * @param mixed  $default Value returned if parameter is not set
      */
     public function input(string $name, mixed $default = null): mixed {
-        return $this->requestOwner()->requestInput[$name] ?? $default;
+        return (RequestScope::current($this)->input ?? $this->requestOwner()->pageInput)[$name] ?? $default;
     }
 
     /**
-     * Get an uploaded file from the current action request.
+     * Get an uploaded file of the action request the running code serves (see input()).
      *
      * Returns the parsed file array for the named field when a file was
      * successfully uploaded via a multipart/form-data form. Returns null if
-     * no file was sent, the field is missing, or the upload failed.
+     * no file was sent, the field is missing, or the upload failed, and outside an action.
+     * Once the action has answered it is null too, because OpenSwoole deletes the temporary
+     * file with the request: move the file in the action before a spawn() task works on it.
      *
      * Use this in action callbacks instead of \$_FILES, which is not safe in
      * OpenSwoole's coroutine model.
@@ -334,8 +580,8 @@ class Context {
      * @return null|array{name: string, type: string, tmp_name: string, error: int, size: int}
      */
     public function file(string $name): ?array {
-        $f = $this->requestOwner()->requestFiles[$name] ?? null;
-        if (!\is_array($f) || $f['error'] !== UPLOAD_ERR_OK) {
+        $f = RequestScope::current($this)?->file($name);
+        if ($f === null || $f['error'] !== UPLOAD_ERR_OK) {
             return null;
         }
 
@@ -343,9 +589,9 @@ class Context {
     }
 
     /**
-     * Set cookies from the current request.
+     * Set the cookies of the page request, or of the request that rebuilt the page.
      *
-     * @internal called by RequestHandler and ActionHandler before executing the handler/action
+     * @internal called by RequestHandler on a page load, and by Via when it rebuilds the context
      *
      * @param array<string, string> $cookies Raw cookie array from the OpenSwoole request
      */
@@ -354,7 +600,8 @@ class Context {
     }
 
     /**
-     * Get a cookie value from the current request.
+     * Get a cookie value of the request the running code serves (see input()): the action's in an action,
+     * the page request's, or that of the request that rebuilt the page, outside one.
      *
      * Returns null if the cookie is not present. Use this instead of $_COOKIE,
      * which is not safe in OpenSwoole's coroutine model.
@@ -362,16 +609,18 @@ class Context {
      * @param string $name Cookie name
      */
     public function cookie(string $name): ?string {
-        $value = $this->requestOwner()->requestCookies[$name] ?? null;
+        $value = (RequestScope::current($this)->cookies ?? $this->requestOwner()->requestCookies)[$name] ?? null;
 
         return $value !== null ? (string) $value : null;
     }
 
     /**
-     * Queue a cookie to be sent with the next response.
+     * Queue a cookie for the response of the request the running code serves.
      *
-     * The cookie is applied to the HTTP response by RequestHandler (page load) or
-     * ActionHandler (action response). It cannot be sent mid-SSE-stream.
+     * In a page handler it goes out with the page, in an action (and in the spawn() tasks it starts, until
+     * it answers) with that action's response, whatever its status. Queued outside a request, such as in a
+     * timer, or by a task after its action answered, it goes out with the tab's next action response. It
+     * cannot be sent mid-SSE-stream.
      *
      * @param string $name     Cookie name
      * @param string $value    Cookie value
@@ -392,7 +641,15 @@ class Context {
         bool $httpOnly = true,
         string $sameSite = 'Lax',
     ): void {
-        $this->requestOwner()->pendingCookies[] = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
+        $cookie = compact('name', 'value', 'expires', 'path', 'domain', 'secure', 'httpOnly', 'sameSite');
+        $request = RequestScope::current($this);
+        if ($request !== null && $request->queueCookie($cookie)) {
+            return;
+        }
+        if ($request !== null) {
+            $this->app->log('warn', "setCookie('{$name}') ran after its action had answered, so it goes out with the tab's next action response", $this);
+        }
+        $this->requestOwner()->pendingCookies[] = $cookie;
     }
 
     /**
@@ -408,7 +665,7 @@ class Context {
     }
 
     /**
-     * Return all pending cookies and clear the queue.
+     * Return the cookies queued outside an action, and clear the queue.
      *
      * @internal called by RequestHandler and ActionHandler to apply queued cookies
      *
@@ -422,25 +679,24 @@ class Context {
     }
 
     /**
-     * Register a callback to be executed when the context is cleaned up (SSE disconnect).
+     * Register a callback to run when this context is destroyed, the moment its tab is gone for good:
+     * - the SSE connection closed and stayed closed for the cleanup delay (Config::withContextTimeouts())
+     * - the browser sent the tab-close beacon
+     * - no SSE stream attached within the connect timeout
+     *
+     * Via::onClientDisconnect() runs earlier, when the stream closes, also for a reconnect blip.
+     *
+     * @param callable(Context): void $callback
      */
     public function onCleanup(callable $callback): void {
         $this->lifecycle->addCleanupCallback($callback);
     }
 
     /**
-     * Register a callback to be executed when the user disconnects.
-     *
-     * This is an alias for onCleanup() with clearer semantics.
-     * The callback is executed when:
-     * - the SSE connection closes and stays closed for the cleanup delay (Config::withContextCleanupDelay())
-     * - the browser sends the session close beacon
-     * - no SSE stream attaches within the connect timeout (Config::withContextConnectTimeout())
-     *
-     * @param callable(Context): void $callback Function to call on disconnect
+     * @deprecated removed in 0.14; throws and names onCleanup()
      */
-    public function onDisconnect(callable $callback): void {
-        $this->lifecycle->addCleanupCallback($callback);
+    public function onDisconnect(callable $callback): never {
+        Removed::method('Context::onDisconnect()', 'Use $c->onCleanup($fn): it runs at the same moment, when the context is destroyed.');
     }
 
     /**
@@ -457,11 +713,57 @@ class Context {
     }
 
     /**
+     * Run $task in a coroutine of its own, for work that outlives the action or page handler that
+     * starts it, such as a long query that reports its progress. The task receives this context.
+     * Call sync() or syncSignals() to send what it changes: only an action sends its changed signals
+     * by itself.
+     *
+     * A throw from the task is logged and goes to Via::onError() with ErrorPhase::Task, unless an
+     * onError() callback started the task; the worker and its other tabs keep running.
+     *
+     * A task keeps running when its context is destroyed (see onCleanup()), so a read on a shared
+     * database or Redis connection is never cut short. From then on isDestroyed() is true and
+     * sync(), syncSignals(), patchElements() and execScript() do nothing, so a task finishes without
+     * guards. A long task checks isDestroyed() to stop early, and an onCleanup() callback stops work
+     * it started outside PHP, such as a process.
+     *
+     * A stopping worker waits for its running tasks: with its open streams before the onWorkerStop()
+     * callbacks, and after them for the rest of the stop budget (max_wait_time less a second). A task
+     * that loops checks Via::isShuttingDown(). spawn() on a destroyed context does nothing.
+     *
+     * A task started in an action reads that action's input(), cookie() and request attributes for as long
+     * as it runs; file() is null once the action has answered. A cookie it sets before then goes out with the
+     * action's response, and after it with the tab's next action response.
+     *
+     * @param callable(Context): void $task
+     *
+     * @throws \RuntimeException when no coroutine can be created, at OpenSwoole's max_coroutine
+     */
+    public function spawn(callable $task): void {
+        if ($this->destroyed) {
+            return;
+        }
+
+        $this->lifecycle->spawn($task);
+    }
+
+    /**
+     * Whether this context was destroyed: its tab is gone for good and its onCleanup() callbacks ran.
+     *
+     * A revival builds a new context under the same id, so this one stays destroyed. A spawn() task
+     * that holds it checks this to stop early.
+     */
+    public function isDestroyed(): bool {
+        return $this->destroyed;
+    }
+
+    /**
      * Execute cleanup callbacks and release resources.
      *
      * @internal Called by Via when context is destroyed
      */
     public function cleanup(): void {
+        $this->destroyed = true;
         $this->lifecycle->cleanup();
 
         // Close patch channel
@@ -470,6 +772,7 @@ class Context {
         // Clear references to prevent memory leaks
         $this->signalFactory->clearSignals();
         $this->seedWait = null;
+        $this->tabState = [];
         $this->actionRegistry = [];
         // A component that joined a scope is registered there itself and would outlive the page.
         foreach ($this->componentManager->getComponents() as $component) {
@@ -477,6 +780,7 @@ class Context {
         }
         $this->componentManager->clearComponents();
         $this->viewFn = null;
+        $this->beforeRender = null;
     }
 
     public function getRoute(): string {
@@ -499,6 +803,8 @@ class Context {
 
     /**
      * Get the shell template override for this context, if any.
+     *
+     * @internal
      */
     public function getShellTemplate(): ?string {
         return $this->shellTemplate;
@@ -566,19 +872,21 @@ class Context {
     }
 
     /**
-     * Set the scope(s) for this context.
+     * Set the primary scope of this context.
      *
-     * Replaces any previously set scopes. To add additional scopes, use addScope().
+     * Replaces the primary scope set before. The scopes joined through addScope() or a scoped signal stay.
+     *
+     * The primary scope is the target of broadcast() and the key of the shared update render. It is no
+     * default for later declarations: actions stay per tab, and signal() needs the scope to share a signal.
+     * Scope::ROUTE resolves to this route's scope and Scope::SESSION to this session's.
      *
      * @param string $scope Built-in scope (Scope::TAB, etc.) or custom (e.g., "room:lobby")
      */
     public function scope(string $scope): void {
-        // Auto-expand ROUTE to include the actual route path
-        if ($scope === Scope::ROUTE) {
-            $scope = Scope::routeScope($this->route);
-        }
+        $scope = Scope::resolve($scope, $this, 'Context::scope()');
 
-        $this->scopes = [$scope];
+        $joined = array_filter($this->scopes, fn (string $s): bool => $s !== $scope && isset($this->joinedScopes[$s]));
+        $this->scopes = [$scope, ...array_values($joined)];
         $this->app->registerContextInScope($this, $scope);
         $this->app->log('debug', "Scope set to: {$scope}", $this);
     }
@@ -588,10 +896,15 @@ class Context {
      *
      * Allows a context to belong to multiple scopes simultaneously.
      * Example: A user in a chat room can have both "user:123" and "room:lobby" scopes.
+     * Scope::ROUTE and Scope::SESSION resolve as in scope().
      *
      * @param string $scope Additional scope to add
      */
     public function addScope(string $scope): void {
+        $scope = Scope::resolve($scope, $this, 'Context::addScope()');
+        if ($scope !== Scope::TAB) {
+            $this->joinedScopes[$scope] = true;
+        }
         if (!\in_array($scope, $this->scopes, true)) {
             $this->scopes[] = $scope;
             $this->app->registerContextInScope($this, $scope);
@@ -608,9 +921,11 @@ class Context {
      * @param string $scope Scope to remove
      */
     public function removeScope(string $scope): void {
+        $scope = Scope::resolve($scope, $this, 'Context::removeScope()');
         if ($scope === Scope::TAB) {
             return; // TAB scope is permanent: it's the per-context identity scope
         }
+        unset($this->joinedScopes[$scope]);
         $key = array_search($scope, $this->scopes, true);
         if ($key !== false) {
             array_splice($this->scopes, (int) $key, 1);
@@ -640,21 +955,31 @@ class Context {
     }
 
     /**
-     * Check if this context has a specific scope.
-     *
-     * @internal
-     */
-    public function hasScope(string $scope): bool {
-        return \in_array($scope, $this->scopes, true);
-    }
-
-    /**
      * Broadcast updates to all contexts with the same primary scope.
      *
      * Inside a coroutine this only marks the scope for the worker's next broadcast flush; see Via::broadcast().
+     * With the default primary scope, TAB, it syncs this tab only: scopes joined through addScope() are reached
+     * with Via::broadcast().
      */
     public function broadcast(): void {
-        $this->app->broadcast($this->getPrimaryScope());
+        $scope = $this->getPrimaryScope();
+        if ($scope !== Scope::TAB) {
+            $this->app->broadcast($scope);
+
+            return;
+        }
+
+        $joined = array_values(array_diff($this->scopes, [Scope::TAB]));
+        if ($joined !== [] && !$this->tabBroadcastWarned && $this->app->getSettings()->devMode) {
+            $this->tabBroadcastWarned = true;
+            $this->app->log('warn', \sprintf(
+                'Context::broadcast() syncs only this tab, since its primary scope is TAB; before php-via 0.14 it re-rendered '
+                . 'every tab on the worker. To reach the scopes it joined (%s), call $app->broadcast() with one of them.',
+                implode(', ', $joined),
+            ), $this);
+        }
+
+        $this->sync();
     }
 
     /**
@@ -699,71 +1024,131 @@ class Context {
     /**
      * Define the UI rendered by this context.
      *
-     * @param callable(bool, string): string|string $view         Function that returns HTML content (receives $isUpdate, $basePath), or Twig template name
-     * @param array<string, mixed>                  $data         Optional data for Twig templates
-     * @param null|string                           $block        Twig block name to render on SSE updates instead of the full template. On initial page load the full template is always rendered.
-     * @param bool                                  $cacheUpdates Whether to cache update renders (default true). Set to false if view returns different content on updates (e.g., empty string).
+     * Either view($callable), which renders whatever the callable returns and receives
+     * ($isUpdate, $basePath), or view('template.html.twig', $data, $block), which renders a
+     * template through the engine from Config::withTemplateEngine() or withTemplateDir().
+     *
+     * @param callable(bool, string): string|string                 $view        Function that returns HTML, or a template name
+     * @param array<string, mixed>|callable(): array<string, mixed> $data        Template data, or a callable that builds it on every render. Template views only.
+     * @param null|string                                           $block       Block rendered on SSE updates instead of the whole template; the initial page load always renders the whole template. Template views only.
+     * @param bool                                                  $shareRender Render each update once for every context of this view (same primary scope, route and component) instead of once per context. Only for views that are identical for every tab: TAB signals, per-user data or components inside the view make the shared HTML wrong for the others. Needs a primary scope set with scope(). A full-document view never shares its render.
+     *
+     * @throws \InvalidArgumentException when $data or $block is passed with a callable, or the template name is markup
+     * @throws \LogicException           for a template without a template engine, or $block with an engine that renders no blocks
      */
-    public function view(callable|string $view, array $data = [], ?string $block = null, bool $cacheUpdates = true): void {
-        $this->updateBlock = $block;
-
+    public function view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void {
         if (\is_string($view)) {
-            // Twig template name: block is applied automatically by render() during updates
-            $this->viewFn = fn () => $this->render($view, $data);
-        } elseif (\is_callable($view)) {
-            // Callable function - don't wrap, let the callable handle its own structure
-            $this->viewFn = $view;
+            if (str_contains($view, '<')) {
+                throw new \InvalidArgumentException('view() takes a template name as a string, not markup. Return the HTML from a callable instead: $c->view(fn () => \'<div>...</div>\').');
+            }
+            $this->templateEngine("view('{$view}')", $block);
+
+            $this->viewFn = fn (bool $isUpdate): string => $this->render($view, $this->resolveViewData($data), $isUpdate ? $block : null);
         } else {
-            throw new \RuntimeException('View must be a template name or callable');
+            if ($block !== null) {
+                throw new \InvalidArgumentException("view(callable, block: '{$block}') does nothing: a block applies only to a template view. Use \$c->view('template.html.twig', fn () => [...], block: '{$block}').");
+            }
+            if ($data !== []) {
+                throw new \InvalidArgumentException('view(callable, $data): data applies only to a template view. Build the data inside the callable, or use $c->view(\'template.html.twig\', $data).');
+            }
+
+            $this->viewFn = $view;
         }
 
-        $this->cacheUpdates = $cacheUpdates;
+        $this->shareRender = $shareRender;
+    }
+
+    /**
+     * Run $hook before the view function on every render, whichever view() set it, as the composition API copies
+     * the scoped signals' values onto the instance first.
+     *
+     * @internal
+     *
+     * @param \Closure(): void $hook
+     */
+    public function beforeEachRender(\Closure $hook): void {
+        $this->beforeRender = $hook;
     }
 
     /**
      * Check if a view has been defined for this context.
+     *
+     * @internal
      */
     public function hasView(): bool {
         return $this->viewFn !== null;
     }
 
     /**
-     * Check if update renders should be cached.
+     * Whether update renders are shared by every context of this view in its primary scope.
      *
      * @internal
      */
-    public function shouldCacheUpdates(): bool {
-        return $this->cacheUpdates;
+    public function shouldShareRender(): bool {
+        return $this->shareRender;
     }
 
     /**
-     * Render a Twig template with context data.
-     *
-     * If a `block` was set via `view()` and this render is called during an SSE update
-     * without an explicit `$block` argument, the update block is applied automatically.
+     * @internal the view part of this context's shared render key, see ViewCache::viewKey()
+     */
+    public function viewKey(): string {
+        return $this->viewKey ??= ViewCache::viewKey($this->route, $this->namespace);
+    }
+
+    /**
+     * Render a template with this context's data: its named signals and actions, '_via',
+     * contextId, currentRoute, basePath, via_html_attrs, via_head and via_foot. Explicit $data wins.
      *
      * @param array<string, mixed> $data  Data to pass to the template
      * @param null|string          $block Optional block name to render only that block
+     *
+     * @throws \LogicException without a template engine, or with $block and an engine that renders no blocks
      */
     public function render(string $template, array $data = [], ?string $block = null): string {
-        $effectiveBlock = $block ?? ($this->isUpdating ? $this->updateBlock : null);
+        $this->templateEngine("render('{$template}')", $block);
         $data = array_merge($this->buildAutoData(), $data); // explicit $data wins
-        $data += ['contextId' => $this->id, 'currentRoute' => $this->route];
+        $data += ['contextId' => $this->id, 'currentRoute' => $this->route, 'basePath' => $this->app->getSettings()->basePath] + $this->documentData();
 
-        return $this->app->getViewRenderer()->renderTemplate($template, $data, $effectiveBlock);
+        return $this->app->getViewRenderer()->renderTemplate($template, $data, $block);
     }
 
     /**
-     * Render a Twig template from string.
+     * @deprecated removed in 0.14; throws and names getTwig()->createTemplate()
      *
-     * @param string               $template Template content
-     * @param array<string, mixed> $data     Data to pass to the template
+     * @param array<string, mixed> $data
      */
-    public function renderString(string $template, array $data = []): string {
-        // Add context data automatically
-        $data += ['contextId' => $this->id];
+    public function renderString(string $template, array $data = []): never {
+        Removed::method('Context::renderString()', 'Render a template held as a string with $app->getTwig()->createTemplate($template)->render($data).');
+    }
 
-        return $this->app->getViewRenderer()->renderString($template, $data);
+    /**
+     * The tags that connect a page to php-via, for its <head> right after <meta charset>: the
+     * via_ctx signal, the import map (with withDatastarRocket() or withImportMap() entries), the
+     * SSE connect with its reconnect, and the beacon that closes the context when the tab goes.
+     *
+     * The default shell writes it with {{ via_head }}, a custom shell with the same placeholder, a
+     * Twig template with {{ via_head() }}, and a closure that returns a full document with this
+     * method. Every tag carries the nonce from the page request's 'via.csp_nonce' attribute, which
+     * middleware sets for a Content-Security-Policy, except in an update render. A component returns its page's.
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    public function viaHead(): string {
+        $nonce = $this->bootstrapNonce();
+        $settings = $this->app->getSettings();
+
+        return Bootstrap::head($this->getPageContext()->id, $settings->basePath, $settings->importMapTag($nonce), $nonce);
+    }
+
+    /**
+     * The Datastar module script, from Config::getDatastarUrl(), for the end of <body>: {{ via_foot }}
+     * in a shell, {{ via_foot() }} in a Twig template. It carries the nonce of viaHead(). A layout
+     * that loads its own Datastar bundle leaves it out.
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    public function viaFoot(): string {
+        return Bootstrap::foot($this->app->getSettings()->datastarUrl, $this->bootstrapNonce());
     }
 
     /**
@@ -782,18 +1167,32 @@ class Context {
             throw new \RuntimeException('View not defined');
         }
 
-        $this->isUpdating = $isUpdate;
+        $scope = $this->getPrimaryScope();
+        if ($this->shareRender && $scope === Scope::TAB) {
+            throw new \LogicException("view(shareRender: true) on {$this->route} has no scope to share the render in: its primary scope is TAB. Call \$c->scope(...) with the shared scope, or drop shareRender.");
+        }
+
+        $viewFn = $this->viewFn;
+        if ($this->beforeRender !== null) {
+            $before = $this->beforeRender;
+            $viewFn = static function (mixed ...$args) use ($before, $viewFn): string {
+                $before();
+
+                return $viewFn(...$args);
+            };
+        }
+        $this->renderingUpdate = $isUpdate;
 
         try {
             return $this->app->getViewRenderer()->renderView(
-                $this->viewFn,
+                $viewFn,
                 $isUpdate,
-                $this->getPrimaryScope(),
+                $scope,
                 $this,
                 $this->route
             );
         } finally {
-            $this->isUpdating = false;
+            $this->renderingUpdate = false;
         }
     }
 
@@ -801,7 +1200,8 @@ class Context {
      * Create a signal.
      *
      * @param mixed       $initialValue   The initial value of the signal
-     * @param null|string $name           Optional signal name (defaults to 'signal')
+     * @param string      $name           The signal's name in this context, used by getSignal(), templates
+     *                                    and the browser id
      * @param null|string $scope          Optional scope for shared signal (null = TAB scope, no sharing)
      * @param bool        $autoBroadcast  Auto-broadcast changes for scoped signals (default: true)
      * @param null|bool   $clientWritable Whether the client may write this signal. null (default):
@@ -813,11 +1213,26 @@ class Context {
      * ROUTE/SESSION/GLOBAL scope: Signal is shared across all contexts in the same scope
      * Custom scope: Signal is shared across all contexts with that scope (e.g., "room:lobby")
      *
+     * A scoped signal joins this context to its scope, so its writes reach the tab. The primary scope
+     * set by scope() is not a default: after scope() set a shared one, a signal without a scope throws.
+     *
      * Declaring a TAB signal again with the same name returns the existing signal and sets it to
      * the new initial value; a warning is logged when that changes the live value.
+     *
+     * $clientSeeded declares a TAB signal whose initial value the browser holds, such as one the page's
+     * own script reads from the URL or from localStorage: $initialValue is only the server's fallback.
+     * The page seed and the first sync leave the signal out, declaring it again keeps the live value, and
+     * until the server writes it, every SSE connect gives it the browser's value before the view renders.
+     * Such a signal is client-writable. The browser must hold the value when via_head's SSE connect runs,
+     * so declare it on <html> or in <head> before via_head (data-signals, data-init): Datastar applies
+     * attributes in document order, and a value declared in <body> misses the first connect, which then
+     * renders the fallback.
+     *
+     * @throws \LogicException           without a scope, after scope() set a primary scope other than TAB
+     * @throws \InvalidArgumentException for $clientSeeded with a shared scope or with clientWritable: false
      */
-    public function signal(mixed $initialValue, ?string $name = null, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null): Signal {
-        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable);
+    public function signal(mixed $initialValue, string $name, ?string $scope = null, bool $autoBroadcast = true, ?bool $clientWritable = null, bool $clientSeeded = false): Signal {
+        return $this->signalFactory->createSignal($initialValue, $name, $scope, $autoBroadcast, $clientWritable, $clientSeeded);
     }
 
     /**
@@ -839,6 +1254,8 @@ class Context {
      * Covers all scopes: TAB, ROUTE, SESSION, GLOBAL, and custom.
      *
      * @return array<string, Signal>
+     *
+     * @internal
      */
     public function getNamedSignals(): array {
         return $this->signalFactory->getNamedSignals();
@@ -877,77 +1294,46 @@ class Context {
      * Only actions registered with an explicit $name are included.
      *
      * @return array<string, Action>
+     *
+     * @internal
      */
     public function getNamedActions(): array {
         return $this->namedActions;
     }
 
     /**
-     * Create an action trigger.
+     * Create an action trigger. It runs for the tab, or the component, that posts it.
      *
-     * Actions can be TAB-scoped (per-context) or shared across a scope.
-     * If the context has a non-TAB scope, the action is registered as a scoped action
-     * and shared with all contexts in the same scope.
+     * Registering a name twice keeps the later callback and logs a warning once per id.
      *
-     * Registering a name twice: a TAB action keeps the later callback and logs a warning once
-     * per id; a scoped action keeps the first callback registered in its scope and reuses it.
-     *
-     * @param callable    $fn    The action function to execute
-     * @param null|string $name  Optional human-readable name
-     * @param null|string $scope Optional explicit scope (defaults to context's primary scope)
+     * @param callable    $fn         The action function to execute
+     * @param null|string $name       Optional human-readable name
+     * @param mixed       ...$removed Nothing: the $scope argument was removed in php-via 0.14, and a value here throws
      */
-    public function action(callable $fn, ?string $name = null, ?string $scope = null): Action {
-        // Use explicit scope if provided, otherwise use context's primary scope
-        $actionScope = $scope ?? $this->getPrimaryScope();
-
-        // Auto-expand ROUTE to include the actual route path
-        if ($actionScope === Scope::ROUTE) {
-            $actionScope = Scope::routeScope($this->route);
+    public function action(callable $fn, ?string $name = null, mixed ...$removed): Action {
+        if ($removed !== []) {
+            // ArgumentCountError, like Signal's removed flags: no catch (\Exception) block hides it.
+            throw new \ArgumentCountError('The $scope argument of Context::action() was removed in php-via 0.14. An action runs for the tab that posts it: drop the third argument, and give signal() a scope to share state.');
         }
 
-        // For scoped actions, use deterministic ID (name only) so cached views work
-        // For TAB scope, use random ID to ensure uniqueness per context
-        if ($actionScope !== Scope::TAB) {
-            if ($name === null) {
-                throw new \InvalidArgumentException('Action name is required for scoped actions (non-TAB scope)');
-            }
-            $actionId = $name; // Use name directly for deterministic ID
+        // Deterministic ID so a destroyed context that is later revived
+        // (re-created with the same context ID, handler re-run) regenerates byte-identical
+        // action URLs: the already-loaded DOM's buttons keep working without a reload.
+        // Keyed on the stable namespace (not the random component context ID): a component's
+        // namespace disambiguates its actions from the parent page's (e.g. `a-increment` vs
+        // `increment`), which keeps executeAction()'s parent-first lookup unambiguous.
+        $base = $name ?? 'action' . $this->anonActionSeq++;
+        $namespace = $this->getNamespace();
+        $actionId = $namespace !== null ? $namespace . '-' . $base : $base;
 
-            // Check if action already exists in this scope
-            $existingAction = $this->app->getScopedAction($actionScope, $actionId);
-            if ($existingAction !== null) {
-                // Action already registered in this scope, reuse it
-                $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
-                $action = new Action($actionId, $this->getConfig()->getBasePath());
-                $this->namedActions[$name] = $action;
-
-                return $action;
-            }
-
-            // Register as scoped action
-            $this->app->log('debug', "[{$this->getId()}] Registering new action {$actionId} in scope {$actionScope}", $this);
-
-            $this->app->registerScopedAction($actionScope, $actionId, $fn);
-        } else {
-            // TAB scope: deterministic ID so a destroyed context that is later revived
-            // (re-created with the same context ID, handler re-run) regenerates byte-identical
-            // action URLs: the already-loaded DOM's buttons keep working without a reload.
-            // Keyed on the stable namespace (not the random component context ID): a component's
-            // namespace disambiguates its actions from the parent page's (e.g. `a-increment` vs
-            // `increment`), which keeps executeAction()'s parent-first lookup unambiguous.
-            $base = $name ?? 'action' . $this->anonActionSeq++;
-            $namespace = $this->getNamespace();
-            $actionId = $namespace !== null ? $namespace . '-' . $base : $base;
-
-            if (isset($this->actionRegistry[$actionId]) && !isset($this->duplicateActionWarned[$actionId])) {
-                $this->duplicateActionWarned[$actionId] = true;
-                $this->app->log('warn', "Action '{$actionId}' registered twice in this context; the later callback replaces the earlier one", $this);
-            }
-
-            $this->actionRegistry[$actionId] = $fn;
+        if (isset($this->actionRegistry[$actionId]) && !isset($this->duplicateActionWarned[$actionId])) {
+            $this->duplicateActionWarned[$actionId] = true;
+            $this->app->log('warn', "Action '{$actionId}' registered twice in this context; the later callback replaces the earlier one", $this);
         }
 
-        $action = new Action($actionId, $this->getConfig()->getBasePath());
+        $this->actionRegistry[$actionId] = $fn;
+
+        $action = new Action($actionId, $this->app->getSettings()->basePath);
 
         if ($name !== null) {
             $this->namedActions[$name] = $action;
@@ -957,19 +1343,37 @@ class Context {
     }
 
     /**
-     * Execute a function periodically.
+     * Register an action shared by every context of $scope, as #[Action(scope: ...)] does. The first callback
+     * registered for an id in a scope serves the whole scope and receives the context that posts it and the id.
      *
-     *     * @deprecated Use setInterval() instead
+     * @internal used by PageMount
      *
-     * @internal
-     *
-     *     * @param int      $milliseconds Interval in milliseconds
-     * @param callable $fn The function to execute
-     *
-     * @return int Timer ID that can be used to clear the timer
+     * @param callable(Context, string): void $fn
      */
-    public function interval(int $milliseconds, callable $fn): int {
-        return $this->lifecycle->registerTimer($fn, $milliseconds);
+    public function scopedAction(callable $fn, string $name, string $scope): Action {
+        $actionScope = Scope::resolve($scope, $this, '#[Action(scope: ...)]');
+        // The id holds no context id, so a shared render carries the same URL for every context. A component's
+        // namespace is in it, as in action(), so two components that declare one name keep apart.
+        $namespace = $this->getNamespace();
+        $actionId = $namespace !== null ? $namespace . '-' . $name : $name;
+        if ($actionScope === Scope::TAB) {
+            return $this->action(static fn (Context $caller) => $fn($caller, $actionId), $name);
+        }
+
+        $action = new Action($actionId, $this->app->getSettings()->basePath);
+        $this->namedActions[$name] = $action;
+        $this->app->retainScope($this, $actionScope);
+
+        if ($this->app->getScopedAction($actionScope, $actionId) !== null) {
+            $this->app->log('debug', "[{$this->getId()}] Reusing existing action {$actionId} in scope {$actionScope}", $this);
+
+            return $action;
+        }
+
+        $this->app->log('debug', "[{$this->getId()}] Registering new action {$actionId} in scope {$actionScope}", $this);
+        $this->app->registerScopedAction($actionScope, $actionId, static fn (Context $caller) => $fn($caller, $actionId));
+
+        return $action;
     }
 
     /**
@@ -1025,13 +1429,22 @@ class Context {
             }
         }
 
-        // Check component contexts
-        foreach ($this->componentManager->getComponents() as $component) {
-            if ($component->hasAction($actionId)) {
-                $component->executeAction($actionId);
+        $sessionScope = $this->sessionId !== null ? Scope::sessionScope($this->sessionId) : null;
+        if ($sessionScope !== null && !\in_array($sessionScope, $scopes, true)) {
+            $scopedAction = $this->app->getScopedAction($sessionScope, $actionId);
+            if ($scopedAction !== null) {
+                $this->app->log('debug', "Found scoped action {$actionId} in SESSION scope", $this);
+                $scopedAction($this);
 
                 return;
             }
+        }
+
+        $component = $this->componentWithAction($actionId);
+        if ($component !== null) {
+            $component->executeAction($actionId);
+
+            return;
         }
 
         throw new \RuntimeException("Action not found: {$actionId}");
@@ -1045,11 +1458,21 @@ class Context {
      * the setup closure from the class's #[Signal]/#[Action] metadata.
      *
      * @param callable|class-string $fn        Component setup function, or class name
-     * @param null|string           $namespace Optional namespace for component signals
+     * @param string                $namespace Name of the component, unique on its page: it prefixes the component's
+     *                                         signals and actions and keeps its id stable when the page is rebuilt.
+     *                                         Letters, digits, '_' and '-' only, as it goes into action URLs and signal names.
      *
      * @return callable Returns a function that renders the component
+     *
+     * @throws \InvalidArgumentException for a namespace with other characters, or one already on the page
      */
-    public function component(callable|string $fn, ?string $namespace = null): callable {
+    public function component(callable|string $fn, string $namespace): callable {
+        if (preg_match('/^[A-Za-z0-9_-]+$/', $namespace) !== 1) {
+            throw new \InvalidArgumentException(
+                'A component namespace takes letters, digits, \'_\' and \'-\' only, since it goes into action URLs and signal names, got '
+                . var_export($namespace, true) . ". Build it from a key with something like 'item-' . md5(\$key)."
+            );
+        }
         if (\is_string($fn)) {
             $fn = PageMount::buildClosure(ClassMetadata::analyze($fn), $this->app);
         }
@@ -1058,9 +1481,13 @@ class Context {
     }
 
     /**
-     * Sync current view and signals to the browser.
+     * Sync current view and signals to the browser. Does nothing once the context is destroyed.
      */
     public function sync(): void {
+        if ($this->destroyed) {
+            return;
+        }
+
         $this->patchManager->sync();
     }
 
@@ -1084,10 +1511,137 @@ class Context {
     }
 
     /**
-     * Execute JavaScript on the client.
+     * Execute JavaScript on the client. Does nothing once the context is destroyed.
      */
     public function execScript(string $script): void {
+        if ($this->destroyed) {
+            return;
+        }
+
         $this->patchManager->execScript($script);
+    }
+
+    /**
+     * Fire a CustomEvent named $event on the browser's window, with $detail as its detail.
+     *
+     * Listen with data-on:toast__window="show(evt.detail)" or window.addEventListener('toast', ...). The name
+     * and the detail are JSON-encoded into the script, so no value breaks out of it, which a script built by
+     * hand for execScript() has to see to itself. The event is queued and delivered like execScript(): never
+     * dropped, and a component's goes to its page.
+     *
+     * ```php
+     * $c->dispatch('toast', ['level' => 'error', 'text' => 'Save failed: ' . $e->getMessage()]);
+     * ```
+     *
+     * @param mixed $detail any value json_encode() takes, invalid UTF-8 replaced; null for none
+     *
+     * @throws \InvalidArgumentException for an empty name, or a detail json_encode() cannot encode, such as NAN or a resource
+     */
+    public function dispatch(string $event, mixed $detail = null): void {
+        if ($event === '') {
+            throw new \InvalidArgumentException('dispatch() needs an event name.');
+        }
+
+        $flags = JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+
+        try {
+            $script = 'window.dispatchEvent(new CustomEvent(' . json_encode($event, $flags) . ', {detail: ' . json_encode($detail, $flags) . '}))';
+        } catch (\JsonException $e) {
+            throw new \InvalidArgumentException("dispatch('{$event}') takes a detail that json_encode() can encode: " . $e->getMessage(), 0, $e);
+        }
+
+        $this->patchManager->execScript($script);
+    }
+
+    /**
+     * A one-shot URL that sends $source to the browser as a file download over plain HTTP, for exports that do not
+     * belong in the SSE stream.
+     *
+     * A string is the path of a file, sent with sendfile(); php-via does not delete it. A callable returns the
+     * content, or yields it in chunks, when the browser fetches the URL, so a generator streams an export of any
+     * size without holding it in memory. The URL works once and only for this tab's session, while its context
+     * lives: it is gone after the first request for it or when the context is destroyed, and one asked for on a
+     * destroyed context, such as by a spawn() task, answers 404. Send the browser there,
+     * with a link the view renders or $c->execScript('window.location = ' . json_encode($url)). A tab keeps its
+     * newest 100 download URLs, so a view that renders links on every render keeps those of its last renders.
+     * A callable that throws is logged and reaches Via::onError() as ErrorPhase::Render, and the browser sees the
+     * download fail.
+     *
+     * With more than one worker, the URL carries the id of the worker that made it, and a request for it that reaches
+     * another worker is passed there (see Config::withContextTimeouts(forwardMs:)). Once the tab's stream has moved to
+     * another worker, that worker has destroyed its copy of the context, so the URLs it made answer 404.
+     *
+     * ```php
+     * $url = $c->download(function () use ($rows): \Generator {
+     *     foreach ($rows as $row) {
+     *         yield implode(',', $row) . "\n";
+     *     }
+     * }, 'flows.csv', 'text/csv; charset=utf-8');
+     * ```
+     *
+     * @param callable(): (iterable<string>|string)|string $source   a file path, or a callable that returns or yields the content
+     * @param string                                       $filename the name the browser saves the file under
+     * @param string                                       $mimeType its Content-Type, such as 'text/csv; charset=utf-8'
+     *
+     * @throws \InvalidArgumentException for a path that is no readable file, an empty filename or one with control characters, or a malformed MIME type
+     */
+    public function download(callable|string $source, string $filename, string $mimeType): string {
+        $token = $this->app->getApp()->downloads()->register($this->getPageContext(), $source, $filename, $mimeType);
+
+        return $this->app->getSettings()->basePath . DownloadHandler::PATH . $this->app->downloadTokenPrefix() . $token;
+    }
+
+    /**
+     * Patch HTML into this tab outside the view, such as a modal, a toast or a chunk of streamed output.
+     *
+     * Without $selector, Outer and Replace match the top-level elements of $html by id; the other modes
+     * need a selector. Remove needs no HTML: patchElements(selector: '#toast', mode: PatchMode::Remove).
+     * Patches queue until the tab's stream is open, like sync(). Each one counts, since no render sends it
+     * again: a full queue drops them last, and a client that falls behind gets them all. Does nothing once
+     * the context is destroyed.
+     *
+     * @throws \InvalidArgumentException when there is neither HTML nor a selector, the mode needs a selector, or the selector has a line break
+     */
+    public function patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void {
+        if ($html === '' && ($selector ?? '') === '') {
+            throw new \InvalidArgumentException('patchElements() needs HTML, a selector, or both.');
+        }
+        if (($selector ?? '') === '' && $mode !== PatchMode::Outer && $mode !== PatchMode::Replace) {
+            throw new \InvalidArgumentException("PatchMode::{$mode->name} needs a selector: only Outer and Replace find their target by the element's id.");
+        }
+        if ($selector !== null && strpbrk($selector, "\r\n") !== false) {
+            throw new \InvalidArgumentException('patchElements() refuses a selector with a line break: it would end the SSE data line.');
+        }
+
+        if ($this->destroyed) {
+            return;
+        }
+
+        $patch = ['type' => 'elements', 'content' => $html, 'mode' => $mode];
+        if ($selector !== null && $selector !== '') {
+            $patch['selector'] = $selector;
+        }
+
+        $this->patchManager->queuePatch($patch);
+    }
+
+    /**
+     * Whether this tab's SSE stream is open on this worker.
+     *
+     * sync() and patches sent while it is not are queued and delivered when the tab connects or
+     * reconnects, so checking it first only saves the render.
+     */
+    public function isConnected(): bool {
+        return ($this->app->activeSseCount[$this->getPageContext()->id] ?? 0) > 0;
+    }
+
+    /**
+     * The page this context belongs to: the page itself, or for a component the page it sits on.
+     *
+     * Use it to tell which visitor an action inside a component came from.
+     */
+    public function getPageContext(): self {
+        return $this->componentManager->getParentPageContext() ?? $this;
     }
 
     /**
@@ -1165,15 +1719,33 @@ class Context {
     }
 
     /**
-     * Get next patch from the queue.
+     * Give the clientSeeded TAB signals of this page and its components the browser's values, for those the
+     * server has not written. The usual clientWritable and type rules apply.
+     *
+     * @internal called through Via::seedFromConnect()
+     *
+     * @param array<int|string, mixed> $clientSignals Signal values the SSE connect carries
+     */
+    public function takeClientSeeded(array $clientSignals): void {
+        $seed = [];
+        foreach ($this->collectTabSignals() as $signal) {
+            if ($signal->isClientSeeded() && $signal->writeCount() === 0 && \array_key_exists($signal->id(), $clientSignals)) {
+                $seed[$signal->id()] = $clientSignals[$signal->id()];
+            }
+        }
+
+        if ($seed !== []) {
+            $this->signalFactory->injectFlat($seed);
+        }
+    }
+
+    /**
+     * Get next patch from the queue, or null if none is available. Its `confirm` must be invoked
+     * only after the patch has actually been written.
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array{type: string, content: mixed, selector?: string, confirm?: callable(): void} Next patch data
-     *                                                                                                 or null if none available.
-     *                                                                                                 `confirm` must be invoked
-     *                                                                                                 only after the patch has
-     *                                                                                                 actually been written.
+     * @return null|array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void}
      */
     public function getPatch(): ?array {
         return $this->patchManager->getPatch();
@@ -1186,9 +1758,128 @@ class Context {
     /**
      * Sync only signals to the browser.
      * Useful when you only need to update signal values without re-rendering.
+     * Does nothing once the context is destroyed.
      */
     public function syncSignals(): void {
+        if ($this->destroyed) {
+            return;
+        }
+
         $this->patchManager->syncSignals();
+    }
+
+    /**
+     * The CSP nonce from this context's page request, null without one.
+     *
+     * @internal also used by the Dev Bar's injector
+     *
+     * @throws \LogicException when 'via.csp_nonce' is set to something other than a string
+     */
+    public function cspNonce(): ?string {
+        $nonce = $this->requestOwner()->requestAttributes['via.csp_nonce'] ?? null;
+        if ($nonce === null || \is_string($nonce)) {
+            return $nonce;
+        }
+
+        throw new \LogicException("The 'via.csp_nonce' request attribute holds the CSP nonce for via_head and via_foot as a string, got " . get_debug_type($nonce) . '.');
+    }
+
+    /**
+     * The page's CSP nonce, or null in an update render: the browser hid the nonce of the page's tags, and a
+     * morph would write it back where scripts on the page can read it.
+     */
+    private function bootstrapNonce(): ?string {
+        $page = $this->getPageContext();
+
+        return $this->renderingUpdate || $page->renderingUpdate ? null : $page->cspNonce();
+    }
+
+    /**
+     * The component, at any depth, that registered $actionId for its tab or in a scope it joined.
+     */
+    private function componentWithAction(string $actionId): ?self {
+        foreach ($this->componentManager->getComponents() as $component) {
+            if ($component->hasAction($actionId)) {
+                return $component;
+            }
+            foreach ($component->getScopes() as $scope) {
+                if ($this->app->getScopedAction($scope, $actionId) !== null) {
+                    return $component;
+                }
+            }
+            $nested = $component->componentWithAction($actionId);
+            if ($nested !== null) {
+                return $nested;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * via_html_attrs, via_head and via_foot as template data, built only when a template prints them. An update
+     * render leaves data-nonce out, so a morph of the document does not put back what Datastar removed.
+     *
+     * @return array{via_html_attrs: Html, via_head: Html, via_foot: Html}
+     */
+    private function documentData(): array {
+        return [
+            'via_html_attrs' => new Html(fn (): string => $this->renderingUpdate ? '' : Bootstrap::htmlAttributes($this->getPageContext()->cspNonce())),
+            'via_head' => new Html($this->viaHead(...)),
+            'via_foot' => new Html($this->viaFoot(...)),
+        ];
+    }
+
+    /**
+     * The app's template engine, for $call, which renders a template.
+     *
+     * @throws \LogicException without an engine, or with $block and an engine that renders no blocks
+     */
+    private function templateEngine(string $call, ?string $block): TemplateEngine {
+        $engine = $this->app->getViewRenderer()->getEngine();
+        if ($engine === null) {
+            throw new \LogicException("{$call} renders a template, and this app has no template engine. For Twig templates run composer require twig/twig, then set \$config->withTemplateDir(__DIR__ . '/templates') or ->withTemplateEngine(new \\Mbolli\\PhpVia\\Twig\\TwigEngine(__DIR__ . '/templates')). Without templates, return the HTML from a closure: \$c->view(fn () => '<div>...</div>').");
+        }
+        if ($block !== null && !$engine->supportsBlocks()) {
+            throw new \LogicException("{$call} with block: '{$block}' needs a template engine that renders single blocks, and " . $engine::class . ' does not. Drop block:, so updates render the whole template.');
+        }
+
+        return $engine;
+    }
+
+    /**
+     * The data of a template view for one render.
+     *
+     * @param array<string, mixed>|callable(): array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    private function resolveViewData(array|callable $data): array {
+        return \is_array($data) ? $data : $data();
+    }
+
+    /**
+     * The tab state keys of this context: the page's, or for a component, its namespace's.
+     */
+    private function tabStateBucket(): string {
+        return $this->componentManager->isComponent() ? 'component:' . $this->namespace : '';
+    }
+
+    /**
+     * Whether $value is a resource or an array that holds one, which serialize() writes as the integer 0.
+     */
+    private static function holdsResource(mixed $value): bool {
+        $isResource = static fn (mixed $v): bool => \is_resource($v) || \gettype($v) === 'resource (closed)';
+        if (!\is_array($value)) {
+            return $isResource($value);
+        }
+
+        $found = false;
+        array_walk_recursive($value, static function (mixed $v) use ($isResource, &$found): void {
+            $found = $found || $isResource($v);
+        });
+
+        return $found;
     }
 
     /**
@@ -1199,7 +1890,7 @@ class Context {
     }
 
     /**
-     * Build the auto-injection data array for Twig templates.
+     * Build the auto-injection data array for templates.
      *
      * Merges all named signals (keyed by user-supplied name) and named actions
      * (keyed by camelCase of user-supplied name) into a single array, plus a

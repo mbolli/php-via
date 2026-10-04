@@ -21,7 +21,7 @@ test('scoped view is cached for multiple update renders', function (): void {
             ++$renderCount;
 
             return "<div>Stock: {$symbol} (render #{$renderCount}, " . ($isUpdate ? 'update' : 'initial') . ')</div>';
-        });
+        }, shareRender: true);
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -74,10 +74,10 @@ test('scoped view is NOT cached for SSE updates', function (): void {
 
             // Simulate signal updates
             $price = 100 + $renderCount;
-            $c->signal($price, 'price');
+            $c->signal($price, 'price', Scope::build('stock', $symbol));
 
             return $isUpdate ? '' : "<div>Stock: {$symbol}</div>";
-        }, cacheUpdates: false); // Opt-out of update caching for this test
+        });
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -116,10 +116,10 @@ test('scoped view: update renders can use cache, initial loads do not', function
 
             // Update price on each render
             $lastPrice += 10;
-            $c->signal($lastPrice, 'price');
+            $c->signal($lastPrice, 'price', Scope::build('stock', $symbol));
 
             return $isUpdate ? '' : "<div>Stock: {$symbol} - Last render: {$renderCount}</div>";
-        }, cacheUpdates: false); // Opt-out of update caching for this test
+        });
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -157,7 +157,7 @@ test('scoped view: update renders can use cache, initial loads do not', function
 
     // Now simulate SSE updates (stock price ticks) on first context
     $ctx1->renderView(isUpdate: true);
-    expect($renderCount)->toBe(4)->and('First SSE update should render (cacheUpdates: false)');
+    expect($renderCount)->toBe(4)->and('First SSE update should render (shareRender: false)');
 
     $ctx1->renderView(isUpdate: true);
     expect($renderCount)->toBe(5)->and('Second SSE update should render');
@@ -189,7 +189,7 @@ test('different scopes have separate caches', function (): void {
             ++$renderCount;
 
             return $isUpdate ? '' : "<div>Stock: {$symbol}</div>";
-        });
+        }, shareRender: true);
     };
 
     $this->app->page('/stock/{symbol}', $handler);

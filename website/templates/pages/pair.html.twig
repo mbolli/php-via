@@ -1,0 +1,46 @@
+{% extends 'shells/base.html.twig' %}
+{% block title %}Phone pairing · php-via{% endblock %}
+{% block description %}The phone side of the pairing demo on the php-via homepage. This page shares one colour with a desktop tab.{% endblock %}
+{% block body_class %}page-home page-pair{% endblock %}
+{% block head %}
+<meta name="robots" content="noindex, nofollow">
+{% endblock %}
+{% block content %}
+<section class="px-phone">
+    <div class="px-phone-wrap">
+        <div class="px-pair px-pair--phone">
+            <div class="px-pair-bar">
+                <span class="px-pair-bar-title">Phone pairing</span>
+                {% if found %}<code class="px-tag px-tag--scope">{{ scope }}</code>{% endif %}
+            </div>
+            <div class="px-phone-body">
+            {% if found %}
+                <h1>Pick a colour for both screens</h1>
+                <p>
+                    This page and the desktop tab that showed the QR code share the scope
+                    <code>{{ scope }}</code>. Tap a swatch and both screens change.
+                </p>
+                {% block pair_widget -%}
+                <div id="pair-widget" class="px-pair-shared">
+                    {% include 'components/pair-widget.html.twig' with widget|merge({expired: 'This pairing has ended. Open the homepage on your computer for a new code.'}) only %}
+                </div>
+                {%- endblock %}
+            {% else %}
+                <h1>This pairing code is not active</h1>
+                <p>
+                    The link may be incomplete. A pairing also ends 30 minutes after both of its
+                    screens close. Open the homepage on your computer to get a new code.
+                </p>
+                <p><a href="{{ basePath }}" class="px-btn px-btn--primary">Go to the homepage <span aria-hidden="true">→</span></a></p>
+            {% endif %}
+            </div>
+        </div>
+        {% if found %}
+        <p class="px-phone-foot">
+            The pairing ends 30 minutes after both screens close.
+            <a href="{{ basePath }}">Read about php-via</a>
+        </p>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

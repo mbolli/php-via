@@ -24,8 +24,20 @@ final class FakeStaticResponse extends Response {
 
     public bool $ended = false;
 
+    /** The file passed to sendfile(), whose contents become the body. */
+    public ?string $sentFile = null;
+
+    /** @var array<string, null|string> */
+    public array $cookies = [];
+
     public function header(string $key, mixed $value, bool $ucwords = true): bool {
         $this->headers[$key] = (string) $value;
+
+        return true;
+    }
+
+    public function cookie(string $key, ?string $value = null, int $expire = 0, string $path = '', string $domain = '', bool $secure = false, bool $httpOnly = false, string $sameSite = '', string $priority = ''): bool {
+        $this->cookies[$key] = $value;
 
         return true;
     }
@@ -45,5 +57,11 @@ final class FakeStaticResponse extends Response {
         $this->ended = true;
 
         return true;
+    }
+
+    public function sendfile(string $fileName, int $offset = 0, int $length = 0): bool {
+        $this->sentFile = $fileName;
+
+        return $this->end((string) file_get_contents($fileName));
     }
 }

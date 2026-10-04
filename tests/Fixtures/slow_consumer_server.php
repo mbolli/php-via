@@ -4,30 +4,29 @@ declare(strict_types=1);
 
 /*
  * Fixture for SlowConsumerTest: a real OpenSwoole server streaming to a client
- * that connects and never reads, exercising the send_queued_bytes check.
+ * that connects and never reads, exercising the send_queued_bytes check with
+ * php-via's default socket_buffer_size and threshold, as SseHandler runs it.
  *
  * Prints iterations=, dropped=, max_park_ms=.
  */
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
-// Derived from the PID rather than fixed: see client_registry_workers.php.
-$port = 3850 + (getmypid() % 140);
+$port = FixturePort::pick(3850, 140);
+$settings = (new Config())->freeze();
+$serverSettings = ['worker_num' => 1, 'log_level' => 5] + Via::serverSettings($settings);
 $server = new Server('127.0.0.1', $port, Server::POOL_MODE);
-$server->set([
-    'worker_num' => 1,
-    'log_level' => 5,
-    'send_yield' => true,
-    'socket_buffer_size' => 1024 * 1024,
-    'hook_flags' => SWOOLE_HOOK_ALL,
-]);
+$server->set($serverSettings);
 
-$threshold = 1024 * 1024;
+$threshold = SseHandler::dropThreshold($settings->sseMaxQueuedBytes, $serverSettings['socket_buffer_size']);
 
 $server->on('request', static function ($req, $res) use ($server, $threshold): void {
     if (($req->server['request_uri'] ?? '') !== '/sse') {
@@ -44,6 +43,7 @@ $server->on('request', static function ($req, $res) use ($server, $threshold): v
         $iterations = 0;
         $dropped = 0;
         $maxParkMs = 0.0;
+        $backedUp = false;
         $deadline = microtime(true) + 3.0;
 
         while (microtime(true) < $deadline) {
@@ -52,7 +52,8 @@ $server->on('request', static function ($req, $res) use ($server, $threshold): v
             $info = $server->getClientInfo($res->fd) ?: [];
             $queued = (int) ($info['send_queued_bytes'] ?? 0);
 
-            if (SseHandler::shouldDropFrame('elements', $queued, $threshold)) {
+            $backedUp = SseHandler::shouldDropFrame('elements', $queued, $threshold, $backedUp);
+            if ($backedUp) {
                 ++$dropped;
                 Coroutine::usleep(1000);
 

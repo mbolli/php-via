@@ -25,7 +25,7 @@ function teardownMintPage(Via $app, string $route, callable $handler): Context {
 
 /** @return list<string> IDs registered under $scope */
 function teardownIdsIn(Via $app, string $scope): array {
-    return array_map(static fn (Context $c): string => $c->getId(), $app->getContextsByScope($scope));
+    return array_map(static fn (Context $c): string => $c->getId(), $app->getLocalContexts($scope));
 }
 
 describe('Context teardown', function (): void {
@@ -133,8 +133,8 @@ describe('Context teardown with a revival under the same ID', function (): void 
 
         expect($app->getApp()->getContext($id))->toBe($revived)
             ->and($app->contexts[$id] ?? null)->toBe($revived)
-            ->and($app->getContextsByScope('room:1'))->toBe([$revived])
-            ->and($app->getContextsByScope(Scope::TAB))->toBe([$revived])
+            ->and($app->getLocalContexts('room:1'))->toBe([$revived])
+            ->and($app->getLocalContexts(Scope::TAB))->toBe([$revived])
         ;
     });
 
@@ -182,7 +182,7 @@ describe('Context teardown with a revival under the same ID', function (): void 
 
         expect($revived)->toBeNull()
             ->and($log)->toContain('database down')
-            ->and($app->getContextsByScope('room:flaky'))->toBe([])
+            ->and($app->getLocalContexts('room:flaky'))->toBe([])
             ->and($app->getContextSessionId($id))->toBeNull()
         ;
     });
@@ -203,33 +203,126 @@ describe('Component IDs', function (): void {
         ;
     });
 
-    test('two components with one name on a page get distinct IDs', function (): void {
+    test('a second component with one name on a page throws and leaves the first in place', function (): void {
         $app = createVia();
         $page = new Context('/p_/abc', '/p', $app);
         $page->component(fn (Context $w) => $w->view(fn (): string => 'a'), 'widget');
-        $page->component(fn (Context $w) => $w->view(fn (): string => 'b'), 'widget');
 
-        expect(array_unique(array_keys($page->getComponentRegistry())))->toHaveCount(2);
+        expect(fn () => $page->component(fn (Context $w) => $w->view(fn (): string => 'b'), 'widget'))
+            ->toThrow(InvalidArgumentException::class, "A component named 'widget' is already on this page")
+            ->and($page->getComponentRegistry())->toHaveCount(1)
+        ;
     });
 });
 
 describe('Scope state after a component is released', function (): void {
-    test('a released component leaves its scope\'s signals for the next page', function (): void {
+    test('a released component leaves its scope\'s signals while another context uses the scope', function (): void {
         $app = createVia();
         $handler = function (Context $c): void {
             $c->component(function (Context $w): void {
                 $w->scope('widgets');
-                $w->signal(0, 'clicks');
+                $w->signal(0, 'clicks', 'widgets');
                 $w->view(fn (): string => 'widget');
             }, 'widget');
             $c->view(fn (): string => 'page');
         };
         $first = teardownMintPage($app, '/a', $handler);
-        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7, broadcast: false);
-
-        $app->getApp()->destroyContext($first->getId());
+        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7);
         teardownMintPage($app, '/a', $handler);
 
+        $app->getApp()->destroyContext($first->getId());
+
         expect($app->getScopedSignalByName('widgets', 'clicks', 'widget')?->int())->toBe(7);
+    });
+
+    test('the last component in a scope takes the scope\'s signals with it', function (): void {
+        $app = createVia();
+        $handler = function (Context $c): void {
+            $c->component(function (Context $w): void {
+                $w->signal(0, 'clicks', 'widgets');
+                $w->view(fn (): string => 'widget');
+            }, 'widget');
+            $c->view(fn (): string => 'page');
+        };
+        $first = teardownMintPage($app, '/a', $handler);
+        $app->getScopedSignalByName('widgets', 'clicks', 'widget')?->setValue(7);
+
+        $app->getApp()->destroyContext($first->getId());
+
+        expect($app->getScopedSignalByName('widgets', 'clicks', 'widget'))->toBeNull();
+        teardownMintPage($app, '/a', $handler);
+        expect($app->getScopedSignalByName('widgets', 'clicks', 'widget')?->int())->toBe(0);
+    });
+});
+
+describe('Cycle-free teardown', function (): void {
+    test('a destroyed context is freed by its last reference and leaves no garbage for the cycle collector', function (): void {
+        $app = createVia();
+        $handlers = [
+            '/counter' => function (Context $c): void {
+                $count = $c->signal(0, 'count');
+                $inc = $c->action(function (Context $ctx) use ($count): void {
+                    $count->setValue($count->int() + 1);
+                    $ctx->sync();
+                }, 'inc');
+                $c->view(fn (): string => '<div id="counter">' . $count->int() . $inc->url() . '</div>');
+            },
+            '/components' => function (Context $c): void {
+                $widget = $c->component(function (Context $w): void {
+                    $n = $w->signal(1, 'n');
+                    $inner = $w->component(fn (Context $x) => $x->view(fn (): string => 'inner'), 'inner');
+                    $w->action(fn () => $n->setValue(2), 'bump');
+                    $w->view(fn (): string => 'widget ' . $n->int() . $inner());
+                }, 'widget');
+                $shared = $c->component(function (Context $w) use ($c): void {
+                    $w->scope('widgets');
+                    $w->view(fn (): string => 'shared on ' . $c->getId());
+                }, 'shared');
+                $c->view(fn (): string => '<div id="page">' . $widget() . $shared() . '</div>');
+            },
+            '/room' => function (Context $c): void {
+                $c->scope('room:1');
+                $c->onCleanup(fn () => $c->getId());
+                $c->view(fn (): string => '<div id="room">room</div>');
+            },
+        ];
+        $wasEnabled = gc_enabled();
+        // No collector run may free what refcounting alone has to.
+        gc_disable();
+
+        try {
+            gc_collect_cycles();
+            $collectedBefore = gc_status()['collected'];
+            $refs = [];
+            foreach ($handlers as $route => $handler) {
+                for ($i = 0; $i < 50; ++$i) {
+                    $ctx = teardownMintPage($app, $route, $handler);
+                    $id = $ctx->getId();
+                    $app->contexts[$id] = $ctx;
+                    $app->buildHtmlDocument($ctx);
+                    $app->scheduleContextCleanup($id, 60_000);
+                    foreach ([$ctx, ...array_values($ctx->getComponentRegistry())] as $owner) {
+                        foreach ($owner->getNamedActions() as $action) {
+                            $ctx->executeAction($action->id());
+                        }
+                        $refs[] = WeakReference::create($owner);
+                    }
+                    $ctx->sync();
+                    while ($ctx->getPatch() !== null);
+                    unset($ctx, $owner, $action);
+
+                    $app->getApp()->destroyContext($id);
+                }
+            }
+
+            expect(array_filter($refs, static fn (WeakReference $ref): bool => $ref->get() !== null))->toBe([])
+                ->and(gc_collect_cycles())->toBe(0)
+                ->and(gc_status()['collected'] - $collectedBefore)->toBe(0)
+            ;
+        } finally {
+            if ($wasEnabled) {
+                gc_enable();
+            }
+        }
     });
 });

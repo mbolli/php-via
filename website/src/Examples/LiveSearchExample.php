@@ -155,32 +155,32 @@ final class LiveSearchExample {
                 $category = $ctx->getSignal('category');
 
                 if ($cat !== null && \in_array($cat, self::CATEGORIES, strict: true)) {
-                    $category->setValue($cat, broadcast: false);
+                    $category->setValue($cat);
                 }
 
                 $ctx->sync();
             }, 'search');
 
-            $c->view(fn (): string => $c->render('examples/live_search.html.twig', [
-                'title' => '🔍 Live Search',
-                'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip, and nobody shipped a line of search logic to the browser.',
+            $c->view('examples/live_search.html.twig', fn (): array => [
+                'title' => 'Live Search',
+                'description' => 'Type to search PHP functions, and pick a category to narrow the list. The input sends a throttled action, and <code>$c->sync()</code> re-renders the results for this tab only.',
                 'summary' => [
                     '<strong>data-on:input__throttle.100ms.trailing</strong> fires at most once every 100 ms while the user types, and always fires one final time at the end, so the last keystroke is never dropped. No setTimeout written by you.',
                     '<strong>Server-side filtering</strong> is intentional. The query parser, category filter, and result ranking all live in PHP. Swap the hardcoded array for a database query and nothing else changes.',
                     '<strong>$c->sync()</strong> re-renders the view for this tab only: no broadcast, no shared state. Other users\' searches are completely isolated.',
-                    '<strong>Signals are injected</strong> into the context before the action closure runs. By the time the view callable executes, $query->string() already holds the current input value.',
-                    '<strong>Callable views</strong> re-run on every sync, computing fresh results. The client receives rendered HTML via SSE: no JSON payload, no client-side fetch() logic.',
+                    '<strong>Signals are injected</strong> into the context before the action closure runs. By the time the view\'s data closure runs, the query signal already holds the current input value.',
+                    '<strong>A data closure</strong> builds the template data on every render, so each sync computes fresh results. The client receives rendered HTML via SSE: no JSON payload, no client-side fetch() logic.',
                 ],
                 'anatomy' => [
                     'signals' => [
-                        ['name' => 'query', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Current text in the search box. Injected from the browser before the action closure runs.'],
+                        ['name' => 'query', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Current text in the search box. Injected from the browser before the action closure runs.'],
                         ['name' => 'category', 'type' => 'string', 'scope' => 'TAB', 'default' => '"all"', 'desc' => 'Active category filter. Set via ?cat= query param when the user clicks a filter pill.'],
                     ],
                     'actions' => [
                         ['name' => 'search', 'desc' => 'Reads optional ?cat= param to override category, then calls $c->sync() to re-render the results block.'],
                     ],
                     'views' => [
-                        ['name' => 'live_search.html.twig', 'desc' => 'Callable view: re-runs on every sync, filtering the PHP stdlib dataset from current signal values. Only the results block is re-rendered on updates.'],
+                        ['name' => 'live_search.html.twig', 'desc' => 'Its data closure filters the PHP stdlib dataset from the current signal values on every sync. Only the results block is re-rendered on updates.'],
                     ],
                 ],
                 'githubLinks' => [
@@ -189,7 +189,7 @@ final class LiveSearchExample {
                 ],
                 'results' => self::filter($c->getSignal('query')->string(), $c->getSignal('category')->string()),
                 'categories' => self::CATEGORIES,
-            ]), block: 'results', cacheUpdates: false);
+            ], block: 'results');
         });
     }
 

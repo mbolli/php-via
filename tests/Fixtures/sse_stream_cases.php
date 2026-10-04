@@ -132,7 +132,7 @@ Coroutine::run(static function () use ($case): void {
             $second = $s->open('room', 32);
 
             echo 'first_running=', (int) $s->running[31], "\n";
-            echo 'scope_members=', count($app->getContextsByScope('room:lobby')), "\n";
+            echo 'scope_members=', count($app->getLocalContexts('room:lobby')), "\n";
             echo 'clients=', count($app->getClients()), "\n";
 
             $GLOBALS['bumps'] = 1;
@@ -167,7 +167,7 @@ Coroutine::run(static function () use ($case): void {
             echo 'reconnected_got_patch=', (int) str_contains($second->body, 'POKE'), "\n";
         } elseif ($case === 'quiet') {
             $context = $s->context('static');
-            $context->view(static fn (bool $isUpdate): string => $isUpdate ? '' : '<main>page</main>', cacheUpdates: false);
+            $context->view(static fn (bool $isUpdate): string => $isUpdate ? '' : '<main>page</main>');
             $response = $s->open('static', 71);
             echo 'connect_event=', (int) str_contains($response->body, '"_disconnected":false'), "\n";
             echo 'resent_page=', (int) str_contains($response->body, '<main>'), "\n";

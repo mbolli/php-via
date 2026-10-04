@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
+use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\State\SharedTable;
+use Mbolli\PhpVia\Via;
 use Tests\Support\TestBroker;
 
 /*
@@ -117,10 +119,14 @@ describe('Multi-node broadcast via TestBroker', function (): void {
             $brokerBCalled = true;
         });
 
-        // Broadcasting TAB scope should not reach nodeB
-        $viaA->broadcast(Scope::TAB);
+        // A TAB-primary context's broadcast syncs that tab, and a bare TAB has no recipients to publish to
+        $tab = new Context('tab', '/t', $viaA);
+        $tab->view(fn (): string => '<p>tab</p>');
+        $tab->broadcast();
 
-        expect($brokerBCalled)->toBeFalse('TAB scope must not be published to broker');
+        expect(fn () => $viaA->broadcast(Scope::TAB))->toThrow(InvalidArgumentException::class)
+            ->and($brokerBCalled)->toBeFalse('TAB scope must not be published to broker')
+        ;
     });
 
     test('disconnected broker receives no messages', function (): void {
@@ -145,31 +151,65 @@ describe('Multi-node broadcast via TestBroker', function (): void {
 
 describe('Multi-worker startup guard', function (): void {
     test('start() throws RuntimeException when worker_num > 1 with InMemoryBroker', function (): void {
-        $via = createVia((new Config())->withWorkerNum(2));
-        // Confirm InMemoryBroker is the implicit default
+        $via = createVia((new Config())->withWorkerNum(2)->withBroker(new InMemoryBroker()));
         expect(fn () => $via->start())->toThrow(
             RuntimeException::class,
             'worker_num > 1 requires a multi-worker broker'
         );
     });
 
+    test('more than one worker without withBroker() broadcasts through SwooleBroker', function (): void {
+        expect((new Config())->withWorkerNum(2)->freeze()->broker())->toBeInstanceOf(SwooleBroker::class)
+            ->and(createVia((new Config())->withWorkerNum(2))->getBroker())->toBeInstanceOf(SwooleBroker::class)
+            ->and((new Config())->freeze()->broker())->toBeInstanceOf(InMemoryBroker::class)
+        ;
+    });
+
     test('start() does not throw when worker_num = 1 with InMemoryBroker', function (): void {
         // worker_num = 1 is the default; InMemoryBroker is valid.
         // Verify the guard condition is not met (no exception from guard path).
         $config = (new Config())->withWorkerNum(1);
-        expect($config->getWorkerNum())->toBe(1);
+        expect($config->freeze()->workerNum)->toBe(1);
         // The guard is: workerNum > 1 && InMemoryBroker — with workerNum=1 it never fires.
         expect(true)->toBeTrue();
     });
 
+    test('start() refuses a worker_num passed through withSwooleSettings(), naming withWorkerNum()', function (): void {
+        // As nfsen-ng did with SWOOLE_WORKER_NUM: 4 workers would start, each set up as the only one.
+        $via = createVia((new Config())->withSwooleSettings(['worker_num' => '4']));
+
+        expect(fn () => $via->start())->toThrow(
+            RuntimeException::class,
+            "withSwooleSettings(['worker_num' => 4]) would start 4 workers that php-via sets up as 1"
+        );
+
+        try {
+            $via->start();
+        } catch (RuntimeException $e) {
+            expect($e->getMessage())->toContain('Call ->withWorkerNum(4) instead and drop worker_num from withSwooleSettings()');
+        }
+    });
+
+    test('a worker_num in withSwooleSettings() that matches withWorkerNum() passes', function (): void {
+        // Each start() gets past the worker_num check and throws at a later one.
+        $matching = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 3])->withBroker(new InMemoryBroker()));
+        $default = createVia((new Config())->withSwooleSettings(['worker_num' => 1, 'hook_flags' => SWOOLE_HOOK_STDIO]));
+        $differing = createVia((new Config())->withWorkerNum(3)->withSwooleSettings(['worker_num' => 2]));
+
+        expect(fn () => $matching->start())->toThrow(RuntimeException::class, 'worker_num > 1 requires a multi-worker broker')
+            ->and(fn () => $default->start())->toThrow(RuntimeException::class, 'SWOOLE_HOOK_STDIO')
+            ->and(fn () => $differing->start())->toThrow(RuntimeException::class, 'Call ->withWorkerNum(2)')
+        ;
+    });
+
     test('withWorkerNum accepts 1 as minimum', function (): void {
         $config = (new Config())->withWorkerNum(0); // should clamp to 1
-        expect($config->getWorkerNum())->toBe(1);
+        expect($config->freeze()->workerNum)->toBe(1);
     });
 
     test('withWorkerNum stores the value', function (): void {
         $config = (new Config())->withWorkerNum(8);
-        expect($config->getWorkerNum())->toBe(8);
+        expect($config->freeze()->workerNum)->toBe(8);
     });
 });
 

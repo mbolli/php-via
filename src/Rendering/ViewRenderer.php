@@ -5,24 +5,36 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Rendering;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Core\Settings;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
-use Twig\Environment;
+use OpenSwoole\Coroutine;
 
 /**
  * Handles view rendering with scope-based caching.
  *
- * Manages Twig template rendering and caching strategies
- * based on context scope (TAB, ROUTE, SESSION, GLOBAL, custom).
+ * Renders templates through the app's TemplateEngine and shares update renders
+ * by context scope (TAB, ROUTE, SESSION, GLOBAL, custom).
  */
 class ViewRenderer {
-    /** @var array<string, true> Routes already warned about a silently-disabled update cache */
-    private array $multiScopeWarned = [];
+    /** @var array<string, true> Routes already warned about a full document asking to share its render */
+    private array $documentShareWarned = [];
+
+    /**
+     * Per coroutine, the open fan-outs, innermost last: for each view, the hashes of its update
+     * renders, how many there were and one of its contexts.
+     *
+     * @var array<int, list<array<string, array{hashes: array<string, true>, renders: int, context: Context}>>>
+     */
+    private array $fanOuts = [];
+
+    /** @var array<string, true> Views already given the identical-render hint */
+    private array $identicalHinted = [];
 
     public function __construct(
-        private Environment $twig,
+        private Settings $settings,
         private ViewCache $cache,
         private Stats $stats,
         private Logger $logger
@@ -46,84 +58,117 @@ class ViewRenderer {
         Context $context,
         ?string $route = null
     ): string {
-        // Check if this scope supports caching (non-TAB scopes)
-        // Only cache UPDATE renders, not initial page loads (which contain unique context IDs)
-        $shouldCache = $scope !== Scope::TAB && $isUpdate;
-
-        if ($shouldCache) {
-            // If context allows update caching (default true), use cache for performance
-            // This prevents rendering once per client (e.g., game of life)
-            if ($context->shouldCacheUpdates()) {
-                $cached = $this->cache->get($scope, true);
-                if ($cached !== null) {
-                    $this->logger->debug("Using cached update view for scope: {$scope}", $context);
-                    $this->recordCacheHit($scope, $context);
-
-                    return $cached;
+        // Only update renders are shared: an initial page load carries the context's own id.
+        if ($isUpdate && $scope !== Scope::TAB && $context->shouldShareRender()) {
+            $view = $context->viewKey();
+            $cached = $this->cache->get($scope, true, $view);
+            if ($cached !== null) {
+                if ($this->logger->debugEnabled) {
+                    $this->logger->debug("Using shared update render for scope: {$scope}", $context);
                 }
+                $this->recordCacheHit($scope, $context);
+
+                return $cached;
             }
 
-            // Render fresh (either no cache, or cacheUpdates=false)
-            $this->logger->debug("Rendering update view for scope: {$scope} (no cache)", $context);
+            if ($this->logger->debugEnabled) {
+                $this->logger->debug("Rendering shared update for scope: {$scope}", $context);
+            }
 
-            $generation = $this->cache->generation($scope);
-            $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+            $generation = $this->cache->beginRender($scope);
 
-            // Cache the result if updates are cacheable, unless a broadcast invalidated the scope while
-            // the view rendered: the render saw the older state.
-            if ($context->shouldCacheUpdates()) {
-                $this->cache->setIfCurrent($scope, $result, true, $generation);
+            try {
+                $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+            } finally {
+                $this->cache->endRender($scope);
+            }
+
+            // Not stored when a broadcast invalidated the scope while the view rendered: the render saw the older state.
+            if (!$this->isSharedDocument($result, $context)) {
+                $this->cache->setIfCurrent($scope, $result, true, $generation, $view);
             }
 
             return $result;
         }
 
-        // No caching for: TAB scope or initial page loads
-        // Initial page loads contain unique context IDs that must not be cached
-        if ($isUpdate && $scope === Scope::TAB) {
-            $this->warnSilentCacheOptOut($context, $route);
+        if ($this->logger->debugEnabled) {
+            $this->logger->debug('Rendering ' . ($isUpdate ? 'update' : 'initial') . " view for {$route}", $context);
+        }
+        $result = $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+        if ($isUpdate && $this->fanOuts !== []) {
+            $this->noteFanOutRender($result, $scope, $context);
         }
 
-        $logContext = $scope === Scope::TAB ? 'TAB-scoped' : 'initial page load';
-        $this->logger->debug("Rendering {$logContext} view for {$route} (no cache)", $context);
-
-        return $this->renderTraced($viewFn, $isUpdate, $context, $scope, false);
+        return $result;
     }
 
     /**
-     * Render a Twig template.
+     * Open a fan-out in this coroutine. Until endFanOut(), update renders that are not shared are
+     * compared per view, for the dev-mode hint that a view could share its render.
+     *
+     * @internal called by Via around a broadcast fan-out in dev mode
+     */
+    public function beginFanOut(): void {
+        $this->fanOuts[Coroutine::getCid()][] = [];
+    }
+
+    /**
+     * Close the innermost fan-out of this coroutine and hint, once per view, when every context of
+     * a view rendered the same HTML in it.
+     *
+     * @internal
+     */
+    public function endFanOut(string $scope): void {
+        $cid = Coroutine::getCid();
+        $views = array_pop($this->fanOuts[$cid]) ?? [];
+        if ($this->fanOuts[$cid] === []) {
+            unset($this->fanOuts[$cid]);
+        }
+
+        foreach ($views as $view) {
+            $context = $view['context'];
+            $tabPrimary = $context->getPrimaryScope() === Scope::TAB;
+            $key = $context->viewKey() . ($tabPrimary ? "\0tab" : '');
+            if ($view['renders'] < 2 || \count($view['hashes']) !== 1 || isset($this->identicalHinted[$key])) {
+                continue;
+            }
+            $this->identicalHinted[$key] = true;
+
+            $namespace = $context->getNamespace();
+            $this->logger->info(\sprintf(
+                '%d tabs of %s rendered identical HTML in one broadcast of %s. If this view is the same for every tab, %s so it renders once per broadcast.',
+                $view['renders'],
+                $context->getRoute() . ($namespace !== null ? " (component {$namespace})" : ''),
+                $scope,
+                $tabPrimary ? 'set its shared scope with $c->scope(...) and pass shareRender: true to view()' : 'pass shareRender: true to view()',
+            ), $context);
+        }
+    }
+
+    /**
+     * Render a template through the app's template engine.
      *
      * @param string               $template Template name
      * @param array<string, mixed> $data     Data to pass to template
      * @param null|string          $block    Optional block name to render
      *
      * @return string Rendered HTML
+     *
+     * @throws \LogicException without a template engine
      */
     public function renderTemplate(string $template, array $data = [], ?string $block = null): string {
-        if ($block !== null) {
-            return $this->twig->load($template)->renderBlock($block, $data);
+        if ($this->settings->templateEngine === null) {
+            throw new \LogicException("No template engine renders '{$template}'.");
         }
 
-        return $this->twig->render($template, $data);
+        return $this->settings->templateEngine->render($template, $data, $block);
     }
 
     /**
-     * Render a Twig template from string.
-     *
-     * @param string               $template Template string
-     * @param array<string, mixed> $data     Data to pass to template
-     *
-     * @return string Rendered HTML
+     * The app's template engine, null when it renders closures only.
      */
-    public function renderString(string $template, array $data = []): string {
-        return $this->twig->createTemplate($template)->render($data);
-    }
-
-    /**
-     * Get the Twig environment.
-     */
-    public function getTwig(): Environment {
-        return $this->twig;
+    public function getEngine(): ?TemplateEngine {
+        return $this->settings->templateEngine;
     }
 
     /**
@@ -131,9 +176,9 @@ class ViewRenderer {
      * recording a `render.regions` span. Zero-overhead when tracing is off.
      */
     private function renderTraced(callable $viewFn, bool $isUpdate, Context $context, string $scope, bool $cacheHit): string {
-        $run = function () use ($viewFn, $isUpdate, $context): string {
+        $run = function () use ($viewFn, $isUpdate): string {
             $startTime = microtime(true);
-            $result = $viewFn($isUpdate, $context->getConfig()->getBasePath());
+            $result = $viewFn($isUpdate, $this->settings->basePath);
             $this->stats->trackRender(microtime(true) - $startTime);
 
             return $result;
@@ -177,50 +222,36 @@ class ViewRenderer {
         $tracer->span($isComponent ? 'render.component' : 'render.regions', static fn () => null, $attributes, 'cache');
     }
 
+    private function noteFanOutRender(string $html, string $scope, Context $context): void {
+        $cid = Coroutine::getCid();
+        $depth = \count($this->fanOuts[$cid] ?? []) - 1;
+        // Empty updates (a static page) and full documents (per-tab ids) say nothing about sharing.
+        if ($depth < 0 || trim($html) === '' || stripos($html, '<html') !== false) {
+            return;
+        }
+
+        $key = $scope . "\0" . $context->viewKey();
+        $view = $this->fanOuts[$cid][$depth][$key] ?? ['hashes' => [], 'renders' => 0, 'context' => $context];
+        $view['hashes'][hash('xxh128', $html)] = true;
+        ++$view['renders'];
+        $this->fanOuts[$cid][$depth][$key] = $view;
+    }
+
     /**
-     * Warn once per route when a shared-scope context looks like it could use the update cache.
-     *
-     * `addScope()` (and the Composition API's scoped-signal registration) subscribes a context to a
-     * broadcast channel without touching the primary scope, and the update cache is keyed on the
-     * primary scope alone. A TAB-primary context therefore opts out of caching entirely, and every
-     * client in the shared scope re-renders on each broadcast, with nothing in the code to show it.
-     *
-     * For almost every caller that is the CORRECT outcome: their views embed per-client data, so a
-     * shared cache entry would serve one client's HTML to another (see `b0b8dda`). Warning on those
-     * would be pure noise. The narrow case worth reporting is a context that declares no TAB-scoped
-     * signals at all, where promoting the shared scope is likely an N-to-1 render win. `hasSignals()`
-     * is a heuristic, not a proof (the view may still read per-context state), so the message asks
-     * for a decision rather than asserting one.
+     * Whether a shared update render is a full document, which carries the context's own id
+     * (via_ctx, the beacon) and so is never shared. Warns once per route in dev mode.
      */
-    private function warnSilentCacheOptOut(Context $context, ?string $route): void {
-        // Only ambiguous while the author still believes the view is cacheable.
-        if (!$context->shouldCacheUpdates()) {
-            return;
+    private function isSharedDocument(string $html, Context $context): bool {
+        if (stripos($html, '<html') === false) {
+            return false;
         }
 
-        // A declared TAB signal is near-proof the render differs per client. Leave it alone.
-        if ($context->getSignalFactory()->hasSignals()) {
-            return;
+        $route = $context->getRoute();
+        if ($this->settings->devMode && !isset($this->documentShareWarned[$route])) {
+            $this->documentShareWarned[$route] = true;
+            $this->logger->warn("The view of {$route} renders a full document, which holds this tab's context id, so shareRender: true is ignored and every tab renders its own update. Pass block: to render updates without the document, or drop shareRender.", $context);
         }
 
-        $shared = array_values(array_filter($context->getScopes(), static fn (string $s): bool => $s !== Scope::TAB));
-        if ($shared === []) {
-            return;
-        }
-
-        $key = ($route ?? '?') . '|' . implode(',', $shared);
-        if (isset($this->multiScopeWarned[$key])) {
-            return;
-        }
-        $this->multiScopeWarned[$key] = true;
-
-        $this->logger->warn(\sprintf(
-            'Update cache is disabled for %s: this context broadcasts to %s but its primary scope is still TAB, so every '
-            . 'client in that scope re-renders on each broadcast. It declares no TAB-scoped signals, so promoting the '
-            . 'shared scope with scope() would likely render once for all of them. Do that only if the view is identical '
-            . 'for every client; otherwise declare cacheUpdates: false to record that the per-client render is intended.',
-            $route ?? 'this route',
-            implode(', ', $shared)
-        ), $context);
+        return true;
     }
 }

@@ -10,8 +10,8 @@ use Mbolli\PhpVia\Context;
  * Verifies that page-level sync() only re-renders components whose state
  * has actually changed, rather than blindly syncing all registered components.
  *
- * Key invariant: components with cacheUpdates=false always sync (they may
- * read external state outside the signal system).
+ * Key invariant: components without signals always sync (they may read
+ * external state outside the signal system).
  */
 
 describe('Selective Component Sync', function (): void {
@@ -57,30 +57,30 @@ describe('Selective Component Sync', function (): void {
         expect($compBRenders)->toBe(0, 'Component B should be skipped (no dirty signals)');
     });
 
-    test('page sync always re-renders components with cacheUpdates=false', function (): void {
+    test('page sync always re-renders a signal-less component that reads external state', function (): void {
         $app = createVia();
         $page = new Context('page1', '/test', $app);
 
         $externalState = 'initial';
         $compRenders = 0;
 
-        // Component with cacheUpdates=false reads external state (no signals)
+        // Component that reads external state (no signals)
         $page->component(function (Context $c) use (&$externalState, &$compRenders): void {
             $c->view(function () use (&$externalState, &$compRenders) {
                 ++$compRenders;
 
                 return '<span>' . $externalState . '</span>';
-            }, cacheUpdates: false);
+            });
         }, 'extComp');
 
         $page->view(fn () => '<div>page</div>');
 
         $compRenders = 0;
 
-        // Even with no dirty signals, cacheUpdates=false forces sync
+        // No signals to prove the view pure, so it syncs
         $page->sync();
 
-        expect($compRenders)->toBe(1, 'Component with cacheUpdates=false must always sync');
+        expect($compRenders)->toBe(1, 'A signal-less component must always sync');
     });
 
     test('only the component with a changed signal re-renders', function (): void {
@@ -190,13 +190,13 @@ describe('Selective Component Sync', function (): void {
         expect($renders['y'])->toBe(1);
     });
 
-    test('component with no signals and cacheUpdates=true is NOT skipped', function (): void {
+    test('component with no signals is NOT skipped', function (): void {
         $app = createVia();
         $page = new Context('page1', '/test', $app);
 
         $compRenders = 0;
 
-        // Component with no signals at all, default cacheUpdates=true
+        // Component with no signals at all
         $page->component(function (Context $c) use (&$compRenders): void {
             $c->view(function () use (&$compRenders) {
                 ++$compRenders;
@@ -214,8 +214,7 @@ describe('Selective Component Sync', function (): void {
         // hasChangedSignals() permanently false, so skipping on it froze any
         // signal-less component that read external state (a PHP static, GlobalState)
         // on its first-render value for the life of the process — silently, with
-        // nothing above debug level, and cacheUpdates=true is the DEFAULT, so authors
-        // opted in without declaring anything.
+        // nothing above debug level, and authors opted in without declaring anything.
         //
         // The framework cannot tell a genuinely static component from one reading
         // external state, and the costs are asymmetric: skipping wrongly freezes the
@@ -230,7 +229,7 @@ describe('Components with no signals', function (): void {
     /*
      * Regression: a component declaring no signals at all was skipped forever.
      *
-     * The skip condition is `shouldCacheUpdates() && !hasChangedSignals()`.
+     * The skip condition was `!hasChangedSignals()` alone.
      * hasChangedSignals() iterates the component's own signals and returns false
      * for an EMPTY set, so a signal-less component satisfied the skip on every
      * broadcast for the life of the process — silently freezing the client on its

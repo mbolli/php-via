@@ -1,15 +1,17 @@
 {% extends 'shells/docs.html.twig' %}
-{% block title %}Getting Started · php-via Docs{% endblock %}
+{% block title %}Getting started · php-via Docs{% endblock %}
 {% block content %}
 <article>
-    <h1>Getting Started</h1>
+    <h1>Getting started with php-via</h1>
     <p>
-        php-via is a real-time engine for PHP. It brings server-centric reactivity to PHP using
-        <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> as the runtime and
-        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> as the client-side reactive layer.
+        php-via is a PHP framework for server-side reactive UIs. Your app runs as a long-lived
+        <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> server, and
+        <a href="https://data-star.dev/" target="_blank" rel="noopener">Datastar</a> applies the server's
+        updates in the browser.
     </p>
     <p>
-        The result: you write PHP, the browser updates in real-time. No JavaScript. No build step. No API layer to maintain.
+        You write signals, actions and views in PHP. Each tab receives new HTML and signal values over one
+        SSE stream, so you write no JavaScript, run no build step and keep no separate API.
     </p>
 
     <h2 id="requirements">Requirements</h2>
@@ -17,22 +19,26 @@
         <li>PHP 8.4+</li>
         <li><a href="https://openswoole.com/docs/get-started/installation" target="_blank" rel="noopener">OpenSwoole PHP extension</a> 26+</li>
         <li>Composer</li>
-        <li><a href="https://pecl.php.net/package/brotli" target="_blank" rel="noopener">Brotli PHP extension</a> <em>(optional, required for <code>Config::withBrotli()</code>)</em></li>
+        <li><a href="https://twig.symfony.com/" target="_blank" rel="noopener">Twig</a> <em>(optional: views that are PHP closures need nothing more, template views need <code>composer require twig/twig</code>; see <a href="/docs/twig">Twig templates</a>)</em></li>
+        <li><a href="https://pecl.php.net/package/brotli" target="_blank" rel="noopener">Brotli PHP extension</a> <em>(optional: static files get Brotli level 11 once it is loaded, pages and SSE with <code>Config::withBrotli()</code>, and a <code>.br</code> file next to an asset goes out as it is, also without the extension; see <a href="/docs/deployment#static-compression">Static compression</a>)</em></li>
     </ul>
 
     <h2 id="installation">Installation</h2>
     {% code 'bash' %}{% verbatim %}
 composer require mbolli/php-via
     {% endverbatim %}{% endcode %}
+    <p>
+        php-via serves Datastar 1.0.4 itself, so the browser side needs no install.
+    </p>
 
     <h2 id="your-first-app">Your first app</h2>
     <p>
-        Create <code>app.php</code> in a new directory. Here's the most minimal
-        php-via application, a counter:
+        Create <code>app.php</code> in a new directory and put this counter in it. It is a complete
+        php-via app:
     </p>
 
     <div class="docs-demo">
-        <div class="docs-demo-header">▶ Complete source + live result</div>
+        <div class="docs-demo-header">The counter, running on this server</div>
         <div class="docs-demo-body">
             {{ demo | raw }}
         </div>
@@ -40,29 +46,106 @@ composer require mbolli/php-via
 
     {% code 'bash' %}{% verbatim %}
 php app.php
-# ⚡ Server started on http://0.0.0.0:3000
+# [INFO] Via server started on http://0.0.0.0:3000
     {% endverbatim %}{% endcode %}
 
-    <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. Then open a second tab: the counter stays independent. That's <strong>TAB scope</strong>, the default.</p>
+    <p>Open <a href="http://localhost:3000" target="_blank">localhost:3000</a> in your browser and click the button. A second tab starts again at 0, because each tab keeps its own count. That is <strong>TAB scope</strong>, the default.</p>
+    <p>
+        The action changes <code>count</code> and returns. php-via then sends the new value to the tab, and
+        <code>data-text</code> shows it. <code>$count-&gt;ref()</code> writes the signal's reference for such
+        expressions, and <code>$count-&gt;int()</code> writes the value into the first render. The view's HTML
+        stays the same, so nothing renders again. When an action changes what the view renders, it calls
+        <code>$c-&gt;sync()</code>, and Datastar puts the new HTML in place by the id of the view's top-level
+        element, here <code>counter</code>.
+    </p>
 
     <h2 id="how-it-works">How it works</h2>
-    <p>When the page loads, php-via:</p>
+    <p>A php-via page goes through these steps:</p>
     <ol>
-        <li>Executes your page handler to build the initial HTML</li>
-        <li>Injects signal state into the page as JSON <code>&lt;meta data-signals&gt;</code></li>
-        <li>Datastar establishes an SSE connection to <code>/_sse</code></li>
-        <li>When you click a button, Datastar POSTs to <code>/_action/{id}</code></li>
-        <li>Your action callback runs, signals update, view re-renders</li>
-        <li>The patch arrives via SSE and Datastar morphs the DOM</li>
+        <li>php-via runs your page handler, puts the view into its shell and sends the page. The shell's
+            <code>via_head</code> writes the tags that connect the tab, the signal values come along as JSON, and
+            <code>via_foot</code> loads Datastar.</li>
+        <li>Datastar opens an SSE stream to <code>/_sse</code>, and php-via renders the view again for it.</li>
+        <li>A click makes Datastar POST to <code>/_action/increment</code>, with the tab's signals in the body.</li>
+        <li>Your action runs. When it returns, the signals it changed go to the tab over the stream.</li>
+        <li>Datastar updates the signals in the page. A <code>sync()</code> also sends the view's new HTML, and
+            Datastar morphs only the elements that differ.</li>
     </ol>
-    <p>No page reload. No flash. Just seamless updates.</p>
+    <p>The page does not reload.</p>
+
+    <h2 id="configuration">Configuring the server</h2>
+    <p>
+        <code>Config</code> holds the server's settings. Make every <code>with*()</code> call before
+        <code>new Via($config)</code>: the constructor freezes the Config, and a <code>with*()</code> call after
+        it throws a <code>LogicException</code>.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$config = (new Config())
+    ->withPort(8080)
+    ->withDevMode(true); // for local work only
+
+$app = new Via($config);
+    {% endverbatim %}{% endcode %}
+    <p>
+        Dev mode logs more warnings, shows the exception of a page that fails instead of a bare
+        <code>Internal Server Error</code>, and shows the default shell's Live Signals panel. Leave it off in
+        production. The <a href="/docs/api#config">Config reference</a> lists the settings.
+    </p>
+
+    <h2 id="testing">Testing the counter</h2>
+    <p>
+        <code>Testing\TestApp</code> runs your pages in a test, without a server, through php-via's own page,
+        action and SSE handlers. To share the page between the app and its tests, register it in a file of its
+        own:
+    </p>
+    {% code 'php' %}{% verbatim %}
+<?php
+// routes.php
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Via;
+
+return function (Via $app): void {
+    $app->page('/', function (Context $c): void {
+        // the counter from app.php
+    });
+};
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>app.php</code> then calls <code>(require __DIR__ . '/routes.php')($app);</code> before
+        <code>$app-&gt;start()</code>, and a <a href="https://pestphp.com/" target="_blank" rel="noopener">Pest</a>
+        test opens the page, clicks twice and reads the signal the browser holds:
+    </p>
+    {% code 'php' %}{% verbatim %}
+<?php
+// tests/CounterTest.php
+use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Testing\TestApp;
+
+it('counts clicks', function (): void {
+    $app = new TestApp(new Config(), require __DIR__ . '/../routes.php');
+
+    $tab = $app->open('/');
+    $tab->action('increment')->action('increment');
+
+    expect($tab->signal('count'))->toBe(2);
+    $app->shutdown();
+});
+    {% endverbatim %}{% endcode %}
+    <p>
+        A <code>TestTab</code> also gives you the patches its stream received (<code>patches()</code>), the page
+        as the server would render it now (<code>html()</code>), and <code>disconnect(expire: true)</code> to
+        test a <a href="/docs/lifecycle#revival">revival</a>. TestApp runs everything in one process as one
+        worker.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/signals">Signals</a>: reactive state and two-way binding</li>
-        <li><a href="/docs/scopes">Scopes</a>: share state across users with one line</li>
+        <li><a href="/docs/actions">Actions</a>: what runs when the browser posts, and what goes back</li>
+        <li><a href="/docs/views">Views</a>: when a view renders and how its HTML reaches the page</li>
+        <li><a href="/docs/scopes">Scopes</a>: share state between tabs and users</li>
         <li><a href="/docs/components">Components</a>: compose complex pages from isolated sub-contexts</li>
-        <li><a href="/examples">Examples</a>: live, editable examples of every feature</li>
+        <li><a href="/examples">Examples</a>: running examples with their PHP and Twig source</li>
     </ul>
 
     <h2 id="professional-support">Professional support</h2>

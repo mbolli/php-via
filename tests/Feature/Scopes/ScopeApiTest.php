@@ -60,12 +60,12 @@ describe('Setting Scopes', function (): void {
 
     test('can set session scope', function (): void {
         $app = createVia();
-        $context = new Context(testContextId(), '/profile', $app);
+        $context = new Context(testContextId(), '/profile', $app, null, 'abcdefabcdefabcdefabcdefabcdefab');
 
         $context->scope(Scope::SESSION);
 
         $scopes = $context->getScopes();
-        expect($scopes)->toContain(Scope::SESSION);
+        expect($scopes)->toContain(Scope::sessionScope('abcdefabcdefabcdefabcdefabcdefab'));
     });
 
     test('can set custom scope', function (): void {
@@ -93,7 +93,7 @@ describe('Scope Behavior', function (): void {
 
     test('addScope() adds multiple scopes', function (): void {
         $app = createVia();
-        $context = new Context(testContextId(), '/chat', $app);
+        $context = new Context(testContextId(), '/chat', $app, null, 'abcdefabcdefabcdefabcdefabcdefab');
 
         $context->scope('room:lobby');
         $context->addScope(Scope::SESSION);
@@ -101,7 +101,7 @@ describe('Scope Behavior', function (): void {
         $scopes = $context->getScopes();
         expect($scopes)->toHaveCount(2);
         expect($scopes)->toContain('room:lobby');
-        expect($scopes)->toContain(Scope::SESSION);
+        expect($scopes)->toContain(Scope::sessionScope('abcdefabcdefabcdefabcdefabcdefab'));
     });
 
     test('addScope() does not add duplicate scopes', function (): void {

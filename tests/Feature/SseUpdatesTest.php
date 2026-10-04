@@ -48,11 +48,11 @@ describe('Patch Queue Behavior', function (): void {
 
         $ctx1 = new Context('ctx1', '/stock/AAPL', $app);
         $ctx1->scope(Scope::ROUTE);
-        $price1 = $ctx1->signal(100.0, 'price');
+        $price1 = $ctx1->signal(100.0, 'price', Scope::ROUTE);
 
         $ctx2 = new Context('ctx2', '/stock/AAPL', $app);
         $ctx2->scope(Scope::ROUTE);
-        $price2 = $ctx2->signal(100.0, 'price');
+        $price2 = $ctx2->signal(100.0, 'price', Scope::ROUTE);
 
         // Signals are the same object
         expect($price1)->toBe($price2);
@@ -77,7 +77,7 @@ describe('View Caching and Patches', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         $ctx2 = new Context('ctx2', '/game', $app);
         $ctx2->scope(Scope::ROUTE);
@@ -86,7 +86,7 @@ describe('View Caching and Patches', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Initial renders NOT cached
         $html1 = $ctx1->renderView(isUpdate: false);

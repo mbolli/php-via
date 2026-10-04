@@ -13,18 +13,18 @@
 </div>
 
 <div class="login-middleware-note">
-    <p>🛡️ <strong>This page is protected by <code>AuthMiddleware</code></strong>, attached via
+    <p><strong>This page is protected by <code>AuthMiddleware</code></strong>, attached via
     <code>Via::group()->middleware(new AuthMiddleware(...))</code> alongside the profile page.
     The auth record was injected as a request attribute and read via <code>$c->getRequestAttribute('auth')</code>.</p>
 </div>
 
 <p class="login-refresh-hint">
-    💡 <strong>Refresh the page</strong>: you will still be logged in.
+    <strong>Refresh the page</strong>: you will still be logged in.
     The middleware reads <code>sessionData('auth')</code> from the session cookie on every request.
 </p>
 
 <div class="login-nav">
-    <a href="/examples/login/profile" class="btn">View Profile →</a>
+    <a href="/examples/login/profile" class="btn">View profile</a>
     <button class="danger login-logout-btn" data-on:click="@post('{{ logout.url }}')">Log out</button>
 </div>
 

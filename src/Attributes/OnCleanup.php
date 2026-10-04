@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Attributes;
 
 /**
- * Marks a method as the cleanup handler for a composition page/component.
+ * Marks a method as a cleanup handler for a composition page/component.
  *
  * The method is registered via Context::onCleanup() and runs when the context
- * is disposed. It receives the Context as its only argument. At most one method
- * per class may carry this attribute.
+ * is destroyed: the SSE connection stayed closed for the cleanup delay, the
+ * browser sent the close beacon, or no stream attached within the connect
+ * timeout. It receives the Context as its only argument.
  *
- * Context::onDisconnect() and Context::onCleanup() share the same underlying
- * cleanup-callback queue; use #[OnCleanup] when you prefer the cleanup-oriented
- * naming, and #[OnDisconnect] for disconnect-oriented semantics.
+ * Several methods may carry the attribute; they run in declaration order.
+ * Reactive properties are hydrated from their signals before the first one runs.
  *
  * @example
  * #[OnCleanup]

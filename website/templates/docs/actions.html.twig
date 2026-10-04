@@ -4,32 +4,35 @@
 <article>
     <h1>Actions</h1>
     <p>
-        Actions are server-side event handlers that the browser can trigger. When a user clicks a button or submits a form,
-        Datastar POSTs to the action's URL and your PHP callback runs: signals update, views re-render, and patches stream back via SSE.
+        An action is a PHP callback the browser can run. A click or a form submit makes Datastar POST to the
+        action's URL with the tab's signals, your callback runs, and what it changed goes back over the tab's
+        SSE stream.
     </p>
 
     <h2 id="creating">Creating an action</h2>
     {% code 'php' %}{% verbatim %}
 $increment = $c->action(function (Context $c) use ($count): void {
     $count->setValue($count->int() + 1);
-    $c->sync();
 }, 'increment');
     {% endverbatim %}{% endcode %}
 
     <p>
-        The first argument is the callback; the second is an optional name used in the URL.
-        The name defaults to an auto-generated ID if omitted, but a name makes debugging easier.
+        The callback receives the context of the tab that posted it. The second argument is the action's name:
+        it goes into the URL, and a template gets the action under it. Unnamed actions are numbered
+        <code>action0</code>, <code>action1</code> and so on, in the order the handler registers them.
+        <code>action()</code> takes no third argument: an action runs for the tab that posts it, and state that
+        tabs share lives in signals with a scope (see <a href="/docs/scopes">Scopes</a>).
     </p>
 
     <h2 id="url">Action URL</h2>
-    <p>Get the URL to pass into your Twig template:</p>
+    <p>Pass the URL to the view:</p>
     {% code 'php' %}{% verbatim %}
 $increment->url();  // '/_action/increment'
     {% endverbatim %}{% endcode %}
 
-    <p>In Twig, bind it to a Datastar event attribute:</p>
+    <p>and bind it to a Datastar event attribute. In a Twig template the action is a variable under its name:</p>
     {% code 'html' %}{% verbatim %}
-<button data-on:click="@post('{{ increment_url }}')">>+1</button>
+<button data-on:click="@post('{{ increment.url }}')">+1</button>
     {% endverbatim %}{% endcode %}
 
     <div class="callout callout--warn">
@@ -44,82 +47,293 @@ $increment->url();  // '/_action/increment'
         (<code>/_sse</code>), just not for actions.
     </div>
 
-    <h2 id="post-data">Reading POST data</h2>
-    <p>Read POST body and query parameters with <code>$c->input()</code> inside the callback. OpenSwoole does not fill <code>$_POST</code> or <code>$_GET</code>:</p>
+    <h2 id="syncing">What goes back to the browser</h2>
+    <p>
+        When the action returns, the TAB signals it changed go to its tab, also when it throws. That covers the
+        page and its components, so an action that only changes signals needs no sync call:
+    </p>
     {% code 'php' %}{% verbatim %}
-$vote = $c->action(function (Context $c) use ($app, $votes): void {
+$c->action(function () use ($label): void {
+    $label->setValue('Saved!'); // reaches the tab when the action returns
+}, 'save');
+    {% endverbatim %}{% endcode %}
+    <p>
+        The view does not render for that. Call <code>$c-&gt;sync()</code> when the action changes what the view
+        renders, such as rows it reads from a database:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->action(function (Context $c) use ($todos, $draft): void {
+    $todos->add($draft->string());
+    $draft->setValue('');
+    $c->sync(); // render the list again
+}, 'add');
+    {% endverbatim %}{% endcode %}
+    <p>
+        A write to a scoped signal broadcasts its scope, which renders every tab in it, the acting tab
+        included. A scoped signal declared with <code>autoBroadcast: false</code> goes nowhere until you call
+        <code>$c-&gt;syncSignals()</code> or <code>$app-&gt;broadcast()</code>. To render other tabs after a
+        change outside signals, broadcast their scope; see <a href="/docs/broadcasting">Broadcasting</a>.
+    </p>
+
+    <h2 id="post-data">Reading request data</h2>
+    <p>
+        Read the query string and the POST body with <code>$c-&gt;input()</code> inside the callback, and an
+        uploaded file with <code>$c-&gt;file()</code>. OpenSwoole does not fill <code>$_POST</code>,
+        <code>$_GET</code> or <code>$_FILES</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$vote = $c->action(function (Context $c) use ($app): void {
     $option = $c->input('option');
     if (!in_array($option, ['a', 'b', 'c'], true)) {
         return; // ignore unknown values
     }
     $app->incrementGlobalState('vote_' . $option);
-    $votes->setValue(['a' => $app->globalState('vote_a'), 'b' => $app->globalState('vote_b')]);
-    $app->broadcast(Scope::routeScope('/'));
+    $app->broadcast(Scope::routeScope('/poll'));
 }, 'vote');
     {% endverbatim %}{% endcode %}
 
     {% code 'html' %}{% verbatim %}
 <!-- Pass option as query param -->
-<button data-on:click="@post('{{ vote_url }}?option=a')">Vote A</button>
+<button data-on:click="@post('{{ vote.url }}?option=a')">Vote A</button>
     {% endverbatim %}{% endcode %}
+    <p>In the page handler, <code>$c-&gt;input()</code> reads the page's query string.</p>
 
-    <h2 id="syncing">Syncing after an action</h2>
+    <h3 id="action-request">Each action reads its own request</h3>
     <p>
-        Actions don't auto-sync. You must call <code>$c-&gt;sync()</code> (view + signals) or <code>$c-&gt;syncSignals()</code>
-        (signals only, faster) to push changes to the browser:
+        <code>$c->input()</code>, <code>$c->file()</code>, <code>$c->cookie()</code> and
+        <code>$c->getRequestAttribute()</code> return the values of the request that posted the action, and a
+        cookie from <code>$c->setCookie()</code>, like the new session cookie of <code>$c->regenerateSession()</code>,
+        goes out with that action's response, whatever its status.
+        This holds when two actions of one tab run at once and one of them waits on I/O.
+    </p>
+    <ul>
+        <li>A <code>$c->spawn()</code> task keeps the request of the action that started it. Once the action
+            has answered, <code>$c->file()</code> returns null, because OpenSwoole deletes the upload's
+            temporary file with the request: move the file in the action. A cookie the task sets after that
+            goes out with the tab's next action response.</li>
+        <li>Code outside an action, such as a timer, the SSE connect or a broadcast render, reads the page
+            request. A cookie it sets goes out with the tab's next action response.</li>
+        <li>Signals are the tab's state, not the request's: an action that waits sees the values the
+            browser sent with a later action of the tab.</li>
+        <li>Request attributes in an action come from global middleware, which runs on actions. Per-route
+            middleware runs on page loads.</li>
+    </ul>
+
+    <h3 id="login">Logging in</h3>
+    <p>
+        An action that logs a visitor in calls <code>$c-&gt;regenerateSession()</code> before it writes the
+        login. The session gets a new cookie with the action's response, so a cookie someone planted or read
+        before the login no longer reaches it, and it keeps its id, its data, its SESSION signals and its other
+        tabs. The old cookie opens no page from then on, and for 2 seconds it still reaches the actions and
+        streams of tabs that exist, for requests already on their way:
     </p>
     {% code 'php' %}{% verbatim %}
-$c->action(function (Context $c) use ($label): void {
-    $label->setValue('Saved!');
-    $c->syncSignals(); // only the signal changed: skip view re-render
-}, 'save');
-    {% endverbatim %}{% endcode %}
+$c->action(function (Context $c) use ($users, $username, $password, $error): void {
+    $user = $users->check($username->string(), $password->string());
+    if ($user === null) {
+        $error->setValue('Invalid username or password.');
 
+        return;
+    }
+
+    $c->regenerateSession();
+    $c->setSessionData('user_id', $user->id);
+    $c->execScript("window.location.href = '/dashboard'");
+}, 'login');
+    {% endverbatim %}{% endcode %}
     <p>
-        For ROUTE-scoped signals, use <code>$app-&gt;broadcast()</code> instead so <em>all</em> clients on the route receive the update.
-        See <a href="/docs/broadcasting">Broadcasting</a> for details.
+        A logout calls it too, with <code>$c-&gt;clearSessionData()</code>. Middleware and
+        <code>route()</code> handlers call <code>$app-&gt;regenerateSession($request)</code>; see
+        <a href="/docs/middleware#session-rotation">Session rotation</a>.
     </p>
 
     <h2 id="multiple-actions">Multiple actions per context</h2>
     <p>A context can have as many actions as needed. Each gets its own URL:</p>
     {% code 'php' %}{% verbatim %}
-$inc   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int() + 1) & $c->sync(), 'inc');
-$dec   = $c->action(fn(Context $c) use ($count) => $count->setValue($count->int() - 1) & $c->sync(), 'dec');
-$reset = $c->action(fn(Context $c) use ($count) => $count->setValue(0) & $c->sync(), 'reset');
+$inc   = $c->action(fn () => $count->increment(), 'inc');
+$dec   = $c->action(fn () => $count->increment(-1), 'dec');
+$reset = $c->action(fn () => $count->setValue(0), 'reset');
     {% endverbatim %}{% endcode %}
     <p>
-        Registering a second TAB action under the same name in one context replaces the first and logs a
-        warning. A scoped action keeps its first registration.
+        Registering a second action under the same name in one context replaces the first and logs a warning.
     </p>
+
+    <h2 id="events">Events, patches and scripts</h2>
+    <p>Besides signals and the view, an action can send the page:</p>
+    <ul>
+        <li><code>$c-&gt;dispatch($event, $detail)</code>: a <code>CustomEvent</code> on <code>window</code>, its
+            detail JSON-encoded, for a toast and the like.</li>
+        <li><code>$c-&gt;patchElements($html, $selector, $mode)</code>: HTML outside the view, such as a line
+            appended to a log. See <a href="/docs/views#patch-elements">Views</a>.</li>
+        <li><code>$c-&gt;execScript($js)</code>: a script, for what the other two do not cover.</li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$c->action(function (Context $c) use ($notes, $note): void {
+    $notes->save($note->string());
+    $c->dispatch('toast', ['text' => 'Saved']);
+}, 'save');
+    {% endverbatim %}{% endcode %}
+    {% code 'html' %}{% verbatim %}
+<div id="toast" data-on:toast__window="el.textContent = evt.detail.text"></div>
+    {% endverbatim %}{% endcode %}
+    <p>
+        They reach the tab in the order the action sent them, and none is dropped for a client that falls
+        behind. A component's go to its page.
+    </p>
+
+    <h2 id="downloads">Downloads</h2>
+    <p>
+        <code>$c-&gt;download($source, $filename, $mimeType)</code> returns a one-shot URL that sends a file over
+        plain HTTP, outside the SSE stream. The source is a file path, or a callable that returns the content
+        or yields it in chunks when the browser fetches the URL, so a large export never sits in memory:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->action(function (Context $c) use ($orders): void {
+    $url = $c->download(function () use ($orders): \Generator {
+        foreach ($orders->all() as $order) {
+            yield implode(',', $order) . "\n";
+        }
+    }, 'orders.csv', 'text/csv; charset=utf-8');
+
+    $c->execScript('window.location = ' . json_encode($url));
+}, 'export');
+    {% endverbatim %}{% endcode %}
+    <p>
+        The URL works once, for the tab's session, while its context lives, and a tab keeps its newest 100. A
+        source that throws reaches <code>onError()</code> as <code>ErrorPhase::Render</code>, and the browser sees
+        the download fail.
+    </p>
+
+    <h2 id="io">Waiting on I/O</h2>
+    <p>
+        A worker serves all its tabs from one thread. An action that waits on a database query, an HTTP call
+        over PHP streams or a sleep suspends only its own coroutine, through OpenSwoole's coroutine hooks, and
+        the worker serves other requests meanwhile. A call no hook covers blocks the worker until it returns,
+        and so does a curl request on libcurl 8.20 or newer. See
+        <a href="/docs/deployment#hooks">Coroutine hooks</a>.
+    </p>
+
+    <h2 id="spawn">Work that outlasts the action</h2>
+    <p>
+        <code>$c-&gt;spawn($task)</code> runs work in a coroutine of its own, so the action answers at once. The
+        task receives the context. Only an action sends its changed signals by itself, so a task calls
+        <code>syncSignals()</code> or <code>sync()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->action(function (Context $c) use ($status, $report): void {
+    $status->setValue('running'); // goes out when the action returns
+
+    $c->spawn(function (Context $c) use ($status, $report): void {
+        $report->build();         // slow work
+        $status->setValue('done');
+        $c->syncSignals();
+    });
+}, 'run');
+    {% endverbatim %}{% endcode %}
+    <p>
+        A task keeps running when its tab goes for good. From then on <code>$c-&gt;isDestroyed()</code> is true
+        and its syncs, patches and downloads do nothing, so it finishes without guards; a long task checks
+        <code>isDestroyed()</code> to stop early. A throw from a task is logged and reaches
+        <code>onError()</code> as <code>ErrorPhase::Task</code>, and a stopping worker waits for running tasks.
+    </p>
+
+    <h2 id="cancellation">Requests that cancel each other</h2>
+    <p>
+        Datastar cancels an in-flight request when the page sends another one with the same method and
+        URL, from any element. A request cancelled before it reaches the server never runs its action.
+        One that has reached php-via still runs, and its patches arrive over the SSE stream as usual.
+        Cancellation suits a value where the latest post wins, such as a slider. Where every request
+        counts, or where two elements post the same action URL for different reasons, such as the Enter
+        key in a field and a send button, tell the requests apart with a query string (Datastar compares
+        the URL as written in the expression), or pass <code>requestCancellation: 'disabled'</code>:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<input data-bind="{{ message.id }}"
+    data-on:keydown="evt.key === 'Enter' && @post('{{ send.url }}?from=enter')">
+<button data-on:click="@post('{{ send.url }}?from=button')">Send</button>
+
+<!-- every click counts, so none may cancel another -->
+<button data-on:click="@post('{{ paint.url }}', {requestCancellation: 'disabled'})">Paint</button>
+    {% endverbatim %}{% endcode %}
 
     <h2 id="errors">When an action throws</h2>
     <p>
         A throw from an action, a view or a timer never takes the worker down. An action that throws any
-        <code>\Throwable</code> answers 500 <code>Action failed</code>, the worker keeps running with
-        whatever the action changed before it threw, and the error is logged with its class, message and
-        <code>file:line</code>. A page whose handler or render throws answers 500 and its context is torn
-        down. A view that throws during a broadcast skips that one tab, and the other tabs still get the
-        frame. A per-tab <code>$c-&gt;setInterval()</code> keeps ticking after a throw.
+        <code>\Throwable</code> answers 500 <code>Action failed</code>, its tab still gets the signals it
+        changed before the throw, and the error is logged with its class, message and
+        <code>file:line</code>. A page whose handler or render throws answers 500, with the exception in dev
+        mode, and its context is torn down. A view that throws during a broadcast skips that one tab, and the
+        other tabs still get the frame. A per-tab <code>$c-&gt;setInterval()</code> keeps ticking after a throw.
     </p>
-
-    <h2 id="cleanup">Cleanup actions</h2>
-    <p>
-        For actions that should only run once, or that need cleanup when the user leaves,
-        combine with <a href="/docs/lifecycle">lifecycle hooks</a>:
-    </p>
+    <p><code>$app-&gt;onError()</code> sees each of these throws, to report them:</p>
     {% code 'php' %}{% verbatim %}
-$c->onDisconnect(function (Context $c) use ($room, $app): void {
-    Room::$members[$room]--;
-    $app->broadcast('room:' . $room);
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\ErrorPhase;
+
+$app->onError(function (\Throwable $e, ?Context $c, ErrorPhase $phase, ?string $action): void {
+    error_log(sprintf('[%s] %s: %s', $phase->value, $action ?? '-', $e->getMessage()));
+
+    if ($phase === ErrorPhase::Action) {
+        $c?->getSignal('error')?->setValue('Saving failed. Try again.');
+    }
 });
     {% endverbatim %}{% endcode %}
+    <p>
+        The phase says where the throw came from: <code>Action</code>, <code>Render</code> (a page handler, a
+        view or a <code>download()</code> source), <code>Timer</code>, <code>Task</code> (a
+        <code>spawn()</code> task) or <code>Route</code> (a <code>route()</code> handler). For an action,
+        <code>$c</code> is the tab's page context, also for a component's action, and <code>$action</code> the
+        action's id. The callback only observes: the action still answers 500. It runs before the changed
+        signals go out, so a signal it writes reaches the tab with them, and before the response, so a slow
+        report delays the 500. Throws from <code>onClientConnect()</code>, <code>onCleanup()</code> and the
+        other lifecycle callbacks are only logged.
+    </p>
+
+    <h2 id="workers">Actions with several workers</h2>
+    <p>
+        With <code>withWorkerNum()</code> above 1, a tab lives on the worker that holds its SSE stream, and an
+        action can reach another worker. That worker passes the action to the tab's worker and sends back its
+        answer, cookies included, so the action always runs on the tab's own context. It waits up to
+        <code>withContextTimeouts(forwardMs: ...)</code>, 60 seconds by default, and then answers 504; the
+        action may still finish. <code>download()</code> URLs go the same way. See
+        <a href="/docs/deployment#tab-worker">Same machine</a>.
+    </p>
+
+    <h2 id="plain-routes">Endpoints without a page</h2>
+    <p>
+        An action belongs to a tab. For a JSON endpoint, a webhook or an MCP server, register a PSR-15 handler
+        with <code>$app-&gt;route()</code>. It runs behind the global middleware and its own, with no context,
+        shell or template:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Nyholm\Psr7\Response;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+
+$app->route('GET', '/api/votes', new class($app) implements RequestHandlerInterface {
+    public function __construct(private Via $app) {}
+
+    public function handle(ServerRequestInterface $request): ResponseInterface {
+        $body = json_encode(['votes' => $this->app->globalState('votes', 0)]);
+
+        return new Response(200, ['Content-Type' => 'application/json'], $body);
+    }
+});
+    {% endverbatim %}{% endcode %}
+    <p>
+        The request carries the session id in its <code>via.session</code> attribute and each path parameter as
+        an attribute of its name. php-via checks no <code>Origin</code> header there, so give a route that
+        changes state CSRF or auth middleware. A throw answers 500 and reaches <code>onError()</code> as
+        <code>ErrorPhase::Route</code>.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/signals">Signals</a>: the state that actions modify</li>
-        <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to multiple clients</li>
-        <li><a href="/docs/views">Views</a>: how <code>sync()</code> triggers a view re-render</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: cleanup hooks and timers</li>
+        <li><a href="/docs/signals">Signals</a>: the state that actions change</li>
+        <li><a href="/docs/broadcasting">Broadcasting</a>: pushing updates to other tabs</li>
+        <li><a href="/docs/views">Views</a>: what <code>sync()</code> renders</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: cleanup hooks, timers and revival</li>
     </ul>
 </article>
 

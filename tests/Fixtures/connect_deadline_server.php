@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 /*
- * Real-server fixture for Config::withContextConnectTimeout(): a context with no SSE stream on its
+ * Real-server fixture for Config::withContextTimeouts(connectMs:): a context with no SSE stream on its
  * worker is destroyed after the timeout. Cases: page (one worker), off (timeout 0), xworker (two
- * workers, a copy an action rebuilt on the worker the tab does not stream from), revived and
+ * workers, actions on the worker the tab does not stream from, which pass them on), revived and
  * revived-late (a tab whose stream dropped, freed after the cleanup delay, then revived by an action
  * with only via_ctx that queues a script; the stream returns after the connect timeout, within the
  * reconnect timeout for revived and after it for revived-late).
@@ -22,27 +22,19 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
+use Tests\Support\FixturePort;
 
 $mode = (string) ($argv[1] ?? 'page');
 $marker = sys_get_temp_dir() . '/via_connect_deadline_' . getmypid();
 @unlink($marker);
 
-// enable_reuse_port would let a second server share a busy port without an error.
-for ($i = 0; $i < 150; ++$i) {
-    $port = 4800 + ((getmypid() + $i) % 150);
-    $probe = @stream_socket_server("tcp://127.0.0.1:{$port}");
-    if ($probe !== false) {
-        fclose($probe);
-
-        break;
-    }
-}
+$port = FixturePort::pick(4800, 150);
 
 $config = (new Config())->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
-    ->withContextConnectTimeout($mode === 'off' ? 0 : ($mode === 'xworker' ? 400 : 300))
+    ->withContextTimeouts(connectMs: $mode === 'off' ? 0 : ($mode === 'xworker' ? 400 : 300))
 ;
 if (str_starts_with($mode, 'revived')) {
-    $config = $config->withContextCleanupDelay(200)->withContextReconnectTimeout(1500);
+    $config = $config->withContextTimeouts(cleanupDelayMs: 200, reconnectMs: 1500);
 }
 if ($mode === 'xworker') {
     $config = $config->withWorkerNum(2)->withBroker(new SwooleBroker());
@@ -55,10 +47,10 @@ $app->page('/room', function (Context $c) use ($marker): void {
     $c->action(static function (Context $c): void {
         $c->execScript('window.viaWindow = "WINDOW-PATCH"');
     }, 'window');
-    $c->onDisconnect(static function (Context $c) use ($marker): void {
+    $c->onCleanup(static function (Context $c) use ($marker): void {
         file_put_contents($marker, "cleanup {$c->getId()}\n", FILE_APPEND | LOCK_EX);
     });
-    $c->view(fn (): string => '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':END</div>', cacheUpdates: false);
+    $c->view(fn (): string => '<div id="v">CTX:' . $c->getId() . ':URL:' . $hit->url() . ':END</div>');
 });
 
 // The /room contexts the serving worker holds, and its pid.

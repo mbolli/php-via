@@ -2,76 +2,424 @@
 
 All notable changes to php-via will be documented in this file.
 
-## [0.13.1] - 2026-10-02
+## [0.14.0] - 2026-10-04
 
 ### Highlights
 
+- **Scopes share only what you declare.** `signal()` and `action()` no longer take the primary
+  scope from `scope()`, `Scope::ROUTE` and `Scope::SESSION` resolve the same way everywhere, and a
+  view shares its update render only with `shareRender: true`. Most of the breaking changes throw
+  with a message that names the fix.
+- **Session ids stay on the server.** The raw session id, the value of the HttpOnly session cookie,
+  reached the page HTML, the Dev Bar, traces and broker messages. php-via uses a hash of it now,
+  accepts only session ids in the form it issues, and `$c->regenerateSession()` gives a session a
+  new cookie at login.
+- **Twig is optional.** `twig/twig` no longer comes with php-via. Closure views need nothing more,
+  Twig apps run `composer require twig/twig`, and `Config::withTemplateEngine()` takes any engine.
+- **One bootstrap for every layout.** `via_head` and `via_foot` write what a page needs to connect,
+  in a shell, a Twig layout or a closure view, with a CSP nonce when middleware sets one.
+- **Actions reach their tab with several workers.** An action that reached a worker other than the
+  tab's answered 200, but its TAB signals, renders and scripts never reached the browser. The worker
+  that gets an action or a download now passes it to the tab's worker, also with revival off. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#tab-worker).
+- **New APIs for common jobs:** tab state that survives a revival (`tabState()`), downloads over
+  plain HTTP (`download()`), PSR-15 routes (`route()`), background tasks (`spawn()`), an error hook
+  (`onError()`), browser events (`dispatch()`), element patches (`patchElements()`) and a test
+  harness (`Testing\TestApp`).
+- **Datastar 1.0.4, at a versioned URL.** php-via serves Datastar 1.0.4 from
+  `/datastar.js?v=<hash>`, so browsers fetch the new bundle after an upgrade. Datastar now cancels
+  an in-flight request when any element posts to the same URL: check pages where two elements post
+  the same action.
+- **Web components.** `Config::withDatastarRocket()` runs Rocket components such as Starbase's on
+  php-via pages, and `Config::withImportMap()` pins them with integrity hashes.
 - **Page views no longer leak memory.** A page whose handler called `$c->scope()`, which most do,
-  stayed registered for the life of the worker together with its components and its response's
-  Brotli encoder: about 0.6 MB per page view with Brotli on. A page view that never opens its stream
-  now holds 13 to 35 KB until the connect timeout. In a 5 s burst on the website, 0.13.0 grew by
-  2.4 GB and kept it; 0.13.1 grows by 147 MB and reuses it.
-- **An open tab costs less.** A tab no longer keeps its page response's Brotli encoder: a docs tab
-  went from 2.8 MB to 574 KB, a home page tab from 1.3 MB to 642 KB. Most of what remains is the
-  live stream's encoder; [Performance](https://via.zweiundeins.gmbh/docs/performance#tab-memory)
-  shows the trade against the Brotli level.
-- **Multi-worker pages keep working when the context directory is full.** Every page view answered
-  500 once about 8,000 contexts had been created within the revival window.
+  stayed registered for the life of the worker with its components and its response's Brotli
+  encoder: about 0.6 MB per page view with Brotli on. In a 5 s burst on the website, 0.13.0 grew by
+  2.4 GB and kept it. A page view that never opens its stream now holds 20 to 55 KB until the
+  connect timeout.
+- **An open tab costs less.** A tab no longer keeps its page response's Brotli encoder. In 0.13.0 a
+  docs tab took 2.8 MB and a home page tab 1.3 MB; a tab now takes 590 to 670 KB at Brotli level 4.
+  [Performance](https://via.zweiundeins.gmbh/docs/performance#tab-memory) shows the trade against
+  the Brotli level.
+- **Worker freezes and crashes.** A burst of page views that never opened a stream froze a worker
+  for about a minute once their contexts expired, on libcurl 8.20 or newer a curl request crashed
+  the worker, and with several workers every page view answered 500 once about 8,000 contexts had
+  been created within the revival window. All three are fixed.
+- **Cheaper page views and static files.** A small page view costs 38% less CPU than on 0.13.0, a
+  cached stylesheet about a quarter, and static files go out with Brotli level 11 whenever
+  ext-brotli is loaded, compressed outside the workers.
+- **The Dev Bar shows the server's figures.** A new Stats panel shows every `getStats()->getAll()`
+  figure, which now counts requests, actions and streams for the whole server.
+- **Upgrade guide.** [Upgrading to 0.14](https://via.zweiundeins.gmbh/docs/upgrading) takes a 0.13
+  app through every change in the order the errors appear.
+
+### Breaking Changes
+
+- **`signal()` and `action()` no longer take the primary scope.** A signal without a scope is
+  private to the tab, and after `scope()` set a shared scope, `signal()` without one throws: pass
+  the scope as the third argument. A third argument to `action()` throws; `#[Action(scope: ...)]`
+  keeps working. See [Upgrading](https://via.zweiundeins.gmbh/docs/upgrading#scopes-signals).
+- **A scoped signal joins its context to its scope,** so its writes reach the tab without
+  `addScope()`. A worker clears a scope's signals and actions when the last context that uses the
+  scope is destroyed, so per-entity scopes such as `room:<id>` no longer add up for the life of the
+  worker. See [Scopes](https://via.zweiundeins.gmbh/docs/scopes#scope-lifetime). `scope()` replaces
+  only the primary scope, where it replaced the whole list.
+- **`Scope::ROUTE` and `Scope::SESSION` resolve in every method that takes a scope.**
+  `$app->broadcast()` and `getScopedSignalByName()` throw for a bare `Scope::TAB`, `Scope::ROUTE`
+  or `Scope::SESSION`: pass `Scope::routeScope('/path')` or `Scope::sessionScope($id)`.
+- **`$c->broadcast()` on a context whose primary scope is TAB updates that tab only,** where it
+  re-rendered every tab on the worker. Use `$app->broadcast($scope)`.
+- **Session ids are hashed.** `getSessionId()` and the `via.session` attribute return a hash of the
+  session cookie, and session scopes and SESSION signal ids carry a hash of it. Data an app keeps
+  under a 0.13 session id is not found again, and nodes that share a broker upgrade together. See
+  [Upgrading](https://via.zweiundeins.gmbh/docs/upgrading#session-id).
+- **Each action reads its own request.** `getRequestAttribute()` in an action returns what global
+  middleware set on the action's request. Outside an action, `input()` and `cookie()` read the page
+  request. See [Actions](https://via.zweiundeins.gmbh/docs/actions#action-request).
+- **The update render is shared only with `view(..., shareRender: true)`,** keyed by scope, route
+  pattern and component. `cacheUpdates:` is gone, and `shareRender: true` on a TAB-primary context
+  throws. See [Views](https://via.zweiundeins.gmbh/docs/views#caching).
+- **`view()` is `view($view, $data = [], ?string $block = null, bool $shareRender = false)`.**
+  `$data` may be a callable that runs on every render. A callable view with `$data` or `block:`
+  throws, and so does a string of HTML.
+- **The signals an action changed go to its tab after the action,** also when it throws. A trailing
+  `syncSignals()` is no longer needed; signals declared with `autoBroadcast: false` still need it.
+- **`setValue()`, `increment()` and `mutate()` take no flags.** `broadcast:` and `markChanged:`
+  throw: declare the signal with `autoBroadcast: false`, or call `markSynced()` after the write.
+- **`signal()` needs a name,** since unnamed signals on one page were the same signal.
+- **Client writes must match the signal's type.** A lossless form such as `'5'` for a number is
+  converted; any other value is refused, where it was stored as sent. A signal declared with `null`
+  takes any type. See [Signals](https://via.zweiundeins.gmbh/docs/signals#client-writes).
+- **`twig/twig` moved from `require` to `suggest`.** Without it, `withTemplateDir()`, template
+  views, `render()` and `getTwig()` throw with the command to run.
+- **`component()` needs a namespace, unique on its page,** of letters, digits, `_` and `-`.
+- **Datastar 1.0.4 in the browser.** Requests cancel per method and URL, retries stop after 10
+  attempts, and `data-bind` on checkboxes and radios listens to `input`. PHP code and
+  `starfederation/datastar-php` 1.0.1 need no change. See
+  [Upgrading](https://via.zweiundeins.gmbh/docs/upgrading#datastar).
+- **Static files get Brotli without `withBrotli()`** whenever ext-brotli is loaded. The server
+  compresses the small files present at start before it listens, for 2.3 s at most, and the rest
+  right after. `withBrotli(false)` turns it off, and
+  a static level of 0 now means none instead of Brotli level 0. See
+  [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
+- **`worker_num` in `withSwooleSettings()` throws** when it differs from `withWorkerNum()`.
+- **Routes win over extension-less static files,** and route parameters arrive percent-decoded: an
+  encoded slash arrives as `/`, so check a parameter you build a file path from.
+- **A tab rebuilt after it was away runs the route's middleware again,** so an auth gate applies.
+  See [Revival](https://via.zweiundeins.gmbh/docs/lifecycle#revival).
+- **`new Via($config)` freezes the Config,** and a later `with*` call throws.
+- **`Config::withLogLevel()` throws for an unknown level,** where it used `info`.
+- **`Config`, `Signal`, `Action` and `Scope` are final.**
+- **The default shell shows its Live Signals panel in dev mode only.**
+- **Renamed, merged and removed methods** throw, most with a message that names the replacement
+  until 0.15, as listed under Upgrading from 0.13. Internal API is tagged `@internal`, and so are the `Config` getters
+  other than `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`,
+  `getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`. These 0.13 public
+  methods still work but are `@internal` now: `Signal::isScoped()`, `getScope()`,
+  `isClientWritable()`, `writeCount()` and `hasChanged()`; `Scope::parse()`, `matches()`,
+  `isBuiltIn()`, `isRouteBased()` and `isValidWireScope()`; `Context::getNamedSignals()`,
+  `getNamedActions()`, `hasView()` and `getShellTemplate()`; `Via::getScopedSignal()`,
+  `getNotFoundHandler()` and `runGcCycle()`; and the `Stats::track*()` methods and `reset()`.
+
+### Upgrading from 0.13
+
+One line per renamed, merged or removed name, old to new. Most old names throw until 0.15 with a
+message that names the new one. [Upgrading to 0.14](https://via.zweiundeins.gmbh/docs/upgrading)
+covers the changes that need more than a rename.
+
+- `twig/twig` came with php-via → `composer require twig/twig` for `withTemplateDir()`,
+  template views, `render()` and `getTwig()`
+- the bootstrap a custom shell copied (the `{{ signals_json }}` meta, the SSE and beacon metas and
+  the `{{ base_path }}datastar.js` script) → `{{ via_head }}` after `<meta charset>`,
+  `{{ via_foot }}` before `</body>`
+- the same tags copied into a Twig layout → `{{ via_head() }}` and `{{ via_foot() }}`
+- `$c->renderString($src, $data)` → `$app->getTwig()->createTemplate($src)->render($data)`
+- `$app->onStart($fn)` → `$app->onWorkerStart($fn)`, which runs in every worker and passes
+  `int $workerId`
+- `$app->onShutdown($fn)` → `$app->onWorkerStop($fn)`
+- `$app->getContextsByScope($scope)` → `$app->getLocalContexts($scope)`, this worker's contexts
+  only
+- `$app->config()` → `$app->getConfig()`
+- `$app->getRenderStats()` → `$app->getStats()->getStats()`
+- `$app->activeSseCount[$id]` → `$c->isConnected()`
+- `Via::parseSignals()` → removed
+- `$app->broadcast(Scope::ROUTE)` → `$app->broadcast(Scope::routeScope('/path'))`
+- `$app->broadcast(Scope::SESSION)` → `$app->broadcast(Scope::sessionScope($id))`
+- the `via_session_id` cookie read in middleware → `$request->getAttribute('via.session')`
+- `$c->onDisconnect($fn)` → `$c->onCleanup($fn)`
+- `#[OnDisconnect]` → `#[OnCleanup]`
+- `$c->interval($ms, $fn)` → `$c->setInterval($fn, $ms)`
+- `$c->view($fn, cacheUpdates: true)` → `$c->view($fn, shareRender: true)` only for a view that is
+  the same for every tab, after `scope()` set a shared scope; otherwise, and for
+  `cacheUpdates: false`, leave it out
+- `$c->action($fn, 'name', $scope)` → `$c->action($fn, 'name')`, or `#[Action(scope: ...)]`
+- `$c->signal($value)` → `$c->signal($value, 'name')`
+- `$c->component($fn)` → `$c->component($fn, 'namespace')`
+- `$signal->text()` → `<span data-text="{$signal->ref()}">{$signal->string()}</span>`
+- `setValue($v, broadcast: false)`, and the same flag on `increment()` and `mutate()` →
+  declare the signal with `signal(..., autoBroadcast: false)`
+- `setValue($v, markChanged: false)` → `setValue($v)`, followed by `markSynced()` only for a signal
+  the tab already shows: in a page handler `markSynced()` keeps the value out of the page
+- `Config::withContextCleanupDelay($ms)` → `withContextTimeouts(cleanupDelayMs: $ms)`
+- `Config::withContextConnectTimeout($ms)` → `withContextTimeouts(connectMs: $ms)`
+- `Config::withContextRevivalWindow($ms)` → `withContextTimeouts(revivalWindowMs: $ms)`
+- `Config::withTracing($on)` → `withDevBar($on)`
+- `Config::withTracingWrites($on)` → `withDevBarOptions(writes: $on)`
+- `Config::withTraceBufferSize($n)` → `withDevBarOptions(traces: $n)`
+- `Config::withSsePollIntervalMs($ms)` → `withDevBarOptions(pollMs: $ms)`
+- `Config::getDevMode()` → `isDevMode()`
+- `Config::withGcInterval($ms)` → `withGcIntervalMs($ms)`
+- `Config::withSwooleSettings(['worker_num' => $n])` → `withWorkerNum($n)`
+- `Config::withBroadcastCoalescing(false)` → `$app->flushBroadcasts()` where a broadcast has to
+  land first (deprecated, still works)
+- `Config::getTraceMaxBytes()` → removed
+- `Stats::setActiveSse()` and `setActiveContexts()` → removed; `getAll()` reads the live counts
+
+### New Features
+
+- **`via_head` and `via_foot`** replace the bootstrap that custom shells and full-document layouts
+  copied from the default shell, and carry the page request's `via.csp_nonce`. php-via warns about
+  a shell without `via_head` or with a second Datastar script. See
+  [Templates](https://via.zweiundeins.gmbh/docs/twig#bootstrap).
+- **`data-nonce` on `<html>`.** Datastar runs expressions and server scripts under a nonce policy
+  without `'unsafe-eval'` once `<html>` carries the nonce. The default shell writes it when the page
+  request has `via.csp_nonce`, a custom shell with `{{ via_html_attrs }}` and a Twig layout with
+  `{{ via_html_attrs() }}`. See [Templates](https://via.zweiundeins.gmbh/docs/twig#csp).
+- **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine`; `Twig\TwigEngine` is
+  php-via's. See [Templates](https://via.zweiundeins.gmbh/docs/twig#own-engine).
+- **`$c->patchElements($html, $selector, $mode)`** sends HTML outside a view render, with a
+  `PatchMode` for each Datastar mode. See [Views](https://via.zweiundeins.gmbh/docs/views#patch-elements).
+- **`$c->dispatch($event, $detail)`** fires a CustomEvent on the browser's window, for toasts and
+  the like. Listen with `data-on:toast__window`.
+- **`$c->isConnected()`** says whether the tab has an open stream, and **`$c->getPageContext()`**
+  returns the page a component sits on.
+- **`Signal::ref()`** returns `$` plus the signal id for Datastar expressions, and
+  **`Signal::bind('value')`** binds an element property, as web components need.
+- **`$c->signal($fallback, 'name', clientSeeded: true)`** declares a TAB signal whose initial value
+  the browser holds. See [Signals](https://via.zweiundeins.gmbh/docs/signals#client-seeded).
+- **`$c->input()` on a page load** reads the page's query string, also after a revival.
+- **`$c->tabState($key)` and `setTabState()`** keep server-side values of a tab across a revival
+  and across workers. See [Tab state](https://via.zweiundeins.gmbh/docs/lifecycle#tab-state).
+- **`$c->download($source, $filename, $mimeType)`** returns a one-shot URL that sends a file, or
+  what a callable returns or yields, over plain HTTP. See
+  [Actions](https://via.zweiundeins.gmbh/docs/actions#downloads).
+- **`$c->spawn($task)`** runs per-tab work in a coroutine that a stopping worker waits for. See
+  [Actions](https://via.zweiundeins.gmbh/docs/actions#spawn).
+- **`$app->onError($callback)`** sees each throw php-via catches from app code, with its
+  `ErrorPhase`. See [Actions](https://via.zweiundeins.gmbh/docs/actions#errors).
+- **`$app->route($methods, $path, $handler)`** serves a PSR-15 handler with no context, for JSON,
+  webhooks and MCP, behind the same middleware as a page. See
+  [Actions](https://via.zweiundeins.gmbh/docs/actions#plain-routes).
+- **The `via.session` request attribute** gives middleware the session id on pages, actions, SSE
+  and plain routes.
+- **`$c->regenerateSession()`** gives the session a new cookie for a login or a logout, and
+  `$app->regenerateSession($request)` does it in middleware. The session keeps its id, data and
+  tabs. See [Session rotation](https://via.zweiundeins.gmbh/docs/middleware#session-rotation).
+- **`Config::withContextTimeouts(forwardMs:)`** sets how long a worker waits for the tab's worker to
+  answer a request it passed there, 60 s by default; then it answers 504.
+- **`$app->countClients($scope)`** counts the connected tabs a broadcast of a scope reaches, on
+  every worker.
+- **`Config::withBroadcastThrottle($scope, $minIntervalMs)`** renders a scope's broadcasts at most
+  once per interval, and `$app->flushBroadcasts()` renders a held one at once.
+- **`Scope::sessionScope($id)`** returns a session's scope, for `$app->broadcast()` outside a
+  context.
+- **`SwooleBroker` by default.** More than one worker without `withBroker()` uses it, where
+  `start()` threw.
+- **`Config::withDatastarRocket()`** serves Starbase's build of Datastar 1.0.4 with Rocket, and
+  **`Config::withImportMap()`** adds pinned modules to the import map. See
+  [Web components](https://via.zweiundeins.gmbh/docs/web-components).
+- **`Config::getDatastarUrl()`** returns the versioned bundle URL, cached for a year, and
+  `getDatastarIntegrity()` its hash. `new Via()` warns about an import map pin for `/datastar.js`
+  at another URL.
+- **`withStaticCacheControl()` closures can return `null`** to keep the default policy for a file.
+- **More static content types:** `.mjs`, `.map`, `.webmanifest`, `.wasm`, fonts and media files get
+  theirs. See [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
+- **`.br` sidecars.** A `foo.css.br` at least as new as `foo.css` goes to Brotli clients as it is.
+- **`Via::noFileIoHookFlags()`** is the hook set without file and stdio hooks, and `start()` throws
+  for hook flags that break includes or the Redis broker. See
+  [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks).
+- **A Stats panel in the Dev Bar** shows every `getStats()->getAll()` figure, the broadcast tick,
+  and the hook flags, AIO threads and event loop lag of the worker that answers, from
+  `/_via/stats`. The dev-mode `/_stats` reports the same runtime figures. See
+  [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#stats).
+- **`Testing\TestApp`** runs an app's pages in a test through php-via's own handlers, with no
+  server, and fires `setInterval()` timers while `runTasks()` runs. See
+  [Testing](https://via.zweiundeins.gmbh/docs/getting-started#testing).
+- **Several `#[OnCleanup]` methods** per class, run in declaration order.
+- **Dev mode** shows a page's exception class and message instead of "Internal Server Error",
+  logs a hint when every tab of a view rendered the same HTML in one broadcast, and warns once per
+  route about a page update whose top-level element has no id, which Datastar drops.
+
+### Deprecated
+
+- **`Config::withBroadcastCoalescing()`** goes in 0.15, and `new Via()` logs a warning when
+  coalescing is off. Call `$app->flushBroadcasts()` where a broadcast has to land first.
+
+### Performance
+
+- **Shell templates are read once per worker:** a small page view costs 0.048 ms of CPU instead of
+  0.091 ms. Outside dev mode, a changed shell needs a reload.
+- **Static files are served from worker memory:** a 91 KB stylesheet costs 0.054 ms of CPU per
+  request instead of 0.193 ms. See [Static assets](https://via.zweiundeins.gmbh/docs/deployment#static-assets).
+- **Brotli level 11 never runs in a worker.** The master process or a helper process compresses
+  static files, where the first request for a large file held its worker for seconds.
+- **Only paths with a file extension are looked up in `withStaticDir()`** before routing, which
+  halves the CPU of an action on a FUSE mount.
+- **Dev Bar assets** are served from memory with an ETag and Brotli: 7.6 KB instead of 29 KB, and a
+  304 on a page view.
+- **A destroyed context leaves nothing for PHP's cycle collector,** so the collector runs once
+  instead of 20 times while the contexts of a 250,000-view burst expire.
+- **`withGcIntervalMs($ms, onGrowth: true)`** turns PHP's own collector runs off and runs the
+  collector when a worker's memory grows by half: 9 runs instead of 25 in a burst of 250,000 page
+  views. It is opt-in, because a loop that creates cycles without waiting on I/O can then take a
+  worker past `memory_limit`. See [Cycle collector](https://via.zweiundeins.gmbh/docs/performance#cycle-collector).
+- **Broadcasts cost less per tab:** 38% less than 0.13.0 for tabs that share a render, 4% less for
+  tabs that render their own view.
+
+### Security
+
+- SESSION scopes, SESSION signal ids, the debug log and traces carried the raw session id. They use
+  a SHA-256 hash of it now, and traces redact attributes named like a session.
+- `$c->scope(Scope::SESSION)` put every user's tabs into one scope, so its broadcasts and shared
+  render reached other users. Each session has its own scope now.
+- Any cookie value was accepted as a session id. Only the form php-via issues is accepted now, and
+  under `withSecureCookie(true)` only the secure cookie, which logs out users who carry only the
+  plain one.
+- A login could not replace the session cookie (session fixation). Call `regenerateSession()` at
+  login and logout. The old cookie then opens no page, and for 2 s still reaches the actions and
+  streams of tabs that exist.
+- `withDevBar(true)` outside dev mode is read-only, but shows every visitor's traces, scopes,
+  context ids, the server's logs and its stats. Outside dev mode, `POST /_via/reset` no longer lets any
+  visitor clear the worker's trace buffer. See [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#enabling).
 
 ### Fixed
 
+- With several workers, an action on a worker other than the tab's ran on a copy of the context
+  that no stream read. It now runs on the tab's worker, as do uploads and downloads, also with
+  `revivalWindowMs: 0`, where such actions answered 400.
+- A burst of page views that never opened a stream froze a worker for 60 to 74 s once their
+  contexts expired, and any client could cause it with GET requests.
+- On libcurl 8.20 or newer, a curl request crashed the worker under the default hook flags
+  (curl#21558). The default leaves `SWOOLE_HOOK_NATIVE_CURL` out there.
 - Page contexts that called `$c->scope()` were never freed. The registry now remembers every scope a
   context joined, and teardown removes it from all of them.
 - Components that joined a scope stayed registered after their page was destroyed and kept receiving
-  broadcasts. Their `onDisconnect` and `onCleanup` callbacks now run and their timers stop when the
-  page is destroyed; they never ran before. The scope's signals and actions stay for other pages.
+  broadcasts. Their `onCleanup` callbacks now run and their timers stop when the page is destroyed.
 - A response's Brotli encoder lived as long as its tab. It is now created on the first write and
   released when the response ends.
 - Both maps of context sessions grew by one entry per page view.
+- With several workers, a full context directory turned every page view into a 500. New contexts
+  now get no row, a warning is logged at most every 10 s per worker, and actions of those tabs that
+  reach another worker answer 400. The sweep of expired rows runs at most once a second. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
+- With several workers, the shared table of scoped signal values kept a row for every scoped signal
+  ever declared, so per-entity scopes such as `room:<id>` filled it, and then page views that declared
+  a new one answered 500. A scope's rows now go when the last context that uses it on any worker is
+  destroyed, and a write to a full table is dropped and logged at most every 10 s per worker. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#shared-tables) for sizing.
 - A revival that arrived while a destroyed context's cleanup callbacks ran could be torn down with
   it. Teardown now removes only entries that still belong to the destroyed context.
 - A revival whose page handler threw left the half-built context in its scopes, with its timers
   running.
+- Two revivals of one tab at the same moment (an action and the stream reconnect) both registered,
+  leaving one copy running with its timers. The later one now returns the registered context.
 - After a revival, components lost their DOM wrappers because component IDs were random. A
-  component created with a name (`$c->component($fn, 'name')`) now gets the same ID every time its
-  page is built.
+  component's ID now comes from its namespace, so it is the same every time its page is built.
 - A stream with nothing to send on connect never cleared the reconnect banner after a dropped
   connection, and sent no headers until its first keep-alive. Every connect now sends
   `_disconnected: false`.
-- With `worker_num > 1`, a full context directory turned every page view into a 500. New contexts
-  now get no row, a warning is logged at most every 10 s per worker, and those tabs' actions on other
-  workers answer 400. With the revival window at 0, no rows are written, and the sweep of expired
-  rows runs at most once a second. See
-  [Deployment](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
 - A broadcast that reached a context through another scope, a wildcard or `Scope::GLOBAL`, or a
   component re-rendered with its page, served the update cached at an earlier broadcast, and a render
-  that started before a broadcast could store its older result over the newer one. Each scope still
-  renders once per flush.
-- Two revivals of one tab at the same moment (an action and the stream reconnect) both registered,
-  leaving one copy running with its timers. The later one now returns the registered context.
+  that started before a broadcast could store its older result over the newer one.
 - A component's actions could not read the request or set cookies. `input()`, `file()`,
   `cookie()` and `setCookie()` on a component now use its page's request.
+- With `hook_flags` that lack `SWOOLE_HOOK_SLEEP`, an open Dev Bar froze its worker.
+- A page in the browser's back/forward cache kept its Dev Bar stream open. Over HTTP/1.1, a few tabs
+  then held all six connections the browser opens to a host, and navigation and actions stalled.
+- `getStats()->getAll()` read 0 for requests, actions, SSE connections and the active counts.
+- A client that read too slowly could park its SSE stream until it disconnected. Its element frames
+  are now dropped until its backlog is empty, and the default `socket_buffer_size` is 2 MiB.
+  `start()` warns when `withSseMaxQueuedBytes()` is above half of it, which caps the threshold.
+- For a client that fell behind, appended and prepended element patches went missing. Only view
+  updates are dropped now.
+- Headers a middleware added to the response from `$handler->handle()`, such as
+  `Content-Security-Policy` or `Strict-Transport-Security`, never reached a page or an action. They
+  go out now; php-via keeps the headers and cookies it writes itself. See
+  [Middleware](https://via.zweiundeins.gmbh/docs/middleware#how-it-works).
+- A middleware or `route()` response with several `Set-Cookie` headers sent only the last one.
+- `withStaticDir()` served dotfiles such as `.env`, and the source of PHP files. See
+  [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused).
+- With several workers or a broker, a broadcast of `Scope::ROUTE` on a route with parameters, such
+  as `/blog/{slug}`, and the writes of its scoped signals never reached the other workers. Scopes
+  with the characters of a URL path cross now, and php-via warns once about a scope that cannot.
+- Static `.json`, `.txt`, `.html` and `.xml` files were served as `application/octet-stream`, and a
+  percent-encoded path never found its file.
+- In dev mode, an edited static file was served with its old ETag and content.
+- HEAD on a static file, a php-via bundle or `/_health` answered 404.
+- Actions of a component in a custom scope, or inside another component, answered 500.
+- Composition actions under `#[Broadcast]` or `#[Action(scope: ...)]` ran on the first tab's
+  instance, so one tab's click changed another tab's properties.
+- `#[Broadcast]` dropped the scopes of a class's scoped `#[Signal]` properties.
+- Property changes an `#[Action]` method made before it threw were lost.
+- A composition view that read a scoped `#[Signal]` property rendered the tab's stale copy when
+  another tab's write reached it. Scoped properties are hydrated before each render now.
+- SESSION-scoped actions were never found.
+- Components had no session.
+- Views of different routes or components in one scope got each other's shared render.
+- `getScopedSignalByName()` returned null on a worker where no context had declared the signal.
+- A full-document view that contained the text `via_ctx` got no `via_ctx` signal, and its signal
+  seed came before `<meta charset>`.
+- `Signal::bool()` returned false for integers such as 2.
+- Components on a route with parameters never updated.
+- Two actions of one tab that ran at once shared one request.
+- A tab rebuilt after it was away lost the request attributes middleware set.
+- After the worker was busy, expired contexts were destroyed in one pass, with pauses of up to
+  160 ms. They are destroyed in 10 ms slices now.
+- A stopping worker ended its streams and the tabs waited up to 15 s to reconnect. It now asks them
+  to reconnect at once.
 - A tab whose stream was down when an action reached it was freed after the connect timeout (30 s),
   while Datastar's next reconnect attempt can be 30 s away, and the patches the action queued went
-  with it. It now waits for the new reconnect timeout, 60 s after the last action
-  (`withContextReconnectTimeout()`). [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream)
-  lists which timer frees a context without a stream.
+  with it. It now waits for a reconnect timeout, 60 s after the last action
+  (`withContextTimeouts(reconnectMs:)`). See
+  [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream).
+- The default shell never showed its "Not connected" warning: it listened with
+  `data-on-datastar-fetch`, which Datastar 1.0 ignores.
+- A CR in rendered text, such as a chat message, ended the SSE data line and could inject Datastar
+  events that run script, also under a nonce CSP. CR now goes out as LF, and `patchElements()`
+  refuses a selector with a line break.
+- An unauthenticated client could fill a worker's memory and log with made-up `via_ctx` values on
+  `/_sse`. A value over 512 bytes or with control characters answers 400, and the contexts told
+  to reload stay at 10,000.
+- `withStaticDir()` served backup copies of PHP files, such as `x.php~`, `x.php.bak` or `x.php.br`.
+- Under a nonce CSP without `'unsafe-inline'` for styles, the Dev Bar showed unstyled.
+- A view that renders a whole document opened its stream twice on the first sync, the first request
+  aborted: the update dropped the seed tag from `<head>`, so the morph moved via_head's connect onto
+  another tag. Under a nonce CSP that update also wrote the nonce back onto via_head's tags, where the
+  browser had hidden it from scripts. Updates now keep the tags of `<head>` in place and carry no nonce.
 
-### Known limitations
+### Tests
 
-- An action a component registers in a scope of its own is not found. Register it with
-  `Scope::TAB` and broadcast with `$app->broadcast($scope)`, as
-  [Components](https://via.zweiundeins.gmbh/docs/components#scoped-components) shows.
-- The update cache is keyed by scope alone, so two different views with caching on in one scope
-  receive each other's HTML. See [Views](https://via.zweiundeins.gmbh/docs/views#caching).
-- Signals and actions of a scope stay after its last context leaves, as they did in 0.13.0, so
-  per-entity scopes such as `room:<id>` accumulate for the life of the worker. A scoped action
-  should use the `Context` it receives rather than a captured `$c`, which it would keep alive.
+- `VIA_TEST_PORT_BASE` and `VIA_TEST_PORT_COUNT` give every fixture that starts a real server a
+  port from one window, so the suite runs on a machine where other ports are taken.
 
 ### Docs
 
+- Every docs page, the README, PERFORMANCE.md and the LLM references describe 0.14, and the
+  website's examples use its APIs.
+- New [Upgrading to 0.14](https://via.zweiundeins.gmbh/docs/upgrading) guide.
 - New [Performance](https://via.zweiundeins.gmbh/docs/performance) page, with the harness in
   `bench/capacity`.
+- The [API reference](https://via.zweiundeins.gmbh/docs/api) lists every public method with its
+  signature.
+- New [Web components](https://via.zweiundeins.gmbh/docs/web-components) page.
+- New [Coroutine hooks](https://via.zweiundeins.gmbh/docs/deployment#hooks),
+  [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression),
+  [Content-Security-Policy](https://via.zweiundeins.gmbh/docs/deployment#csp) and
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#tab-worker) sections in Deployment.
+- [Views](https://via.zweiundeins.gmbh/docs/views#preserve-attr) shows how `data-preserve-attr`
+  keeps a `<dialog>` open across updates.
+- Deployment shows the live site's Caddy h2c setup, and no longer says Caddy needs response
+  buffering turned off for SSE.
 
 ## [0.13.0] - 2026-10-02
 

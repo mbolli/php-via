@@ -89,29 +89,28 @@
         least four moving parts even for the simplest case.
     </p>
     <p>
-        php-via replaces all of that with a single declaration:
+        php-via replaces all of that with the scope argument of a signal:
     </p>
     {% code 'php' %}{% verbatim %}
-$c->scope(Scope::ROUTE);     // every user on this URL shares signals
-$c->scope(Scope::SESSION);   // follows the user across their tabs
-$c->scope(Scope::GLOBAL);    // every connected client, every route
-$c->scope('room:lobby');     // a custom group you define
+$count  = $c->signal(0, 'count', Scope::ROUTE);        // every tab on this route
+$theme  = $c->signal('light', 'theme', Scope::SESSION); // the visitor's tabs
+$online = $c->signal(0, 'online', Scope::GLOBAL);      // every connected tab, every route
+$topic  = $c->signal('', 'topic', 'room:lobby');       // a custom group you define
 {% endverbatim %}{% endcode %}
     <p>
-        Changing one line changes who sees what. There's no channel subscription code in the browser,
+        Changing one argument changes who sees what. There's no channel subscription code in the browser,
         no backend event bus to configure, no mapping between signal names and channel topics.
         The framework infers the broadcast topology from the scope, handles subscribe/unsubscribe at
         connect/disconnect time, and routes patches to the right clients automatically.
     </p>
     <p>
         The tradeoff is that the scope system uses in-process PHP arrays shared across OpenSwoole
-        coroutines, not an external store. For multi-worker deployments on the same machine you
-        wire in <a href="/docs/broker#swoolebbroker"><code>SwooleBroker</code></a> (zero external
-        dependencies: OpenSwoole inter-worker pipes + shared memory). For multi-server deployments
-        you wire in a <a href="/docs/broker">message broker</a> (<code>RedisBroker</code> or
-        <code>NatsBroker</code>) so <code>broadcast()</code> calls propagate scope invalidations
-        across nodes. Either way, adding a broker requires one line in your config and doesn't
-        change any application code.
+        coroutines, not an external store. With several workers on one machine, php-via uses
+        <a href="/docs/broker#swoolebbroker"><code>SwooleBroker</code></a> by itself (no external
+        dependencies: OpenSwoole inter-worker pipes and shared memory). For several servers you wire in a
+        <a href="/docs/broker">message broker</a> (<code>RedisBroker</code> or <code>NatsBroker</code>) so
+        <code>broadcast()</code> calls propagate scope invalidations across nodes. That is one line in your
+        config and no change to application code.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

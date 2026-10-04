@@ -53,9 +53,9 @@ test('a closed connection ends only its own stream, at once', function (): void 
 
 test('the heartbeat runs at a quarter of the directory TTL or of the revival window, the shorter', function (): void {
     // A worker that destroys its copy of a context shortens the record to the revival window (600 s).
-    expect(Via::sseHeartbeatIntervalMs(new Config()))->toBe(150_000);
-    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextDirectorySize(4096, 1024, 60)))->toBe(15_000);
-    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextDirectorySize(4096, 1024, 7200)))->toBe(150_000);
-    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextDirectorySize(4096, 1024, 7200)->withContextRevivalWindow(0)))->toBe(1_800_000);
-    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextRevivalWindow(2000)))->toBe(1000);
+    expect(Via::sseHeartbeatIntervalMs((new Config())->freeze()))->toBe(150_000);
+    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextDirectorySize(4096, 1024, 60)->freeze()))->toBe(15_000);
+    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextDirectorySize(4096, 1024, 7200)->freeze()))->toBe(150_000);
+    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextDirectorySize(4096, 1024, 7200)->withContextTimeouts(revivalWindowMs: 0)->freeze()))->toBe(1_800_000);
+    expect(Via::sseHeartbeatIntervalMs((new Config())->withContextTimeouts(revivalWindowMs: 2000)->freeze()))->toBe(1000);
 });

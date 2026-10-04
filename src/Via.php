@@ -6,25 +6,37 @@ namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Broker\RedisBroker;
 use Mbolli\PhpVia\Broker\ServerAwareBroker;
 use Mbolli\PhpVia\Composition\ClassMetadata;
 use Mbolli\PhpVia\Composition\PageMount;
 use Mbolli\PhpVia\Core\Application;
+use Mbolli\PhpVia\Core\RequestSession;
 use Mbolli\PhpVia\Core\Router;
 use Mbolli\PhpVia\Core\SessionManager;
+use Mbolli\PhpVia\Core\Settings;
+use Mbolli\PhpVia\DevBar\DevBarController;
 use Mbolli\PhpVia\DevBar\Injector;
 use Mbolli\PhpVia\Http\ActionHandler;
+use Mbolli\PhpVia\Http\Adapter\PsrRequestFactory;
+use Mbolli\PhpVia\Http\Forwarder;
 use Mbolli\PhpVia\Http\Middleware\BrotliMiddleware;
+use Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher;
 use Mbolli\PhpVia\Http\RequestHandler;
 use Mbolli\PhpVia\Http\RouteDefinition;
 use Mbolli\PhpVia\Http\RouteGroup;
+use Mbolli\PhpVia\Http\SignalParser;
 use Mbolli\PhpVia\Http\SseHandler;
+use Mbolli\PhpVia\Http\StaticBrotli;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\Rendering\Html;
 use Mbolli\PhpVia\Rendering\HtmlBuilder;
 use Mbolli\PhpVia\Rendering\ViewCache;
 use Mbolli\PhpVia\Rendering\ViewRenderer;
 use Mbolli\PhpVia\State\ActionRegistry;
 use Mbolli\PhpVia\State\ReadEpochs;
 use Mbolli\PhpVia\State\ScopeRegistry;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\State\SharedClientRegistry;
 use Mbolli\PhpVia\State\SharedContextDirectory;
 use Mbolli\PhpVia\State\SharedSessionStore;
@@ -32,14 +44,21 @@ use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\State\SqliteSnapshot;
+use Mbolli\PhpVia\Support\CycleCollector;
+use Mbolli\PhpVia\Support\DatastarBundle;
+use Mbolli\PhpVia\Support\ErrorHooks;
 use Mbolli\PhpVia\Support\IdGenerator;
 use Mbolli\PhpVia\Support\LogBuffer;
 use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\Removed;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Support\SignalId;
 use Mbolli\PhpVia\Support\Stats;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Tracing\TraceStore;
+use Mbolli\PhpVia\Twig\TwigEngine;
+use Nyholm\Psr7\Response as Psr7Response;
+use Nyholm\Psr7\Stream;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Event;
 use OpenSwoole\Http\Request;
@@ -47,16 +66,24 @@ use OpenSwoole\Http\Response;
 use OpenSwoole\Http\Server;
 use OpenSwoole\Process;
 use OpenSwoole\Timer;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 use Twig\Environment;
 
 /**
  * Via - Real-time engine for building reactive web applications in PHP.
  *
  * Main application class that manages routing, contexts, and SSE connections.
+ * Not designed for extension.
  */
 class Via {
-    public const string VERSION = '0.13.1';
+    public const string VERSION = '0.14.0';
+
+    /** See noFileIoHookFlags(): 1790 on OpenSwoole 26.2. */
+    private const int NO_FILE_IO_HOOKS = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
+        | SWOOLE_HOOK_SSL | SWOOLE_HOOK_TLS | SWOOLE_HOOK_STREAM_FUNCTION | SWOOLE_HOOK_SLEEP | SWOOLE_HOOK_PROC;
 
     /**
      * The worker that runs server-wide singleton work (see setInterval()).
@@ -83,23 +110,50 @@ class Via {
      */
     private const int FLUSH_WAIT_MS = 1000;
 
-    // Legacy public properties for HTTP handlers (will be phased out)
-    /** @var array<string, Context> */
+    // Public for the HTTP handlers only; they move into Application later.
+    /**
+     * @internal
+     *
+     * @var array<string, Context>
+     */
     public array $contexts = [];
 
-    /** @var array<string, int> Cleanup timer IDs for contexts */
+    /**
+     * @internal
+     *
+     * @var array<string, int> Cleanup timer IDs for contexts
+     */
     public array $cleanupTimers = [];
 
-    /** @var array<string, int> Number of active SSE coroutines per context ID */
+    /**
+     * @internal use Context::isConnected()
+     *
+     * @var array<string, int> Number of active SSE coroutines per context ID
+     */
     public array $activeSseCount = [];
 
-    /** SSE handlers still running, including their exit path and onClientDisconnect hooks */
+    /**
+     * @internal SSE handlers still running, including their exit path and onClientDisconnect hooks
+     */
     public int $runningSseStreams = 0;
 
-    /** @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID */
+    /**
+     * @internal Context::spawn() tasks still running in this worker
+     */
+    public int $runningTasks = 0;
+
+    /**
+     * @internal use getClients()
+     *
+     * @var array<string, array{id: string, identicon: string, connected_at: int, ip: string}> Client info by context ID
+     */
     public array $clients = [];
 
-    /** @var array<string, string> Session ID by context ID (contextId => sessionId) */
+    /**
+     * @internal
+     *
+     * @var array<string, string> Session ID by context ID (contextId => sessionId)
+     */
     public array $contextSessions = [];
 
     /**
@@ -112,11 +166,14 @@ class Via {
 
     private ?Server $server = null;
 
-    /** @var array<callable> Callbacks to run when server starts */
+    /** @var list<callable(int): void> Callbacks from onWorkerStart() */
     private array $startCallbacks = [];
 
-    /** @var array<callable> Callbacks to run on graceful shutdown */
+    /** @var list<callable(int): void> Callbacks from onWorkerStop() */
     private array $shutdownCallbacks = [];
+
+    /** This process's worker id, set in workerStart */
+    private int $workerId = 0;
 
     /** @var list<array{callable, int, bool}> Server intervals from setInterval(): callback, period, every-worker flag */
     private array $serverIntervals = [];
@@ -124,11 +181,22 @@ class Via {
     /** @var list<int> Timer IDs for running server intervals (populated in workerStart) */
     private array $serverIntervalIds = [];
 
+    /** Whether this worker runs the cycle collector from a timer, with PHP's own runs off */
+    private bool $collectsCycles = false;
+
+    /** @var array<string, int> Actions running on this worker, by context ID */
+    private array $runningActions = [];
+
+    /** @var array<string, true> Contexts handed over to another worker that wait here for their running actions to end */
+    private array $handingOver = [];
+
     /** @var array<callable(Context): void> Callbacks to run when a client connects via SSE */
     private array $clientConnectCallbacks = [];
 
     /** @var array<callable(Context): void> Callbacks to run when a client disconnects from SSE */
     private array $clientDisconnectCallbacks = [];
+
+    private ErrorHooks $errorHooks;
 
     /** @var null|callable(Request, Response): void Handler for unmatched routes (404) */
     private $notFoundHandler;
@@ -158,6 +226,9 @@ class Via {
     /** @var array<string, true> Scopes still to be published to the broker */
     private array $unpublishedScopes = [];
 
+    /** @var array<string, true> Scopes warned about that other workers and nodes refuse, see isPublishable() */
+    private array $unwiredScopesWarned = [];
+
     private bool $flushScheduled = false;
 
     /** Set while the scheduled flush waits on a timer (the tick gap) rather than Event::defer. */
@@ -165,6 +236,14 @@ class Via {
 
     /** Bumped on every (re)schedule and cancel, so a superseded callback does nothing. */
     private int $flushGeneration = 0;
+
+    /** @var array<string, int> Scopes with a Config::withBroadcastThrottle() => hrtime(true) when their last render began */
+    private array $throttledAt = [];
+
+    /** The timer that flushes the scopes a throttle holds back once the first is due, and hrtime(true) when it fires. */
+    private ?int $throttleTimerId = null;
+
+    private int $throttleDueNs = 0;
 
     /**
      * Flushes run side by side, each on scopes no other one is rendering, so a view that waits on
@@ -185,11 +264,22 @@ class Via {
     /** Set in workerStart: from then on the reactor can run a deferred flush even outside a coroutine. */
     private bool $workerStarted = false;
 
+    /** Set by serveInProcess(): this app runs without a server, see Testing\TestApp. */
+    private bool $inProcess = false;
+
     private Application $app;
     private Router $router;
     private SessionManager $sessionManager;
     private RequestHandler $requestHandler;
     private SseHandler $sseHandler;
+    private StaticBrotli $staticBrotli;
+
+    /** Passes requests of tabs another worker holds there; set in workerStart with more than one worker. */
+    private ?Forwarder $forwarder = null;
+
+    /** Builds the request a route's middleware gets when a tab is rebuilt, created with the first. */
+    private ?PsrRequestFactory $psrRequestFactory = null;
+    private Settings $settings;
     private Logger $logger;
     private RequestLogger $requestLogger;
     private Stats $stats;
@@ -197,6 +287,9 @@ class Via {
     private ?Tracer $tracer = null;
     private ?LogBuffer $logBuffer = null;
     private ?Injector $devBarInjector = null;
+
+    /** The last update decorateUpdate() left as it was: a fan-out of a shared render passes it for every tab. */
+    private string $plainUpdate = '';
     private ViewCache $viewCache;
     private ViewRenderer $viewRenderer;
     private HtmlBuilder $htmlBuilder;
@@ -220,32 +313,53 @@ class Via {
     /** @var array<string, RouteDefinition> Route definitions indexed by route pattern */
     private array $routeDefinitions = [];
 
+    /** @var array<string, array<string, array{RequestHandlerInterface, RouteDefinition}>> route()'s routes: pattern => method => handler and definition */
+    private array $plainRoutes = [];
+
+    /** @var list<RouteDefinition> route()'s definitions in registration order, for group() */
+    private array $plainRouteDefinitions = [];
+
     /** Active URL prefix set by the currently executing group() closure */
     private string $groupPrefix = '';
 
+    /**
+     * Freezes $config: a with* call on it afterwards throws.
+     *
+     * @throws \LogicException for a template setup that cannot work, see Config::withTemplateEngine()
+     */
     public function __construct(private Config $config) {
+        // First, since it throws for a template setup that cannot work.
+        $this->settings = $config->freeze();
+        $templateEngine = $this->settings->templateEngine;
         $this->viaUnsetCallbackRegistered = new \WeakMap();
 
         // Initialize support classes
-        $this->logger = new Logger($this->config->getLogLevel());
-        $this->requestLogger = new RequestLogger($this->config->getDevMode());
+        $this->logger = new Logger($this->settings->logLevel);
+        $this->requestLogger = new RequestLogger($this->settings->devMode);
         $this->logger->setRequestLogger($this->requestLogger);
-        $this->stats = new Stats();
+        $this->stats = new Stats(fn (): array => ['active_sse' => array_sum($this->activeSseCount), 'active_contexts' => \count($this->contexts)]);
+        $this->errorHooks = new ErrorHooks($this->log(...));
+
+        if (!$this->settings->broadcastCoalescingEnabled) {
+            $this->log('warn', 'Config::withBroadcastCoalescing(false) is deprecated and goes in php-via 0.15. Call '
+                . '$app->flushBroadcasts() where a broadcast has to land before the next step.');
+        }
+        $this->warnStaleDatastarPin();
 
         // Dev Bar tracing substrate. Allocated here (master process, before fork)
         // so the per-worker tracer + buffer are inherited cleanly. When tracing
         // is off, Tracer::current() stays null and span call sites are no-ops.
-        if ($this->config->isTracingEnabled()) {
-            $this->traceStore = new TraceStore($this->config->getTraceBufferSize());
+        if ($this->settings->tracingEnabled) {
+            $this->traceStore = new TraceStore($this->settings->traceBufferSize);
             $this->tracer = new Tracer($this->traceStore);
             Tracer::setCurrent($this->tracer);
             $this->logBuffer = new LogBuffer();
             $this->logger->setBuffer($this->logBuffer);
-            $this->devBarInjector = new Injector($this->config);
+            $this->devBarInjector = new Injector($this->settings);
         }
 
         $this->viewCache = new ViewCache();
-        $this->htmlBuilder = new HtmlBuilder($this->config->getShellTemplate(), $this->log(...));
+        $this->htmlBuilder = new HtmlBuilder($this->settings->shellTemplate, $this->log(...), $this->settings->devMode);
         $this->scopeRegistry = new ScopeRegistry();
         $this->signalManager = new SignalManager();
         $this->actionRegistry = new ActionRegistry();
@@ -253,32 +367,43 @@ class Via {
 
         // Initialize Core classes
         $this->app = new Application(
-            $this->config,
+            $this->settings,
             $this->logger,
-            $this->stats,
             $this->scopeRegistry,
             $this->signalManager,
-            $this->actionRegistry
+            $this->actionRegistry,
+            $this->viewCache,
         );
         $this->router = new Router();
-        $this->sessionManager = new SessionManager($this->logger);
+        // Four rows per session that can hold data: its first cookie, its current one and retired ones in their grace period.
+        $this->sessionManager = new SessionManager($this->logger, new SessionTokens(
+            4 * ($this->settings->workerNum > 1 ? $this->settings->sessionTableRows : max($this->settings->sessionTableRows, Application::MAX_SESSIONS)),
+            fn (string $key): bool => $this->app->hasSessionData($key),
+        ));
 
         // Initialize HTTP handlers
+        $this->staticBrotli = new StaticBrotli($this->settings, $this->log(...));
         $this->sseHandler = new SseHandler($this);
         $actionHandler = new ActionHandler($this);
-        $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler);
+        $this->requestHandler = new RequestHandler($this, $this->sseHandler, $actionHandler, $this->staticBrotli);
 
         // Share request logger with HTTP handlers
         $this->sseHandler->setRequestLogger($this->requestLogger);
         $actionHandler->setRequestLogger($this->requestLogger);
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
-        // Initialize ViewRenderer with Twig from Application
-        $this->viewRenderer = new ViewRenderer($this->app->getTwig(), $this->viewCache, $this->stats, $this->logger);
+        if ($templateEngine instanceof TwigEngine) {
+            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_html_attrs, via_head and via_foot.
+            $templateEngine->environment()->addGlobal('basePath', $this->settings->basePath);
+            $templateEngine->environment()->addGlobal('via_html_attrs', new Html(''));
+            $templateEngine->environment()->addGlobal('via_head', new Html($this->settings->importMapTag()));
+            $templateEngine->environment()->addGlobal('via_foot', new Html(Bootstrap::foot($this->settings->datastarUrl, null)));
+        }
+        $this->viewRenderer = new ViewRenderer($this->settings, $this->viewCache, $this->stats, $this->logger);
 
         // Broker: default to no-op InMemoryBroker; replaced via Config::withBroker().
         // Subscribe immediately so the handler is wired before connect() spawns the read loop.
-        $this->broker = $this->config->getBroker();
+        $this->broker = $this->settings->broker();
         $this->broker->subscribe(function (string $scope): void {
             if (!Scope::isValidWireScope($scope)) {
                 $this->log('warning', "Broker: rejected invalid scope \"{$scope}\" from wire");
@@ -295,7 +420,7 @@ class Via {
         });
 
         // Wire optional error handler (supported by RedisBroker and NatsBroker).
-        $brokerErrorHandler = $this->config->getBrokerErrorHandler();
+        $brokerErrorHandler = $this->settings->brokerErrorHandler;
 
         if ($brokerErrorHandler !== null && method_exists($this->broker, 'setErrorHandler')) {
             $this->broker->setErrorHandler($brokerErrorHandler);
@@ -312,10 +437,10 @@ class Via {
     }
 
     /**
-     * Get the configuration instance for fluent configuration.
+     * @deprecated removed in 0.14; throws and names getConfig()
      */
-    public function config(): Config {
-        return $this->config;
+    public function config(): never {
+        Removed::method('Via::config()', 'Use $app->getConfig(); the Config is frozen once new Via() has it.');
     }
 
     /**
@@ -343,21 +468,21 @@ class Via {
         return $this->config;
     }
 
+    /**
+     * What the framework reads from the Config, taken when new Via() froze it.
+     *
+     * @internal
+     */
+    public function getSettings(): Settings {
+        return $this->settings;
+    }
+
     /**     * Get the Router instance.
      *
      * @internal Used by HTTP handlers
      */
     public function getRouter(): Router {
         return $this->router;
-    }
-
-    /**
-     * Apply configuration changes (called internally after fluent config).
-     *
-     * @internal
-     */
-    public function applyConfig(): void {
-        $this->app->applyConfig();
     }
 
     /**
@@ -448,26 +573,29 @@ class Via {
     }
 
     /**
-     * Get the global view cache.
+     * Give the visitor of $request a new session cookie with the response, for a login handled in middleware or
+     * a route() handler. The session keeps its id, its data and its tabs. The rotation happens at the call: from
+     * then on the old cookie keeps working for 10 seconds, for requests the browser sent before the new one
+     * arrived, and then starts a new session. See Context::regenerateSession() for an action or a page handler.
      *
-     * @internal Used by Context for global scope caching
-     */
-    /**
-     * Get cached view for a scope.
+     * Middleware calls it before $handler->handle(), which sends the page or the action's response, and before
+     * the login writes anything, so a throw leaves the visitor logged out.
      *
-     * @internal Used by Context to get cached view
+     * @param ServerRequestInterface $request a request php-via handed to middleware or a route() handler
+     *
+     * @throws \LogicException    when the request did not come from php-via, or its response went out already
+     * @throws \OverflowException when the rotation table is full of sessions that need their rows
      */
-    public function getViewCache(string $scope): ?string {
-        return $this->viewCache->get($scope);
-    }
+    public function regenerateSession(ServerRequestInterface $request): void {
+        $session = $request->getAttribute(RequestSession::class);
+        if (!$session instanceof RequestSession) {
+            throw new \LogicException('regenerateSession() needs the request php-via passed to the middleware or route() handler, or one made from it with withAttribute() and the like.');
+        }
+        if ($session->written) {
+            throw new \LogicException('regenerateSession() came after the response of this request went out. In middleware, call it before $handler->handle().');
+        }
 
-    /**
-     * Set cached view for a scope.
-     *
-     * @internal Used by Context to cache view
-     */
-    public function setViewCache(string $scope, string $html): void {
-        $this->viewCache->set($scope, $html);
+        $this->sessionManager->rotateNow($session);
     }
 
     /**
@@ -475,6 +603,10 @@ class Via {
      *
      * Middleware implementing SseAwareMiddleware will additionally run on SSE
      * handshake requests.
+     *
+     * The request carries the visitor's session id in the 'via.session' attribute, for
+     * getSessionData() and the like. A request without the session cookie gets a new session,
+     * whose cookie a page then sets.
      *
      * WARNING: Middleware instances are long-lived in Swoole: they persist across
      * all requests in the worker process. Do NOT store per-request state on
@@ -527,8 +659,8 @@ class Via {
      *
      * The class must have a public `view(Context $ctx)` method and may declare
      * reactive properties with #[Signal] (optionally scoped, e.g. #[Signal(Scope::SESSION)]),
-     * server-only state with #[Persist], a primary scope with #[Broadcast], action
-     * methods with #[Action], and lifecycle hooks with #[OnDisconnect] / #[OnCleanup].
+     * server-only state with #[Persist], a broadcast target with #[Broadcast], action
+     * methods with #[Action], and cleanup hooks with #[OnCleanup].
      *
      * @param class-string  $class   Page class name
      * @param string        $route   URL pattern (may contain {params})
@@ -537,6 +669,7 @@ class Via {
      *                               The factory should return an instance of $class.
      *
      * @throws \InvalidArgumentException if $class has no public view(Context) method
+     * @throws \LogicException           if $class still uses the removed #[OnDisconnect]
      */
     public function mount(string $class, string $route, ?callable $factory = null): RouteDefinition {
         $meta = ClassMetadata::analyze($class);
@@ -558,10 +691,65 @@ class Via {
     }
 
     /**
+     * Register a plain HTTP route, with no context, shell or template: a JSON endpoint, a webhook, an MCP server.
+     *
+     * The PSR-15 handler gets the request after the global middleware and the route's own (->middleware() on
+     * the returned definition), outermost first, and its response goes out as it is, a body of unknown size
+     * as it is read. The request carries the session id in 'via.session', each path parameter as an
+     * attribute of its name, and uploaded files in getUploadedFiles(). A HEAD reaches a GET route as GET,
+     * and its response goes out without the body; list OPTIONS for a CORS preflight. '*' takes every
+     * method the path has no route of its own for, for a handler that answers each one itself, such as
+     * 404 while it is switched off. php-via checks no Origin header here, as for pages: add CSRF or auth
+     * middleware where a route changes state. The response sets no session cookie unless the handler or a
+     * middleware calls regenerateSession(). Plain routes go before pages, so a page on the same path answers
+     * the other methods; on a path with no page, the other methods get 405. A throw from the handler, a
+     * middleware or the response body answers 500, or closes the connection once the body has started, is
+     * logged and reaches onError() as ErrorPhase::Route.
+     *
+     * ```php
+     * $app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
+     * ```
+     *
+     * @param list<string>|string $methods an HTTP method, or several: 'POST', ['GET', 'POST', 'OPTIONS'], or '*'
+     * @param string              $path    route pattern with {params}, as for page(); a group() prefix applies
+     *
+     * @throws \InvalidArgumentException without a method, or for one that is no HTTP method name
+     */
+    public function route(array|string $methods, string $path, RequestHandlerInterface $handler): RouteDefinition {
+        $methods = \is_string($methods) ? [$methods] : $methods;
+        if ($methods === []) {
+            throw new \InvalidArgumentException('route() needs at least one HTTP method, such as \'GET\' or [\'GET\', \'POST\'].');
+        }
+
+        if ($this->groupPrefix !== '') {
+            $base = rtrim($this->groupPrefix, '/');
+            $path = ($path === '' || $path === '/') ? $base : $base . '/' . ltrim($path, '/');
+        }
+
+        $methods = array_map(self::httpMethod(...), $methods);
+        $definition = new RouteDefinition($path, $handler->handle(...));
+        foreach ($methods as $method) {
+            $this->plainRoutes[$path][$method] = [$handler, $definition];
+        }
+        $this->plainRouteDefinitions[] = $definition;
+
+        return $definition;
+    }
+
+    /**
+     * @internal read by the request handler
+     *
+     * @return array<string, array<string, array{RequestHandlerInterface, RouteDefinition}>> pattern => method => handler and definition
+     */
+    public function getPlainRoutes(): array {
+        return $this->plainRoutes;
+    }
+
+    /**
      * Register a group of routes that share a URL prefix and/or middleware.
      *
-     * Optionally pass a URL prefix as the first argument: every `page()` call inside
-     * the closure will have the prefix prepended to its route. Call `->middleware()` on
+     * Optionally pass a URL prefix as the first argument: every `page()` and `route()` call
+     * inside the closure will have the prefix prepended to its route. Call `->middleware()` on
      * the returned RouteGroup to apply shared middleware to all routes in the group.
      *
      * ```php
@@ -590,6 +778,7 @@ class Via {
         }
 
         $before = array_keys($this->routeDefinitions);
+        $plainBefore = \count($this->plainRouteDefinitions);
         $this->groupPrefix = $prefix;
 
         try {
@@ -603,7 +792,7 @@ class Via {
         $newRoutes = array_diff($after, $before);
         $definitions = array_values(array_map(fn (string $r) => $this->routeDefinitions[$r], $newRoutes));
 
-        return new RouteGroup($definitions);
+        return new RouteGroup([...$definitions, ...\array_slice($this->plainRouteDefinitions, $plainBefore)]);
     }
 
     /**
@@ -625,16 +814,19 @@ class Via {
      * sent by this call or, when another coroutine is publishing, by that one. When the scope's
      * fan-out is already running in another coroutine, that fan-out runs once more for it instead,
      * and after 8 passes in a row the next flush renders it, except during shutdown, which drops it.
+     * A scope with a Config::withBroadcastThrottle() renders at most once per its interval.
      *
-     * @param string $scope Scope to broadcast to
+     * @param string $scope Scope to broadcast to: a resolved one, so Scope::routeScope('/path') or
+     *                      Scope::sessionScope($id) rather than the bare ROUTE or SESSION
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
      */
     public function broadcast(string $scope): void {
-        // TAB scope is per-connection: no cross-node recipients exist.
-        $publish = $scope !== Scope::TAB;
+        $scope = Scope::resolve($scope, null, 'Via::broadcast()');
 
-        if ($this->shouldCoalesce()) {
+        if ($this->shouldCoalesce($scope)) {
             $this->tracer?->span('broadcast.schedule', static fn () => null, ['scope' => $scope], 'sse');
-            $this->markDirty($scope, $publish);
+            $this->markDirty($scope, publish: true);
             $this->rememberCallerMark($scope);
             $this->scheduleFlush();
 
@@ -643,14 +835,14 @@ class Via {
 
         $this->syncLocally($scope);
 
-        if (!$publish) {
-            return;
-        }
-
         if ($this->publishing) {
             // Another coroutine owns the broker connection; it sends this before it stops.
             $this->unpublishedScopes[$scope] = true;
 
+            return;
+        }
+
+        if (!$this->isPublishable($scope)) {
             return;
         }
 
@@ -674,7 +866,8 @@ class Via {
      * such as `broadcast(); flushBroadcasts(); execScript(...)`, or before shared state is
      * changed back. It ignores the broadcast tick. When a scope this coroutine broadcast is
      * being rendered by another flush, it waits for that fan-out first, up to 1 s; past that it
-     * logs a warning, and that scope's frame follows on a later flush. Publishing to other
+     * logs a warning, and that scope's frame follows on a later flush. Broadcasts that a
+     * Config::withBroadcastThrottle() holds back render now too. Publishing to other
      * workers or nodes is done here too, unless a publish is already running, which then sends
      * these as well. A no-op when nothing is pending.
      */
@@ -691,7 +884,7 @@ class Via {
         }
 
         $this->cancelScheduledFlush();
-        $this->runTickFlush(inlinePublish: true);
+        $this->runTickFlush(inlinePublish: true, throttle: false);
         $this->scheduleFlush();
     }
 
@@ -702,6 +895,7 @@ class Via {
      */
     public function registerContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->registerContext($context, $scope);
+        $this->app->refreshClientScopes($context->getPageContext());
     }
 
     /**
@@ -711,15 +905,53 @@ class Via {
      */
     public function unregisterContextInScope(Context $context, string $scope): void {
         $this->scopeRegistry->unregisterContext($context, $scope);
+        $this->app->refreshClientScopes($context->getPageContext());
     }
 
     /**
-     * Get all contexts registered under a specific scope.
+     * Keep a scope's signals and actions while $context lives, without rendering it on the scope's broadcasts.
+     *
+     * @internal Called by Context::scopedAction()
+     */
+    public function retainScope(Context $context, string $scope): void {
+        $this->scopeRegistry->retain($context, $scope);
+    }
+
+    /**
+     * The contexts of this worker in $scope.
+     *
+     * With more than one worker, contexts in the same scope on other workers are not in the list, so an empty
+     * list does not mean nobody is in the scope.
      *
      * @return array<Context>
      */
-    public function getContextsByScope(string $scope): array {
+    public function getLocalContexts(string $scope): array {
         return $this->scopeRegistry->getContextsByScope($scope);
+    }
+
+    /**
+     * How many tabs with an open stream a broadcast of $scope reaches, on every worker: whether anyone is watching.
+     *
+     * A tab is in a scope when its page or one of its components joined it, with scope(), addScope() or a scoped
+     * signal, and in Scope::routeScope('/path') when it is on that route. Scope::GLOBAL counts every connected tab,
+     * and a wildcard such as 'room:*' each tab in a matching scope once. A tab counts from its SSE connect until its
+     * stream closes, so unlike getLocalContexts() it leaves out a page that has not connected yet. With one worker
+     * this worker's tabs are all; with more it reads the shared client registry, as getClients() does, which holds
+     * 512 bytes of scopes per tab.
+     *
+     * @param string $scope a resolved scope, as for broadcast(): Scope::routeScope('/path'), not Scope::ROUTE
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
+     */
+    public function countClients(string $scope): int {
+        return $this->app->countClients(Scope::resolve($scope, null, 'Via::countClients()'), $this->readEpochs->current());
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names getLocalContexts()
+     */
+    public function getContextsByScope(string $scope): never {
+        Removed::method('Via::getContextsByScope()', 'Use $app->getLocalContexts($scope); it lists the contexts of this worker only.');
     }
 
     /**
@@ -730,7 +962,9 @@ class Via {
     public function registerScopedSignal(string $scope, Signal $signal): void {
         // Back the value with shared memory before anything reads it, so a worker mounting a
         // route another worker already serves adopts the live value instead of resetting the
-        // scope to its own declared default.
+        // scope to its own declared default. The hold comes first, so no other worker deletes the
+        // rows of the scope in between.
+        $this->app->holdSharedScope($scope);
         $this->sharedSignalStore?->attachTo($signal);
 
         $this->signalManager->registerSignal($scope, $signal);
@@ -744,6 +978,8 @@ class Via {
      */
     public function setSharedSignalStore(?SharedSignalStore $store): void {
         $this->sharedSignalStore = $store;
+        $this->app->setSharedSignalStore($store);
+        $store?->onTableFull(fn (string $message) => $this->log('error', $message));
 
         // Signals backed by the store read under its epochs, so fan-outs take theirs from it.
         // Contexts keep the epoch of their newest frame, so the new counter continues past the old one.
@@ -756,7 +992,7 @@ class Via {
     /**
      * Get a scoped signal by scope and browser id ($signal->id()).
      *
-     * To find one by the name it was declared with, use getScopedSignalByName().
+     * @internal use getScopedSignalByName()
      */
     public function getScopedSignal(string $scope, string $signalId): ?Signal {
         return $this->signalManager->getSignal($scope, $signalId);
@@ -765,11 +1001,32 @@ class Via {
     /**
      * Get a scoped signal by the name it was declared with, for code outside a context such as a timer.
      *
+     * It never creates a signal: null means no context declared it. With worker_num > 1, on a worker where no
+     * context declared it but another worker did, it returns a detached handle on the shared value. The handle
+     * is not registered on this worker, so a later declaration here keeps its own default and flags, and a
+     * write through it always broadcasts the scope, even for a signal declared with autoBroadcast: false.
+     *
      * @param string      $scope     a resolved scope: Scope::routeScope('/path'), not Scope::ROUTE
      * @param null|string $namespace the component namespace, for a signal declared inside a component
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION
      */
     public function getScopedSignalByName(string $scope, string $name, ?string $namespace = null): ?Signal {
-        return $this->signalManager->getSignal($scope, SignalId::scoped($scope, $namespace, $name));
+        $scope = Scope::resolve($scope, null, 'Via::getScopedSignalByName()');
+        $signalId = SignalId::scoped($scope, $namespace, $name);
+
+        $signal = $this->signalManager->getSignal($scope, $signalId);
+        if ($signal !== null || $this->sharedSignalStore === null) {
+            return $signal;
+        }
+
+        $handle = new Signal($signalId, null, $scope, true, null, $this);
+        if (!$this->sharedSignalStore->has($handle->sharedKey())) {
+            return null;
+        }
+        $handle->attachSharedStore($this->sharedSignalStore);
+
+        return $handle;
     }
 
     /**
@@ -841,61 +1098,67 @@ class Via {
     public function start(): void {
         // Lazy initialization: create server only when starting
         if ($this->server === null) {
+            self::assertWorkerSettings($this->settings);
+
             // Multi-worker guard: InMemoryBroker is a no-op. Cross-worker broadcasts
             // will be silently lost. Fail loudly so operators don't run with broken config.
-            if ($this->config->getWorkerNum() > 1 && $this->broker instanceof InMemoryBroker) {
+            if ($this->settings->workerNum > 1 && $this->broker instanceof InMemoryBroker) {
                 throw new \RuntimeException(
-                    'worker_num > 1 requires a multi-worker broker. '
-                    . 'Use SwooleBroker (same machine), RedisBroker, or NatsBroker. '
-                    . 'Example: (new Config())->withWorkerNum(4)->withBroker(new SwooleBroker())'
+                    'worker_num > 1 requires a multi-worker broker, and this server has InMemoryBroker. '
+                    . 'Leave withBroker() out to get SwooleBroker (same machine), calling withWorkerNum() before new Via(), '
+                    . 'or pass RedisBroker or NatsBroker.'
                 );
             }
 
-            // Actions, scoped signal values and session data cross workers, but three things do not,
-            // and they fail quietly enough that an operator would not connect them to worker_num.
-            if ($this->config->getWorkerNum() > 1) {
+            // Scoped signal values and session data cross workers, and actions reach the worker that holds
+            // their tab, but three things do not, and they fail quietly enough that an operator would not
+            // connect them to worker_num.
+            if ($this->settings->workerNum > 1) {
                 $this->log(
                     'warn',
-                    'worker_num > 1: actions, scoped signal values, session data and the client list are '
-                    . 'shared across workers. Three things are not. (1) Mutating a scoped signal by reading '
+                    'worker_num > 1: scoped signal values, session data and the client list are shared across workers, '
+                    . 'and an action or a download that reaches another worker is passed to the one that holds its tab. '
+                    . 'Three things are not shared. (1) Mutating a scoped signal by reading '
                     . 'it and calling setValue() loses updates: use Signal::increment() for counters and '
                     . 'Signal::mutate() for anything else. Reading a session data key and writing it back '
                     . 'loses updates the same way and has no atomic form. (2) PHP statics in your own handlers are '
-                    . 'per-process, so a simulation kept in one diverges per worker. (3) A server-owned TAB '
-                    . 'signal (clientWritable: false, or any TAB signal without clientWritable: true under '
-                    . 'withStrictTabSignals()) lives in one worker: an action another worker takes rebuilds '
-                    . 'it from its initial value, so keep that state in a scoped signal or use worker_num = 1. '
+                    . 'per-process, so a simulation kept in one diverges per worker. (3) A tab lives on the worker of '
+                    . 'its SSE stream. When the stream reconnects to another worker after the one that held the tab '
+                    . 'stopped, the new one rebuilds the tab as a revival does, so a server-owned TAB signal '
+                    . '(clientWritable: false, or any TAB signal without clientWritable: true under withStrictTabSignals()) '
+                    . 'starts from its initial value: keep state that must survive in a scoped signal or tabState(), or '
+                    . 'use worker_num = 1. '
                     . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
                 );
             }
 
             // Validate Brotli requirements before binding any socket
-            if ($this->config->getBrotli()) {
+            if ($this->settings->brotli) {
                 if (!\function_exists('brotli_compress_init')) {
                     throw new \RuntimeException(
                         'withBrotli() requires the ext-brotli PHP extension. Install it with: pecl install brotli'
                     );
                 }
-                if (!$this->config->isHttps() && !$this->config->isH2c()) {
+                if (!$this->settings->https && !$this->settings->h2c) {
                     throw new \RuntimeException(
                         'withBrotli() requires HTTP/2. Call withCertificate($certFile, $keyFile) for direct HTTPS, '
                         . 'or withH2c() when behind a TLS-terminating reverse proxy (Caddy, Nginx).'
                     );
                 }
                 // Auto-register BrotliMiddleware as the outermost global middleware
-                array_unshift($this->globalMiddleware, new BrotliMiddleware($this->config->getBrotliDynamicLevel()));
+                array_unshift($this->globalMiddleware, new BrotliMiddleware($this->settings->brotliDynamicLevel));
             }
 
             // Validate embeddable (SameSite=None) requirements before binding any socket.
             // A SameSite=None cookie without Secure is silently dropped by browsers, and Secure
             // cookies are only honoured over HTTPS (direct TLS or TLS-terminating proxy via h2c).
-            if ($this->config->getSessionCookieSameSite() === 'None') {
-                if (!$this->config->getSecureCookie()) {
+            if ($this->settings->sessionCookieSameSite === 'None') {
+                if (!$this->settings->secureCookie) {
                     throw new \RuntimeException(
                         'withEmbeddable() requires Secure cookies; do not call withSecureCookie(false) after it.'
                     );
                 }
-                if (!$this->config->isHttps() && !$this->config->isH2c()) {
+                if (!$this->settings->https && !$this->settings->h2c) {
                     throw new \RuntimeException(
                         'withEmbeddable() sets SameSite=None, which requires Secure cookies: '
                         . 'enable withCertificate() (HTTPS) or withH2c() (TLS-terminating proxy).'
@@ -903,27 +1166,42 @@ class Via {
                 }
             }
 
-            $socketType = $this->config->isHttps()
+            $settings = self::serverSettings($this->settings);
+            self::assertHookFlags($settings, $this->broker);
+            $maxQueued = $this->settings->sseMaxQueuedBytes;
+            $socketBuffer = (int) ($settings['socket_buffer_size'] ?? 0);
+            $threshold = SseHandler::dropThreshold($maxQueued, $socketBuffer);
+            if ($threshold < $maxQueued) {
+                $this->log('warning', "withSseMaxQueuedBytes({$maxQueued}) is above half of socket_buffer_size ({$socketBuffer}), so a slow client's element frames are dropped from a backlog of {$threshold} bytes. "
+                    . 'Raise socket_buffer_size with withSwooleSettings() to ' . (2 * $maxQueued) . ' for the threshold you set.');
+            }
+            if (((int) ($settings['hook_flags'] ?? 0) & SWOOLE_HOOK_NATIVE_CURL) !== 0 && self::nativeCurlHookCrashes()) {
+                $this->log('warning', 'hook_flags include SWOOLE_HOOK_NATIVE_CURL, and with libcurl 8.20 or newer a curl '
+                    . 'request to any hostname crashes the worker. Remove the flag, see https://via.zweiundeins.gmbh/docs/deployment#hooks');
+            }
+
+            $socketType = $this->settings->https
                 ? (SWOOLE_SOCK_TCP | SWOOLE_SSL)
                 : SWOOLE_SOCK_TCP;
-            $this->server = new Server($this->config->getHost(), $this->config->getPort(), Server::POOL_MODE, $socketType);
+            $this->server = new Server($this->settings->host, $this->settings->port, Server::POOL_MODE, $socketType);
 
             // Configure OpenSwoole for SSE streaming
-            $this->server->set(self::serverSettings($this->config));
+            $this->server->set($settings);
 
             $this->requestHandler->setRoutes($this->router->getRoutes());
+            $this->stats->share();
 
             // SharedTable: allocate in master process so it is mmap'd into all workers
             // on fork. Only needed when worker_num > 1 (single-worker uses a plain PHP array).
             // The shared table is needed whenever GlobalState has to be visible beyond one
             // process OR dirty-tracked for persistence, so persistence pulls it in even when
             // running single-worker.
-            $persistPath = $this->config->getGlobalStatePath();
+            $persistPath = $this->settings->globalStatePath;
 
-            if ($this->config->getWorkerNum() > 1 || $persistPath !== null) {
+            if ($this->settings->workerNum > 1 || $persistPath !== null) {
                 $sharedTable = new SharedTable(
-                    $this->config->getGlobalStateTableRows(),
-                    $this->config->getGlobalStateTableValueBytes(),
+                    $this->settings->globalStateTableRows,
+                    $this->settings->globalStateTableValueBytes,
                 );
                 $this->app->setSharedTable($sharedTable);
 
@@ -932,32 +1210,37 @@ class Via {
                 }
             }
 
-            if ($this->config->getWorkerNum() > 1) {
+            if ($this->settings->workerNum > 1) {
                 // Same reason, same timing: scoped signal VALUES have to be visible across
                 // workers or every worker runs its own divergent copy of the scope.
                 $this->setSharedSignalStore(new SharedSignalStore(
-                    $this->config->getScopedSignalTableRows(),
-                    $this->config->getScopedSignalTableValueBytes(),
+                    $this->settings->scopedSignalTableRows,
+                    $this->settings->scopedSignalTableValueBytes,
+                    max(16, 2 * $this->settings->workerNum),
                 ));
 
                 // Lets any worker rebuild a context created by any other, which is what turns
                 // an action landing on the "wrong" worker from a 400 into a served request.
                 $this->app->setContextDirectory(new SharedContextDirectory(
-                    $this->config->getContextDirectoryRows(),
-                    $this->config->getContextDirectoryRecordBytes(),
+                    $this->settings->contextDirectoryRows,
+                    $this->settings->contextDirectoryRecordBytes,
+                    $this->settings->contextDirectoryTabStateBytes,
                 ));
 
                 // So getClients() and the connect/disconnect hooks see the whole server rather
                 // than whichever streams this worker happened to serve.
                 $this->app->setClientRegistry(new SharedClientRegistry(
-                    $this->config->getContextDirectoryRows(),
+                    $this->settings->contextDirectoryRows,
                 ));
 
                 // A tab's next request can land on any worker, so its session data has to be there.
                 $this->app->setSessionStore(new SharedSessionStore(
-                    $this->config->getSessionTableRows(),
-                    $this->config->getSessionTableValueBytes(),
+                    $this->settings->sessionTableRows,
+                    $this->settings->sessionTableValueBytes,
                 ));
+
+                // And its cookie has to name the same session there after a rotation.
+                $this->sessionManager->tokens()->share();
             }
 
             // SwooleBroker receive path: decode inter-worker pipe messages and apply
@@ -967,6 +1250,16 @@ class Via {
             // in SwooleBroker::publish(), but kept as a belt-and-suspenders guard).
             $this->server->on('pipeMessage', function (Server $server, int $srcWorkerId, string $data): void {
                 try {
+                    if (str_starts_with($data, Forwarder::MESSAGE_PREFIX)) {
+                        $this->forwarder?->receive($srcWorkerId, $data);
+
+                        return;
+                    }
+                    if (str_starts_with($data, StaticBrotli::MESSAGE_PREFIX)) {
+                        $this->staticBrotli->receive($data);
+
+                        return;
+                    }
                     $this->handlePipeMessage($srcWorkerId, $data);
                 } catch (\Throwable $e) {
                     $this->log('error', "pipeMessage from worker {$srcWorkerId} failed: " . Logger::describe($e));
@@ -974,12 +1267,12 @@ class Via {
             });
 
             $this->server->on('start', function (Server $server): void {
-                $scheme = $this->config->isHttps() ? 'https' : 'http';
-                $this->log('info', "Via server started on {$scheme}://{$this->config->getHost()}:{$this->config->getPort()}");
+                $scheme = $this->settings->https ? 'https' : 'http';
+                $this->log('info', "Via server started on {$scheme}://{$this->settings->host}:{$this->settings->port}");
 
                 // Write master PID so external tools (e.g. scripts/dev.sh) can send
                 // SIGUSR1 to the correct process for hot worker reload.
-                if ($this->config->getDevMode()) {
+                if ($this->settings->devMode) {
                     $pidFile = sys_get_temp_dir() . '/php-via-master.pid';
                     file_put_contents($pidFile, (string) $server->master_pid);
                 }
@@ -1006,6 +1299,8 @@ class Via {
             $this->server->on('workerStart', function (Server $server, int $workerId): void {
                 $this->workerStarted = true;
                 $this->app->claimWorker($workerId);
+                $this->staticBrotli->setWorkerId($workerId);
+                $this->staticBrotli->warmUp();
 
                 // Register signal handlers in worker process (where timers run)
                 $this->registerSignalHandlers();
@@ -1030,9 +1325,20 @@ class Via {
                     );
                 });
 
-                // Execute all registered start callbacks
+                $this->workerId = $workerId;
+                if ($this->app->getContextDirectory() !== null) {
+                    $this->forwarder = new Forwarder(
+                        $this,
+                        $server,
+                        $workerId,
+                        self::resolveWorkerNum($server),
+                        $this->settings->contextForwardTimeoutMs,
+                        $this->requestHandler->serveForwarded(...),
+                    );
+                    $this->requestHandler->setForwarder($this->forwarder);
+                }
                 foreach ($this->startCallbacks as $callback) {
-                    $callback();
+                    $callback($workerId);
                 }
 
                 // Refresh route table: startCallbacks may have registered new routes (e.g. via
@@ -1046,30 +1352,27 @@ class Via {
                 // These are registered inside workerStart, so without the gate each of the N
                 // workers armed its own Timer::tick and a "once per server" job ran N times,
                 // and, if it broadcasts, delivered N^2 times.
-                foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
-                    if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
-                        continue;
-                    }
+                $this->armServerIntervals($workerId);
 
-                    $id = Timer::tick($ms, function () use ($callback): void {
-                        try {
-                            $callback();
-                        } catch (\Throwable $e) {
-                            $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
+                // See Config::withGcIntervalMs().
+                $gcIntervalMs = $this->settings->gcIntervalMs;
+                if ($this->settings->gcOnGrowth) {
+                    $collector = new CycleCollector($gcIntervalMs > 0 ? $gcIntervalMs : PHP_INT_MAX, CycleCollector::memoryLimit((string) \ini_get('memory_limit')));
+                    gc_disable();
+                    $id = Timer::tick(CycleCollector::CHECK_MS, function () use ($collector): void {
+                        if ($collector->isDue()) {
+                            $this->runGcCycle();
+                            $collector->ran();
                         }
                     });
 
                     if ($id !== false) {
                         $this->serverIntervalIds[] = $id;
+                        $this->collectsCycles = true;
+                    } else {
+                        gc_enable();
                     }
-                }
-
-                // Proactive GC timer: call gc_collect_cycles() on a fixed schedule
-                // to prevent unpredictable mid-request pauses. PHP's automatic cycle
-                // collector fires when its root buffer fills (~10,000 roots); calling
-                // it periodically spreads the work out during idle gaps between requests.
-                $gcIntervalMs = $this->config->getGcIntervalMs();
-                if ($gcIntervalMs > 0) {
+                } elseif ($gcIntervalMs > 0) {
                     $id = Timer::tick($gcIntervalMs, fn () => $this->runGcCycle());
 
                     if ($id !== false) {
@@ -1100,7 +1403,7 @@ class Via {
                 }
 
                 if ($this->app->getContextDirectory() !== null) {
-                    $id = Timer::tick(self::sseHeartbeatIntervalMs($this->config), function (): void {
+                    $id = Timer::tick(self::sseHeartbeatIntervalMs($this->settings), function (): void {
                         try {
                             $this->sseHandler->heartbeatStreams();
                         } catch (\Throwable $e) {
@@ -1114,7 +1417,7 @@ class Via {
                 }
 
                 // A browser that cancels one HTTP/2 stream keeps the connection, so no close event tells the worker.
-                if ((self::serverSettings($this->config)['open_http2_protocol'] ?? false) === true) {
+                if ((self::serverSettings($this->settings)['open_http2_protocol'] ?? false) === true) {
                     $id = Timer::tick(SseHandler::RESET_CHECK_MS, function (): void {
                         try {
                             $this->sseHandler->endResetStreams();
@@ -1182,7 +1485,7 @@ class Via {
 
             // Runs in the worker that owns the connection, about 1 ms after the client's FIN. OpenSwoole
             // rejects it under dispatch_mode 1, 3 and 7; the SSE keep-alive wake covers those.
-            if (self::deliversCloseEvents(self::serverSettings($this->config))) {
+            if (self::deliversCloseEvents(self::serverSettings($this->settings))) {
                 $this->server->on('close', function (Server $server, int $fd): void {
                     try {
                         $this->sseHandler->onConnectionClose($fd);
@@ -1191,34 +1494,66 @@ class Via {
                     }
                 });
             }
+
+            // Last, after the settings are final: the helper process is added and the static files compressed in
+            // the master process, so every worker inherits them.
+            $assets = [DatastarBundle::path($this->settings->datastarRocketEnabled), RequestHandler::viaCssPath()];
+            if ($this->settings->tracingEnabled) {
+                $assets[] = DevBarController::defaultAssetPath('devbar.css');
+                $assets[] = DevBarController::defaultAssetPath('devbar.js');
+            }
+            $this->staticBrotli->prepare($this->server, $assets, $this->settings->staticDir);
         }
 
         $this->server->start();
     }
 
     /**
-     * Register a callback to run when the server starts.
-     * Use this to initialize timers or background tasks.
+     * Register a callback to run in every worker process when it starts, with the worker's id.
+     *
+     * It runs once per worker start, so with withWorkerNum(4) four times, and again when a worker restarts
+     * after a reload (SIGUSR1), a `max_request` recycle or a crash. Run work meant for one worker where
+     * $workerId === 0: worker 0 always exists, runs the setInterval() jobs, and restarts under the same id.
+     * Routes registered here are picked up, so a reload loads them from disk again.
+     *
+     * @param callable(int): void $callback receives the worker id
      */
-    public function onStart(callable $callback): void {
+    public function onWorkerStart(callable $callback): void {
         $this->startCallbacks[] = $callback;
     }
 
     /**
-     * Register a callback to run on graceful shutdown.
+     * Register a callback to run in every worker process when it stops, with the worker's id.
      *
      * Callbacks run once in each worker process when that worker stops: on SIGTERM or SIGINT to
      * the master, `$server->shutdown()`, and also on a worker reload (SIGUSR1) or a `max_request`
      * recycle. A callback cannot tell a reload from a stop. They run inside a coroutine, each in its
-     * own try/catch, after waiting up to half the stop budget for open SSE streams to finish
-     * (no wait when `max_wait_time` is below 2). OpenSwoole counts `max_wait_time` in whole seconds,
+     * own try/catch, after waiting up to half the stop budget for open SSE streams and Context::spawn()
+     * tasks to finish (no wait when `max_wait_time` is below 2). Tasks still running after the
+     * callbacks get the rest of the budget. OpenSwoole counts `max_wait_time` in whole seconds,
      * so the budget for the stop is roughly `max_wait_time` minus up to one second.
      *
      * End long-lived coroutines, sockets and `Event::add` fds here (or check isShuttingDown() in
      * the loop): anything still alive holds the worker until `max_wait_time`, then it is killed.
+     *
+     * @param callable(int): void $callback receives the worker id
      */
-    public function onShutdown(callable $callback): void {
+    public function onWorkerStop(callable $callback): void {
         $this->shutdownCallbacks[] = $callback;
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names onWorkerStart()
+     */
+    public function onStart(callable $callback): never {
+        Removed::method('Via::onStart()', 'Use $app->onWorkerStart($fn). It runs in every worker and passes the worker id: run work meant for one worker where $workerId === 0.');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names onWorkerStop()
+     */
+    public function onShutdown(callable $callback): never {
+        Removed::method('Via::onShutdown()', 'Use $app->onWorkerStop($fn). It runs in every worker and passes the worker id.');
     }
 
     /**
@@ -1269,6 +1604,8 @@ class Via {
 
     /**
      * @return null|callable(Request, Response): void
+     *
+     * @internal
      */
     public function getNotFoundHandler(): ?callable {
         return $this->notFoundHandler;
@@ -1292,6 +1629,60 @@ class Via {
      */
     public function onClientDisconnect(callable $callback): void {
         $this->clientDisconnectCallbacks[] = $callback;
+    }
+
+    /**
+     * Register a callback that sees each throw php-via catches from app code, to report it: to an error
+     * tracker, as a metric, or in an error signal on the tab. It only observes. php-via still logs the
+     * throw and handles it as before, so a failing action still answers 500 and sends the signals it
+     * changed, the ones the callback writes included.
+     *
+     * $phase says where the throw came from:
+     * - Action: an action threw, or something it called, such as a sync() whose view threw. $c is the
+     *   tab's page context, also for a component's action, and $action the action's id: the name given
+     *   to action(), after the component's namespace and a dash, or action0, action1 for unnamed ones.
+     * - Render: a page handler or view threw on page load or revival ($c is the context being built,
+     *   which is discarded), a view on a stream's first sync, or a view in a broadcast. A broadcast
+     *   reports each distinct failure once per pass, with the first context it failed for. A
+     *   Context::download() source that throws reports here too, with its page context.
+     * - Timer: a Context::setInterval() callback threw, or a Via::setInterval() one, with $c null.
+     * - Task: a Context::spawn() task threw.
+     * - Route: a route() handler or its middleware threw, with $c null and $action the route's path
+     *   as registered, such as '/api/items/{id}'. The request still answers 500.
+     * $action is null outside Action and Route.
+     *
+     * Callbacks run in the order registered, in the coroutine that caught the throw; for an action
+     * before its changed signals are sent, so what they write goes out with them. A throw from a
+     * callback is logged and reaches no callback, and so is a throw caught while a callback runs, in
+     * its coroutine or in one started from it, and the throw of a Context::spawn() task a callback
+     * starts. A broadcast a callback starts renders later, in another coroutine, so a view that fails
+     * in it calls the callbacks again, and the two repeat until the broadcast re-entrancy limit stops
+     * them after 8 passes.
+     * php-via's own failures, such as a broker that cannot publish, and throws from lifecycle
+     * callbacks (onClientConnect(), onCleanup(), onWorkerStop() and the like) are only logged.
+     *
+     * @param callable(\Throwable, ?Context, ErrorPhase, ?string): void $callback receives the throwable, the context, the phase and the action id or route path
+     */
+    public function onError(callable $callback): void {
+        $this->errorHooks->add($callback);
+    }
+
+    /**
+     * Pass a throw php-via caught, after handling it, to the onError() callbacks.
+     *
+     * @internal called where php-via catches a throw from an action, a render, a timer, a task or a route
+     */
+    public function reportError(\Throwable $e, ?Context $context, ErrorPhase $phase, ?string $action = null): void {
+        $this->errorHooks->report($e, $context, $phase, $action);
+    }
+
+    /**
+     * Whether the onError() callbacks run in this coroutine or in one it was started from.
+     *
+     * @internal read by Context::spawn(): the throw of a task a callback starts reaches no callback
+     */
+    public function inErrorCallbacks(): bool {
+        return $this->errorHooks->inCallbacks();
     }
 
     /**
@@ -1350,12 +1741,10 @@ class Via {
     }
 
     /**
-     * Get render statistics.
-     *
-     * @return array{render_count: int, total_time: float, min_time: float, max_time: float, avg_time: float}
+     * @deprecated removed in 0.14; throws and names getStats()
      */
-    public function getRenderStats(): array {
-        return $this->app->getRenderStats();
+    public function getRenderStats(): never {
+        Removed::method('Via::getRenderStats()', 'Use $app->getStats()->getStats().');
     }
 
     /**
@@ -1395,8 +1784,7 @@ class Via {
     /**
      * Run one GC cycle: collect circular references, log memory usage, update stats.
      *
-     * Called by the GC timer (configurable via Config::withGcInterval()) and
-     * exposed publicly so it can be invoked directly in tests or from user code.
+     * @internal run by a worker's collector timer, see Config::withGcIntervalMs()
      */
     public function runGcCycle(): void {
         $cycles = gc_collect_cycles();
@@ -1407,39 +1795,21 @@ class Via {
     }
 
     /**
-     * Track view render time.
+     * The Twig Environment of the app's TwigEngine, for extensions, globals and runtime loaders, and
+     * for templates held as strings: $app->getTwig()->createTemplate($src)->render($data). Short for
+     * the engine's environment().
      *
-     * @internal Called by Context during rendering
-     */
-    public function trackRender(float $duration): void {
-        $this->app->trackRender($duration);
-    }
-
-    /**
-     * Get cached view HTML for a route if available and fresh.
-     *
-     * @internal Used by Context for scope-based caching
-     */
-    public function getCachedView(string $route): ?string {
-        return $this->viewCache->get($route);
-    }
-
-    /**
-     * Cache rendered view HTML for a route.
-     *
-     * @internal Used by Context for scope-based caching
-     */
-    public function cacheView(string $route, string $html): void {
-        $this->viewCache->set($route, $html);
-    }
-
-    /**
-     * Get Twig environment.
-     *
-     * @internal Used by Context for template rendering
+     * @throws \LogicException when the app renders templates with no engine or another engine than TwigEngine
      */
     public function getTwig(): Environment {
-        return $this->app->getTwig();
+        $engine = $this->viewRenderer->getEngine();
+        if ($engine instanceof TwigEngine) {
+            return $engine->environment();
+        }
+
+        throw new \LogicException($engine === null
+            ? 'getTwig() needs Twig templates, and this app has no template engine. Run composer require twig/twig, then set $config->withTemplateDir(__DIR__ . \'/templates\') or ->withTemplateEngine(new \\Mbolli\\PhpVia\\Twig\\TwigEngine(__DIR__ . \'/templates\')).'
+            : 'getTwig() returns the Twig environment of a TwigEngine, but this app renders templates with ' . $engine::class . '.');
     }
 
     /**
@@ -1452,107 +1822,56 @@ class Via {
     }
 
     /**
-     * Check if a route is currently rendering.
-     *
-     * @internal Used by Context for render locking
-     */
-    public function isRendering(string $route): bool {
-        return $this->viewCache->isRendering($route);
-    }
-
-    /**
-     * Set rendering status for a route.
-     *
-     * @internal Used by Context for render locking
-     */
-    public function setRendering(string $route, bool $status): void {
-        $this->viewCache->setRendering($route, $status);
-    }
-
-    /**
-     * Get or create session ID from request cookies.
+     * The session id of a request: the key of the session its cookie names, or of a new session.
      *
      * @internal Used by HTTP handlers
      */
     public function getSessionId(Request $request): string {
-        return $this->sessionManager->getOrCreateSessionId($request, $this->config->getSecureCookie());
+        return $this->sessionManager->getOrCreateSessionId($request, $this->settings->secureCookie);
     }
 
     /**
-     * Set session cookie in response.
+     * The session of a request, for the attribute middleware gets.
      *
      * @internal Used by HTTP handlers
      */
-    public function setSessionCookie(Response $response, string $sessionId): void {
-        $config = $this->app->getConfig();
-        $this->sessionManager->setSessionCookie(
-            $response,
-            $sessionId,
-            $config->getSecureCookie(),
-            $config->getSessionCookieSameSite(),
-            $config->isSessionCookiePartitioned(),
-        );
+    public function getRequestSession(Request $request): RequestSession {
+        return $this->sessionManager->resolve($request, $this->settings->secureCookie);
     }
 
     /**
-     * Read Datastar signals from an OpenSwoole HTTP request.
+     * Set the session cookie the response to $request needs: a new one when the session rotates, and on a page
+     * load ($refresh) the cookie of a new session or the request's own for a fresh expiry.
      *
-     * Delegates to parseSignals() with the request's raw parts.
+     * @param bool $rotate a new cookie, as Context::regenerateSession() asks; Via::regenerateSession() asks on the request
      *
      * @internal Used by HTTP handlers
-     *
-     * @return array<string, mixed> The decoded signals array
      */
-    public static function readSignals(Request $request): array {
-        return self::parseSignals(
-            $request->get ?? [],
-            $request->post ?? [],
-            $request->getContent(),
-        );
+    public function writeSessionCookie(Request $request, Response $response, bool $rotate = false, bool $refresh = false): void {
+        try {
+            $token = $this->sessionManager->cookieFor($request, $this->settings->secureCookie, $rotate, $refresh);
+        } catch (\OverflowException $e) {
+            $this->log('error', 'Session rotation failed: ' . $e->getMessage());
+
+            return;
+        }
+
+        if ($token !== null) {
+            $this->sessionManager->setSessionCookie(
+                $response,
+                $token,
+                $this->settings->secureCookie,
+                $this->settings->sessionCookieSameSite,
+                $this->settings->sessionCookiePartitioned,
+            );
+        }
     }
 
     /**
-     * Parse Datastar signals from raw request parts.
-     *
-     * Signal source priority:
-     *  1. GET  ?datastar=<json>:           Datastar GET actions
-     *  2. Raw JSON body:                   Datastar POST/PATCH actions (application/json)
-     *  3. POST datastar=<json> field:      Datastar POST via multipart/form-data or
-     *                                      application/x-www-form-urlencoded
-     *
-     * Exposed as a public static method so it can be tested without an OpenSwoole
-     * Request instance (which is a final extension class).
-     *
-     * @param array<string, mixed> $get  Parsed GET parameters
-     * @param array<string, mixed> $post Parsed POST parameters
-     * @param false|string         $body Raw request body
-     *
-     * @return array<string, mixed> The decoded signals array
+     * @internal used by Context::regenerateSession() and tests
      */
-    public static function parseSignals(array $get, array $post, false|string $body): array {
-        // 1. GET ?datastar=<json>
-        if (isset($get['datastar'])) {
-            $signals = json_decode((string) $get['datastar'], true);
-
-            return \is_array($signals) ? $signals : [];
-        }
-
-        // 2. Raw JSON body (standard Datastar POST/PATCH action)
-        if ($body) {
-            $signals = json_decode($body, true);
-            if (\is_array($signals)) {
-                return $signals;
-            }
-        }
-
-        // 3. POST field datastar=<json> (multipart/form-data or urlencoded form submission)
-        if (isset($post['datastar'])) {
-            $signals = json_decode((string) $post['datastar'], true);
-
-            return \is_array($signals) ? $signals : [];
-        }
-
-        return [];
+    public function getSessionManager(): SessionManager {
+        return $this->sessionManager;
     }
 
     /**
@@ -1583,11 +1902,12 @@ class Via {
 
         // Pass an active-SSE guard so the timer won't destroy a context that has
         // a live SSE connection (can happen under load when the cleanup timer fires
-        // before the next SSE reconnection completes its handshake).
+        // before the next SSE reconnection completes its handshake), nor one that
+        // finishHandover() destroys once its running actions end.
         $this->app->scheduleContextCleanup(
             $contextId,
             $delayMs,
-            fn (): bool => ($this->activeSseCount[$contextId] ?? 0) > 0,
+            fn (): bool => ($this->activeSseCount[$contextId] ?? 0) > 0 || isset($this->handingOver[$contextId]),
         );
     }
 
@@ -1598,7 +1918,7 @@ class Via {
      * @internal used by the page and action handlers
      */
     public function armConnectDeadline(string $contextId): void {
-        $timeoutMs = $this->config->getContextConnectTimeoutMs();
+        $timeoutMs = $this->settings->contextConnectTimeoutMs;
         // Only a running server has an event loop to fire the timer; a CLI script or test would wait for it.
         if ($timeoutMs <= 0 || $this->server === null || ($this->activeSseCount[$contextId] ?? 0) > 0) {
             return;
@@ -1622,8 +1942,8 @@ class Via {
             return;
         }
 
-        $connectMs = $this->config->getContextConnectTimeoutMs();
-        $timeoutMs = isset($this->app->getClients()[$contextId]) ? $connectMs : $this->config->getContextReconnectTimeoutMs();
+        $connectMs = $this->settings->contextConnectTimeoutMs;
+        $timeoutMs = isset($this->app->getClients()[$contextId]) ? $connectMs : $this->settings->contextReconnectTimeoutMs;
         if ($timeoutMs <= 0) {
             $timeoutMs = $connectMs;
         }
@@ -1637,38 +1957,52 @@ class Via {
      *
      * When an SSE reconnect names a context that was already cleaned up, this re-creates it with
      * the *same* ID (so signal IDs regenerate byte-identical and the already-loaded DOM (bindings,
-     * action URLs, via_ctx) keeps working), re-runs the page handler, and re-seeds TAB signal
-     * values from what the client still holds (sent with the reconnect). Returns null (and the
-     * caller falls back to a full reload) when revival is disabled, no record exists, it expired,
-     * the requester's session doesn't own the context, or the route is no longer registered.
+     * action URLs, via_ctx) keeps working), re-runs the page handler behind the route's own middleware,
+     * and re-seeds TAB signal values from what the client still holds (sent with the reconnect). Returns
+     * null (and the caller falls back to a full reload) when revival is disabled, no record exists, it
+     * expired, the requester's session doesn't own the context or its cookie is in its grace period, the route is no longer registered, or
+     * the route's middleware answered instead of running the handler, which $refused then holds.
      *
-     * @param bool $byConnect Whether an SSE connect revives it, which seeds the context itself
+     * @param bool                 $byConnect  Whether an SSE connect revives it, which seeds the context itself
+     * @param array<string, mixed> $attributes PSR-7 request attributes the middleware of the reviving request set
      *
      * @internal used by SseHandler on reconnect to a missing context
      */
-    public function reviveContext(string $contextId, Request $request, bool $byConnect = false): ?Context {
+    public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = [], ?ResponseInterface &$refused = null): ?Context {
+        // A revival runs the page handler, which a cookie in its grace period may no longer do.
+        if ($this->getRequestSession($request)->state === SessionTokens::GRACE) {
+            return null;
+        }
+
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),
-            self::readSignals($request),
+            SignalParser::read($request),
             $request->cookie ?? [],
             $byConnect,
+            $attributes,
+            fn (string $route, array $params, string $query): ServerRequestInterface => $this->revivalRequest($request, $route, $params, $query, $attributes),
+            $refused,
         );
     }
 
     /**
-     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types (mirrors the
-     * readSignals/parseSignals split so it can be exercised without a live server).
+     * Testable core of {@see reviveContext()}, free of OpenSwoole Request types, so it can be exercised
+     * without a live server.
      *
-     * @param string                $requesterSession Session ID of the reconnecting client
-     * @param array<string, mixed>  $clientSignals    Signal values the client still holds
-     * @param array<string, string> $cookies          Request cookies (forwarded to the context)
-     * @param bool                  $byConnect        Whether an SSE connect revives it, which seeds the context itself
+     * @param string                                                                       $requesterSession Session ID of the reconnecting client
+     * @param array<string, mixed>                                                         $clientSignals    Signal values the client still holds
+     * @param array<string, string>                                                        $cookies          Request cookies (forwarded to the context)
+     * @param bool                                                                         $byConnect        Whether an SSE connect revives it, which seeds the context itself
+     * @param array<string, mixed>                                                         $attributes       PSR-7 request attributes the middleware of the reviving request set,
+     *                                                                                                       which the page handler reads as on a page load
+     * @param null|\Closure(string, array<string, string>, string): ServerRequestInterface $routeRequest     the request the route's middleware gets, from route, parameters and query; without it the middleware is skipped
+     * @param null|ResponseInterface                                                       $refused          set to what the route's middleware answered when it did not run the handler
      *
      * @internal
      */
-    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false): ?Context {
-        if ($this->config->getContextRevivalWindowMs() <= 0) {
+    public function reviveContextFromClient(string $contextId, string $requesterSession, array $clientSignals, array $cookies = [], bool $byConnect = false, array $attributes = [], ?\Closure $routeRequest = null, ?ResponseInterface &$refused = null): ?Context {
+        if ($this->settings->contextRevivalWindowMs <= 0) {
             return null;
         }
 
@@ -1700,17 +2034,37 @@ class Via {
         $this->contextSessions[$contextId] = $sessionId;
         $context->injectRouteParams($record['params']);
         $context->setRequestCookies($cookies);
+        if ($attributes !== []) {
+            $context->setRequestAttributes($attributes);
+        }
+        if (($record['query'] ?? '') !== '') {
+            parse_str($record['query'], $query);
+            $context->setPageInput($query);
+        }
+        $context->importTabState($record['tabState'] ?? []);
 
         try {
-            $this->invokeHandlerWithParams($handler, $context, $record['params']);
+            $refusal = $this->runRevivedHandler($handler, $context, $route, $record['params'], $record['query'] ?? '', $routeRequest);
         } catch (\Throwable $e) {
             $this->log('error', "Revival handler exception on {$route}: " . Logger::describe($e));
             // The half-built context may already have joined scopes and started timers.
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
             if (!isset($this->contexts[$contextId])) {
                 unset($this->contextSessions[$contextId]);
             }
+            $this->reportError($e, $context, ErrorPhase::Render);
+
+            return null;
+        }
+        if ($refusal !== null) {
+            $this->log('info', "The middleware of {$route} answered {$refusal->getStatusCode()} instead of rebuilding context {$contextId}");
+            $context->cleanup();
+            $this->app->releaseScopes($context);
+            if (!isset($this->contexts[$contextId])) {
+                unset($this->contextSessions[$contextId]);
+            }
+            $refused = $refusal;
 
             return null;
         }
@@ -1720,7 +2074,7 @@ class Via {
         $winner = $this->contexts[$contextId] ?? null;
         if ($winner !== null) {
             $context->cleanup();
-            $this->scopeRegistry->unregisterContextFromAllScopes($context);
+            $this->app->releaseScopes($context);
 
             return $winner;
         }
@@ -1754,7 +2108,186 @@ class Via {
     }
 
     /**
-     * Seed a context that an action revived without client signals from its SSE connect; others ignore the call.
+     * Make this worker the home of a tab whose stream connected here, and ask the worker that held it to give it up.
+     *
+     * @internal used by SseHandler
+     */
+    public function claimStream(string $contextId): void {
+        $directory = $this->app->getContextDirectory();
+        if ($this->forwarder === null || $directory === null || $directory->home($contextId) === $this->app->workerIdentity()) {
+            return;
+        }
+
+        [$claimed, $previous] = $this->app->claimHome($contextId, true, null, $this->forwarder->isLive(...));
+        if ($claimed && $previous !== null) {
+            $this->forwarder->handOver($contextId, $previous);
+        }
+    }
+
+    /**
+     * Note an action of a tab that starts running on this worker.
+     *
+     * @internal called by ActionHandler
+     */
+    public function actionStarted(string $contextId): void {
+        $this->runningActions[$contextId] = ($this->runningActions[$contextId] ?? 0) + 1;
+    }
+
+    /**
+     * Note an action that ended, after its response, and finish the handover of its tab when it was the last one.
+     *
+     * @internal called by ActionHandler
+     */
+    public function actionEnded(string $contextId): void {
+        $left = ($this->runningActions[$contextId] ?? 1) - 1;
+        if ($left > 0) {
+            $this->runningActions[$contextId] = $left;
+
+            return;
+        }
+
+        unset($this->runningActions[$contextId]);
+        if (isset($this->handingOver[$contextId])) {
+            unset($this->handingOver[$contextId]);
+            $this->finishHandover($contextId);
+        }
+    }
+
+    /**
+     * Give up this worker's copy of a tab whose stream connected to another worker, and return what the new home
+     * needs from it: the patches no render sends again, and the TAB signal values the browser cannot send there.
+     *
+     * The copy is destroyed without touching its record, which ends a stream it still has here. While actions of
+     * the tab run here, it stays without a stream until the last one ends, and then passes on what they sent.
+     *
+     * @internal called by Forwarder on a handover
+     *
+     * @return array{patches: list<array{type: string, content: string, selector?: string, mode?: string}>, signals: array<string, mixed>}
+     */
+    public function releaseHandedOver(string $contextId): array {
+        $context = $this->contexts[$contextId] ?? null;
+        $home = $this->app->getContextDirectory()?->home($contextId);
+        if ($context === null || $context->isDestroyed() || $home === null || $home === $this->app->workerIdentity()) {
+            return ['patches' => [], 'signals' => []];
+        }
+
+        $patchManager = $context->getPatchManager();
+        $handed = ['patches' => $patchManager->takeOneShotPatches(), 'signals' => $patchManager->takeHandOverSignals(serverOwned: true)];
+        $this->app->cancelContextCleanup($contextId);
+        unset($this->cleanupTimers[$contextId]);
+
+        if (($this->runningActions[$contextId] ?? 0) > 0) {
+            $this->log('debug', "Handing context {$contextId} over to worker {$home[0]} once its running actions end", $context);
+            $this->handingOver[$contextId] = true;
+            // Ends a stream the copy still has here; what the actions queue waits in the new channel.
+            $patchManager->recreatePatchChannel();
+
+            return $handed;
+        }
+
+        $this->dropHandedOver($context, $home);
+
+        return $handed;
+    }
+
+    /**
+     * Queue the patches and write the TAB signal values the previous home of a tab handed over.
+     *
+     * @internal called by Forwarder
+     *
+     * @param array<mixed>         $patches as releaseHandedOver() returns them
+     * @param array<string, mixed> $signals signal values by id
+     */
+    public function queueHandedOverPatches(string $contextId, array $patches, array $signals = []): void {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null || $context->isDestroyed()) {
+            return;
+        }
+
+        if ($signals !== []) {
+            $context->getPatchManager()->applyHandedOverSignals($signals);
+        }
+
+        foreach ($patches as $patch) {
+            if (!\is_array($patch) || !\in_array($patch['type'] ?? null, ['script', 'elements'], true) || !\is_string($patch['content'] ?? null)) {
+                continue;
+            }
+            $queued = ['type' => (string) $patch['type'], 'content' => $patch['content']];
+            if (\is_string($patch['selector'] ?? null)) {
+                $queued['selector'] = $patch['selector'];
+            }
+            $mode = \is_string($patch['mode'] ?? null) ? PatchMode::tryFrom($patch['mode']) : null;
+            if ($mode !== null) {
+                $queued['mode'] = $mode;
+            }
+            $context->getPatchManager()->queuePatch($queued);
+        }
+    }
+
+    /**
+     * Give the cookies of an action response that never reached the browser, because the worker that got the
+     * request stopped waiting for it, to the tab's next action response.
+     *
+     * @internal called by Forwarder
+     *
+     * @param array<mixed> $cookies cookie calls: method and arguments
+     * @param array<mixed> $headers header calls, for a session cookie written as a header
+     */
+    public function requeueResponseCookies(string $contextId, array $cookies, array $headers): void {
+        $context = $this->contexts[$contextId] ?? null;
+        if ($context === null || $context->isDestroyed()) {
+            return;
+        }
+
+        $sessionCookie = $this->settings->secureCookie ? SessionManager::SESSION_COOKIE_NAME_SECURE : SessionManager::SESSION_COOKIE_NAME;
+        $requeued = 0;
+        foreach ($cookies as $call) {
+            $args = \is_array($call) && \is_array($call[1] ?? null) ? array_values($call[1]) : [];
+            if (!\is_string($args[0] ?? null)) {
+                continue;
+            }
+            ++$requeued;
+            $value = (string) ($args[1] ?? '');
+            if ($args[0] === $sessionCookie) {
+                $context->requeueSessionCookie($value);
+
+                continue;
+            }
+            $context->queueCookieForNextResponse([
+                'name' => $args[0],
+                'value' => $value,
+                'expires' => (int) ($args[2] ?? 0),
+                'path' => (string) ($args[3] ?? '/'),
+                'domain' => (string) ($args[4] ?? ''),
+                'secure' => (bool) ($args[5] ?? true),
+                'httpOnly' => (bool) ($args[6] ?? true),
+                'sameSite' => (string) ($args[7] ?? 'Lax'),
+            ]);
+        }
+        foreach ($headers as $call) {
+            if (\is_array($call) && strtolower((string) ($call[0] ?? '')) === 'set-cookie'
+                && preg_match('/^' . preg_quote($sessionCookie, '/') . '=([0-9a-f]{32})/', (string) ($call[1] ?? ''), $m) === 1) {
+                ++$requeued;
+                $context->requeueSessionCookie($m[1]);
+            }
+        }
+        if ($requeued > 0) {
+            $this->log('warn', 'The response to an action of this tab never reached the browser, so its cookies go out with the next one', $context);
+        }
+    }
+
+    /**
+     * What a download URL starts with: with more than one worker this worker's id, so any worker passes it here.
+     *
+     * @internal used by Context::download()
+     */
+    public function downloadTokenPrefix(): string {
+        return $this->forwarder !== null ? $this->workerId . '-' : '';
+    }
+
+    /**
+     * Seed a context that an action revived without client signals from its SSE connect, and give the
+     * clientSeeded signals of any other the browser's values.
      *
      * @param array<string, mixed> $clientSignals Signal values the SSE connect carries
      *
@@ -1762,6 +2295,8 @@ class Via {
      */
     public function seedFromConnect(Context $context, array $clientSignals): void {
         if (!$context->isAwaitingSeed()) {
+            $context->takeClientSeeded($clientSignals);
+
             return;
         }
 
@@ -1777,7 +2312,12 @@ class Via {
     public function buildHtmlDocument(Context $context): string {
         $content = $context->renderView();
 
-        $html = $this->htmlBuilder->buildDocument($content, $context, $context->getId(), $this->config->getBasePath());
+        $html = $this->htmlBuilder->buildDocument(
+            $content,
+            $context,
+            $context->getId(),
+            $this->settings->basePath,
+        );
 
         // Inject the Dev Bar overlay before </body> when tracing is enabled.
         if ($this->devBarInjector !== null) {
@@ -1797,15 +2337,22 @@ class Via {
      * @internal Used by PatchManager during sync
      */
     public function decorateUpdate(string $html, Context $context): string {
-        if ($context->getComponentManager()->isComponent()) {
+        if ($html === $this->plainUpdate || $context->getComponentManager()->isComponent()) {
             return $html;
         }
 
-        if (stripos($html, '<html') !== false) {
+        $isDocument = stripos($html, '<html') !== false;
+        if ($isDocument) {
             $html = $this->htmlBuilder->injectIntoDocument($html, $context, initial: false);
+        } else {
+            $this->htmlBuilder->checkRootIds($html, $context);
         }
 
         if ($this->devBarInjector === null || stripos($html, '</body>') === false) {
+            if (!$isDocument) {
+                $this->plainUpdate = $html;
+            }
+
             return $html;
         }
 
@@ -1871,23 +2418,22 @@ class Via {
      *
      * @internal
      */
-    public static function serverSettings(Config $config): array {
+    public static function serverSettings(Settings $settings): array {
         $defaults = [
-            'open_http2_protocol' => $config->isHttps() || $config->isH2c(),
+            'open_http2_protocol' => $settings->https || $settings->h2c,
             'http_compression' => false,
-            // buffer_output_size: per-connection TCP send-buffer cap before send_yield kicks in.
-            // In POOL_MODE all sends go through the master reactor pipe, so 0 would cause
-            // ERRNO 1203 on every send. 2MB is the OpenSwoole default; send_yield=true
-            // handles backpressure without stalling. SSE events are flushed per-chunk by
-            // OpenSwoole's HTTP chunked-transfer encoding, not held in this buffer.
-            'socket_buffer_size' => 1024 * 1024,
+            // Per-connection backlog in the master past which a write parks (send_yield) until the backlog is
+            // empty. Twice the default withSseMaxQueuedBytes(), so frames still in the worker pipe when a
+            // stream checks its backlog do not fill it. In POOL_MODE all sends go through the master reactor
+            // pipe, so 0 would cause ERRNO 1203 on every send.
+            'socket_buffer_size' => 2 * 1024 * 1024,
             'max_coroutine' => 100000,
-            'worker_num' => $config->getWorkerNum(),  // POOL_MODE enables USR1 graceful worker reload
+            'worker_num' => $settings->workerNum,  // POOL_MODE enables USR1 graceful worker reload
             'send_yield' => true,
-            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onShutdown
+            'max_wait_time' => 3,  // Seconds a stopping worker gets for SSE exits and onWorkerStop callbacks
             'reload_async' => true,  // Enable async reload
             'enable_reuse_port' => true,  // Allow immediate rebind on restart
-            'hook_flags' => SWOOLE_HOOK_ALL,  // Enable coroutine hooks for native functions (sleep, usleep, etc.)
+            'hook_flags' => self::defaultHookFlags(),  // Sockets, sleep and processes yield; file and stdio I/O go through the AIO thread pool
             'log_level' => 4,  // SWOOLE_LOG_WARNING: suppress NOTICE about sending to closed connections
             // Connection limits: prevent a burst of SSE connections from exhausting the
             // accept queue and making the server unresponsive. Callers can override via
@@ -1897,10 +2443,79 @@ class Via {
         ];
 
         // Caller overrides win over the defaults; explicit SSL paths win over both.
-        return array_merge($defaults, $config->getSwooleSettings(), array_filter([
-            'ssl_cert_file' => $config->getSslCertFile(),
-            'ssl_key_file' => $config->getSslKeyFile(),
+        return array_merge($defaults, $settings->swooleSettings, array_filter([
+            'ssl_cert_file' => $settings->sslCertFile,
+            'ssl_key_file' => $settings->sslKeyFile,
         ]));
+    }
+
+    /**
+     * The hook_flags Via sets unless Config::withSwooleSettings() overrides them: SWOOLE_HOOK_ALL, without
+     * SWOOLE_HOOK_NATIVE_CURL when nativeCurlHookCrashes().
+     */
+    public static function defaultHookFlags(): int {
+        return self::nativeCurlHookCrashes() ? SWOOLE_HOOK_ALL & ~SWOOLE_HOOK_NATIVE_CURL : SWOOLE_HOOK_ALL;
+    }
+
+    /**
+     * The socket, stream, sleep and proc_open() hooks, plus SWOOLE_HOOK_NATIVE_CURL unless nativeCurlHookCrashes(), for
+     * `withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()])`.
+     *
+     * Without FILE and STDIO, file and stdio I/O skip the AIO thread pool and block the worker for the call. Only for
+     * apps that run no exec(), system() or popen() and hold no flock() across a yield.
+     */
+    public static function noFileIoHookFlags(): int {
+        return self::NO_FILE_IO_HOOKS | (self::nativeCurlHookCrashes() ? 0 : SWOOLE_HOOK_NATIVE_CURL);
+    }
+
+    /**
+     * Whether OpenSwoole's native curl hook segfaults the worker on a curl request to any hostname, which it
+     * does with libcurl 8.20.0 or newer (curl#21558; OpenSwoole 26.2). False when OpenSwoole was built without
+     * the hook (no --enable-hook-curl), since the flag then hooks nothing.
+     *
+     * @internal
+     */
+    public static function nativeCurlHookCrashes(): bool {
+        if (!\function_exists('openswoole_native_curl_exec')) {
+            return false;
+        }
+        $curl = \function_exists('curl_version') ? curl_version() : false;
+
+        return \is_array($curl) && $curl['version_number'] >= 0x08_14_00;
+    }
+
+    /**
+     * Refuse hook_flags that break the server: STDIO without FILE, or a RedisBroker whose socket would not yield.
+     *
+     * @param array<string, mixed> $settings the effective server settings, see serverSettings()
+     *
+     * @throws \RuntimeException
+     *
+     * @internal
+     */
+    public static function assertHookFlags(array $settings, MessageBroker $broker): void {
+        $flags = (int) ($settings['hook_flags'] ?? 0);
+
+        if (($flags & SWOOLE_HOOK_STDIO) !== 0 && ($flags & SWOOLE_HOOK_FILE) === 0) {
+            throw new \RuntimeException(
+                'hook_flags has SWOOLE_HOOK_STDIO without SWOOLE_HOOK_FILE: include and require then yield '
+                . 'halfway through a file, and concurrent requests fail with "Class not found". Add SWOOLE_HOOK_FILE, '
+                . 'drop SWOOLE_HOOK_STDIO, or use Via::defaultHookFlags() or Via::noFileIoHookFlags().'
+            );
+        }
+
+        if ($broker instanceof RedisBroker && ($flags & $broker->requiredHookFlag()) === 0) {
+            $name = match ($broker->requiredHookFlag()) {
+                SWOOLE_HOOK_TLS => 'SWOOLE_HOOK_TLS',
+                SWOOLE_HOOK_UNIX => 'SWOOLE_HOOK_UNIX',
+                default => 'SWOOLE_HOOK_TCP',
+            };
+
+            throw new \RuntimeException(
+                "RedisBroker needs {$name} in hook_flags: without it every Redis call, including the endless "
+                . 'SUBSCRIBE read, blocks the whole worker. Add it, or use Via::defaultHookFlags() or Via::noFileIoHookFlags().'
+            );
+        }
     }
 
     /**
@@ -1920,9 +2535,9 @@ class Via {
      *
      * @internal
      */
-    public static function sseHeartbeatIntervalMs(Config $config): int {
-        $seconds = $config->getContextDirectoryTtlSeconds();
-        $windowMs = $config->getContextRevivalWindowMs();
+    public static function sseHeartbeatIntervalMs(Settings $settings): int {
+        $seconds = $settings->contextDirectoryTtlSeconds;
+        $windowMs = $settings->contextRevivalWindowMs;
         if ($windowMs > 0) {
             $seconds = min($seconds, (int) ceil($windowMs / 1000));
         }
@@ -1937,6 +2552,69 @@ class Via {
      */
     public function getServer(): ?Server {
         return $this->server;
+    }
+
+    /**
+     * Serve requests in this process without a server, as one worker, for Testing\TestApp.
+     *
+     * Contexts created from now on queue their patches in an array, and an SSE loop running in a
+     * Fiber parks on it as it parks on a Channel in a coroutine. The onWorkerStart callbacks run
+     * here, as worker 0, and then the setInterval() timers are armed as worker 0 arms them. Nothing
+     * else of a worker start happens: no collector, sweep or heartbeat timer is armed.
+     *
+     * @internal
+     *
+     * @throws \LogicException after start() or a first call
+     */
+    public function serveInProcess(): RequestHandler {
+        if ($this->server !== null || $this->inProcess) {
+            throw new \LogicException('serveInProcess() runs once, on a Via that start() has not started.');
+        }
+        $this->inProcess = true;
+
+        foreach ($this->startCallbacks as $callback) {
+            $callback($this->workerId);
+        }
+        $this->armServerIntervals($this->workerId);
+
+        return $this->requestHandler;
+    }
+
+    /**
+     * Whether serveInProcess() runs this app.
+     *
+     * @internal read by PatchManager
+     */
+    public function isInProcess(): bool {
+        return $this->inProcess;
+    }
+
+    /**
+     * Stop as a worker stops: end the SSE streams, run the onWorkerStop callbacks and disconnect the broker.
+     *
+     * @internal for Testing\TestApp, after serveInProcess()
+     */
+    public function stopInProcess(): void {
+        $this->runWorkerShutdown();
+    }
+
+    /**
+     * Run the event loop until the Context::spawn() tasks have ended and the broadcasts they left for the tick
+     * or a throttle have rendered, up to $deadlineNs (hrtime).
+     *
+     * @internal for Testing\TestApp, after serveInProcess()
+     *
+     * @return bool whether they did
+     */
+    public function runTasksInProcess(int $deadlineNs): bool {
+        if (Coroutine::getCid() > 0) {
+            throw new \LogicException('Run the tasks from outside a coroutine: an app served in process runs its requests outside one.');
+        }
+
+        $busy = fn (): bool => $this->runningTasks > 0 || $this->flushScheduled || $this->dirtyScopes !== [];
+        $this->runEventLoopWhile($busy, $deadlineNs);
+
+        return !$busy();
     }
 
     /**
@@ -1987,6 +2665,186 @@ class Via {
     }
 
     /**
+     * Arm the setInterval() timers this worker runs: every one on the leader, only those for every worker elsewhere.
+     */
+    private function armServerIntervals(int $workerId): void {
+        foreach ($this->serverIntervals as [$callback, $ms, $everyWorker]) {
+            if (!$everyWorker && $workerId !== self::LEADER_WORKER_ID) {
+                continue;
+            }
+
+            $id = Timer::tick($ms, function () use ($callback): void {
+                try {
+                    $callback();
+                } catch (\Throwable $e) {
+                    $this->log('error', 'Interval callback failed: ' . Logger::describe($e));
+                    $this->reportError($e, null, ErrorPhase::Timer);
+                }
+            });
+
+            if ($id !== false) {
+                $this->serverIntervalIds[] = $id;
+            }
+        }
+    }
+
+    /**
+     * Pass on what the actions that outlived a handover sent, and destroy the copy they ran on.
+     */
+    private function finishHandover(string $contextId): void {
+        $context = $this->contexts[$contextId] ?? null;
+        $home = $this->app->getContextDirectory()?->home($contextId);
+        // The tab's stream may have come back here meanwhile.
+        if ($context === null || $context->isDestroyed() || $home === null || $home === $this->app->workerIdentity()) {
+            return;
+        }
+
+        $patchManager = $context->getPatchManager();
+        $patches = $patchManager->takeOneShotPatches();
+        $signals = $patchManager->takeHandOverSignals(serverOwned: false);
+        if ($patches !== [] || $signals !== []) {
+            $this->forwarder?->sendHandedOver($home[0], $contextId, $patches, $signals);
+        }
+        $this->app->cancelContextCleanup($contextId);
+        unset($this->cleanupTimers[$contextId]);
+        $this->dropHandedOver($context, $home);
+    }
+
+    /**
+     * Destroy this worker's copy of a tab another worker holds now.
+     *
+     * @param array{int, int} $home
+     */
+    private function dropHandedOver(Context $context, array $home): void {
+        $contextId = $context->getId();
+        $this->log('debug', "Handed context {$contextId} over to worker {$home[0]}, which its stream reached", $context);
+        $this->app->destroyContext($contextId, handedOver: true);
+        if (($this->contexts[$contextId] ?? null) === $context) {
+            unset($this->contexts[$contextId], $this->contextSessions[$contextId]);
+        }
+    }
+
+    /**
+     * Run the page handler of a context being rebuilt behind its route's middleware, as a page load runs it, so
+     * an auth gate applies again and its attributes reach the handler.
+     *
+     * @param array<string, string>                                                        $params
+     * @param null|\Closure(string, array<string, string>, string): ServerRequestInterface $routeRequest
+     *
+     * @return null|ResponseInterface what the middleware answered when it did not run the handler
+     */
+    private function runRevivedHandler(callable $handler, Context $context, string $route, array $params, string $query, ?\Closure $routeRequest): ?ResponseInterface {
+        $middleware = $this->getRouteMiddleware($route);
+        if ($middleware === [] || $routeRequest === null) {
+            $this->invokeHandlerWithParams($handler, $context, $params);
+
+            return null;
+        }
+
+        $core = new class($this, $handler, $context, $params) implements RequestHandlerInterface {
+            public bool $handled = false;
+
+            /**
+             * @param callable              $pageHandler
+             * @param array<string, string> $params
+             */
+            public function __construct(private Via $via, private mixed $pageHandler, private Context $context, private array $params) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $this->handled = true;
+                $this->context->setRequestAttributes(RequestHandler::contextAttributes($request->getAttributes()));
+                $this->via->invokeHandlerWithParams($this->pageHandler, $this->context, $this->params);
+
+                return new Psr7Response(200);
+            }
+        };
+        $response = (new MiddlewareDispatcher($middleware, $core))->handle($routeRequest($route, $params, $query));
+
+        return $core->handled ? null : $response;
+    }
+
+    /**
+     * The request the route's middleware gets when a tab is rebuilt: a GET of the page's URL, with the headers,
+     * cookies and session of the request that rebuilds it and the attributes its middleware set.
+     *
+     * @param array<string, string> $params
+     * @param array<string, mixed>  $attributes
+     */
+    private function revivalRequest(Request $request, string $route, array $params, string $query, array $attributes): ServerRequestInterface {
+        $path = (string) preg_replace_callback('/\{([a-zA-Z_]\w*)\}/', static fn (array $m): string => rawurlencode($params[$m[1]] ?? ''), $route);
+        parse_str($query, $queryParams);
+
+        $psr = ($this->psrRequestFactory ??= new PsrRequestFactory())->create($request, 'page');
+        $psr = $psr->withMethod('GET')
+            ->withUri($psr->getUri()->withPath($path)->withQuery($query))
+            ->withQueryParams($queryParams)
+            ->withParsedBody(null)
+            ->withUploadedFiles([])
+            ->withBody(Stream::create(''))
+            ->withAttribute('via.session', $this->getRequestSession($request)->key)
+        ;
+        foreach ($attributes as $name => $value) {
+            $psr = $psr->withAttribute($name, $value);
+        }
+
+        return $psr;
+    }
+
+    /**
+     * Warn about an import map integrity entry for php-via's own Datastar bundle at another URL than the one
+     * pages load, which leaves Datastar unpinned: one built before withBasePath() or withDatastarRocket(),
+     * or copied from an earlier build.
+     */
+    private function warnStaleDatastarPin(): void {
+        $url = $this->settings->datastarUrl;
+        foreach ($this->config->getImportMap()['integrity'] ?? [] as $pinned => $_) {
+            $path = parse_url($pinned, PHP_URL_PATH);
+            if ($pinned === $url || !str_starts_with($pinned, '/') || !\is_string($path) || basename($path) !== 'datastar.js') {
+                continue;
+            }
+
+            $this->log('warn', "Config::withImportMap() pins '{$pinned}', but pages load Datastar from '{$url}', so the browser "
+                . 'checks no hash for it. Pin it with $config->withImportMap([], [$config->getDatastarUrl() => '
+                . '$config->getDatastarIntegrity()]) after withDatastarRocket() and withBasePath(), not with a URL from an earlier build.');
+        }
+    }
+
+    /**
+     * @param mixed $method an entry of route()'s $methods, whose type PHP does not check
+     *
+     * @throws \InvalidArgumentException for anything but letters or '*'
+     */
+    private static function httpMethod(mixed $method): string {
+        if (!\is_string($method) || preg_match('/^(?:[A-Za-z]+|\*)$/', $method) !== 1) {
+            throw new \InvalidArgumentException('route() takes HTTP method names such as \'GET\' or \'POST\', or \'*\', got ' . var_export($method, true) . '.');
+        }
+
+        return strtoupper($method);
+    }
+
+    /**
+     * Refuse a worker_num passed through withSwooleSettings() that differs from withWorkerNum(): php-via sets up its
+     * shared tables, cross-worker state and the broker check from withWorkerNum() alone.
+     *
+     * @throws \RuntimeException
+     */
+    private static function assertWorkerSettings(Settings $settings): void {
+        $swoole = $settings->swooleSettings;
+        if (!\array_key_exists('worker_num', $swoole) || (int) $swoole['worker_num'] === $settings->workerNum) {
+            return;
+        }
+
+        $n = (int) $swoole['worker_num'];
+
+        throw new \RuntimeException(
+            "withSwooleSettings(['worker_num' => {$n}]) would start {$n} workers that php-via sets up as "
+            . "{$settings->workerNum}: sessions, scoped signals and contexts would not be shared between them. "
+            . "Call ->withWorkerNum({$n}) instead and drop worker_num from withSwooleSettings(). "
+            . 'See https://via.zweiundeins.gmbh/docs/deployment#same-machine'
+        );
+    }
+
+    /**
      * Seed GlobalState from its durable snapshot and arm the write-behind flush.
      *
      * Called from start() in the master process, before the fork, so the seeded table is the one
@@ -2030,12 +2888,12 @@ class Via {
                 $this->log('error', 'GlobalState flush failed: ' . $e->getMessage());
             }
         };
-        $this->setInterval($flush, $this->config->getGlobalStateFlushMs());
+        $this->setInterval($flush, $this->settings->globalStateFlushMs);
 
         // The leader flushes once more when it stops: a second SIGTERM to the master can end it
         // before its shutdown event, and then only this flush saves the last window.
-        $this->onShutdown(function () use ($flush): void {
-            if ($this->server?->getWorkerId() === self::LEADER_WORKER_ID) {
+        $this->onWorkerStop(function (int $workerId) use ($flush): void {
+            if ($workerId === self::LEADER_WORKER_ID) {
                 $flush();
             }
         });
@@ -2065,14 +2923,15 @@ class Via {
         // Serialize fan-outs per scope.
         //
         // doSyncLocally() renders each context in a loop, and a render can suspend:
-        // a first-ever Twig compile, or any hooked file I/O in a view, yields under
-        // SWOOLE_HOOK_ALL. A second broadcast could then run its ENTIRE fan-out before
-        // the first resumed, so the first loop's remaining contexts rendered against
-        // newer state and some clients never saw the intervening frame at all.
+        // on hooked file or socket I/O (a first-ever Twig compile, a database query),
+        // a hooked sleep, Coroutine::usleep(), a Channel or a lock. A second broadcast
+        // could then run its ENTIRE fan-out before the first resumed, so the first
+        // loop's remaining contexts rendered against newer state and some clients
+        // never saw the intervening frame at all.
         //
         // This cannot be solved by rendering once and pushing that value to every
-        // context: cacheUpdates=false exists precisely because those views may differ
-        // per context (LoginExample renders per-user session state), so sharing one
+        // context: a view that does not pass shareRender may differ per context
+        // (LoginExample renders per-user session state), so sharing one
         // render across contexts would leak one user's view to another.
         //
         // A broadcast that arrives mid-fan-out is therefore folded into a single
@@ -2092,6 +2951,9 @@ class Via {
         }
 
         $this->syncInFlight[$scope] = ['cid' => Coroutine::getCid(), 'lastCid' => (int) (Coroutine::stats()['coroutine_last_cid'] ?? PHP_INT_MAX), 'since' => hrtime(true), 'warned' => false];
+        if ($this->settings->broadcastThrottleMs($scope) > 0) {
+            $this->throttledAt[$scope] = hrtime(true);
+        }
 
         // Wrap fan-out in a "broadcast {scope}" root trace. Inside an action (the
         // synchronous path, or flushBroadcasts()) this is a no-op: the action trace is
@@ -2133,7 +2995,7 @@ class Via {
 
             if ($reenteredPasses === self::MAX_SYNC_PASSES) {
                 // Another pass would broadcast again: stop rather than wedge the worker.
-                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\": a view it renders broadcasts it again on every pass, directly, through another scope or from a coroutine it starts, so its fan-out stopped after " . self::MAX_SYNC_PASSES . ' passes');
+                $this->log('warning', "Broadcast re-entrancy limit reached for scope \"{$scope}\": a view it renders broadcasts it again on every pass, directly, through another scope or from a coroutine it starts, or an onError() callback does for a view that fails, so its fan-out stopped after " . self::MAX_SYNC_PASSES . ' passes');
             } elseif (isset($this->syncReentered[$scope])) {
                 // Not a loop, so owed like a broadcast from outside.
                 $this->syncPending[$scope] = true;
@@ -2232,15 +3094,10 @@ class Via {
      */
     private function invalidateForBroadcast(string $scope): void {
         if (Scope::isRouteBased($scope) && (Scope::parse($scope)[1] ?? null) === null) {
-            // Bare "route" reaches every route. Cache keys carry an :initial or :update
-            // suffix, so strip it to invalidate each route scope once.
-            $seenScopes = [];
-            foreach ($this->viewCache->getKeys() as $cacheKey) {
-                $baseScope = (string) preg_replace('/:(?:initial|update)$/', '', $cacheKey);
-
-                if (Scope::isRouteBased($baseScope) && !isset($seenScopes[$baseScope])) {
-                    $this->invalidateViewCache($baseScope);
-                    $seenScopes[$baseScope] = true;
+            // Bare "route" reaches every route.
+            foreach ($this->viewCache->getScopes() as $cachedScope) {
+                if (Scope::isRouteBased($cachedScope)) {
+                    $this->invalidateViewCache($cachedScope);
                 }
             }
 
@@ -2254,8 +3111,9 @@ class Via {
     /**
      * Whether a broadcast from the current code is marked for the next flush instead of run now.
      */
-    private function shouldCoalesce(): bool {
-        return $this->config->isBroadcastCoalescingEnabled() && !$this->shuttingDown && Coroutine::getCid() > 0;
+    private function shouldCoalesce(?string $scope = null): bool {
+        return ($this->settings->broadcastCoalescingEnabled || ($scope !== null && $this->settings->broadcastThrottleMs($scope) > 0))
+            && !$this->shuttingDown && Coroutine::getCid() > 0;
     }
 
     /**
@@ -2263,7 +3121,8 @@ class Via {
      */
     private function receiveBroadcast(string $scope): void {
         // pipeMessage runs in a coroutine on OpenSwoole 26, but a started worker can schedule without one.
-        if ($this->config->isBroadcastCoalescingEnabled() && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
+        $coalesce = $this->settings->broadcastCoalescingEnabled || $this->settings->broadcastThrottleMs($scope) > 0;
+        if ($coalesce && !$this->shuttingDown && ($this->workerStarted || Coroutine::getCid() > 0)) {
             $this->markDirty($scope, publish: false);
             $this->scheduleFlush();
 
@@ -2372,7 +3231,12 @@ class Via {
      */
     private function scheduleFlush(): void {
         // A scope whose fan-out is running is scheduled when it ends; shutdown drops what is left.
-        if ($this->shuttingDown || !$this->hasFlushWork()) {
+        if ($this->shuttingDown) {
+            return;
+        }
+        if (!$this->hasFlushWork()) {
+            $this->scheduleThrottledFlush();
+
             return;
         }
 
@@ -2404,14 +3268,90 @@ class Via {
     }
 
     private function hasFlushWork(): bool {
-        return ($this->unpublishedScopes !== [] && !$this->publishing) || array_diff_key($this->dirtyScopes, $this->syncInFlight) !== [];
+        return ($this->unpublishedScopes !== [] && !$this->publishing) || $this->withoutThrottled(array_diff_key($this->dirtyScopes, $this->syncInFlight)) !== [];
+    }
+
+    /**
+     * $scopes without those a Config::withBroadcastThrottle() holds back, whose last render began less than their
+     * interval ago.
+     *
+     * @template T
+     *
+     * @param array<string, T> $scopes
+     *
+     * @return array<string, T>
+     */
+    private function withoutThrottled(array $scopes): array {
+        if ($this->throttledAt === []) {
+            return $scopes;
+        }
+
+        $now = hrtime(true);
+        foreach ($scopes as $scope => $_) {
+            if ($this->throttleWaitNs($scope, $now) > 0) {
+                unset($scopes[$scope]);
+            }
+        }
+
+        return $scopes;
+    }
+
+    /**
+     * How long a throttle still holds $scope back, in ns; 0 when it may render. Forgets a render whose interval is over.
+     */
+    private function throttleWaitNs(string $scope, int $now): int {
+        $renderedAt = $this->throttledAt[$scope] ?? null;
+        if ($renderedAt === null) {
+            return 0;
+        }
+
+        $waitNs = $this->settings->broadcastThrottleMs($scope) * 1_000_000 - ($now - $renderedAt);
+        if ($waitNs <= 0) {
+            unset($this->throttledAt[$scope]);
+
+            return 0;
+        }
+
+        return $waitNs;
+    }
+
+    /**
+     * Arm a timer for the first scope a throttle holds back, which schedules the flush that renders it.
+     */
+    private function scheduleThrottledFlush(): void {
+        $now = hrtime(true);
+        $waitNs = null;
+        foreach (array_diff_key($this->dirtyScopes, $this->syncInFlight) as $scope => $_) {
+            $scopeWaitNs = $this->throttleWaitNs($scope, $now);
+            if ($scopeWaitNs > 0 && ($waitNs === null || $scopeWaitNs < $waitNs)) {
+                $waitNs = $scopeWaitNs;
+            }
+        }
+        if ($waitNs === null) {
+            return;
+        }
+
+        // Timer::clearAll() (workerExit, test fixtures) drops the timer without telling anyone.
+        if ($this->throttleTimerId !== null && Timer::exists($this->throttleTimerId)) {
+            if ($this->throttleDueNs <= $now + $waitNs) {
+                return;
+            }
+            Timer::clear($this->throttleTimerId);
+        }
+
+        $id = Timer::after(max(1, (int) ceil($waitNs / 1_000_000)), function (): void {
+            $this->throttleTimerId = null;
+            $this->scheduleFlush();
+        });
+        $this->throttleTimerId = \is_int($id) ? $id : null;
+        $this->throttleDueNs = $now + $waitNs;
     }
 
     /**
      * 0 when a flush may start now, else the wait in ms (at least 1: Timer::after(0) fails).
      */
     private function msUntilNextTick(): int {
-        $tickNs = $this->config->getBroadcastTickMs() * 1_000_000;
+        $tickNs = $this->settings->broadcastTickMs * 1_000_000;
         if ($tickNs === 0 || $this->lastFlushStartNs === null) {
             return 0;
         }
@@ -2466,10 +3406,15 @@ class Via {
 
     /**
      * Run one flush on the dirty scopes no other flush is rendering, and record it in the stats.
+     *
+     * @param bool $throttle leave out the scopes a Config::withBroadcastThrottle() holds back
      */
-    private function runTickFlush(bool $inlinePublish = false): void {
+    private function runTickFlush(bool $inlinePublish = false, bool $throttle = true): void {
         $cid = Coroutine::getCid();
         $batch = array_diff_key($this->dirtyScopes, $this->syncInFlight);
+        if ($throttle) {
+            $batch = $this->withoutThrottled($batch);
+        }
         if (isset($this->runningFlushes[$cid]) || ($batch === [] && ($this->unpublishedScopes === [] || $this->publishing))) {
             return;
         }
@@ -2486,7 +3431,11 @@ class Via {
         } finally {
             unset($this->runningFlushes[$cid]);
             $this->lastFlushEndNs = hrtime(true);
-            $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->config->getBroadcastTickMs());
+            $this->stats->trackBroadcastFlush(($this->lastFlushEndNs - $startNs) / 1e6, $this->settings->broadcastTickMs);
+            // Forget the renders whose interval is over, so scopes that stop broadcasting leave no entry.
+            foreach ($this->throttledAt as $scope => $_) {
+                $this->throttleWaitNs($scope, $this->lastFlushEndNs);
+            }
             $this->scheduleFlush();
         }
     }
@@ -2548,6 +3497,22 @@ class Via {
      * Publish every pending scope. Only one coroutine per worker publishes at a time, so a broker
      * connection is never shared by two coroutines.
      */
+    /**
+     * Whether a scope crosses to other workers and nodes: they refuse one that Scope::isValidWireScope() refuses,
+     * which is warned about once per scope, for the first 100.
+     */
+    private function isPublishable(string $scope): bool {
+        if ($this->broker instanceof InMemoryBroker || Scope::isValidWireScope($scope)) {
+            return true;
+        }
+        if (\count($this->unwiredScopesWarned) < 100 && !isset($this->unwiredScopesWarned[$scope])) {
+            $this->unwiredScopesWarned[$scope] = true;
+            $this->log('warning', "Broadcasts of scope \"{$scope}\" stay on this worker: other workers and nodes take only scopes of letters, digits and _ - . ~ : / @ % ! \$ & ' ( ) + , ; = { }, up to 256 bytes.");
+        }
+
+        return false;
+    }
+
     private function publishPending(): void {
         if ($this->publishing) {
             return;
@@ -2560,6 +3525,10 @@ class Via {
                 $this->unpublishedScopes = [];
 
                 foreach ($scopes as $scope => $_) {
+                    if (!$this->isPublishable($scope)) {
+                        continue;
+                    }
+
                     try {
                         $this->broker->publish($scope);
                     } catch (\Throwable $e) {
@@ -2580,10 +3549,14 @@ class Via {
      */
     private function drainBroadcasts(bool $renderPending, ?int $publisherDeadlineNs = null): void {
         $this->cancelScheduledFlush();
+        if ($this->throttleTimerId !== null) {
+            Timer::clear($this->throttleTimerId);
+            $this->throttleTimerId = null;
+        }
 
         if ($renderPending && Coroutine::getCid() > 0) {
             // Views that do not yield are done when this returns, before the channels close.
-            Coroutine::create(fn () => $this->runTickFlush());
+            Coroutine::create(fn () => $this->runTickFlush(throttle: false));
         }
 
         // Left over, such as a scope another flush is still rendering: clients reconnect for fresh state.
@@ -2598,18 +3571,50 @@ class Via {
     }
 
     /**
-     * Inside a coroutine, wait while $condition holds, up to $deadlineNs (hrtime) or FLUSH_WAIT_MS.
+     * Inside a coroutine, or in process (see serveInProcess()), wait while $condition holds, up to $deadlineNs
+     * (hrtime) or FLUSH_WAIT_MS.
      *
      * @param \Closure(): bool $condition
      */
     private function waitWhile(\Closure $condition, ?int $deadlineNs = null): void {
+        $deadlineNs ??= hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000;
         if (Coroutine::getCid() <= 0) {
+            if ($this->inProcess) {
+                $this->runEventLoopWhile($condition, $deadlineNs);
+            }
+
             return;
         }
 
-        $deadlineNs ??= hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000;
         while ($condition() && hrtime(true) < $deadlineNs) {
             Coroutine::usleep(1000);
+        }
+    }
+
+    /**
+     * Outside a coroutine, run the event loop while $condition holds, up to $deadlineNs (hrtime): coroutines waiting
+     * on a timer or I/O resume and timers fire, as on a server.
+     *
+     * @param \Closure(): bool $condition
+     */
+    private function runEventLoopWhile(\Closure $condition, int $deadlineNs): void {
+        $done = static fn (): bool => hrtime(true) >= $deadlineNs || !$condition();
+        if ($done()) {
+            return;
+        }
+
+        // One turn at a time: Event::exit() would leave the coroutines still waiting unable to resume.
+        // The tick ends each turn within 5 ms, also while every coroutine waits on I/O.
+        $tick = Timer::tick(5, static fn () => null);
+
+        try {
+            while (!$done()) {
+                Event::dispatch();
+            }
+        } finally {
+            if (\is_int($tick)) {
+                Timer::clear($tick);
+            }
         }
     }
 
@@ -2682,6 +3687,10 @@ class Via {
             Timer::clear($id);
         }
         $this->serverIntervalIds = [];
+        // The tick that ran the cycle collector is gone, so PHP runs it again while the worker drains.
+        if ($this->collectsCycles) {
+            gc_enable();
+        }
 
         // The frames waiting for the tick go out before the channels close; workerExit clears the tick's timer.
         $this->drainBroadcasts(renderPending: true);
@@ -2691,18 +3700,21 @@ class Via {
             $context->getPatchManager()->closePatchChannel();
         }
         $this->sseHandler->closeStreams();
-        $this->waitForSseStreams();
+        $this->waitForStreamsAndTasks();
 
         foreach ($this->shutdownCallbacks as $callback) {
             try {
-                $callback();
+                $callback($this->workerId);
             } catch (\Throwable $e) {
                 $this->log('error', 'Error in shutdown callback: ' . $e->getMessage());
             }
         }
 
-        // Presence broadcasts from onClientDisconnect and onShutdown may still sit with a running publisher.
         $stopBudgetNs = max(0, (int) ($this->server?->setting['max_wait_time'] ?? 3) - 1) * 1_000_000_000;
+        // Tasks the callbacks told to stop, such as by killing the process they wait on.
+        $this->waitWhile(fn (): bool => $this->runningTasks > 0, $stopStartNs + $stopBudgetNs);
+
+        // Presence broadcasts from onClientDisconnect and onWorkerStop may still sit with a running publisher.
         $this->drainBroadcasts(renderPending: false, publisherDeadlineNs: min(hrtime(true) + self::FLUSH_WAIT_MS * 1_000_000, $stopStartNs + $stopBudgetNs));
 
         try {
@@ -2713,22 +3725,27 @@ class Via {
 
         $others = (int) (Coroutine::stats()['coroutine_num'] ?? 0) - (Coroutine::getCid() > 0 ? 1 : 0);
         if ($others > 0) {
-            $this->log('warning', "{$others} coroutine(s) still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
+            $tasks = $this->runningTasks > 0 ? ", {$this->runningTasks} of them Context::spawn() tasks," : '';
+            $this->log('warning', "{$others} coroutine(s){$tasks} still running after shutdown; the worker waits for them up to max_wait_time, then is killed");
         }
     }
 
     /**
-     * Let the SSE exit paths (onClientDisconnect included) finish before the callbacks and the
-     * broker go away, within half the stop budget so the callbacks keep the rest.
+     * Let the SSE exit paths (onClientDisconnect included) and the Context::spawn() tasks finish before
+     * the callbacks and the broker go away, within half the stop budget so the callbacks keep the rest.
      */
-    private function waitForSseStreams(): void {
+    private function waitForStreamsAndTasks(): void {
+        $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
         if (Coroutine::getCid() <= 0) {
+            if ($this->inProcess) {
+                $this->runEventLoopWhile(fn (): bool => $this->runningTasks > 0, hrtime(true) + (int) (max(0, $maxWait - 1) / 2 * 1e9));
+            }
+
             return;
         }
 
-        $maxWait = (int) ($this->server?->setting['max_wait_time'] ?? 3);
         $deadline = microtime(true) + max(0, $maxWait - 1) / 2;
-        while ($this->runningSseStreams > 0 && microtime(true) < $deadline) {
+        while (($this->runningSseStreams > 0 || $this->runningTasks > 0) && microtime(true) < $deadline) {
             Coroutine::usleep(10_000);
         }
     }
@@ -2744,6 +3761,24 @@ class Via {
      * @return int how many contexts it reached
      */
     private function syncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
+        if ($this->settings->devMode) {
+            $this->viewRenderer->beginFanOut();
+
+            try {
+                return $this->doSyncContexts($contexts, $route, $scope, $rendered, $skipRenderedAfter);
+            } finally {
+                $this->viewRenderer->endFanOut($scope);
+            }
+        }
+
+        return $this->doSyncContexts($contexts, $route, $scope, $rendered, $skipRenderedAfter);
+    }
+
+    /**
+     * @param array<Context>       $contexts
+     * @param null|array<int, int> $rendered see syncLocally()
+     */
+    private function doSyncContexts(array $contexts, ?string $route, string $scope, ?array &$rendered, int $skipRenderedAfter): int {
         $epochs = $this->readEpochs;
         $renewals = -1;
         $epoch = 0;
@@ -2831,6 +3866,7 @@ class Via {
     private function logSyncFailures(string $scope): void {
         foreach ($this->syncFailures[$scope] ?? [] as [$e, $context, $count]) {
             $this->log('error', "Sync failed during broadcast of {$scope} for {$count} context(s): " . Logger::describe($e), $context);
+            $this->reportError($e, $context, ErrorPhase::Render);
         }
         $this->syncFailures[$scope] = [];
     }
@@ -2853,9 +3889,23 @@ class Via {
 
             return;
         }
+        if ($this->viewCache->isIdle()) {
+            return;
+        }
         if (Scope::isRouteBased($scope)) {
             $route = Scope::parse($scope)[1] ?? null;
-            $this->invalidatePrimaryScopes($route === null ? $this->contexts : array_filter($this->contexts, static fn (Context $c): bool => $c->getRoute() === $route));
+            if ($route === null) {
+                $this->invalidatePrimaryScopes($this->contexts);
+
+                return;
+            }
+            $onRoute = [];
+            foreach ($this->contexts as $id => $context) {
+                if ($context->getRoute() === $route) {
+                    $onRoute[$id] = $context;
+                }
+            }
+            $this->invalidatePrimaryScopes($onRoute);
 
             return;
         }

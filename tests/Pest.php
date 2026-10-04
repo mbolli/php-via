@@ -13,7 +13,9 @@ declare(strict_types=1);
 */
 
 use Mbolli\PhpVia\Config;
+use Mbolli\PhpVia\Twig\TwigEngine;
 use Mbolli\PhpVia\Via;
+use Twig\Loader\ArrayLoader;
 
 /*
 |--------------------------------------------------------------------------
@@ -40,6 +42,18 @@ function createVia(?Config $config = null): Via {
     $config = $config->withLogLevel('error');
 
     return new Via($config);
+}
+
+/**
+ * A TwigEngine that loads its templates from $templates, name => source, instead of a directory.
+ *
+ * @param array<string, string> $templates
+ */
+function arrayTwig(array $templates): TwigEngine {
+    $engine = new TwigEngine(__DIR__);
+    $engine->environment()->setLoader(new ArrayLoader($templates));
+
+    return $engine;
 }
 
 /**

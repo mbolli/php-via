@@ -2,7 +2,7 @@
 
 {% block demo %}
 <div id="stockDetail">
-    <a href="{{ basePath }}examples/stock-ticker" class="font-semibold mb-2 inline-block">← Back to Dashboard</a>
+    <a href="{{ basePath }}examples/stock-ticker" class="font-semibold mb-2 inline-block">Back to the dashboard</a>
 
     <div class="card">
         <div class="stock-detail-header">
@@ -11,7 +11,7 @@
                 <div class="stock-detail-name">{{ name }}</div>
             </div>
             <div class="stock-price-lg">
-                $<span data-text="${{ priceSignal.id }}"></span>
+                $<span data-text="{{ price.ref }}">{{ price.string }}</span>
             </div>
         </div>
         <div class="stock-live-indicator">
@@ -24,15 +24,17 @@
         <stock-chart
             symbol="{{ symbol }}"
             color="{{ color }}"
-            data-attr:times="${{ timesSignal.id }}"
-            data-attr:prices="${{ pricesSignal.id }}"
+            data-attr:times="{{ times.ref }}"
+            data-attr:prices="{{ prices.ref }}"
         ></stock-chart>
     </div>
 
     <div class="card mt-2">
         <h3>Other Stocks</h3>
         <div class="mt-1">
-            {{ otherStocks|raw }}
+            {% for other in otherSymbols %}
+            <a href="{{ basePath }}examples/stock-ticker/stock/{{ other }}" style="display:inline-block;padding:var(--size-1) var(--size-3);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin:2px;font-weight:var(--font-weight-6);text-decoration:none;">{{ other }}</a>
+            {% endfor %}
         </div>
     </div>
 </div>

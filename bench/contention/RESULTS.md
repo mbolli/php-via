@@ -1,5 +1,454 @@
 # Contention benchmark results
 
+## 0.14.0 release tree on held clocks, measured 2026-10-04
+
+F1, F2, F4 and F5 were rerun against fbfa1f6 (feat/api-014-rc2), the 0.14.0
+release tree. Each table compares base 737b2aa, v0.13.0 at dccddd6, 7a49802
+(the tree of the next section) and fbfa1f6, with the change of fbfa1f6 against
+base.
+
+- **Trees, server and clients:** as in the next sections, with each tree's
+  vendor directory and the scripts patched only to take the port and the
+  server's cores from environment variables. Server on cores 2 and 4 held at
+  4.5 GHz, broadcast_storm and idle_sse clients on cores 6 to 11, shared_read
+  and get_clients on core 2. Tree order rotated in every rep.
+- **Gating:** every run started only with the package below 95 °C, the
+  sibling cores 3 and 5 under 10% busy and cores 2 and 4 at 4.4 GHz or more,
+  and would have been rerun had its median clock fallen below 4.4 GHz: 106
+  runs kept, none rerun.
+- **Correctness:** every storm converged with no failed action, every
+  idle_sse broadcast reached all 5000 connections, shared_read had 0
+  mismatched frames and every get_clients flag was true, in every tree.
+
+fbfa1f6 matches 7a49802 within the noise in F1, F4 and F5. In F2 the
+broadcast to 5000 idle streams takes 20.5% longer than on 7a49802, ranges
+apart, and the cycle collector's 100 ms check no longer adds wakeups. Both
+follow from 1bdc2f3, which keeps PHP's own collector runs by default and makes
+the growth-based runs opt-in (see the F2 bisect below).
+
+### F4 shared_read, release tree
+
+Defaults (N=2000, S=5, 20 broadcasts), 5 reps:
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| with store, tab (ms per broadcast) | 48.834 (48.632 to 49.502) | 22.722 (22.388 to 23.304) | 21.69 (21.564 to 21.895) | 21.779 (21.507 to 22.125) | 2.24x lower |
+| with store, route (ms per broadcast) | 20.224 (20.033 to 20.79) | 5.319 (5.236 to 5.458) | 3.633 (3.563 to 3.688) | 3.603 (3.591 to 3.675) | 5.61x lower |
+| no store, tab (ms per broadcast) | 19.808 (19.722 to 20.102) | 20.279 (20.16 to 20.701) | 19.456 (19.426 to 19.759) | 19.497 (19.332 to 19.634) | -1.6% |
+| no store, route (ms per broadcast) | 3.751 (3.727 to 3.84) | 4.556 (4.544 to 4.693) | 2.841 (2.822 to 2.879) | 2.844 (2.81 to 2.898) | -24.2% |
+| peak memory (MB) | 78 (78 to 78) | 48 (48 to 48) | 56 (56 to 56) | 56 (56 to 56) | -28.2% |
+
+The F4 regression check passes: without a store, fbfa1f6 costs what base
+costs per context in tab mode and 24.2% less in route mode, ranges apart.
+Against v0.13.0 it is 3.9% faster in tab mode and 37.6% faster in route mode.
+
+### F5 get_clients, release tree
+
+Default sweep (`--n=100,1000,5000 --fanout-cap=1000 --broadcasts=3
+--timeout=300`), 5 reps (base 3):
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| shared, N=1000, call after one new client (ms) | 4.477 (4.348 to 4.615) | 0.384 (0.367 to 0.386) | 0.373 (0.366 to 0.382) | 0.369 (0.364 to 0.385) | 12.1x lower |
+| shared, N=5000, call after one new client (ms) | 22.377 (22.265 to 22.524) | 2.015 (1.962 to 2.101) | 2.053 (2.002 to 2.182) | 2.035 (1.958 to 2.242) | 11.0x lower |
+| shared, N=100, broadcast to 100 contexts (ms) | 45.19 (44.34 to 47.66) | 0.24 (0.24 to 0.25) | 0.2 (0.19 to 0.21) | 0.2 (0.19 to 0.2) | 226x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | 4533.4 (4459.3 to 4555.6) | 2.24 (2.17 to 2.33) | 1.7 (1.65 to 1.9) | 1.69 (1.68 to 1.72) | 2682x lower |
+| shared, N=5000, broadcast to 1000 contexts (ms) | 23016.2 (22657.1 to 23048.7) | 4.06 (3.77 to 4.18) | 3.28 (3.23 to 3.52) | 3.25 (3.24 to 3.47) | 7082x lower |
+| single, N=100, broadcast to 100 contexts (ms) | 0.86 (0.85 to 0.89) | 0.18 (0.18 to 0.18) | 0.13 (0.12 to 0.13) | 0.13 (0.12 to 0.14) | 6.62x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | 108.1 (107.5 to 109.2) | 1.77 (1.68 to 1.79) | 1.24 (1.19 to 1.29) | 1.26 (1.23 to 1.28) | 85.8x lower |
+| peak memory (MB) | 38.0 (38.0 to 38.0) | 28.0 (28.0 to 28.0) | 28.0 (28.0 to 28.0) | 28.0 (28.0 to 28.0) | -26.3% |
+
+Broadcasts that read the client list take 17 to 29% less time than on
+v0.13.0, ranges apart, and the same as on 7a49802. The rebuild after a new
+client is level with v0.13.0.
+
+### F2 idle_sse, release tree
+
+N=5000 with a 15 s window (`--n=5000 --idle=15 --settle=3`), 1 worker, 5 reps:
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| worker CPU (%) | 7.59 (7.4 to 7.79) | 0.2 (0.13 to 0.2) | 0.13 (0.07 to 0.2) | 0.13 (0.07 to 0.13) | 1 to 2 ticks |
+| wakeups/s | 596.7 (595.7 to 623) | 22.1 (21.3 to 22.3) | 33.5 (30.4 to 34.3) | 24.2 (22.6 to 26.6) | 24.7x lower |
+| broadcast to all connections (ms) | 42.07 (41.69 to 42.55) | 44.27 (43.73 to 48.18) | 39.88 (37.97 to 42.01) | 48.07 (47.36 to 52.23) | +14.3% |
+| shutdown (ms) | 122.9 (120.0 to 124.7) | 124.5 (121.0 to 137.5) | 139.4 (134.2 to 153.4) | 140.4 (138.3 to 152.6) | +14.3% |
+| worker RSS (MB) | 204.9 (203 to 207.8) | 231.3 (230.3 to 233) | 230.4 (229.8 to 230.5) | 229.8 (229.6 to 230) | +12.2% |
+
+The broadcast to all 5000 streams takes 48.1 ms, 20.5% longer than on 7a49802
+and 14.3% longer than on base, ranges apart. Wakeups fall back to the level of
+v0.13.0. Shutdown matches 7a49802, 16 to 18 ms slower than base and v0.13.0.
+
+A bisect between 7a49802 and fbfa1f6, 3 reps per tree in the same gated runs,
+puts the broadcast step at 1bdc2f3: 38.6 ms (38.2 to 40.1) on its parent
+541b691 and 44.9 ms (44.8 to 46.0) on 1bdc2f3, ranges apart, with the wakeups
+falling from 32.5 to 22.9 a second at the same commit. 87c8ff9, the parent of
+85b446e, measured 47.5 ms (46.6 to 49.8) and fbfa1f6 51.3 ms (46.3 to 51.3),
+ranges overlapping, so the later commits add at most a few ms that this run
+could not separate. The likely cause, not isolated: with PHP's runs on, a
+collector run can fall inside the fan-out and walk every live context. `withGcIntervalMs(onGrowth: true)` is
+the opt-in that turns those runs off.
+
+### F1 broadcast_storm, release tree
+
+Defaults (N=1000, K=200, concurrency 50, 1 worker), 5 reps, and low load with
+one actor (`--concurrency=1`, K=1), 7 reps:
+
+| Metric | Base | v0.13.0 | 7a49802 | fbfa1f6 | Change |
+|---|---|---|---|---|---|
+| storm to converge (ms) | 1418.9 (1417.9 to 1437.9) | 33.68 (32.573 to 34.1) | 34.731 (32.854 to 35.56) | 33.903 (33.712 to 34.803) | 41.9x lower |
+| converge after last send (ms) | 357.7 (352.2 to 360.9) | 21.554 (19.551 to 23.652) | 23.367 (21.209 to 24.242) | 22.766 (22.729 to 23.772) | 15.7x lower |
+| action latency p50 (ms) | 354.3 (353.0 to 358.8) | 0.503 (0.493 to 0.526) | 0.622 (0.6 to 0.635) | 0.653 (0.632 to 0.665) | 543x lower |
+| action latency p99 (ms) | 358.9 (356.3 to 363.1) | 10.649 (8.528 to 11.525) | 9.057 (8.735 to 12.516) | 9.199 (9.091 to 9.231) | 39x lower |
+| actions/s | 140.9 (139.1 to 141.1) | 15706.1 (14775.4 to 18995.1) | 17322.2 (13332.4 to 17849.2) | 17049 (16914.6 to 17244.2) | 121x higher |
+| converge after last send, K=1 (ms) | 7.591 (7.397 to 8.069) | 8.455 (8.298 to 8.758) | 8.714 (8.582 to 9.173) | 9.143 (8.824 to 9.87) | +20.4% |
+| action latency, K=1 (ms) | 7.628 (7.435 to 8.191) | 0.267 (0.256 to 0.292) | 0.432 (0.409 to 0.471) | 0.434 (0.402 to 0.459) | 17.6x lower |
+
+The storm converges as fast as on v0.13.0 and 7a49802. At K=1 fbfa1f6
+converges 0.4 ms later than 7a49802, ranges overlapping, 0.7 ms later than
+v0.13.0 and 1.6 ms later than base, ranges apart. The K=1 action latency
+matches 7a49802 and stays 0.17 ms above v0.13.0, and the action latency p50
+at the defaults is 29.8% above v0.13.0, ranges apart, as on 7a49802.
+
+## 7a49802 on held clocks, measured 2026-10-03
+
+**Superseded for 0.14.0 by the section above,** which measures the release
+tree fbfa1f6.
+
+F1, F2, F4 and F5 were rerun against 7a49802 (feat/api-014-mw), the 0.14.0
+tree with forwarding between workers, the cycle collector and the fan-out
+work, which the release candidate in the next section did not have. Each table
+compares base 737b2aa, v0.13.0 at dccddd6, 0.14 before that work at 7ea9875
+(feat/api-014-final) and 7a49802, with the change of 7a49802 against base.
+
+- **Trees, server and clients:** as in the next section, with each tree's
+  vendor directory. Server on cores 2 and 4 held at 4.5 GHz, broadcast_storm
+  and idle_sse clients on cores 6 to 11, shared_read and get_clients on core 2.
+- **Gating:** other sessions drove the package to 100 °C during the first
+  F2, F4 and F5 pass, and the held clock fell to 3.0 to 4.3 GHz, so that pass
+  was discarded. Every later run started only with the package below 95 °C,
+  the sibling cores 3 and 5 under 10% busy and cores 2 and 4 at 4.4 GHz or
+  more, and was rerun when its median clock fell below 4.4 GHz: 161 runs kept,
+  11 rerun. The 48 F1 runs were not gated, and all ran at a median clock of
+  4,458 MHz or more.
+- **Correctness:** every storm converged with no failed action, every
+  idle_sse broadcast reached all 5000 connections, shared_read had 0
+  mismatched frames and every get_clients flag was true, in every tree.
+
+### F4 shared_read, 7a49802
+
+Defaults (N=2000, S=5, 20 broadcasts), 5 reps:
+
+| Metric | Base | v0.13.0 | 7ea9875 | 7a49802 | Change |
+|---|---|---|---|---|---|
+| with store, tab (ms per broadcast) | 50.292 (49.394 to 50.848) | 23.084 (22.751 to 23.618) | 24.014 (23.64 to 24.065) | 22.062 (21.778 to 22.262) | 2.28x lower |
+| with store, route (ms per broadcast) | 20.764 (20.652 to 20.932) | 5.57 (5.556 to 5.777) | 6.53 (6.462 to 6.606) | 3.848 (3.79 to 3.934) | 5.40x lower |
+| no store, tab (ms per broadcast) | 20.346 (19.939 to 20.42) | 20.928 (20.591 to 21.411) | 21.605 (21.443 to 21.761) | 19.846 (19.444 to 20.0) | -2.5%, ranges overlap |
+| no store, route (ms per broadcast) | 3.937 (3.894 to 3.987) | 4.915 (4.881 to 5.091) | 5.729 (5.708 to 5.778) | 3.051 (3.042 to 3.114) | -22.5% |
+| peak memory (MB) | 78 | 48 | 58 | 56 | -28.2% |
+
+The F4 regression check passes again. Without a store, 7a49802 costs what
+base costs per context in tab mode and 22.5% less in route mode, ranges apart,
+where 7ea9875 was 6.2% and 45.5% slower than base. Against v0.13.0, 7a49802
+is 5.2% faster in tab mode and 37.9% faster in route mode.
+
+### F5 get_clients, 7a49802
+
+Default sweep (`--n=100,1000,5000 --fanout-cap=1000 --broadcasts=3
+--timeout=300`), 5 reps (base 3):
+
+| Metric | Base | v0.13.0 | 7ea9875 | 7a49802 | Change |
+|---|---|---|---|---|---|
+| shared, N=1000, call after one new client (ms) | 4.586 (4.529 to 4.641) | 0.382 (0.369 to 0.387) | 0.461 (0.452 to 0.471) | 0.379 (0.366 to 0.386) | 12.1x lower |
+| shared, N=5000, call after one new client (ms) | 23.122 (22.209 to 23.265) | 2.082 (1.953 to 2.168) | 2.659 (2.568 to 2.73) | 2.234 (2.082 to 2.444) | 10.4x lower |
+| shared, N=100, broadcast to 100 contexts (ms) | 46.74 (46.11 to 49.4) | 0.24 (0.24 to 0.25) | 0.27 (0.27 to 0.27) | 0.2 (0.18 to 0.21) | 234x lower |
+| shared, N=1000, broadcast to 1000 contexts (ms) | 4664.4 (4543.6 to 4763.1) | 2.26 (2.13 to 2.71) | 2.46 (2.41 to 2.55) | 1.73 (1.65 to 1.76) | 2696x lower |
+| shared, N=5000, broadcast to 1000 contexts (ms) | 23532.5 (23255.4 to 24925.1) | 4.21 (3.96 to 4.41) | 4.77 (4.65 to 4.8) | 3.57 (3.29 to 3.92) | 6592x lower |
+| single, N=100, broadcast to 100 contexts (ms) | 0.89 (0.84 to 0.93) | 0.18 (0.17 to 0.19) | 0.19 (0.19 to 0.19) | 0.13 (0.13 to 0.13) | 6.85x lower |
+| single, N=1000, broadcast to 1000 contexts (ms) | 111.3 (110.7 to 111.7) | 1.74 (1.7 to 1.75) | 1.84 (1.78 to 1.86) | 1.26 (1.21 to 1.33) | 88.3x lower |
+| peak memory (MB) | 38 | 28 | 28 | 28 | -26.3% |
+
+Broadcasts that read the client list take 25 to 32% less time than on
+7ea9875 and 15 to 28% less than on v0.13.0, ranges apart. The rebuild after a
+new client is 17.7% faster than on 7ea9875 and level with v0.13.0.
+
+### F2 idle_sse, 7a49802
+
+N=5000 with a 15 s window (`--n=5000 --idle=15 --settle=3`), 1 worker, 5 reps:
+
+| Metric | Base | v0.13.0 | 7ea9875 | 7a49802 | Change |
+|---|---|---|---|---|---|
+| worker CPU (%) | 8.52 (8.19 to 8.79) | 0.13 (0.13 to 0.27) | 0.13 (0.13 to 0.2) | 0.13 (0.07 to 0.13) | 1 to 2 ticks |
+| wakeups/s | 615.9 (580.7 to 637.9) | 22.5 (21.4 to 23) | 24.2 (22 to 25.1) | 33.8 (32.5 to 37.3) | 18.2x lower |
+| broadcast to all connections (ms) | 44.44 (43.07 to 48.08) | 45.35 (44.01 to 46.74) | 50.37 (47.58 to 50.72) | 40.14 (38.92 to 40.6) | -9.7% |
+| shutdown (ms) | 126.8 (122.9 to 134.1) | 129.4 (124.6 to 142.5) | 132.6 (130.8 to 139.3) | 145.3 (143.7 to 147.7) | +14.6% |
+| worker RSS (MB) | 205.3 (204.7 to 206.9) | 232.5 (230.3 to 234.7) | 227.6 (227.4 to 228.2) | 230.4 (229.7 to 230.6) | +12.2% |
+
+The broadcast to all 5000 streams is faster than in every other tree, ranges
+apart. Two costs are new. About 10 more wakeups a second match the cycle
+collector's 100 ms check, and shutdown takes 13 ms longer than on 7ea9875,
+which matches the reconnect signal a stopping worker now sends every stream.
+Neither cause was isolated.
+
+### F1 broadcast_storm, 7a49802
+
+Defaults (N=1000, K=200, concurrency 50, 1 worker), 5 reps, and low load with
+one actor (`--concurrency=1`, K=1), 7 reps:
+
+| Metric | Base | v0.13.0 | 7ea9875 | 7a49802 | Change |
+|---|---|---|---|---|---|
+| storm to converge (ms) | 1456.4 (1447.3 to 1472.9) | 33.749 (33.421 to 34.778) | 34.391 (33.963 to 34.857) | 34.058 (33.369 to 35.444) | 42.8x lower |
+| converge after last send (ms) | 363.2 (362.1 to 367.7) | 22.44 (20.425 to 24.538) | 22.947 (20.251 to 23.189) | 23.53 (22.537 to 24.434) | 15.4x lower |
+| action latency p50 (ms) | 363.5 (361.0 to 367.3) | 0.498 (0.477 to 0.509) | 0.582 (0.578 to 0.606) | 0.622 (0.607 to 0.638) | 584x lower |
+| action latency p99 (ms) | 367.2 (364.4 to 370.2) | 9.887 (8.466 to 11.678) | 9.914 (9.69 to 11.983) | 8.929 (8.655 to 9.703) | 41.1x lower |
+| actions/s | 137.3 (135.8 to 138.2) | 16821 (14566.6 to 19025.7) | 16310.7 (13962.6 to 16611.1) | 17158.5 (16471.5 to 17938.6) | 125x higher |
+| converge after last send, K=1 (ms) | 7.852 (7.651 to 8.089) | 8.548 (8.4 to 9.56) | 9.481 (9.347 to 11.894) | 8.735 (8.571 to 9.025) | +11.2% |
+| action latency, K=1 (ms) | 7.895 (7.694 to 8.132) | 0.267 (0.258 to 0.302) | 0.547 (0.53 to 0.557) | 0.418 (0.405 to 0.436) | 18.9x lower |
+
+The storm converges as fast as on v0.13.0 and 7ea9875. At K=1, 7a49802
+converges 7.9% earlier than 7ea9875, ranges apart, but still 0.9 ms later than
+base and 0.2 ms later than v0.13.0. A gated second set of 7 reps puts the step
+at 0.13.1: converge after last send 8.827 ms (8.677 to 9.190) on 7a49802,
+8.480 (8.377 to 8.627) on v0.13.0, 8.830 on v0.13.1 (e1742bc) and 8.938 on
+718e51c, and the K=1 action latency 0.417, 0.269, 0.483 and 0.431 ms. The
+action latency p50 at the defaults is 24.9% above v0.13.0, ranges apart. The
+0.13.1 commits were not bisected.
+
+## 0.14.0 release candidate on held clocks, measured 2026-10-03
+
+**Superseded for 0.14.0 by the sections above,** which measure 7a49802 and
+the release tree: their F4 regression check passes and their F1, F2 and F5
+figures replace these.
+
+
+Every F section below was rerun against release/0.14 at 718e51c, the 0.14.0
+release candidate, with the server's cores held at full clock. Base (A) is
+737b2aa, as in the older runs. The rerun checks which recorded figures came
+from idle cores clocking down, and whether 0.14.0 keeps what the branch gained.
+The tables show held medians for base and 0.14.0, the change between them, and
+the recorded base and branch medians from the sections below.
+
+- **Trees:** copies of 718e51c and 737b2aa extracted with `git checkout-index`
+  from a temporary index, on btrfs, each with its vendor directory and
+  `composer dump-autoload`. Both ran release/0.14's scripts, patched only to
+  take the port and the server's cores from environment variables. PHP 8.5.11
+  CLI with opcache and JIT off, ext-openswoole 26.2.0.
+- **Server:** two physical P-cores of an Intel i5-13500 (cores 2 and 4) with
+  their hyperthread siblings idle, held at 4.5 GHz by a busy loop in the idle
+  scheduling class on each core (`bench/capacity/README.md` shows how). The
+  broadcast_storm and idle_sse servers ran there with their clients unheld on
+  cores 6 to 11. lock_contention ran on cores 2, 4, 6 and 8 with four busy
+  loops, shared_read and get_clients on core 2. The clock was sampled during
+  every run.
+- **Protocol:** 0.14.0 then base in every rep, at the sizes and rep counts
+  each table below states. Unheld controls used the same pinning without the
+  busy loops. Table format as described at the top of this file.
+  Every run was correct in both trees: every storm converged with no failed
+  action, every idle_sse broadcast reached all 5000 connections, every lock
+  run reached its final value, shared_read had 0 mismatched frames and every
+  get_clients flag was true.
+
+Held, a core runs at 4.5 GHz; a busy core that is not held reaches up to
+4.8 GHz on this host. With five busy loops, or while the host was busy, the
+held clock fell to 3.7 to 4.3 GHz. The first low-load and idle_sse runs ran at
+3.8 GHz that way and were discarded and rerun at 4.5 GHz. Only idle_sse with 4
+workers ran below 4.5 GHz (see F2).
+
+### What the held clock changes
+
+- F1 at K=1 measured 2 to 3 times its held value in both trees: the clock,
+  plus the host and the branch's FUSE mount. Held, 0.14.0 converges 1.2 ms
+  (15%) later than base with the ranges apart, where the F1 regression checks
+  found no measurable regression.
+- Base's idle CPU in F2 follows the clock: 8.79% held and 17.78% unheld at 5000
+  streams on one worker. The recorded 13.39% lies between.
+- Everything else was not clock-inflated. The storms keep the server busy,
+  and base takes 12 to 13% longer held than recorded. F1 at K=2 and K=20,
+  shared_read and get_clients read the same held and unheld, and
+  lock_contention's throughput moves by under 30% (see F3). Every ratio in the
+  sections below holds.
+- Two verdicts change for 0.14.0, and neither is the clock. The F4 regression
+  check fails: the single-worker fan-out costs more per context than base. The
+  F2 shutdown regression no longer reproduces.
+
+### F1 broadcast_storm on held clocks
+
+Defaults (N=1000, K=200, concurrency 50, 1 worker) and `--n=5000 --k=500
+--concurrency=50`, 3 reps each:
+
+| Metric | Base | 0.14.0 | Change | Recorded, base / 70d23a5 |
+|---|---|---|---|---|
+| storm to converge (ms) | 1487 (1485.6 to 1518.7) | 34.331 (33.495 to 34.557) | 43.3x lower | 1320.407 / 46.889 |
+| converge after last send (ms) | 370.4 (368.6 to 380.5) | 23.648 (22.759 to 23.881) | 15.7x lower | 323.747 / 21.534 |
+| action latency p50 (ms) | 371.2 (370 to 378.3) | 0.504 (0.494 to 0.509) | 737x lower | 323.461 / 1.113 |
+| action latency p99 (ms) | 376.4 (373.6 to 383.6) | 9.12 (9.109 to 9.154) | 41.3x lower | 333.735 / 20.448 |
+| actions/s | 134.5 (131.7 to 134.6) | 17876.2 (17787.5 to 17884.3) | 133x higher | 151.5 / 7748.4 |
+| worker CPU net of idle (s) | 1.452 (1.452 to 1.482) | 0.01 (0.01 to 0.03) | 1 to 3 ticks | 1.254 / 0.03 |
+| master CPU (s) | 1.24 (1.23 to 1.24) | 0.02 (0.01 to 0.02) | 62x lower | 1.03 / 0.03 |
+| storm to converge, N=5000 (ms) | 20290 (20120.2 to 20642.1) | 113.1 (111.4 to 113.6) | 179x lower | 18115.591 / 119.961 |
+| converge after last send, N=5000 (ms) | 2033.5 (2002.2 to 2035.5) | 49.197 (48.099 to 49.576) | 41.3x lower | 1891.457 / 49.759 |
+| action latency p99, N=5000 (ms) | 2090 (2038.3 to 2101.1) | 59.367 (58.836 to 59.577) | 35.2x lower | 1888.692 / 65.056 |
+| worker CPU net of idle, N=5000 (s) | 18.399 (18.357 to 18.823) | 0.1 (0.1 to 0.11) | 184x lower | 13.668 / 0.11 |
+| master CPU, N=5000 (s) | 15.97 (15.96 to 15.97) | 0.08 (0.08 to 0.08) | 200x lower | not recorded |
+
+Renders and frames per client match the recorded runs in both trees (200000
+against 2000 renders at the defaults). Base takes 12 to 13% longer than
+recorded at both sizes. Its worker and its reactor threads are both busy and share the two
+pinned cores at 4.5 GHz, where the recorded runs were not pinned. 0.14.0 is
+within 10% of the recorded branch or faster, and its CPU at the defaults is 1
+to 3 clock ticks.
+
+Low load with one actor (`--concurrency=1`), N=1000 on 1 worker, 5 reps held
+and 5 unheld; N=5000 with `--converge-timeout=60 --watchdog=240`, 3 reps held:
+
+| Metric | Base | 0.14.0 | Change | Unheld, base / 0.14.0 | Recorded, base / 70d23a5 |
+|---|---|---|---|---|---|
+| converge after last send, K=1 (ms) | 7.975 (7.755 to 8.23) | 9.181 (9.032 to 9.953) | +15.1% | 9.048 / 12.291 | 18.545 / 26.326 |
+| action latency, K=1 (ms) | 8.025 (7.802 to 8.281) | 0.532 (0.429 to 0.639) | 15.1x lower | 9.099 / 0.936 | 18.612 / 3.706 |
+| converge after last send, K=2 (ms) | 7.943 (7.591 to 8.151) | 33.898 (33.725 to 34.898) | 4.27x higher | 7.034 / 33.56 | 6.984 / 46.155 |
+| storm to converge, K=2 (ms) | 16.077 (15.494 to 16.404) | 34.425 (34.174 to 35.357) | 2.14x higher | 15.159 / 34.286 | 19.159 / 50.125 |
+| action latency p99, K=2 (ms) | 8.089 (7.891 to 8.329) | 9.733 (8.826 to 13.611) | +20.3% | 7.794 / 8.083 | 12.425 / 21.285 |
+| converge after last send, K=20 (ms) | 7.561 (7.415 to 7.825) | 24.153 (23.443 to 25.303) | 3.19x higher | 7.496 / 23.832 | 6.614 / 30.69 |
+| storm to converge, K=20 (ms) | 153.3 (150.8 to 154.5) | 33.937 (33.765 to 34.882) | 4.52x lower | 149.4 / 34.061 | 166.784 / 56.014 |
+| action latency p50, K=20 (ms) | 7.522 (7.476 to 7.693) | 0.025 (0.025 to 0.038) | 301x lower | 7.173 / 0.023 | 6.839 / 0.024 |
+| action latency p99, K=20 (ms) | 8.256 (8.035 to 9.635) | 8.689 (8.593 to 9.478) | +5.2%, ranges overlap | 8.942 / 9.096 | 26.725 / 22.465 |
+| converge after last send, K=2, N=5000 (ms) | 37.981 (37.75 to 39.732) | 110.3 (102.8 to 110.5) | 2.90x higher | not run | 35.339 / 117.484 |
+| storm to converge, K=2, N=5000 (ms) | 81.487 (81.275 to 84.689) | 118.5 (110.5 to 119.1) | +45.4% | not run | 91.291 / 121.035 |
+| action latency p99, K=2, N=5000 (ms) | 43.518 (41.748 to 46.7) | 54.218 (50.723 to 55.702) | +24.6% | not run | 53.356 / 62.689 |
+
+K=1 is the one row the held clock changes in kind. The recorded figures were
+2 to 3 times the held ones in both trees, and their ranges overlapped. Held,
+0.14.0 converges 1.2 ms later than base, every 0.14.0 rep above every base
+rep; unheld it is 36% later. The 1.2 ms is close to what the slower
+per-context fan-out (F4 below) adds to a 1000-context flush, but that link is
+an inference, not measured.
+
+K=2 and K=20 are tick-bound and read the same held and unheld, so their
+regression holds. It is 34 ms at K=2, against the recorded 46 ms: a
+1000-context flush takes 9 to 10 ms on 0.14.0, and the follow-up update waits
+for the rest of the first flush, half a tick (12.5 ms), and its own flush. The
+recorded p99s at K=20 (26.725 and 22.465 ms) came from host noise; held, both
+trees sit at 8 to 9 ms. At N=5000 the regression holds at 2.90x.
+
+The 4-worker storms (default size and N=5000), K=2 with 4 workers and the
+route and signal variants were not rerun.
+
+### F2 idle_sse on held clocks
+
+N=5000 with a 15 s window (`--n=5000 --idle=15 --settle=3`), 1 worker with 5
+reps held and 3 unheld, 4 workers with 3 reps held:
+
+| Metric | Base | 0.14.0 | Change | Unheld, base / 0.14.0 | Recorded, base / 5a9850a |
+|---|---|---|---|---|---|
+| worker CPU, 1 worker (%) | 8.79 (8.79 to 8.99) | 0.2 (0.13 to 0.27) | 44.0x lower | 17.78 / 0.33 | 13.39 / 0.33 |
+| wakeups/s, 1 worker | 621.4 (601.1 to 637) | 22.1 (20.5 to 22.1) | 28.1x lower | 602.9 / 22.7 | 594.7 / 42.5 |
+| broadcast to all connections, 1 worker (ms) | 45.22 (44.32 to 46.32) | 48.69 (47.68 to 49.57) | +7.7% | 50.26 / 53.58 | 60.9 / 55.02 |
+| shutdown, 1 worker (ms) | 131.2 (128.3 to 133.8) | 131.8 (129.6 to 137.4) | +0.5%, ranges overlap | 133 / 132.6 | 155.55 / 181.09 |
+| worker RSS, 1 worker (MB) | 205.1 (204.1 to 210.8) | 224.9 (224.3 to 225) | +9.7% | 205.5 / 224.6 | 210.1 / 230.3 |
+| master CPU, 1 worker (%) | 0 (0 to 0) | 0.13 (0.13 to 0.2) | new cost | 0 / 0.27 | 0 / 0.33 |
+| worker CPU, 4 workers summed (%) | 15.45 (14.71 to 15.65) | 0.07 (0.07 to 0.2) | 1 to 3 ticks | not run | 25.5 / 0.47 |
+| wakeups/s, 4 workers | 2070.4 (2048.7 to 2075.8) | 62.4 (62 to 63.3) | 33.2x lower | not run | 2007 / 102.6 |
+| broadcast to all connections, 4 workers (ms) | 52.96 (49.19 to 54.16) | 33.74 (30.11 to 42.63) | -36.3% | not run | 60.45 / 45.8 |
+| shutdown, 4 workers (ms) | 127.5 (113.9 to 132) | 132.3 (125.2 to 167.5) | +3.8%, ranges overlap | not run | 127.76 / 141.43 |
+| worker RSS, 4 workers summed (MB) | 420.9 (417.6 to 423.4) | 428.6 (428 to 429.2) | +1.8% | not run | 420.3 / 431.5 |
+
+Base's idle CPU follows the clock, and its recorded figures lie between the
+held and unheld ones, so the recorded base CPU in F2 is superseded by this
+table. The ratio holds: 44x held and 54x unheld with 1 worker. 0.14.0's 0.20%
+is 3 clock ticks per window, and with 4 workers it is 1 tick, so no factor is
+given there. The shutdown regression from the F2 regression checks does not
+reproduce: with 1 worker the two trees are 0.6 ms apart, and with 4 workers
+the ranges overlap. The broadcast to all connections with 1 worker went from
+9.7% faster than base to 7.7% slower, ranges apart, held and unheld alike: the
+per-context fan-out cost of F4 below.
+
+The 4-worker servers ran on cores 2, 4, 6 and 8 with four busy loops, which
+held them at a median of only 4.2 to 4.3 GHz (3.8 GHz at the 10th percentile),
+with the client unheld on core 10. N=2000 was not rerun.
+
+### F3 lock_contention on held clocks
+
+W=4, default sweep (`--reps=1 --timeout=300`), 5 reps held on cores 2, 4, 6
+and 8, and 2 reps unheld:
+
+| Metric | Base | 0.14.0 | Change | Recorded, base / 5a9850a |
+|---|---|---|---|---|
+| ops/s, global, C=1 | 138554 (126030 to 148992) | 293307 (254456 to 314672) | 2.12x higher | 113183 / 244100 |
+| ops/s, global, C=8 | 91148 (87059 to 96120) | 287749 (235543 to 296131) | 3.16x higher | 72258 / 261949 |
+| ops/s, global, C=32 | 52597 (51567 to 55258) | 304278 (257053 to 333111) | 5.79x higher | 42494 / 265524 |
+| ops/s, signal, C=1 | 151826 (149527 to 167884) | 258442 (238540 to 305492) | +70.2% | 142530 / 239609 |
+| ops/s, signal, C=32 | 54827 (51143 to 56828) | 311201 (269999 to 325834) | 5.68x higher | 43377 / 273093 |
+| CPU per op, global, C=32 (us) | 74.12 (70.39 to 75.84) | 13.03 (11.69 to 14.16) | 5.69x lower | 94.06 / 14.77 |
+| CPU per op, signal, C=32 (us) | 71.4 (68.97 to 76.67) | 12.58 (12.09 to 14.38) | 5.68x lower | 92.18 / 13.71 |
+| handoff, global, C=32 (us) | 16.67 (15.92 to 17.02) | 1.56 (1.38 to 2.07) | 10.7x lower | 20.11 / 1.44 |
+| handoff, signal, C=32 (us) | 15.59 (15 to 16.6) | 1.5 (1.41 to 1.88) | 10.4x lower | 19.48 / 1.2 |
+| latency p99, global, C=32 (us) | 5884.8 (5731.1 to 5965.1) | 530.4 (474.5 to 546.3) | 11.1x lower | 4567.4 / 684 |
+| ops/s ratio C=32 to C=1, global | 0.38 (0.367 to 0.426) | 1.022 (0.861 to 1.309) | | 0.375 / 1.088 |
+
+Spinning waiters keep all four cores busy, so the clock moves little: unheld,
+from 2 reps, throughput reads within 12% of these figures for 0.14.0 and
+within 29% for base. Base's p99 latency is the exception, 2594.5 us unheld
+against 5884.8 us held; the cause was not isolated. Both trees are faster than
+recorded, and the ratios hold. W=8, W=16 and `--ops=100000` were not rerun.
+
+### F4 shared_read on held clocks
+
+Defaults (N=2000, S=5, 20 broadcasts), 5 reps held on core 2 and 2 unheld:
+
+| Metric | Base | 0.14.0 | Change | Recorded, base / 70d23a5 |
+|---|---|---|---|---|
+| store reads per broadcast, tab | 20000 | 5 | 4000x fewer | 20000 / 5 |
+| store reads per broadcast, route | 10005 | 5 | 2001x fewer | 10005 / 5 |
+| with store, tab (ms per broadcast) | 50.158 (49.881 to 51.064) | 24.202 (24.013 to 24.687) | 2.07x lower | 48.8 / 21.64 |
+| with store, route (ms per broadcast) | 21.442 (21.091 to 22.028) | 6.464 (6.319 to 6.781) | 3.32x lower | 20 / 4.466 |
+| no store, tab (ms per broadcast) | 20.556 (20.406 to 21.044) | 21.812 (21.788 to 22.441) | +6.1% | 19.67 / 19.35 |
+| no store, route (ms per broadcast) | 4.094 (4.006 to 4.22) | 5.809 (5.657 to 6.04) | +41.9% | 3.767 / 3.726 |
+| peak memory (MB) | 78 | 54 | -30.8% | 78 / 44 |
+
+The F4 regression check fails on 0.14.0. Without a store, the single-worker
+fan-out is 6.1% slower than base in tab mode and 41.9% slower in route mode,
+ranges apart, where 70d23a5 ran at base speed. Unheld runs read the same. In
+the same session, without a store, 70d23a5 measured 20.61 ms (tab) and
+4.05 ms (route), v0.13.1 21.51 and 5.13 ms, and 718e51c 22.08 and 5.72 ms. A
+bisect on unheld efficiency cores, which gives relative numbers only, puts the
+route slowdown on 147b473 (about +18%, measured together with a6765a2, whose
+code shared_read does not run), 0b9aa92 (+9%), 3a965e6 (+4%) and 30218af
+(+8%). The store path pays the same per-context cost: 24.202 and 6.464 ms
+against the recorded 21.64 and 4.466 ms.
+
+The larger configurations (`--contexts=5000`, `--view-reads=3
+--array-items=100`) were not rerun.
+
+### F5 get_clients on held clocks
+
+Default sweep (`--n=100,1000,5000 --fanout-cap=1000 --broadcasts=3
+--timeout=300`), 3 reps held on core 2, and 3 unheld reps of 0.14.0:
+
+| Metric | Base | 0.14.0 | Change | Recorded, base / 5a9850a |
+|---|---|---|---|---|
+| shared, N=1000, call after one new client (ms) | 4.533 (4.36 to 4.767) | 0.377 (0.372 to 0.384) | 12.0x lower | 4.5207 / 0.3762 |
+| shared, N=5000, call after one new client (ms) | 23.049 (22.893 to 23.125) | 2.225 (2.174 to 2.307) | 10.4x lower | 22.4998 / 2.0677 |
+| shared, N=100, broadcast to 100 contexts (ms) | 47.3 (45.8 to 47.51) | 0.26 (0.26 to 0.28) | 182x lower | 47.07 / 0.23 |
+| shared, N=1000, broadcast to 1000 contexts (ms) | 4598 (4590.8 to 4602.6) | 2.5 (2.41 to 2.63) | 1839x lower | 4619.9 / 2.17 |
+| shared, N=5000, broadcast to 1000 contexts (ms) | 23422.8 (23400.1 to 23427.1) | 4.35 (4.05 to 4.43) | 5385x lower | 22844.46 / 4.13 |
+| single, N=1000, broadcast to 1000 contexts (ms) | 108.2 (106.9 to 110.3) | 1.92 (1.92 to 2.11) | 56.4x lower | 105.43 / 1.66 |
+| peak memory (MB) | 38 | 28 | -26.3% | 38 / 26 |
+
+Base is within 3% of its recorded values and unheld 0.14.0 reads the same, so
+nothing here was clock-inflated, and the rebuild ratios hold. The broadcasts
+to 100 and 1000 contexts take 13 to 16% longer on 0.14.0 than on the recorded
+branch, the per-context cost from F4. The single-mode full fan-out and the
+cold reads were not rerun.
+
+## perf/contention, measured 2026-09-29 and 2026-09-30 (partly superseded)
+
+**Partly superseded by the two 0.14.0 sections above.** These runs did not hold the
+clock. Cores that idled between requests clocked down, so the low-rate
+figures read high: F1 at K=1 by 2 to 3 times in both trees, and base's idle
+CPU in F2. The held reruns also find a small K=1 regression where the F1
+regression checks below find none, no F2 shutdown regression, and an F4
+regression check that fails on 0.14.0. The storm, contention, shared-read and
+getClients figures and every ratio still hold.
+
 Before and after measurements for the five contention findings (F1 to F5)
 fixed on `perf/contention`. Base (A) is 737b2aa: the v0.13.0 release (5ff9d25)
 plus the scripts in this directory. Branch (B) is 70d23a5 in the F1 and F4
@@ -162,9 +611,11 @@ after the last send against 9.229 and 8.015 ms on base, and 5e38da9, which was
 meant to fix that, does not make the check pass. K=1 shows no measurable
 regression but is not a confident pass: the ranges overlap, and run from btrfs
 like base (see Protocol) the branch took 15.308 (8.35 to 22.675) ms against
-12.958 (7.347 to 16.307) ms, still overlapping. At K=20 the branch converges
-4.64x later after the last send, while the whole storm still converges 2.98x
-sooner, because base renders every action (20000 renders against 2000).
+12.958 (7.347 to 16.307) ms, still overlapping. On held clocks 0.14.0 converges
+1.2 ms (15%) later than base at K=1, with the ranges apart (see the 0.14.0
+section). At K=20 the branch converges 4.64x later after the last send, while
+the whole storm still converges 2.98x sooner, because base renders every
+action (20000 renders against 2000).
 
 Since 5e38da9, `msUntilNextTick()` in `src/Via.php` starts the next flush one
 tick after the last one started and at least half a tick (12.5 ms) after it
@@ -283,7 +734,8 @@ slower in all 5 interleaved pairs by 8 to 37 ms, and +10.7% with 4 workers,
 where B was slower in 4 of 5 pairs. The ranges overlap in both, so the 4-worker
 figure in particular is weak evidence. The slowest stream end with 1 worker
 went from 39.43 to 58.84 ms. That is about 5 us more per connection at
-shutdown.
+shutdown. On held clocks 0.14.0 shuts down as fast as base (see the 0.14.0
+section).
 
 Worker RSS with 1 worker grows by 3 to 4 KB per connection (+6.1 MB at N=2000,
 +20.2 MB at N=5000). With 4 workers it is +2.7% at N=5000 and flat at N=2000
@@ -462,7 +914,9 @@ Without a store, from the runs above:
 N=5000 is `--modes=route --contexts=5000 --broadcasts=30`. This check passes:
 without a store the branch is 0.7 to 1.6% faster than base, and the ranges
 overlap in every configuration. Store reads stay at S=5 per broadcast, and
-`mismatched_frames` was 0 in every run, so no stale value reached a frame.
+`mismatched_frames` was 0 in every run, so no stale value reached a frame. On
+0.14.0 the check fails: 6.1% slower in tab mode and 41.9% in route mode (see
+the 0.14.0 section).
 
 The store path on the branch still costs more than no store: +11.73% in tab
 mode (2.286 ms at N=2000), +19.24% in route mode (0.702 ms), +20.8% in route

@@ -30,6 +30,7 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Http\Client;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $mode = (string) ($argv[1] ?? 'disconnect');
 $workers = (int) ($argv[2] ?? 1);
@@ -39,16 +40,7 @@ $brotli = $mode === 'keepalive' && $arg === 'br';
 $marker = sys_get_temp_dir() . '/via_sse_idle_wake_' . getmypid();
 @unlink($marker);
 
-// enable_reuse_port would let a second server share a busy port without an error.
-for ($i = 0; $i < 150; ++$i) {
-    $port = 4400 + ((getmypid() + $i) % 150);
-    $probe = @stream_socket_server("tcp://127.0.0.1:{$port}");
-    if ($probe !== false) {
-        fclose($probe);
-
-        break;
-    }
-}
+$port = FixturePort::pick(4400, 150);
 
 $config = (new Config())
     ->withHost('127.0.0.1')->withPort($port)->withLogLevel('error')
@@ -75,11 +67,11 @@ $app->page('/busy', function (Context $c): void {
 });
 
 // What THIS worker sees: the client list, and whether it runs the directory heartbeat timer.
-$app->page('/count', function (Context $c) use ($app, $config): void {
-    $c->view(static function () use ($app, $config): string {
+$app->page('/count', function (Context $c) use ($app): void {
+    $c->view(static function () use ($app): string {
         $heartbeat = 0;
         foreach (Timer::list() as $id) {
-            if ((Timer::info($id)['interval'] ?? 0) === Via::sseHeartbeatIntervalMs($config)) {
+            if ((Timer::info($id)['interval'] ?? 0) === Via::sseHeartbeatIntervalMs($app->getSettings())) {
                 $heartbeat = 1;
             }
         }

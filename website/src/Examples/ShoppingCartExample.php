@@ -11,21 +11,23 @@ use Mbolli\PhpVia\Via;
 final class ShoppingCartExample {
     public const string SLUG = 'shopping-cart';
 
-    /** @var list<array{id: int, name: string, price: float, emoji: string}> */
+    /** @var list<array{id: int, name: string, price: float}> */
     private const array PRODUCTS = [
-        ['id' => 1, 'name' => 'Artisanal Bit Bucket (12L)', 'price' => 4.99, 'emoji' => '🪣'],
-        ['id' => 2, 'name' => 'Blockchain-Certified Rubber Duck', 'price' => 29.99, 'emoji' => '🦆'],
-        ['id' => 3, 'name' => 'Enterprise-Grade Left-Pad Module', 'price' => 1999.00, 'emoji' => '📦'],
-        ['id' => 4, 'name' => 'Self-Documenting Code (PDF, signed)', 'price' => 0.00, 'emoji' => '📄'],
-        ['id' => 5, 'name' => 'Quantum-Entangled HDMI Cable (5m)', 'price' => 79.99, 'emoji' => '🔌'],
-        ['id' => 6, 'name' => 'Gluten-Free Null Pointer', 'price' => 0.01, 'emoji' => '⭕'],
-        ['id' => 7, 'name' => 'Infinite Loop Coffee Mug', 'price' => 14.99, 'emoji' => '☕'],
-        ['id' => 8, 'name' => 'Zero-Day Vulnerability Insurance (Annual)', 'price' => 999.99, 'emoji' => '🛡️'],
+        ['id' => 1, 'name' => 'Artisanal Bit Bucket (12L)', 'price' => 4.99],
+        ['id' => 2, 'name' => 'Blockchain-Certified Rubber Duck', 'price' => 29.99],
+        ['id' => 3, 'name' => 'Enterprise-Grade Left-Pad Module', 'price' => 1999.00],
+        ['id' => 4, 'name' => 'Self-Documenting Code (PDF, signed)', 'price' => 0.00],
+        ['id' => 5, 'name' => 'Quantum-Entangled HDMI Cable (5m)', 'price' => 79.99],
+        ['id' => 6, 'name' => 'Gluten-Free Null Pointer', 'price' => 0.01],
+        ['id' => 7, 'name' => 'Infinite Loop Coffee Mug', 'price' => 14.99],
+        ['id' => 8, 'name' => 'Zero-Day Vulnerability Insurance (Annual)', 'price' => 999.99],
     ];
 
     public static function register(Via $app): void {
         $app->page('/examples/shopping-cart', function (Context $c) use ($app): void {
-            $cartScope = Scope::build('cart', $c->getSessionId() ?? $c->getId());
+            // One scope per session, built from its session scope, since scopes reach the Dev Bar and the session id stays on the server.
+            // A scope of its own re-renders only cart pages when the cart changes.
+            $cartScope = Scope::build('cart', Scope::sessionScope($c->getSessionId() ?? $c->getId()));
             $c->addScope($cartScope);
 
             $c->action(function (Context $ctx) use ($cartScope, $app): void {
@@ -36,7 +38,7 @@ final class ShoppingCartExample {
                     return;
                 }
 
-                /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> $cart */
+                /** @var array<int, array{id: int, name: string, price: float, qty: int}> $cart */
                 $cart = $ctx->sessionData('cart', []);
 
                 if (isset($cart[$id])) {
@@ -64,11 +66,11 @@ final class ShoppingCartExample {
                 $app->broadcast($cartScope);
             }, 'clearCart');
 
-            $c->view(fn (): string => $c->render('examples/shopping_cart.html.twig', [
-                'title' => '🛒 Shopping Cart',
-                'description' => 'Add items across browser tabs: the cart is stored in session data and shared across every tab without cookies, localStorage, or Redux.',
+            $c->view('examples/shopping_cart.html.twig', fn (): array => [
+                'title' => 'Shopping Cart',
+                'description' => 'Add items to the cart, then open this page in another tab: the cart is already there. It lives in the session data, and a custom <code>cart:</code> scope per session updates every tab of your browser.',
                 'summary' => [
-                    '<strong>SESSION-scoped cart</strong> via a custom <code>cart:{sessionId}</code> scope means the cart is shared across every tab in your browser. Open a new tab: the cart is already populated.',
+                    '<strong>A cart per session</strong>: every cart page joins a custom <code>cart:</code> scope built from <code>Scope::sessionScope()</code>, so the cart is shared across every tab in your browser. Open a new tab: the cart is already populated.',
                     '<strong>$app->broadcast($cartScope)</strong> pushes the updated cart to all connected tabs of that session simultaneously. No polling, no cache invalidation, no client state sync.',
                     '<strong>$c->sessionData() / setSessionData()</strong> stores the cart in the framework\'s per-session bucket. No static class, no manual cleanup, and the cart survives a full page reload.',
                     '<strong>CSS @starting-style</strong> animates newly inserted cart rows without a single line of JavaScript. When Datastar morphs in the new item, the browser\'s entry transition fires automatically.',
@@ -90,18 +92,18 @@ final class ShoppingCartExample {
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/shopping_cart.html.twig'],
                 ],
                 'products' => self::PRODUCTS,
-                /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> */
+                /** @var array<int, array{id: int, name: string, price: float, qty: int}> */
                 'cart' => array_values($c->sessionData('cart', [])),
                 'total' => (float) array_sum(array_map(
                     static fn (array $item): float => (float) $item['price'] * (int) $item['qty'],
                     $c->sessionData('cart', [])
                 )),
-            ]), block: 'cart', cacheUpdates: false);
+            ], block: 'cart');
         });
     }
 
     /**
-     * @return null|array{id: int, name: string, price: float, emoji: string}
+     * @return null|array{id: int, name: string, price: float}
      */
     private static function findProduct(int $id): ?array {
         foreach (self::PRODUCTS as $product) {

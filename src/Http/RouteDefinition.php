@@ -9,7 +9,7 @@ use Psr\Http\Server\MiddlewareInterface;
 /**
  * Represents a registered route with its handler and optional middleware.
  *
- * Returned by Via::page() to support fluent middleware registration:
+ * Returned by Via::page() and Via::route() to support fluent middleware registration:
  *
  * ```php
  * $app->page('/admin', fn(Context $c) => ...)->middleware(new AuthMiddleware());
@@ -26,7 +26,7 @@ class RouteDefinition {
 
     /**
      * @param string   $route   Route pattern (e.g. '/users/{id}')
-     * @param callable $handler Page handler function
+     * @param callable $handler Page handler function, or a plain route's handle()
      */
     public function __construct(string $route, callable $handler) {
         $this->route = $route;
@@ -46,16 +46,24 @@ class RouteDefinition {
         return $this;
     }
 
+    /**
+     * @internal
+     */
     public function getRoute(): string {
         return $this->route;
     }
 
+    /**
+     * @internal
+     */
     public function getHandler(): callable {
         return $this->handler;
     }
 
     /**
      * @return list<MiddlewareInterface>
+     *
+     * @internal
      */
     public function getMiddleware(): array {
         return $this->middleware;

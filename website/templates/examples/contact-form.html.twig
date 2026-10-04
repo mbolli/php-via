@@ -6,8 +6,7 @@
 {# ── Success panel ────────────────────────────────────────────────────── #}
 {% if submitted %}
 <div class="cf-success">
-    <div class="cf-success-icon">✓</div>
-    <h3 class="cf-success-title">Message sent!</h3>
+    <h3 class="cf-success-title">Message sent</h3>
     <p class="cf-success-body">
         Thanks for reaching out. We've received your message{% if submittedFile != '' %} along with your file <strong>{{ submittedFile|e }}</strong>{% if submittedFileInfo != '' %} <span class="cf-file-meta">({{ submittedFileInfo|e }})</span>{% endif %}{% endif %}.
     </p>
@@ -23,7 +22,7 @@
       data-on:submit__prevent="@post('{{ submit.url }}', {contentType: 'form'})">
     {# Datastar form mode sends raw FormData: signals are not included.
        via_ctx must be a hidden field so the server can route this request to the right context. #}
-    <input type="hidden" name="via_ctx" value="{{ ctxId }}">
+    <input type="hidden" name="via_ctx" value="{{ contextId }}">
     {# ── Name ─────────────────────────────────────────────────────── #}
     <div class="cf-field">
         <label for="cf-name">Full name <span class="cf-required">*</span></label>
@@ -69,12 +68,12 @@
                name="attachment"
                accept=".jpg,.jpeg,.png,.gif,.pdf,.txt"
                data-on:change="
-                 const f = $event.target.files[0];
+                 const f = evt.target.files[0];
                  const err = document.getElementById('cf-file-size-error');
                  if (f && f.size > 2097152) {
                    err.textContent = 'File is too large. Maximum size is 2 MB.';
                    err.style.display = '';
-                   $event.target.value = '';
+                   evt.target.value = '';
                  } else {
                    err.textContent = '';
                    err.style.display = 'none';
@@ -84,7 +83,7 @@
         {% if fileError != '' %}<span class="cf-field-error">{{ fileError|e }}</span>{% endif %}
     </div>
 
-    <button type="submit" class="cf-btn cf-btn-primary">Send message →</button>
+    <button type="submit" class="cf-btn cf-btn-primary">Send message</button>
 </form>
 {% endif %}
 
@@ -214,20 +213,6 @@
     border-radius: .75rem;
 }
 
-.cf-success-icon {
-    font-size: 2.5rem;
-    line-height: 1;
-    width: 3.5rem;
-    height: 3.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto;
-    background: #dcfce7;
-    color: #16a34a;
-    border-radius: 50%;
-    font-weight: 700;
-}
 
 .cf-success-title {
     margin: 0;

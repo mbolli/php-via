@@ -21,18 +21,19 @@ use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use Tests\Support\FixturePort;
 
 $out = (string) ($argv[1] ?? sys_get_temp_dir() . '/via_coalescing_out');
 
 $app = new Via(
     (new Config())
-        ->withHost('127.0.0.1')->withPort(4200 + (getmypid() % 150))->withLogLevel('error')
-        ->withWorkerNum(2)->withBroker(new SwooleBroker())->withGcInterval(0)
+        ->withHost('127.0.0.1')->withPort(FixturePort::pick(4200, 150))->withLogLevel('error')
+        ->withWorkerNum(2)->withBroker(new SwooleBroker())->withGcIntervalMs(0)
 );
 
 $app->page('/', fn () => null);
 
-$app->onStart(static function () use ($app, $out): void {
+$app->onWorkerStart(static function () use ($app, $out): void {
     $server = $app->getServer();
     if ($server === null) {
         return;
@@ -46,7 +47,7 @@ $app->onStart(static function () use ($app, $out): void {
             ++$renders;
 
             return '<div id="observer">' . $renders . '</div>';
-        }, cacheUpdates: false);
+        });
 
         Timer::after(500, static function () use (&$renders, $out): void {
             file_put_contents($out, "phase1={$renders}\n", FILE_APPEND | LOCK_EX);

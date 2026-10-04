@@ -1,7 +1,7 @@
-<div class="code-result-split" id="code-result-demo">
+<div class="code-result-split code-result-split--demo" id="code-result-demo">
     <div class="code-panel">
         <div class="code-panel-header">
-            <span>⚡</span> app.php: the complete source
+            <span>app.php</span>
         </div>
         {% code 'php' %}{% verbatim %}
 <?php
@@ -14,37 +14,39 @@ use Mbolli\PhpVia\Via;
 $app = new Via(new Config());
 
 $app->page('/', function (Context $c): void {
-    $count = $c->signal(0);
+    $count = $c->signal(0, 'count');
 
-    $increment = $c->action(
-        fn() => $count->setValue($count->int() + 1)
-    );
+    $increment = $c->action(function () use ($count): void {
+        $count->setValue($count->int() + 1);
+    }, 'increment');
 
-    $c->view(fn() => <<<HTML
-        <p>Count: <strong data-text="$count">
-            {$count->int()}
-        </strong></p>
-        <button data-on:click="@post('{$increment->url()}')">
-            +1
-        </button>
-    HTML);
+    $c->view(fn (): string => <<<HTML
+        <div id="counter">
+            <p>Count:
+                <strong data-text="{$count->ref()}">
+                    {$count->int()}
+                </strong>
+            </p>
+            <button data-on:click="@post('{$increment->url()}')">
+                +1
+            </button>
+        </div>
+        HTML);
 });
 
 $app->start();
         {% endverbatim %}{% endcode %}
     </div>
-    <div class="demo-box" style="align-self: center;">
+    <div class="demo-box code-result-demo">
         <div class="demo-box-label">Live result</div>
-        <div style="text-align: center; padding: var(--size-4) 0;">
-            <p style="font-size: var(--font-size-3); margin-block-end: var(--size-3);">
-                Count: <strong data-text="${{ count_id }}" style="color: var(--brand); font-size: 1.4em;">{{ count_val }}</strong>
+        <div class="code-result-body">
+            <p class="code-result-count">
+                Count: <strong data-text="{{ count.ref }}">{{ count.int }}</strong>
             </p>
-            <button class="btn btn-primary" data-on:click="@post('{{ increment_url }}')">
+            <button class="btn btn-primary" data-on:click="@post('{{ increment.url }}')">
                 +1
             </button>
-            <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-start: var(--size-3);">
-                This is your counter. Only you see it.
-            </p>
+            <p class="counter-note">Only this tab sees this count.</p>
         </div>
     </div>
 </div>

@@ -18,22 +18,23 @@ use PhpVia\Website\Middleware\AuthMiddleware;
  *
  * The two protected routes are registered inside Via::group(), so a single
  * ->middleware($authMiddleware) call covers both of them.
- * AuthMiddleware reads sessionData('auth') from the session cookie and either
- * redirects to the login page or passes the auth record as a request attribute.
+ * AuthMiddleware reads sessionData('auth') for the session in the request's
+ * 'via.session' attribute and either redirects to the login page or passes the
+ * auth record as a request attribute.
  * The dashboard handler reads it via $c->getRequestAttribute('auth').
  */
 final class LoginExample {
     public const string SLUG = 'login';
 
-    private const string TITLE = '🔐 Login Flow';
+    private const string TITLE = 'Login Flow';
 
-    private const string DESCRIPTION = 'PSR-15 middleware-based authentication. The login form is public; the dashboard and profile routes are protected by <code>AuthMiddleware</code> via <code>Via::group()->middleware()</code>.';
+    private const string DESCRIPTION = 'Log in with one of the demo accounts to reach the dashboard and profile pages, then log out. Those two routes sit in a <code>Via::group()</code> behind a PSR-15 <code>AuthMiddleware</code>; the login form is public.';
 
     private const array SUMMARY = [
         '<strong>Three routes, one middleware.</strong> <code>/examples/login</code> is public. Dashboard and profile are protected via <code>Via::group()->middleware(new AuthMiddleware(...))</code>: one call shields both.',
-        '<strong>AuthMiddleware reads the session cookie</strong> from the PSR-7 request, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute.',
+        '<strong>AuthMiddleware reads the session id</strong> from the request\'s <code>via.session</code> attribute, looks up <code>sessionData(\'auth\')</code> in the server-side session store, and either redirects (302) or passes the auth record downstream as a request attribute. It runs again when a tab that was away comes back.',
         '<strong>The handlers read <code>$c->getRequestAttribute(\'auth\')</code></strong>: the middleware-set attribute is automatically bridged from the PSR-7 request to the Via Context. No manual session checks needed.',
-        '<strong>Logout clears the session</strong> and redirects back to the login form. The middleware will block any subsequent protected access until login succeeds again.',
+        '<strong>Login and logout rotate the session cookie</strong> with <code>$c->regenerateSession()</code>, so a cookie someone planted or read before stops reaching the account 10 seconds later. Logout also clears <code>sessionData(\'auth\')</code>, and the middleware blocks protected pages until the next login.',
     ];
 
     private const array GITHUB_LINKS = [
@@ -51,7 +52,7 @@ final class LoginExample {
     ];
 
     private const array MIDDLEWARE_ANATOMY = [
-        ['name' => 'AuthMiddleware', 'desc' => 'PSR-15 middleware that checks sessionData(\'auth\') and redirects unauthenticated requests to the login form. Implements SseAwareMiddleware to also protect SSE connections.'],
+        ['name' => 'AuthMiddleware', 'desc' => 'PSR-15 middleware that checks sessionData(\'auth\') and redirects unauthenticated requests to the login form. As route middleware it runs on page loads and when a tab that was away comes back, not on actions or SSE connects: a dashboard tab left open at logout keeps its stream until it reloads.'],
     ];
 
     /** @var array<string, array{password: string, role: string, name: string}> */
@@ -96,6 +97,7 @@ final class LoginExample {
                 }
 
                 $errorMsg->setValue('');
+                $ctx->regenerateSession();
                 $ctx->setSessionData('auth', [
                     'user' => $user,
                     'name' => $record['name'],
@@ -107,18 +109,18 @@ final class LoginExample {
                 $ctx->execScript("window.location.href = '/examples/login/dashboard'");
             }, 'login');
 
-            $c->view(fn (): string => $c->render('examples/login.html.twig', [
+            $c->view('examples/login.html.twig', fn (): array => [
                 'title' => self::TITLE,
                 'description' => self::DESCRIPTION,
                 'summary' => self::SUMMARY,
                 'anatomy' => [
                     'signals' => [
-                        ['name' => 'username', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Username input bound to the login form.'],
-                        ['name' => 'password', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Password input. Cleared on failure.'],
-                        ['name' => 'error', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => 'Validation error message shown beneath the form.'],
+                        ['name' => 'username', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Username input bound to the login form.'],
+                        ['name' => 'password', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Password input. Cleared on failure.'],
+                        ['name' => 'error', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Validation error message shown beneath the form.'],
                     ],
                     'actions' => [
-                        ['name' => 'login', 'desc' => 'Validates credentials. On success, writes auth to sessionData and redirects to the middleware-protected dashboard.'],
+                        ['name' => 'login', 'desc' => 'Validates credentials. On success, rotates the session cookie, writes auth to sessionData and redirects to the middleware-protected dashboard.'],
                     ],
                     'views' => self::VIEWS_ANATOMY,
                     'middleware' => self::MIDDLEWARE_ANATOMY,
@@ -129,62 +131,87 @@ final class LoginExample {
                     array_keys(self::USERS),
                     self::USERS,
                 ),
-            ]), block: 'demo', cacheUpdates: false);
+            ], block: 'demo');
         });
 
         // ── Protected routes (dashboard + profile) behind AuthMiddleware ──
         $app->group(function (Via $app): void {
             $app->page('/examples/login/dashboard', function (Context $c): void {
-                /** @var array{user: string, name: string, role: string, at: int} $auth */
-                $auth = $c->getRequestAttribute('auth');
+                $auth = self::auth($c);
+                if ($auth === null) {
+                    $c->view(static fn (): string => '<div id="login-demo"></div>');
+
+                    return;
+                }
 
                 $logout = $c->action(function (Context $ctx): void {
                     $ctx->clearSessionData('auth');
+                    $ctx->regenerateSession();
                     $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
-                $c->view(fn (): string => $c->render('examples/login_dashboard.html.twig', [
+                $c->view('examples/login_dashboard.html.twig', fn (): array => [
                     'title' => self::TITLE,
                     'description' => self::DESCRIPTION,
                     'summary' => self::SUMMARY,
                     'anatomy' => [
                         'signals' => [],
                         'actions' => [
-                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\') and redirects to the login form.'],
+                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\'), rotates the session cookie and redirects to the login form.'],
                         ],
                         'views' => self::VIEWS_ANATOMY,
                         'middleware' => self::MIDDLEWARE_ANATOMY,
                     ],
                     'githubLinks' => self::GITHUB_LINKS,
                     'auth' => $auth,
-                ]), block: 'demo', cacheUpdates: false);
+                ], block: 'demo');
             });
 
             $app->page('/examples/login/profile', function (Context $c): void {
-                /** @var array{user: string, name: string, role: string, at: int} $auth */
-                $auth = $c->getRequestAttribute('auth');
+                $auth = self::auth($c);
+                if ($auth === null) {
+                    $c->view(static fn (): string => '<div id="login-demo"></div>');
+
+                    return;
+                }
 
                 $logout = $c->action(function (Context $ctx): void {
                     $ctx->clearSessionData('auth');
+                    $ctx->regenerateSession();
                     $ctx->execScript("window.location.href = '/examples/login'");
                 }, 'logout');
 
-                $c->view(fn (): string => $c->render('examples/login_profile.html.twig', [
+                $c->view('examples/login_profile.html.twig', fn (): array => [
                     'title' => self::TITLE,
                     'description' => self::DESCRIPTION,
                     'summary' => self::SUMMARY,
                     'anatomy' => [
                         'signals' => [],
                         'actions' => [
-                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\') and redirects to the login form.'],
+                            ['name' => 'logout', 'desc' => 'Clears sessionData(\'auth\'), rotates the session cookie and redirects to the login form.'],
                         ],
                         'views' => self::VIEWS_ANATOMY,
                         'middleware' => self::MIDDLEWARE_ANATOMY,
                     ],
                     'githubLinks' => self::GITHUB_LINKS,
                     'auth' => $auth,
-                ]), block: 'demo', cacheUpdates: false);
+                ], block: 'demo');
             });
         })->middleware($authMiddleware);
+    }
+
+    /**
+     * The auth record AuthMiddleware set on the page request, or on the request that rebuilt a tab that was away.
+     *
+     * @return null|array{user: string, name: string, role: string, at: int}
+     */
+    private static function auth(Context $c): ?array {
+        /** @var null|array{user: string, name: string, role: string, at: int} $auth */
+        $auth = $c->getRequestAttribute('auth');
+        if ($auth === null) {
+            $c->execScript("window.location.href = '/examples/login'");
+        }
+
+        return $auth;
     }
 }

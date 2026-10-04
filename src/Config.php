@@ -4,25 +4,44 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia;
 
-use Mbolli\PhpVia\Broker\InMemoryBroker;
 use Mbolli\PhpVia\Broker\MessageBroker;
+use Mbolli\PhpVia\Core\Settings;
+use Mbolli\PhpVia\Rendering\TemplateEngine;
+use Mbolli\PhpVia\Support\DatastarBundle;
+use Mbolli\PhpVia\Support\Logger;
+use Mbolli\PhpVia\Support\Removed;
+use Mbolli\PhpVia\Twig\TwigEngine;
 
 /**
  * Configuration class with fluent API.
+ *
+ * new Via($config) freezes it: a with* call after that throws, so make every call before.
  */
-class Config {
+final class Config {
     private string $host = '0.0.0.0';
     private int $port = 3000;
     private bool $devMode = false;
     private string $logLevel = 'info';
     private ?string $templateDir = null;
     private false|string $twigCacheDir = false;
+    private ?TemplateEngine $templateEngine = null;
     private ?string $shellTemplate = null;
     private string $basePath = '/';
     private ?string $staticDir = null;
 
-    /** @var null|\Closure(string, string): string|string */
+    /** @var null|\Closure(string, string): ?string|string */
     private \Closure|string|null $staticCacheControl = null;
+
+    private bool $datastarRocket = false;
+
+    /** @var array<string, array{version: ?string, integrity: ?string}> Bundle path => its hashes, computed once per path */
+    private array $datastarFingerprints = [];
+
+    /** @var array<string, string> Specifier => URL, from withImportMap() */
+    private array $importMapImports = [];
+
+    /** @var array<string, string> Module URL => integrity, from withImportMap() */
+    private array $importMapIntegrity = [];
 
     /** @var array<string, mixed> */
     private array $openSwooleSettings = [];
@@ -36,7 +55,7 @@ class Config {
     /**
      * Unsent backlog per SSE connection, in bytes, above which idempotent element
      * frames are dropped for that client instead of parking the coroutine in write().
-     * Matches the default socket_buffer_size. 0 disables dropping.
+     * Half the default socket_buffer_size. 0 disables dropping.
      */
     private int $sseMaxQueuedBytes = 1048576;
 
@@ -45,6 +64,9 @@ class Config {
 
     /** Minimum gap between the start or end of one broadcast flush and the start of the next, in ms. */
     private int $broadcastTickMs = 25;
+
+    /** @var array<string, int> Scope or wildcard pattern => minimum ms between two renders of a matching scope */
+    private array $broadcastThrottles = [];
 
     /**
      * Whether to set the Secure flag on the session cookie (required for HTTPS).
@@ -102,7 +124,7 @@ class Config {
     private bool $h2c = false;
 
     /**
-     * Whether to enable Brotli compression for HTTP responses.
+     * Whether pages and SSE streams are Brotli-compressed.
      * Requires either withCertificate() (direct HTTPS) or withH2c() (proxy h2c),
      * and the ext-brotli PHP extension. Hard error at start() if either is missing.
      */
@@ -111,7 +133,7 @@ class Config {
     /** Brotli level for dynamic responses (pages, SSE). 0 to 11; default 4. */
     private int $brotliDynamicLevel = 4;
 
-    /** Brotli level for static assets. 0 to 11; default 11 (BROTLI_COMPRESS_LEVEL_MAX). */
+    /** Brotli level for static files whenever ext-brotli is loaded, 0 for none; default 11, see withBrotli(). */
     private int $brotliStaticLevel = 11;
 
     /**
@@ -129,6 +151,8 @@ class Config {
     private int $contextDirectoryRecordBytes = 1024;
 
     private int $contextDirectoryTtlSeconds = 3600;
+
+    private int $contextDirectoryTabStateBytes = 1024;
 
     private int $scopedSignalTableRows = 1024;
 
@@ -166,10 +190,14 @@ class Config {
     private int $actionRateWindow = 60;
 
     /**
-     * Interval in milliseconds between proactive gc_collect_cycles() calls.
-     * 0 disables the timer and leaves GC entirely to PHP's automatic trigger.
+     * Milliseconds between a worker's cycle collector runs; 0 for none.
      */
     private int $gcIntervalMs = 30_000;
+
+    /**
+     * Whether workers turn PHP's own collector runs off and run the collector when their memory grows.
+     */
+    private bool $gcOnGrowth = false;
 
     /**
      * Grace period in milliseconds before an inactive context (no live SSE connection) is
@@ -198,72 +226,125 @@ class Config {
     private int $contextRevivalWindowMs = 600_000;
 
     /**
+     * How long (milliseconds) a worker waits for the worker that holds a tab to answer a request of the tab it
+     * passed there, with more than one worker.
+     */
+    private int $contextForwardTimeoutMs = 60_000;
+
+    /**
      * Whether the Via Dev Bar (tracing overlay + /_via endpoints) is enabled.
      * null = follow devMode; true/false = explicit override.
      */
-    private ?bool $tracing = null;
+    private ?bool $devBar = null;
 
     /**
      * Whether the Dev Bar may write signal state back from the browser.
      * null = follow the VIA_DEVBAR_WRITES env var; true/false = explicit override.
      * Writes are ALWAYS gated behind devMode in addition to this flag.
      */
-    private ?bool $tracingWrites = null;
+    private ?bool $devBarWrites = null;
 
     /** Maximum number of traces retained in the in-process ring buffer. */
     private int $traceBufferSize = 100;
 
-    /** Soft cap on a single serialized trace's byte size (display guard). */
-    private int $traceMaxBytes = 16_384;
+    /** Set by new Via() through freeze(): from then on every with* call throws. */
+    private ?Settings $settings = null;
+
+    /**
+     * A clone is a new Config that new Via() has not frozen, also when the original is frozen.
+     */
+    public function __clone() {
+        $this->settings = null;
+    }
 
     public function withHost(string $host): self {
+        $this->assertMutable(__FUNCTION__);
         $this->host = $host;
 
         return $this;
     }
 
     public function withPort(int $port): self {
+        $this->assertMutable(__FUNCTION__);
         $this->port = $port;
 
         return $this;
     }
 
     public function withDevMode(bool $devMode = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->devMode = $devMode;
 
         return $this;
     }
 
+    /**
+     * Lowest level that is logged: debug, info, warn or error.
+     *
+     * Case does not matter, and the PSR-3 names (warning, notice, critical, alert, emergency) and
+     * the syslog short names (err, crit, emerg) are accepted: notice means info, and everything
+     * above error means error.
+     *
+     * @throws \InvalidArgumentException for any other level
+     */
     public function withLogLevel(string $level): self {
-        $this->logLevel = $level;
+        $this->assertMutable(__FUNCTION__);
+        $this->logLevel = Logger::canonicalLevel($level) ?? throw new \InvalidArgumentException(
+            "Unknown log level '{$level}': use debug, info, warn or error (PSR-3 and syslog names such as warning or err work too)."
+        );
 
         return $this;
     }
 
+    /**
+     * The engine that renders template views, view('page.html.twig', ...) and Context::render():
+     *
+     * ```php
+     * $config->withTemplateEngine(new TwigEngine(__DIR__ . '/templates', cacheDir: '/tmp/twig'));
+     * ```
+     *
+     * Without an engine, views are closures that return HTML, and a template view throws.
+     */
+    public function withTemplateEngine(TemplateEngine $engine): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->templateEngine = $engine;
+
+        return $this;
+    }
+
+    /**
+     * Twig templates from $dir: short for withTemplateEngine(new TwigEngine($dir)), with the cache
+     * directory from withTwigCacheDir(). Needs twig/twig; new Via() throws without it.
+     */
     public function withTemplateDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->templateDir = $dir;
 
         return $this;
     }
 
+    /**
+     * Where the TwigEngine that withTemplateDir() sets up keeps its compiled templates.
+     */
     public function withTwigCacheDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->twigCacheDir = $dir;
 
         return $this;
     }
 
-    public function getTwigCacheDir(): false|string {
-        return $this->twigCacheDir;
-    }
-
+    /**
+     * Serve the files in $dir: a path with a file extension before routing, any other once no route matched.
+     *
+     * A path with a segment that starts with a dot (dotfiles, dot directories, '..'), except /.well-known/, and
+     * PHP sources (.php, .php5, .phtml, .phar, .inc and the like) answer 404 without a look at the disk. A link in
+     * the dir to such a file answers 404 too. Compressible files get Brotli, see withBrotli().
+     */
     public function withStaticDir(string $dir): self {
+        $this->assertMutable(__FUNCTION__);
         $this->staticDir = rtrim($dir, '/');
 
         return $this;
-    }
-
-    public function getStaticDir(): ?string {
-        return $this->staticDir;
     }
 
     /**
@@ -274,53 +355,157 @@ class Config {
      *
      * null (default) = auto: 'no-cache' in devMode (always revalidate, so edits to a
      * withStaticDir() file are visible on the next refresh instead of waiting out a
-     * cached max-age), else 'public, max-age=3600, must-revalidate'.
+     * cached max-age), else 'public, max-age=3600, must-revalidate', and for
+     * /datastar.js?v=<version of the served bundle> 'public, max-age=31536000, immutable'.
      *
      * Pass a string to apply one Cache-Control value to every static response, e.g.
      * 'public, max-age=31536000, immutable' if you fingerprint filenames yourself.
      *
-     * Pass a closure(string $filePath, string $mimeType): string to fine-tune per file:
+     * Pass a closure(string $filePath, string $mimeType): ?string to fine-tune per file:
      * $filePath is the absolute path being served, $mimeType is the resolved MIME type
-     * without a charset suffix (e.g. 'text/css', 'image/png'). A string is always taken
-     * literally (never invoked as a function name); use first-class callable syntax
-     * (`$obj->method(...)`, `SomeClass::method(...)`) to pass an existing method. For
-     * example, long-cache fingerprinted assets and fonts, short-cache everything else:
+     * without a charset suffix (e.g. 'text/css', 'image/png'). Returning null keeps the
+     * default for that file. A string is always taken literally (never invoked as a
+     * function name); use first-class callable syntax (`$obj->method(...)`,
+     * `SomeClass::method(...)`) to pass an existing method. For example, long-cache
+     * fingerprinted assets and fonts, and keep the default for everything else:
      *
      * ```php
-     * $config->withStaticCacheControl(function (string $filePath, string $mimeType): string {
+     * $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?string {
      *     if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
      *         return 'public, max-age=31536000, immutable';
      *     }
      *
-     *     return 'public, max-age=3600, must-revalidate';
+     *     return null;
      * });
      * ```
      *
-     * @param null|\Closure(string, string): string|string $value
+     * @param null|\Closure(string, string): ?string|string $value
      */
     public function withStaticCacheControl(\Closure|string|null $value): self {
+        $this->assertMutable(__FUNCTION__);
         $this->staticCacheControl = $value;
 
         return $this;
     }
 
     /**
-     * @param string $filePath absolute path of the file being served
-     * @param string $mimeType resolved MIME type without a charset suffix, e.g. 'text/css'
+     * Serve Datastar with Rocket, its web component layer, at /datastar.js instead of the plain
+     * Datastar bundle, so Rocket components such as Starbase's work on the page.
+     *
+     * The bundle is Starbase's patched build of Datastar 1.0.4 + Rocket (public/DATASTAR.md): about
+     * 22 KB brotli against 12 KB for the plain bundle, so leave it off unless pages use Rocket.
+     *
+     * A page must run exactly one Datastar module. Rocket components import it by the bare specifier
+     * 'datastar', so an import map has to map 'datastar' to the URL Datastar is loaded from, byte for
+     * byte, query string included, before any module script; another URL loads a second engine. The
+     * default shell emits both from getDatastarUrl(); a custom shell or a layout writes them with
+     * via_head and via_foot (see Context::viaHead()).
      */
-    public function getStaticCacheControl(string $filePath, string $mimeType): string {
-        if ($this->staticCacheControl instanceof \Closure) {
-            return ($this->staticCacheControl)($filePath, $mimeType);
+    public function withDatastarRocket(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->datastarRocket = $enabled;
+
+        return $this;
+    }
+
+    /**
+     * URL of the Datastar bundle served at /datastar.js, versioned by its content so a new bundle
+     * busts caches, e.g. '/datastar.js?v=727844adfc'. The hash is computed once per bundle.
+     */
+    public function getDatastarUrl(): string {
+        return DatastarBundle::url($this->basePath, $this->datastarFingerprint()['version']);
+    }
+
+    /**
+     * Subresource Integrity value (sha384) of the Datastar bundle served at /datastar.js, computed
+     * once per bundle together with the version in getDatastarUrl().
+     *
+     * php-via does not pin Datastar by itself, since a proxy that rewrites the file would then break
+     * every page. To pin it, after withDatastarRocket() and withBasePath():
+     *
+     * ```php
+     * $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()]);
+     * ```
+     *
+     * new Via() warns when a pin names another URL of the bundle, such as one built before those calls.
+     *
+     * @throws \RuntimeException if the bundle cannot be read
+     */
+    public function getDatastarIntegrity(): string {
+        return $this->datastarFingerprint()['integrity']
+            ?? throw new \RuntimeException('Cannot read the Datastar bundle ' . DatastarBundle::path($this->datastarRocket));
+    }
+
+    /**
+     * Add entries to the import map php-via writes into its pages, merged with earlier calls: a later
+     * URL for the same specifier, or integrity for the same URL, replaces the earlier one.
+     *
+     * The map is written when this added entries or withDatastarRocket() is on, by via_head (see
+     * Context::viaHead()). It always maps 'datastar' to getDatastarUrl(), so that specifier is reserved.
+     *
+     * ```php
+     * $config->withImportMap(
+     *     ['chart' => '/js/chart.min.js'],
+     *     ['https://cdn.example.com/c/slider@1a2b/slider.min.js' => 'sha384-...'],
+     * );
+     * ```
+     *
+     * @param array<string, string> $imports   module specifier => URL, absolute or starting with '/' (with the base path
+     *                                         from getBasePath()); a specifier ending in '/' maps a prefix and needs a URL ending in '/'
+     * @param array<string, string> $integrity module URL, written as in $imports => Subresource Integrity value ('sha256-',
+     *                                         'sha384-' or 'sha512-' and the base64 digest), checked when the browser loads the module
+     *
+     * @throws \InvalidArgumentException for an entry the browser would ignore, a URL starting with './' or '../',
+     *                                   which would resolve differently on every route, or an entry for 'datastar'
+     */
+    public function withImportMap(array $imports, array $integrity = []): self {
+        $this->assertMutable(__FUNCTION__);
+        $newImports = [];
+        foreach ($imports as $specifier => $url) {
+            $specifier = self::importMapString($specifier, 'specifier');
+            if ($specifier === 'datastar') {
+                throw new \InvalidArgumentException("The import map specifier 'datastar' is reserved: php-via maps it to getDatastarUrl()");
+            }
+            $url = self::importMapUrl($url, "URL for '{$specifier}'");
+            if (str_ends_with($specifier, '/') && !str_ends_with($url, '/')) {
+                throw new \InvalidArgumentException("Import map specifier '{$specifier}' ends in '/', so its URL has to end in '/' too, got '{$url}'");
+            }
+            $newImports[$specifier] = $url;
         }
 
-        if ($this->staticCacheControl !== null) {
-            return $this->staticCacheControl;
+        $newIntegrity = [];
+        foreach ($integrity as $url => $value) {
+            $url = self::importMapUrl($url, 'integrity URL');
+            $value = self::importMapString($value, "integrity for '{$url}'");
+            if (!self::isIntegrity($value)) {
+                throw new \InvalidArgumentException("Invalid integrity for '{$url}': expected 'sha256-', 'sha384-' or 'sha512-' and the base64 digest, got '{$value}'");
+            }
+            $newIntegrity[$url] = $value;
         }
 
-        return $this->devMode ? 'no-cache' : 'public, max-age=3600, must-revalidate';
+        $this->importMapImports = array_replace($this->importMapImports, $newImports);
+        $this->importMapIntegrity = array_replace($this->importMapIntegrity, $newIntegrity);
+
+        return $this;
+    }
+
+    /**
+     * The import map php-via writes into its pages: 'datastar' => getDatastarUrl() first, then the
+     * entries from withImportMap(), and 'integrity' only when there is any.
+     *
+     * @return array{imports: array<string, string>, integrity?: array<string, string>}
+     */
+    public function getImportMap(): array {
+        $map = ['imports' => ['datastar' => $this->getDatastarUrl()] + $this->importMapImports];
+        if ($this->importMapIntegrity !== []) {
+            $map['integrity'] = $this->importMapIntegrity;
+        }
+
+        return $map;
     }
 
     public function withShellTemplate(string $path): self {
+        $this->assertMutable(__FUNCTION__);
         $this->shellTemplate = $path;
 
         return $this;
@@ -333,6 +518,7 @@ class Config {
      * @throws \InvalidArgumentException if the value is not a valid relative path
      */
     public function withBasePath(string $basePath): self {
+        $this->assertMutable(__FUNCTION__);
         // Accept only safe relative paths: zero or more /segment components
         // (each starting with [a-zA-Z0-9]) followed by an optional trailing slash.
         // Rejects protocol-relative paths (//evil.com), absolute URLs (https://…),
@@ -349,22 +535,6 @@ class Config {
     }
 
     /**
-     * How often the Dev Bar's trace and log stream checks for new records (default 100 ms).
-     *
-     * Page SSE streams do not poll: a stream wakes when a patch is queued for it, when its
-     * connection closes and when the worker stops. See withSseKeepAliveMs().
-     */
-    public function withSsePollIntervalMs(int $ms): self {
-        $this->ssePollIntervalMs = max(1, $ms);
-
-        return $this;
-    }
-
-    public function getSsePollIntervalMs(): int {
-        return $this->ssePollIntervalMs;
-    }
-
-    /**
      * Set how long a page SSE stream may stay silent before it sends an SSE comment (default 15 s).
      *
      * The comment keeps a proxy's idle timeout, such as nginx's 60 s proxy_read_timeout, from
@@ -375,13 +545,10 @@ class Config {
      * @param int $ms interval in milliseconds; 0 sends no comment, and idle streams then wake once a minute
      */
     public function withSseKeepAliveMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sseKeepAliveMs = max(0, $ms);
 
         return $this;
-    }
-
-    public function getSseKeepAliveMs(): int {
-        return $this->sseKeepAliveMs;
     }
 
     /**
@@ -389,19 +556,21 @@ class Config {
      *
      * A slow client otherwise parks its SSE coroutine inside write() until it drains
      * or disconnects (measured at 20s), during which that connection stops observing
-     * shutdown and disconnect. Element patches are idempotent, so a backed-up client
-     * catches up on the next broadcast. Signals and scripts are never dropped.
+     * shutdown and disconnect. View updates are idempotent, so a backed-up client
+     * catches up on the next render. Signals, scripts and patchElements() patches are never dropped.
      *
-     * @param int $bytes threshold in bytes; 0 or less disables dropping entirely
+     * Once a connection is past the threshold, its element frames are dropped until its
+     * backlog is empty, since OpenSwoole wakes a parked write only then. A threshold above
+     * half of socket_buffer_size acts as half of it, and start() logs a warning: frames on
+     * their way to the backlog could otherwise fill the buffer before the backlog shows them.
+     *
+     * @param int $bytes threshold in bytes, 1 MiB by default; 0 or less disables dropping entirely
      */
     public function withSseMaxQueuedBytes(int $bytes): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sseMaxQueuedBytes = $bytes;
 
         return $this;
-    }
-
-    public function getSseMaxQueuedBytes(): int {
-        return $this->sseMaxQueuedBytes;
     }
 
     /**
@@ -418,15 +587,16 @@ class Config {
      * @param bool $enabled false renders and publishes synchronously on every call, as earlier releases did,
      *                      except that a fan-out stopped after 8 passes in a row leaves what it still owes to a
      *                      flush paced by the tick (see withBroadcastTickMs())
+     *
+     * @deprecated goes in php-via 0.15, and new Via() logs a warning when coalescing is off. Call
+     *             Via::flushBroadcasts() where a broadcast has to land before the next step. A composition
+     *             class's auto-broadcast and broadcasts received from the broker cannot be flushed that way.
      */
     public function withBroadcastCoalescing(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broadcastCoalescing = $enabled;
 
         return $this;
-    }
-
-    public function isBroadcastCoalescingEnabled(): bool {
-        return $this->broadcastCoalescing;
     }
 
     /**
@@ -450,46 +620,62 @@ class Config {
      * @param int $ms gap in milliseconds; 0 flushes at the end of every event-loop turn with no gap
      */
     public function withBroadcastTickMs(int $ms): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broadcastTickMs = max(0, $ms);
 
         return $this;
     }
 
-    public function getBroadcastTickMs(): int {
-        return $this->broadcastTickMs;
+    /**
+     * Render the broadcasts of a scope at most once every $minIntervalMs, for a scope that broadcasts more often than
+     * its tabs need to see, such as the progress of an import.
+     *
+     * A broadcast of a matching scope less than the interval after its last render waits until the interval is over,
+     * and the broadcasts meanwhile join it, so the last state always arrives. That holds for Via::broadcast(),
+     * Context::broadcast(), scoped signal writes and broadcasts from other workers or nodes, and a wildcard such as
+     * 'import:*' gives each scope it matches an interval of its own. Via::flushBroadcasts() renders the waiting
+     * broadcasts at once, for a step that has to show now, such as the start or the end of the import. Each worker
+     * throttles the renders of its own tabs, and with several throttles on one scope the longest interval applies.
+     * Broadcasts of a throttled scope coalesce even under withBroadcastCoalescing(false).
+     *
+     * @param string $scope         a scope or wildcard pattern as Via::broadcast() takes it: Scope::routeScope('/path'), not Scope::ROUTE
+     * @param int    $minIntervalMs milliseconds; 0 removes the throttle of $scope
+     *
+     * @throws \InvalidArgumentException for the bare Scope::TAB, Scope::ROUTE or Scope::SESSION, or a negative interval
+     */
+    public function withBroadcastThrottle(string $scope, int $minIntervalMs): self {
+        $this->assertMutable(__FUNCTION__);
+        $scope = Scope::resolve($scope, null, 'Config::withBroadcastThrottle()');
+        if ($minIntervalMs < 0) {
+            throw new \InvalidArgumentException("withBroadcastThrottle('{$scope}') takes an interval of 0 ms or more, got {$minIntervalMs}.");
+        }
+
+        if ($minIntervalMs === 0) {
+            unset($this->broadcastThrottles[$scope]);
+        } else {
+            $this->broadcastThrottles[$scope] = $minIntervalMs;
+        }
+
+        return $this;
     }
 
     /**
+     * Raw OpenSwoole server settings, merged over the ones php-via sets: open_http2_protocol, http_compression,
+     * socket_buffer_size, max_coroutine, send_yield, max_wait_time, reload_async, enable_reuse_port, hook_flags,
+     * log_level, max_conn and backlog. Set the worker count with withWorkerNum(): start() throws for a
+     * worker_num here that differs from it.
+     *
      * @param array<string, mixed> $settings
      */
     public function withSwooleSettings(array $settings): self {
+        $this->assertMutable(__FUNCTION__);
         $this->openSwooleSettings = array_merge($this->openSwooleSettings, $settings);
 
         return $this;
     }
 
-    public function getHost(): string {
-        return $this->host;
-    }
-
-    public function getPort(): int {
-        return $this->port;
-    }
-
-    public function getDevMode(): bool {
+    public function isDevMode(): bool {
         return $this->devMode;
-    }
-
-    public function getLogLevel(): string {
-        return $this->logLevel;
-    }
-
-    public function getTemplateDir(): ?string {
-        return $this->templateDir;
-    }
-
-    public function getShellTemplate(): ?string {
-        return $this->shellTemplate;
     }
 
     public function getBasePath(): string {
@@ -497,24 +683,14 @@ class Config {
     }
 
     /**
-     * @return array<string, mixed>
-     */
-    public function getSwooleSettings(): array {
-        return $this->openSwooleSettings;
-    }
-
-    /**
      * Require the Secure cookie attribute.
      * Enable this for any deployment served over HTTPS.
      */
     public function withSecureCookie(bool $secure = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->secureCookie = $secure;
 
         return $this;
-    }
-
-    public function getSecureCookie(): bool {
-        return $this->secureCookie;
     }
 
     /**
@@ -535,6 +711,7 @@ class Config {
      * @param bool                      $partitioned    partition the cookie per top-level site (CHIPS). Recommended true.
      */
     public function withEmbeddable(array|string|null $frameAncestors = null, bool $partitioned = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sessionCookieSameSite = 'None';
         $this->secureCookie = true;              // SameSite=None requires Secure
         $this->sessionCookiePartitioned = $partitioned;
@@ -543,21 +720,6 @@ class Config {
         }
 
         return $this;
-    }
-
-    public function getSessionCookieSameSite(): string {
-        return $this->sessionCookieSameSite;
-    }
-
-    public function isSessionCookiePartitioned(): bool {
-        return $this->sessionCookiePartitioned;
-    }
-
-    /**
-     * @return null|list<string>
-     */
-    public function getFrameAncestors(): ?array {
-        return $this->frameAncestors;
     }
 
     /**
@@ -570,16 +732,10 @@ class Config {
      * @param null|list<string> $origins
      */
     public function withTrustedOrigins(?array $origins): self {
+        $this->assertMutable(__FUNCTION__);
         $this->trustedOrigins = $origins;
 
         return $this;
-    }
-
-    /**
-     * @return null|list<string>
-     */
-    public function getTrustedOrigins(): ?array {
-        return $this->trustedOrigins;
     }
 
     /**
@@ -591,13 +747,10 @@ class Config {
      * Dev Bar's /_via/signal and /_via/reset.
      */
     public function withAllowMissingOrigin(bool $allow = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->allowMissingOrigin = $allow;
 
         return $this;
-    }
-
-    public function getAllowMissingOrigin(): bool {
-        return $this->allowMissingOrigin;
     }
 
     /**
@@ -612,13 +765,10 @@ class Config {
      * server-owned TAB signals are per-worker state: use worker_num = 1 or a scoped signal.
      */
     public function withStrictTabSignals(bool $strict = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->strictTabSignals = $strict;
 
         return $this;
-    }
-
-    public function getStrictTabSignals(): bool {
-        return $this->strictTabSignals;
     }
 
     /**
@@ -628,124 +778,87 @@ class Config {
      * @param int $windowSeconds Window size in seconds (default 60)
      */
     public function withActionRateLimit(int $maxRequests, int $windowSeconds = 60): self {
+        $this->assertMutable(__FUNCTION__);
         $this->actionRateLimit = max(0, $maxRequests);
         $this->actionRateWindow = max(1, $windowSeconds);
 
         return $this;
     }
 
-    public function getActionRateLimit(): int {
-        return $this->actionRateLimit;
-    }
-
-    public function getActionRateWindow(): int {
-        return $this->actionRateWindow;
-    }
-
     /**
-     * Configure the proactive GC timer interval.
+     * Set how a worker runs PHP's cycle collector, whose every run walks all live objects.
      *
-     * php-via runs as a persistent process; PHP's cycle collector only fires when
-     * its internal root buffer fills (~10,000 new roots), which can cause sudden
-     * micro-pauses under load. Calling gc_collect_cycles() on a fixed timer spreads
-     * that work out predictably during idle gaps between requests.
+     * By default PHP runs the collector itself, once 10,000 or more possible roots wait, and each worker also runs
+     * it every $ms.
      *
-     * @param int $ms Timer interval in milliseconds. Pass 0 to disable.
+     * With $onGrowth, a worker turns PHP's own runs off and runs the collector when its memory has grown by half
+     * since the last run (by 32 MiB at least, by half the room left below memory_limit at most), and every $ms while
+     * possible roots wait. In a burst of page views, or an app whose requests leave cycles, that walks the live
+     * contexts far less often. The risk: a loop that creates cycles without waiting on I/O frees them only once it
+     * ends, and when they outgrow memory_limit first, the worker dies with a fatal error and takes all its tabs with
+     * it, where PHP's runs would have freed them. Turn it on only when no request runs such a loop, or call
+     * gc_collect_cycles() inside it.
+     *
+     * @param int  $ms       milliseconds between timed runs, 30 s by default; 0 runs none
+     * @param bool $onGrowth turn PHP's own runs off and run the collector when memory grows
      */
-    public function withGcInterval(int $ms): self {
+    public function withGcIntervalMs(int $ms, bool $onGrowth = false): self {
+        $this->assertMutable(__FUNCTION__);
         $this->gcIntervalMs = max(0, $ms);
+        $this->gcOnGrowth = $onGrowth;
 
         return $this;
-    }
-
-    public function getGcIntervalMs(): int {
-        return $this->gcIntervalMs;
     }
 
     /**
-     * Configure the context cleanup grace period.
+     * Set how long a context lives without an SSE stream; null keeps a timer as it is.
      *
-     * When an SSE stream disconnects, php-via doesn't destroy the context immediately:
-     * it waits this long for a page navigation or reconnect before tearing it down. Longer
-     * delays tolerate flakier clients at the cost of holding idle contexts (and their
-     * in-memory view payloads) in memory for longer under concurrent disconnects.
+     * - $cleanupDelayMs (default 5 s): after a tab's stream disconnects, the context waits this long for a
+     *   reconnect or a page navigation before it is destroyed. 0 destroys it at once. Longer delays tolerate
+     *   flakier clients and hold idle contexts, with their view payloads, in memory longer.
+     * - $connectMs (default 30 s): a page load whose stream never connects (a crawler, a prefetch, a tab
+     *   closed early), and a context an action rebuilt on a worker the tab does not stream from, are destroyed
+     *   after this long. A connect cancels the timer, and every action on such a context starts it again. 0
+     *   keeps such contexts until the worker stops.
+     * - $reconnectMs (default 60 s): an action that reaches a context whose stream is down (it dropped, or the
+     *   action just revived the context) keeps it this long, so the patches the action queued reach the tab
+     *   when it reconnects. It must exceed the client's longest wait between reconnects: Datastar backs off to
+     *   30 s by default (retryMaxWait). 0 uses $connectMs.
+     * - $revivalWindowMs (default 10 min): for this long after a context is destroyed, a returning tab gets an
+     *   equivalent one (same id, handler run again, signals seeded from the browser) instead of a full reload.
+     *   Context::tabState() values come back; other server-only state such as #[Persist] starts over, as on a
+     *   reload. 0 turns revival off: with more than one worker, a tab's actions still reach the worker that holds
+     *   it, but a stream that reaches another worker reloads the tab.
+     * - $forwardMs (default 60 s): with more than one worker, an action or a download that reaches a worker other
+     *   than the one holding its tab is passed there, and the worker that got it answers 504 when no answer comes
+     *   this long after the request, or after the last chunk of a download. The action may still finish. Minimum 1 s.
      *
-     * @param int $ms Grace period in milliseconds. Pass 0 to disable (cleanup is immediate).
+     * The context's onCleanup() callbacks run when it is destroyed, whichever timer did it.
      */
-    public function withContextCleanupDelay(int $ms): self {
-        $this->contextCleanupDelayMs = max(0, $ms);
+    public function withContextTimeouts(?int $cleanupDelayMs = null, ?int $connectMs = null, ?int $reconnectMs = null, ?int $revivalWindowMs = null, ?int $forwardMs = null): self {
+        $this->assertMutable(__FUNCTION__);
+        if ($cleanupDelayMs !== null) {
+            $this->contextCleanupDelayMs = max(0, $cleanupDelayMs);
+        }
+        if ($connectMs !== null) {
+            $this->contextConnectTimeoutMs = max(0, $connectMs);
+        }
+        if ($reconnectMs !== null) {
+            $this->contextReconnectTimeoutMs = max(0, $reconnectMs);
+        }
+        if ($revivalWindowMs !== null) {
+            $this->contextRevivalWindowMs = max(0, $revivalWindowMs);
+        }
+        if ($forwardMs !== null) {
+            $this->contextForwardTimeoutMs = max(1000, $forwardMs);
+        }
 
         return $this;
-    }
-
-    public function getContextCleanupDelayMs(): int {
-        return $this->contextCleanupDelayMs;
     }
 
     /**
-     * Configure how long a context may live without an SSE stream.
-     *
-     * A page load whose stream never connects (a crawler, a prefetch, a tab closed before it
-     * connected) and a context an action rebuilt on a worker the tab does not stream from are
-     * destroyed after this long, running their onCleanup/onDisconnect callbacks. An SSE connect
-     * cancels the timer, and every action on such a context starts it again. A tab that connects
-     * later than this is rebuilt by revival (see withContextRevivalWindow()). A tab whose stream
-     * dropped is freed after withContextCleanupDelay(), or after withContextReconnectTimeout()
-     * once an action reaches it.
-     *
-     * @param int $ms Lifetime in milliseconds. Pass 0 to keep such contexts until the worker stops.
+     * How long after a context is destroyed a returning tab can still revive it, in milliseconds; 0 when revival is off.
      */
-    public function withContextConnectTimeout(int $ms): self {
-        $this->contextConnectTimeoutMs = max(0, $ms);
-
-        return $this;
-    }
-
-    public function getContextConnectTimeoutMs(): int {
-        return $this->contextConnectTimeoutMs;
-    }
-
-    /**
-     * Configure how long a tab whose stream is down waits for it to reconnect after an action.
-     *
-     * An action that reaches a context without a stream anywhere (its stream dropped, or the action
-     * just revived it) keeps it for this long, and each further action starts the timer again. The
-     * patches the action queued wait in the context, and a freed context takes them with it, so this
-     * must exceed the client's longest wait between reconnect attempts: Datastar backs off to 30 s
-     * by default (retryMaxWait). A copy rebuilt for an action on a worker the tab does not stream
-     * from keeps the connect timeout.
-     *
-     * @param int $ms Wait in milliseconds. Pass 0 to use withContextConnectTimeout().
-     */
-    public function withContextReconnectTimeout(int $ms): self {
-        $this->contextReconnectTimeoutMs = max(0, $ms);
-
-        return $this;
-    }
-
-    public function getContextReconnectTimeoutMs(): int {
-        return $this->contextReconnectTimeoutMs;
-    }
-
-    /**
-     * Configure the context revival window.
-     *
-     * When a tab is backgrounded long enough that its context is destroyed (past
-     * {@see withContextCleanupDelay()}), a returning tab normally hard-reloads. With revival
-     * enabled, the server instead rebuilds an equivalent context (same ID, so the already-loaded
-     * DOM keeps working) by re-running the page handler and re-seeding signal values the client
-     * still holds. This preserves local (underscore) signals, scroll, and focus that a reload
-     * would destroy. Revival re-runs the page handler, so it is not lossless: server-only state
-     * (e.g. #[Persist]) resets and onDisconnect/connect hooks re-fire, exactly as on a reload.
-     *
-     * @param int $ms Window in milliseconds. Pass 0 to disable (reconnect falls back to a reload).
-     */
-    public function withContextRevivalWindow(int $ms): self {
-        $this->contextRevivalWindowMs = max(0, $ms);
-
-        return $this;
-    }
-
     public function getContextRevivalWindowMs(): int {
         return $this->contextRevivalWindowMs;
     }
@@ -758,18 +871,11 @@ class Config {
      * @param string $keyFile  Path to PEM private key file
      */
     public function withCertificate(string $certFile, string $keyFile): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sslCertFile = $certFile;
         $this->sslKeyFile = $keyFile;
 
         return $this;
-    }
-
-    public function getSslCertFile(): ?string {
-        return $this->sslCertFile;
-    }
-
-    public function getSslKeyFile(): ?string {
-        return $this->sslKeyFile;
     }
 
     /**
@@ -780,18 +886,19 @@ class Config {
     }
 
     /**
-     * Enable Brotli compression for HTTP responses (pages, static assets, SSE streams).
-     * Requires withCertificate() (direct HTTPS) or withH2c() (proxy h2c), and ext-brotli.
-     * A hard error is thrown at start() if either requirement is not met.
+     * Brotli compression: $enabled turns it on for pages and the SSE stream, $staticLevel sets it for static files.
      *
-     * @param bool $enabled      enable or disable Brotli compression
-     * @param int  $dynamicLevel Compression level for pages and SSE (0 to 11). Default 4: fast,
-     *                           low CPU overhead on the hot path.
-     * @param int  $staticLevel  Compression level for static assets (0 to 11). Default 11: maximum
-     *                           ratio; paid once per file then served from an in-memory cache.
-     */
-    /**
-     * Enable Brotli compression for pages, static assets and the SSE stream.
+     * **Pages and SSE** need $enabled, withCertificate() (direct HTTPS) or withH2c() (proxy h2c), and ext-brotli;
+     * start() throws if one is missing.
+     *
+     * **Static files** (withStaticDir() files of a compressible type, /datastar.js, /via.css and the Dev Bar
+     * assets) get Brotli at level 11 whenever ext-brotli is loaded, also without a call to withBrotli().
+     * `withBrotli(false)` turns that off too, `withBrotli(false, staticLevel: 11)` keeps it for static files only.
+     * Files up to 128 KiB are compressed in the master process before the server listens (2.3 s at most, not in dev
+     * mode), bigger ones by a helper process right after start and changed ones on their first request, so a worker
+     * never compresses at this level. A precompressed foo.css.br next to foo.css, at least as new, is sent as it is,
+     * even without ext-brotli.
+     * See https://via.zweiundeins.gmbh/docs/deployment#static-compression
      *
      * **The dynamic level is a memory decision, not just a bandwidth one.** A streaming Brotli
      * encoder holds per-connection state that grows toward the window cap as the stream feeds it,
@@ -820,27 +927,17 @@ class Config {
      * be lowered to save memory or raised for the compression Anders Murphy reports from larger
      * windows. Changing that needs an upstream extension change.
      *
-     * $staticLevel applies to one-shot asset compression, which is cached per file+mtime, so its
-     * 94 ms at level 11 is paid once rather than per request.
+     * @param bool     $enabled      Brotli for pages and SSE
+     * @param int      $dynamicLevel level for pages and SSE (0 to 11)
+     * @param null|int $staticLevel  level for static files (1 to 11), 0 for none; null: 11, or 0 if $enabled is false
      */
-    public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, int $staticLevel = 11): self {
+    public function withBrotli(bool $enabled = true, int $dynamicLevel = 4, ?int $staticLevel = null): self {
+        $this->assertMutable(__FUNCTION__);
         $this->brotli = $enabled;
         $this->brotliDynamicLevel = max(0, min(11, $dynamicLevel));
-        $this->brotliStaticLevel = max(0, min(11, $staticLevel));
+        $this->brotliStaticLevel = max(0, min(11, $staticLevel ?? ($enabled ? 11 : 0)));
 
         return $this;
-    }
-
-    public function getBrotli(): bool {
-        return $this->brotli;
-    }
-
-    public function getBrotliDynamicLevel(): int {
-        return $this->brotliDynamicLevel;
-    }
-
-    public function getBrotliStaticLevel(): int {
-        return $this->brotliStaticLevel;
     }
 
     /**
@@ -853,21 +950,19 @@ class Config {
      * Do NOT enable on a server exposed directly to untrusted traffic.
      */
     public function withH2c(bool $enabled = true): self {
+        $this->assertMutable(__FUNCTION__);
         $this->h2c = $enabled;
 
         return $this;
-    }
-
-    public function isH2c(): bool {
-        return $this->h2c;
     }
 
     /**
      * Set the message broker for multi-node broadcasting.
      *
      * A broker enables broadcast() to reach contexts on other nodes (workers,
-     * servers, containers). The default InMemoryBroker is a no-op suitable for
-     * single-node deployments.
+     * servers, containers). Without one, a single worker uses the no-op InMemoryBroker
+     * and more than one worker (withWorkerNum()) SwooleBroker, which reaches the
+     * workers of this server only.
      *
      * Example:
      * ```php
@@ -875,6 +970,7 @@ class Config {
      * ```
      */
     public function withBroker(MessageBroker $broker): self {
+        $this->assertMutable(__FUNCTION__);
         $this->broker = $broker;
 
         return $this;
@@ -901,53 +997,34 @@ class Config {
      * @param callable(\Throwable): void $handler
      */
     public function onBrokerError(callable $handler): self {
+        $this->assertMutable(__FUNCTION__);
         $this->brokerErrorHandler = $handler;
 
         return $this;
     }
 
     /**
-     * Return the configured broker error handler, or null if none was set.
-     *
-     * @return null|callable(\Throwable): void
-     */
-    public function getBrokerErrorHandler(): ?callable {
-        return $this->brokerErrorHandler;
-    }
-
-    /**
-     * Return the configured broker, or a no-op InMemoryBroker if none was set.
-     */
-    public function getBroker(): MessageBroker {
-        return $this->broker ?? new InMemoryBroker();
-    }
-
-    /**
      * Set the number of OpenSwoole worker processes.
      *
      * Using more than one worker distributes CPU-bound actions across cores.
-     * Requires a multi-worker-capable broker: SwooleBroker (same machine),
-     * RedisBroker or NatsBroker (multi-server). A RuntimeException is thrown at
-     * start() if worker_num > 1 and InMemoryBroker is still in use.
+     * Broadcasts then cross workers through SwooleBroker, unless withBroker() sets
+     * RedisBroker or NatsBroker for several servers. Passing InMemoryBroker to
+     * withBroker() makes start() throw.
      *
      * Session data, GlobalState and scoped signal values move to shared-memory tables sized
-     * at start-up; see withSessionTableSize() and the other with*TableSize() methods.
+     * at start-up; see withSessionTableSize() and the other with*TableSize() methods. Values
+     * there are copied, so a live object kept in globalState() only works with one worker.
      *
      * Example:
      * ```php
-     * (new Config())
-     *     ->withWorkerNum(swoole_cpu_num())
-     *     ->withBroker(new SwooleBroker())
+     * (new Config())->withWorkerNum(\OpenSwoole\Util::getCPUNum())
      * ```
      */
     public function withWorkerNum(int $n): self {
+        $this->assertMutable(__FUNCTION__);
         $this->workerNum = max(1, $n);
 
         return $this;
-    }
-
-    public function getWorkerNum(): int {
-        return $this->workerNum;
     }
 
     /**
@@ -974,6 +1051,7 @@ class Config {
      * @param int $maxValueBytes Maximum serialized byte size per value (default 32768)
      */
     public function withGlobalStateTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->assertMutable(__FUNCTION__);
         $this->globalStateTableRows = max(1, $maxRows);
         $this->globalStateTableValueBytes = max(64, $maxValueBytes);
 
@@ -983,8 +1061,9 @@ class Config {
     /**
      * Tune the OpenSwoole\Table that backs scoped signal VALUES in multi-worker mode.
      *
-     * One row per distinct scoped (non-TAB) signal. As with withGlobalStateTableSize(),
-     * $maxRows is a floor rather than a ceiling: size for the count you need.
+     * One row per scoped (non-TAB) signal of a scope some context on any worker uses; the rows of a
+     * scope go when its last context is destroyed. As with withGlobalStateTableSize(), $maxRows is a
+     * floor rather than a ceiling: size for the peak. A write to a full table is dropped and logged.
      *
      * Integer signals are stored in a dedicated atomic column and ignore $maxValueBytes;
      * everything else is PHP-serialized and must fit within it.
@@ -1001,6 +1080,7 @@ class Config {
      * @param int $maxValueBytes Maximum serialized byte size per non-integer value (default 32768)
      */
     public function withScopedSignalTableSize(int $maxRows, int $maxValueBytes = 32768): self {
+        $this->assertMutable(__FUNCTION__);
         $this->scopedSignalTableRows = max(1, $maxRows);
         $this->scopedSignalTableValueBytes = max(64, $maxValueBytes);
 
@@ -1019,14 +1099,23 @@ class Config {
      * the records of the contexts it streams to every quarter of $ttlSeconds or of the revival
      * window, whichever is shorter, so this only governs entries left behind by a crashed worker.
      *
-     * @param int $maxRows        Guaranteed number of tracked contexts (default 4096)
-     * @param int $maxRecordBytes Serialized bytes per record (default 1024; real records are 92-341)
-     * @param int $ttlSeconds     Expiry for a record with no heartbeat (default 3600)
+     * The record also holds the tab's Context::setTabState() values, serialized together, so
+     * every worker reads the same ones. A write that would take the tab past $maxTabStateBytes
+     * throws \OverflowException. The column is reserved for every row: each KB costs about
+     * 2 KB × $maxRows of shared memory, resident from start-up (8 MB at the defaults).
+     *
+     * @param int $maxRows          Guaranteed number of tracked contexts (default 4096)
+     * @param int $maxRecordBytes   Serialized bytes per record (default 1024; real records are 92-341, plus a page
+     *                              query of up to 512)
+     * @param int $ttlSeconds       Expiry for a record with no heartbeat (default 3600)
+     * @param int $maxTabStateBytes Serialized bytes of one tab's tabState() values (default 1024)
      */
-    public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600): self {
+    public function withContextDirectorySize(int $maxRows, int $maxRecordBytes = 1024, int $ttlSeconds = 3600, int $maxTabStateBytes = 1024): self {
+        $this->assertMutable(__FUNCTION__);
         $this->contextDirectoryRows = max(1, $maxRows);
         $this->contextDirectoryRecordBytes = max(128, $maxRecordBytes);
         $this->contextDirectoryTtlSeconds = max(60, $ttlSeconds);
+        $this->contextDirectoryTabStateBytes = max(64, $maxTabStateBytes);
 
         return $this;
     }
@@ -1042,7 +1131,8 @@ class Config {
      * second and logs a warning, and a write that finds the table full drops them on its own worker
      * first. Values must be serializable; one that is not throws \InvalidArgumentException. A single
      * worker keeps session data in a PHP array with no byte cap and drops the least recently used
-     * past 10,000 sessions.
+     * past 10,000 sessions. The record of the cookies regenerateSession() replaced has 4 × $maxSessions
+     * rows, at least 40,000 with a single worker.
      *
      * The table reserves about 2 × $maxSessions (rounded up to a power of two) × $maxBytesPerSession
      * of shared memory: 33 MB at the defaults, 260 MB for 5000 sessions. About 9 MB of it is
@@ -1054,38 +1144,11 @@ class Config {
      * @param int $maxBytesPerSession Serialized byte cap for all of one session's data (default 16384)
      */
     public function withSessionTableSize(int $maxSessions, int $maxBytesPerSession = 16384): self {
+        $this->assertMutable(__FUNCTION__);
         $this->sessionTableRows = max(1, $maxSessions);
         $this->sessionTableValueBytes = max(64, $maxBytesPerSession);
 
         return $this;
-    }
-
-    public function getSessionTableRows(): int {
-        return $this->sessionTableRows;
-    }
-
-    public function getSessionTableValueBytes(): int {
-        return $this->sessionTableValueBytes;
-    }
-
-    public function getContextDirectoryRows(): int {
-        return $this->contextDirectoryRows;
-    }
-
-    public function getContextDirectoryRecordBytes(): int {
-        return $this->contextDirectoryRecordBytes;
-    }
-
-    public function getContextDirectoryTtlSeconds(): int {
-        return $this->contextDirectoryTtlSeconds;
-    }
-
-    public function getScopedSignalTableRows(): int {
-        return $this->scopedSignalTableRows;
-    }
-
-    public function getScopedSignalTableValueBytes(): int {
-        return $this->scopedSignalTableValueBytes;
     }
 
     /**
@@ -1108,104 +1171,547 @@ class Config {
      * @param int    $flushMs How often the leader worker drains the dirty set (default 1000)
      */
     public function withPersistentGlobalState(string $path, int $flushMs = 1000): self {
+        $this->assertMutable(__FUNCTION__);
         $this->globalStatePath = $path;
         $this->globalStateFlushMs = max(50, $flushMs);
 
         return $this;
     }
 
+    /**
+     * Turn the Via Dev Bar on or off: a tabbed debug overlay (traces, signals, SSE patches, request, scopes,
+     * errors) injected into every page, plus the `/_via/*` endpoints and the standalone console.
+     *
+     * Without this call it is on in dev mode only. false turns it off in dev mode, true turns it on outside dev
+     * mode, read-only, for an admin-only or demo deployment. Every visitor of such a deployment sees the traces,
+     * scopes, context ids and signal values of all tabs on the worker, like `/_stats`. Editing signals needs dev
+     * mode in any case, see withDevBarOptions().
+     */
+    public function withDevBar(bool $enabled): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->devBar = $enabled;
+
+        return $this;
+    }
+
+    /**
+     * Tune the Dev Bar; null keeps a setting as it is, so a second call changes only what it names.
+     *
+     * @param null|bool $writes let the Signals panel write values back to the server. Writes need dev mode in
+     *                          addition, so a Dev Bar on outside dev mode stays read-only. Without this, the
+     *                          VIA_DEVBAR_WRITES=1 env var turns them on. Any visitor who can reach the page could
+     *                          then change ROUTE, SESSION and GLOBAL state shared with other users.
+     * @param null|int  $traces traces kept per worker (default 100)
+     * @param null|int  $pollMs how often the Dev Bar's trace and log stream checks for new records (default 100 ms)
+     */
+    public function withDevBarOptions(?bool $writes = null, ?int $traces = null, ?int $pollMs = null): self {
+        $this->assertMutable(__FUNCTION__);
+        $this->devBarWrites = $writes ?? $this->devBarWrites;
+        if ($traces !== null) {
+            $this->traceBufferSize = max(1, $traces);
+        }
+        if ($pollMs !== null) {
+            $this->ssePollIntervalMs = max(1, $pollMs);
+        }
+
+        return $this;
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBar()
+     */
+    public function withTracing(?bool $enabled = true): never {
+        Removed::method('Config::withTracing()', 'Use ->withDevBar(true) or ->withDevBar(false).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withTracingWrites(?bool $enabled = null): never {
+        Removed::method('Config::withTracingWrites()', 'Use ->withDevBarOptions(writes: true).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): never {
+        Removed::method('Config::withTraceBufferSize()', 'Use ->withDevBarOptions(traces: $traces).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withDevBarOptions()
+     */
+    public function withSsePollIntervalMs(int $ms): never {
+        Removed::method('Config::withSsePollIntervalMs()', 'Use ->withDevBarOptions(pollMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names isDevMode()
+     */
+    public function getDevMode(): never {
+        Removed::method('Config::getDevMode()', 'Use ->isDevMode().');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withGcIntervalMs()
+     */
+    public function withGcInterval(int $ms): never {
+        Removed::method('Config::withGcInterval()', 'Use ->withGcIntervalMs($ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextCleanupDelay(int $ms): never {
+        Removed::method('Config::withContextCleanupDelay()', 'Use ->withContextTimeouts(cleanupDelayMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextConnectTimeout(int $ms): never {
+        Removed::method('Config::withContextConnectTimeout()', 'Use ->withContextTimeouts(connectMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextReconnectTimeout(int $ms): never {
+        Removed::method('Config::withContextReconnectTimeout()', 'Use ->withContextTimeouts(reconnectMs: $ms).');
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names withContextTimeouts()
+     */
+    public function withContextRevivalWindow(int $ms): never {
+        Removed::method('Config::withContextRevivalWindow()', 'Use ->withContextTimeouts(revivalWindowMs: $ms).');
+    }
+
+    /** @internal */
+    public function getTwigCacheDir(): false|string {
+        return $this->twigCacheDir;
+    }
+
+    /** @internal */
+    public function getStaticDir(): ?string {
+        return $this->staticDir;
+    }
+
+    /**
+     * @internal
+     *
+     * @param string $filePath  absolute path of the file being served
+     * @param string $mimeType  resolved MIME type without a charset suffix, e.g. 'text/css'
+     * @param bool   $versioned the URL carries the file's current content version, such as the Datastar URL
+     */
+    public function getStaticCacheControl(string $filePath, string $mimeType, bool $versioned = false): string {
+        return Settings::cacheControl($this->staticCacheControl, $this->devMode, $filePath, $mimeType, $versioned);
+    }
+
+    /** @internal */
+    public function getSsePollIntervalMs(): int {
+        return $this->ssePollIntervalMs;
+    }
+
+    /** @internal */
+    public function getSseKeepAliveMs(): int {
+        return $this->sseKeepAliveMs;
+    }
+
+    /** @internal */
+    public function getSseMaxQueuedBytes(): int {
+        return $this->sseMaxQueuedBytes;
+    }
+
+    /** @internal */
+    public function isBroadcastCoalescingEnabled(): bool {
+        return $this->broadcastCoalescing;
+    }
+
+    /** @internal */
+    public function getBroadcastTickMs(): int {
+        return $this->broadcastTickMs;
+    }
+
+    /** @internal */
+    public function getHost(): string {
+        return $this->host;
+    }
+
+    /** @internal */
+    public function getPort(): int {
+        return $this->port;
+    }
+
+    /** @internal */
+    public function getLogLevel(): string {
+        return $this->logLevel;
+    }
+
+    /** @internal */
+    public function getTemplateDir(): ?string {
+        return $this->templateDir;
+    }
+
+    /** @internal */
+    public function getShellTemplate(): ?string {
+        return $this->shellTemplate;
+    }
+
+    /**
+     * @internal
+     *
+     * @return array<string, mixed>
+     */
+    public function getSwooleSettings(): array {
+        return $this->openSwooleSettings;
+    }
+
+    /** @internal */
+    public function getSecureCookie(): bool {
+        return $this->secureCookie;
+    }
+
+    /** @internal */
+    public function getSessionCookieSameSite(): string {
+        return $this->sessionCookieSameSite;
+    }
+
+    /** @internal */
+    public function isSessionCookiePartitioned(): bool {
+        return $this->sessionCookiePartitioned;
+    }
+
+    /**
+     * @internal
+     *
+     * @return null|list<string>
+     */
+    public function getFrameAncestors(): ?array {
+        return $this->frameAncestors;
+    }
+
+    /**
+     * @internal
+     *
+     * @return null|list<string>
+     */
+    public function getTrustedOrigins(): ?array {
+        return $this->trustedOrigins;
+    }
+
+    /** @internal */
+    public function getAllowMissingOrigin(): bool {
+        return $this->allowMissingOrigin;
+    }
+
+    /** @internal */
+    public function getStrictTabSignals(): bool {
+        return $this->strictTabSignals;
+    }
+
+    /** @internal */
+    public function getActionRateLimit(): int {
+        return $this->actionRateLimit;
+    }
+
+    /** @internal */
+    public function getActionRateWindow(): int {
+        return $this->actionRateWindow;
+    }
+
+    /** @internal */
+    public function getGcIntervalMs(): int {
+        return $this->gcIntervalMs;
+    }
+
+    /** @internal */
+    public function getContextCleanupDelayMs(): int {
+        return $this->contextCleanupDelayMs;
+    }
+
+    /** @internal */
+    public function getContextConnectTimeoutMs(): int {
+        return $this->contextConnectTimeoutMs;
+    }
+
+    /** @internal */
+    public function getContextReconnectTimeoutMs(): int {
+        return $this->contextReconnectTimeoutMs;
+    }
+
+    /** @internal */
+    public function getSslCertFile(): ?string {
+        return $this->sslCertFile;
+    }
+
+    /** @internal */
+    public function getSslKeyFile(): ?string {
+        return $this->sslKeyFile;
+    }
+
+    /** @internal */
+    public function getBrotli(): bool {
+        return $this->brotli;
+    }
+
+    /** @internal */
+    public function getBrotliDynamicLevel(): int {
+        return $this->brotliDynamicLevel;
+    }
+
+    /** @internal */
+    public function getBrotliStaticLevel(): int {
+        return $this->brotliStaticLevel;
+    }
+
+    /** @internal */
+    public function isH2c(): bool {
+        return $this->h2c;
+    }
+
+    /**
+     * @internal
+     *
+     * @return null|callable(\Throwable): void
+     */
+    public function getBrokerErrorHandler(): ?callable {
+        return $this->brokerErrorHandler;
+    }
+
+    /** @internal */
+    public function getBroker(): MessageBroker {
+        return $this->broker ?? Settings::defaultBroker($this->workerNum);
+    }
+
+    /** @internal */
+    public function getWorkerNum(): int {
+        return $this->workerNum;
+    }
+
+    /** @internal */
+    public function getSessionTableRows(): int {
+        return $this->sessionTableRows;
+    }
+
+    /** @internal */
+    public function getSessionTableValueBytes(): int {
+        return $this->sessionTableValueBytes;
+    }
+
+    /** @internal */
+    public function getContextDirectoryRows(): int {
+        return $this->contextDirectoryRows;
+    }
+
+    /** @internal */
+    public function getContextDirectoryRecordBytes(): int {
+        return $this->contextDirectoryRecordBytes;
+    }
+
+    /** @internal */
+    public function getContextDirectoryTtlSeconds(): int {
+        return $this->contextDirectoryTtlSeconds;
+    }
+
+    /** @internal */
+    public function getScopedSignalTableRows(): int {
+        return $this->scopedSignalTableRows;
+    }
+
+    /** @internal */
+    public function getScopedSignalTableValueBytes(): int {
+        return $this->scopedSignalTableValueBytes;
+    }
+
+    /** @internal */
     public function getGlobalStatePath(): ?string {
         return $this->globalStatePath;
     }
 
+    /** @internal */
     public function getGlobalStateFlushMs(): int {
         return $this->globalStateFlushMs;
     }
 
+    /** @internal */
     public function getGlobalStateTableRows(): int {
         return $this->globalStateTableRows;
     }
 
+    /** @internal */
     public function getGlobalStateTableValueBytes(): int {
         return $this->globalStateTableValueBytes;
     }
 
-    /**
-     * Enable the Via Dev Bar: a tabbed debug overlay (traces, signals, SSE
-     * patches, request, scopes, errors) injected into every page, plus the
-     * `/_via/*` endpoints and standalone console.
-     *
-     * Like `/_stats`, the Dev Bar exposes timings, routes, and live signal
-     * state: it is for development. It defaults to `getDevMode()`, but you may
-     * force it on (e.g. to demo it on a public site) by passing `true`, or off
-     * with `false`. Even when forced on, signal *editing* stays disabled unless
-     * devMode is also on (see {@see withTracingWrites()}).
-     *
-     * @param null|bool $enabled true/false to force, null to follow devMode
-     */
-    public function withTracing(?bool $enabled = true): self {
-        $this->tracing = $enabled;
-
-        return $this;
-    }
-
+    /** @internal */
     public function isTracingEnabled(): bool {
-        return $this->tracing ?? $this->devMode;
+        return $this->devBar ?? $this->devMode;
     }
 
-    /**
-     * Allow the Dev Bar's Signals panel to write values back to the server.
-     *
-     * **Hard production guard:** writes require `devMode` *in addition to* this
-     * flag and tracing being enabled. The leading devMode check means an
-     * explicit `withTracingWrites(true)` is ignored when devMode is off, so
-     * `withTracing(true)` on a public site is always read-only. Editing is
-     * opt-in for local dev via this call or the `VIA_DEVBAR_WRITES=1` env var.
-     *
-     * The abuse surface is real: any visitor who can reach the page could
-     * mutate ROUTE/SESSION/GLOBAL scope state shared with other users. Never
-     * enable this on a deployment exposed to untrusted traffic.
-     *
-     * @param null|bool $enabled true/false to force, null to follow VIA_DEVBAR_WRITES
-     */
-    public function withTracingWrites(?bool $enabled = null): self {
-        $this->tracingWrites = $enabled;
-
-        return $this;
-    }
-
+    /** @internal */
     public function isTracingWritesEnabled(): bool {
-        if (!$this->devMode || !$this->isTracingEnabled()) {
-            return false;
-        }
-
-        if ($this->tracingWrites !== null) {
-            return $this->tracingWrites;
-        }
-
-        $env = getenv('VIA_DEVBAR_WRITES');
-
-        return $env === '1' || $env === 'true';
+        return Settings::devBarWritesEnabled($this->devMode, $this->isTracingEnabled(), $this->devBarWrites);
     }
 
-    /**
-     * Tune the trace ring buffer.
-     *
-     * @param int $traces        Maximum traces retained (default 100)
-     * @param int $maxTraceBytes Soft cap on a serialized trace's size (default 16384)
-     */
-    public function withTraceBufferSize(int $traces = 100, int $maxTraceBytes = 16_384): self {
-        $this->traceBufferSize = max(1, $traces);
-        $this->traceMaxBytes = max(1024, $maxTraceBytes);
-
-        return $this;
-    }
-
+    /** @internal */
     public function getTraceBufferSize(): int {
         return $this->traceBufferSize;
     }
 
-    public function getTraceMaxBytes(): int {
-        return $this->traceMaxBytes;
+    /** @internal */
+    public function isDatastarRocketEnabled(): bool {
+        return $this->datastarRocket;
+    }
+
+    /**
+     * Freeze this Config, so every later with* call throws, and return what the framework reads from it.
+     * A second call returns the same Settings.
+     *
+     * @internal called by new Via()
+     *
+     * @throws \LogicException when withTemplateEngine() and withTemplateDir() or withTwigCacheDir() are both set,
+     *                         or withTemplateDir() is set without twig/twig; the Config then stays unfrozen
+     */
+    public function freeze(): Settings {
+        return $this->settings ??= new Settings(
+            host: $this->host,
+            port: $this->port,
+            devMode: $this->devMode,
+            logLevel: $this->logLevel,
+            templateEngine: $this->templateEngine(),
+            shellTemplate: $this->shellTemplate,
+            basePath: $this->basePath,
+            staticDir: $this->staticDir,
+            datastarRocketEnabled: $this->datastarRocket,
+            datastarUrl: $this->getDatastarUrl(),
+            importMapJson: $this->datastarRocket || $this->importMapImports !== [] || $this->importMapIntegrity !== []
+                ? json_encode($this->getImportMap(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR)
+                : null,
+            ssePollIntervalMs: $this->ssePollIntervalMs,
+            sseKeepAliveMs: $this->sseKeepAliveMs,
+            sseMaxQueuedBytes: $this->sseMaxQueuedBytes,
+            broadcastCoalescingEnabled: $this->broadcastCoalescing,
+            broadcastTickMs: $this->broadcastTickMs,
+            broadcastThrottles: $this->broadcastThrottles,
+            swooleSettings: $this->openSwooleSettings,
+            secureCookie: $this->secureCookie,
+            sessionCookieSameSite: $this->sessionCookieSameSite,
+            sessionCookiePartitioned: $this->sessionCookiePartitioned,
+            frameAncestors: $this->frameAncestors,
+            trustedOrigins: $this->trustedOrigins,
+            allowMissingOrigin: $this->allowMissingOrigin,
+            strictTabSignals: $this->strictTabSignals,
+            actionRateLimit: $this->actionRateLimit,
+            actionRateWindow: $this->actionRateWindow,
+            gcIntervalMs: $this->gcIntervalMs,
+            gcOnGrowth: $this->gcOnGrowth,
+            contextCleanupDelayMs: $this->contextCleanupDelayMs,
+            contextConnectTimeoutMs: $this->contextConnectTimeoutMs,
+            contextReconnectTimeoutMs: $this->contextReconnectTimeoutMs,
+            contextRevivalWindowMs: $this->contextRevivalWindowMs,
+            contextForwardTimeoutMs: $this->contextForwardTimeoutMs,
+            sslCertFile: $this->sslCertFile,
+            sslKeyFile: $this->sslKeyFile,
+            https: $this->isHttps(),
+            brotli: $this->brotli,
+            brotliDynamicLevel: $this->brotliDynamicLevel,
+            brotliStaticLevel: $this->brotliStaticLevel,
+            h2c: $this->h2c,
+            brokerErrorHandler: $this->brokerErrorHandler === null ? null : \Closure::fromCallable($this->brokerErrorHandler),
+            workerNum: $this->workerNum,
+            sessionTableRows: $this->sessionTableRows,
+            sessionTableValueBytes: $this->sessionTableValueBytes,
+            contextDirectoryRows: $this->contextDirectoryRows,
+            contextDirectoryRecordBytes: $this->contextDirectoryRecordBytes,
+            contextDirectoryTtlSeconds: $this->contextDirectoryTtlSeconds,
+            contextDirectoryTabStateBytes: $this->contextDirectoryTabStateBytes,
+            scopedSignalTableRows: $this->scopedSignalTableRows,
+            scopedSignalTableValueBytes: $this->scopedSignalTableValueBytes,
+            globalStatePath: $this->globalStatePath,
+            globalStateFlushMs: $this->globalStateFlushMs,
+            globalStateTableRows: $this->globalStateTableRows,
+            globalStateTableValueBytes: $this->globalStateTableValueBytes,
+            tracingEnabled: $this->devBar ?? $this->devMode,
+            traceBufferSize: $this->traceBufferSize,
+            devBarWrites: $this->devBarWrites,
+            configuredBroker: $this->broker,
+            staticCacheControlPolicy: $this->staticCacheControl,
+        );
+    }
+
+    /**
+     * The engine from withTemplateEngine(), or the TwigEngine withTemplateDir() describes; null when there is neither.
+     */
+    private function templateEngine(): ?TemplateEngine {
+        if ($this->templateEngine !== null) {
+            if ($this->templateDir !== null || $this->twigCacheDir !== false) {
+                throw new \LogicException('withTemplateEngine() replaces withTemplateDir() and withTwigCacheDir(): set only the engine, and give a TwigEngine its directories as new TwigEngine($templateDir, $cacheDir).');
+            }
+
+            return $this->templateEngine;
+        }
+
+        return $this->templateDir === null ? null : new TwigEngine($this->templateDir, $this->twigCacheDir);
+    }
+
+    private function assertMutable(string $method): void {
+        if ($this->settings !== null) {
+            throw new \LogicException(
+                "Config::{$method}() was called after new Via(\$config), which freezes the Config: a later change would be "
+                . 'ignored or only half applied. Make every with* call before new Via().'
+            );
+        }
+    }
+
+    /**
+     * @return array{version: ?string, integrity: ?string}
+     */
+    private function datastarFingerprint(): array {
+        $path = DatastarBundle::path($this->datastarRocket);
+
+        return $this->datastarFingerprints[$path] ??= DatastarBundle::fingerprint($path);
+    }
+
+    /**
+     * @param mixed $value a key or value of a withImportMap() array, whose types PHP does not check; a list
+     *                     or a numeric specifier arrives as an int key
+     */
+    private static function importMapString(mixed $value, string $what): string {
+        if (!\is_string($value) || $value === '' || !mb_check_encoding($value, 'UTF-8')) {
+            throw new \InvalidArgumentException("Invalid import map {$what}: expected a non-empty UTF-8 string, got " . get_debug_type($value));
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param mixed $value a key or value of a withImportMap() array, whose types PHP does not check
+     */
+    private static function importMapUrl(mixed $value, string $what): string {
+        $url = self::importMapString($value, $what);
+        // Every page gets the same map, and the browser resolves './' and '../' against each page's URL
+        if (preg_match('#^(?:/|[a-zA-Z][a-zA-Z0-9+.-]*:)#', $url) !== 1) {
+            throw new \InvalidArgumentException("Invalid import map {$what}: expected an absolute URL or one starting with '/', got '{$url}'");
+        }
+
+        return $url;
+    }
+
+    /**
+     * One or more space-separated hashes whose base64 digest has the algorithm's length.
+     */
+    private static function isIntegrity(string $value): bool {
+        foreach (explode(' ', $value) as $hash) {
+            if (preg_match('#^sha(256|384|512)-([A-Za-z0-9+/]+={0,2})$#', $hash, $m) !== 1) {
+                return false;
+            }
+            $digest = base64_decode($m[2], true);
+            if ($digest === false || \strlen($digest) * 8 !== (int) $m[1] || base64_encode($digest) !== $m[2]) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

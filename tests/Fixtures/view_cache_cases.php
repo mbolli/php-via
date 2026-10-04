@@ -16,6 +16,9 @@ declare(strict_types=1);
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
+// Patches go to arrays: with channels each drain would wait out the SSE keep-alive per context.
+putenv('VIA_TEST_MODE=1');
+
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
@@ -51,7 +54,7 @@ Coroutine::run(static function () use ($case): void {
                 ++$GLOBALS['renders'];
 
                 return '<p>v=' . $GLOBALS['v'] . '</p>';
-            });
+            }, shareRender: true);
             $app->contexts["/board_/{$i}"] = $c;
             $app->getApp()->registerContext($c);
             $contexts[] = $c;
@@ -73,6 +76,7 @@ Coroutine::run(static function () use ($case): void {
         }
         echo 'renders=', $GLOBALS['renders'], "\n";
         echo 'fresh=', $fresh, "\n";
+        Timer::clearAll();
 
         return;
     }
@@ -90,7 +94,7 @@ Coroutine::run(static function () use ($case): void {
                 }
 
                 return '<p>v=' . $v . '</p>';
-            });
+            }, shareRender: true);
             $app->contexts[$id] = $c;
             $app->getApp()->registerContext($c);
 
@@ -118,6 +122,7 @@ Coroutine::run(static function () use ($case): void {
         // An action's sync() before the next broadcast reads the cache.
         $x2->sync();
         echo 'sync_fresh=', (int) str_contains(implode('', drainElements($x2)), 'v=2'), "\n";
+        Timer::clearAll();
 
         return;
     }
@@ -130,7 +135,7 @@ Coroutine::run(static function () use ($case): void {
         if (!empty($GLOBALS['yield'])) {
             Coroutine::usleep(10_000);
         }
-        $c->onDisconnect(static function (): void { ++$GLOBALS['cleaned']; });
+        $c->onCleanup(static function (): void { ++$GLOBALS['cleaned']; });
         $c->setInterval(static function (): void { ++$GLOBALS['ticks']; }, 5);
         $c->view(static fn (): string => '<div id="p">x</div>');
     });

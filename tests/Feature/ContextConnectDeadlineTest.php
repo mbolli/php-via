@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 /*
- * A context with no SSE stream on its worker is destroyed after Config::withContextConnectTimeout().
+ * A context with no SSE stream on its worker is destroyed after Config::withContextTimeouts(connectMs:).
  * Without it, a page whose stream never connected, and every copy an action rebuilt on a worker the
- * tab does not stream from, stayed in memory until the worker stopped.
+ * tab does not stream from, stayed in memory until the worker stopped. Such actions now go to the
+ * streaming worker, so they leave no copy at all.
  */
 
 /** @return array<string, string> the key=value lines of a Fixtures/connect_deadline_server.php run, plus its raw output */
@@ -41,16 +42,15 @@ test('a connect timeout of 0 keeps a page that never connects', function (): voi
     ;
 });
 
-test('a copy an action rebuilt on a worker the tab does not stream from is freed, the streaming worker keeps the context', function (): void {
+test('an action on a worker the tab does not stream from leaves no copy there, the streaming worker keeps the context', function (): void {
     $r = connectDeadlineFixture('xworker');
 
     expect($r['workers'] ?? null)->toBe('1', $r['out'])
         ->and($r['actions'] ?? null)->toBe('200,200,200', $r['out'])
-        ->and($r['copy_after_action'] ?? null)->toBe('1', $r['out'])
-        ->and($r['copy_kept_while_active'] ?? null)->toBe('1', 'each action starts the timeout again: ' . $r['out'])
-        ->and($r['copy_freed'] ?? null)->toBe('1', $r['out'])
+        ->and($r['copy_after_action'] ?? null)->toBe('0', 'the action goes to the streaming worker: ' . $r['out'])
+        ->and($r['copy_kept_while_active'] ?? null)->toBe('0', $r['out'])
         ->and($r['stream_kept'] ?? null)->toBe('1', $r['out'])
-        ->and($r['action_after_free'] ?? null)->toBe('200', 'the next action rebuilds the copy: ' . $r['out'])
+        ->and($r['action_after_free'] ?? null)->toBe('200', $r['out'])
     ;
 });
 

@@ -16,7 +16,7 @@ namespace Mbolli\PhpVia;
  * - Built-in constants (TAB, ROUTE, SESSION, GLOBAL)
  * - Custom strings (e.g., "room:123", "user:456", "topic:stock:AAPL")
  */
-class Scope {
+final class Scope {
     /**
      * Built-in scope: Tab-scoped (default).
      * Each browser tab/context has isolated state.
@@ -42,6 +42,9 @@ class Scope {
      */
     public const string GLOBAL = 'global';
 
+    /** The characters a scope crosses workers and nodes with, see isValidWireScope() */
+    private const string WIRE_CHARS = "[A-Za-z0-9_\\-.~:\\/@%!$&'()+,;={}]";
+
     /**
      * Parse a scope string into its components.
      *
@@ -52,6 +55,8 @@ class Scope {
      * - "user:123:notifications" => ["user", "123", "notifications"]
      *
      * @return array<string>
+     *
+     * @internal
      */
     public static function parse(string $scope): array {
         return explode(':', $scope);
@@ -68,6 +73,8 @@ class Scope {
 
     /**
      * Check if a scope is a built-in scope.
+     *
+     * @internal
      */
     public static function isBuiltIn(string $scope): bool {
         return \in_array($scope, [self::TAB, self::ROUTE, self::SESSION, self::GLOBAL], true);
@@ -75,6 +82,8 @@ class Scope {
 
     /**
      * Check if a scope is route-based (either ROUTE or includes route).
+     *
+     * @internal
      */
     public static function isRouteBased(string $scope, ?string $route = null): bool {
         if ($scope === self::ROUTE) {
@@ -97,6 +106,60 @@ class Scope {
     }
 
     /**
+     * The scope all tabs of one browser session share, as Scope::SESSION resolves inside a context.
+     *
+     * Opaque: it is derived from the session id but never contains it, since scopes reach the Dev Bar,
+     * traces, broker messages and signal ids in the page. The format may change; build it only through
+     * this method.
+     *
+     * @param string $sessionId the id $c->getSessionId() returns
+     */
+    public static function sessionScope(string $sessionId): string {
+        return 'session:' . substr(hash('sha256', 'via.session-scope|' . $sessionId), 0, 32);
+    }
+
+    /**
+     * Resolve a scope as user code writes it to the scope contexts register under.
+     *
+     * With a context, Scope::ROUTE becomes its route's scope and Scope::SESSION its session's;
+     * Scope::TAB and every other scope stay as they are. Without one, as in Via::broadcast(), there is
+     * nothing to resolve the bare TAB, ROUTE and SESSION against, so they throw.
+     *
+     * @internal
+     *
+     * @param string $caller the public method, named in the exception
+     *
+     * @throws \InvalidArgumentException for a bare TAB, ROUTE or SESSION without a context
+     * @throws \LogicException           for Scope::SESSION on a context without a session
+     */
+    public static function resolve(string $scope, ?Context $context, string $caller): string {
+        if ($context !== null) {
+            return match ($scope) {
+                self::ROUTE => self::routeScope($context->getRoute()),
+                self::SESSION => self::sessionScope($context->getSessionId() ?? throw new \LogicException(
+                    "{$caller} cannot resolve Scope::SESSION: context {$context->getId()} has no session."
+                )),
+                default => $scope,
+            };
+        }
+
+        return match ($scope) {
+            self::TAB => throw new \InvalidArgumentException(
+                "{$caller} needs a shared scope, and Scope::TAB names no one else. To update the calling tab use \$c->sync(); "
+                . "otherwise pass Scope::GLOBAL, Scope::routeScope('/path'), Scope::sessionScope(\$sessionId) or a custom scope."
+            ),
+            self::ROUTE => throw new \InvalidArgumentException(
+                "{$caller} has no route to resolve Scope::ROUTE against. Pass Scope::routeScope('/path')."
+            ),
+            self::SESSION => throw new \InvalidArgumentException(
+                "{$caller} has no session to resolve Scope::SESSION against. Pass Scope::sessionScope(\$sessionId), "
+                . 'with the id from $c->getSessionId().'
+            ),
+            default => $scope,
+        };
+    }
+
+    /**
      * Check if a scope matches a pattern.
      *
      * Patterns support wildcards:
@@ -105,6 +168,8 @@ class Scope {
      *
      * @param string $scope   The scope to check
      * @param string $pattern The pattern to match against
+     *
+     * @internal
      */
     public static function matches(string $scope, string $pattern): bool {
         // Exact match
@@ -125,28 +190,20 @@ class Scope {
     /**
      * Validate a scope string received from the message broker wire.
      *
-     * Accepts:
-     * - Built-in names: tab, route, session, global
-     * - Route-qualified: route:/any/path
-     * - Custom scopes: colon-separated segments of [a-zA-Z0-9_\-.*:/], max 256 chars
+     * Accepts, up to 256 bytes, the characters of a URL path and of a route pattern: letters, digits,
+     * `_ - . ~ : / @ % ! $ & ' ( ) + , ; =` and the `{` `}` of a route parameter, so the route scope of
+     * /blog/{slug} crosses too. One `*` after the first character makes a pattern broadcast, such as room:*.
      *
-     * Rejects NUL bytes, shell metacharacters, overly long strings, or strings that
-     * don't match the expected scope grammar. This prevents a compromised or
-     * misconfigured broker from injecting arbitrary strings into syncLocally().
+     * Rejects whitespace, control characters, quotes, backslashes, angle brackets and anything else, so a
+     * compromised or misconfigured broker cannot pass arbitrary strings into syncLocally().
+     *
+     * @internal
      */
     public static function isValidWireScope(string $scope): bool {
         if ($scope === '' || \strlen($scope) > 256) {
             return false;
         }
 
-        // Built-in single-word scopes.
-        if (self::isBuiltIn($scope)) {
-            return true;
-        }
-
-        // All other scopes: colon-separated segments where each segment consists only
-        // of safe characters. Wildcards (*) are allowed for pattern-broadcast scopes
-        // (e.g. "room:*"). Slashes are required for route-qualified scopes (route:/path).
-        return (bool) preg_match('/^[a-zA-Z0-9_\-.:\/]+(?:\*[a-zA-Z0-9_\-.:\/]*)?$/', $scope);
+        return (bool) preg_match('/^' . self::WIRE_CHARS . '+(?:\*' . self::WIRE_CHARS . '*)?$/', $scope);
     }
 }

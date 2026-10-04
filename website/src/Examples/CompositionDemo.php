@@ -54,35 +54,32 @@ final class CompositionDemo {
         $dogs = $ctx->component(VoteWidget::class, 'dogs');
         $parrots = $ctx->component(VoteWidget::class, 'parrots');
 
-        // Per-client render, declared: `count` and `nameInput` are TAB-scoped, so the output
-        // differs per tab. The SESSION and GLOBAL signals put this context in shared scopes, which
-        // is what makes the declaration worth making explicit rather than leaving to scope order.
         // The widgets render with the page, so a page re-render carries their current votes.
-        $ctx->view(fn (): string => $ctx->render('examples/composition.html.twig', [
-            'title' => '🏗️ Composition API',
-            'description' => 'Class-based page and component API using PHP attributes: <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code>, and <code>#[Action]</code>.',
+        $ctx->view('examples/composition.html.twig', fn (): array => [
+            'title' => 'Composition API',
+            'description' => 'Save a name for all your tabs, click a counter that adds one more each time, and vote for an animal with every other visitor. The page and its vote widgets are classes built with <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code> and <code>#[Action]</code>.',
             'summary' => [
                 '<strong>#[Signal]</strong> creates a TAB-scoped reactive signal backed by a client-visible store entry. Client-writable via <code>data-bind</code>. Each browser tab has its own isolated copy.',
-                '<strong>#[Persist]</strong> is a plain server-side instance property, not a signal, not visible to the client. Because the class instance lives for the lifetime of the tab connection, it persists across action calls.',
-                '<strong>#[Signal(Scope::SESSION)]</strong> is a SESSION-scoped signal. Shared across all open tabs of the same browser session. Saving a name here auto-broadcasts to all other tabs instantly.',
+                '<strong>#[Persist]</strong> is a plain server-side instance property, not a signal, not visible to the client. Because the class instance lives as long as the tab\'s context, it persists across action calls.',
+                '<strong>#[Signal(Scope::SESSION)]</strong> is a SESSION-scoped signal. Shared across all open tabs of the same browser session. Saving a name here broadcasts it to the other tabs.',
                 '<strong>#[Signal(Scope::GLOBAL)]</strong> is a GLOBAL-scoped signal. Shared across every connected user. The <code>totalClicks</code> counter increments for all users simultaneously, regardless of which tab triggered it.',
                 '<strong>#[Action]</strong> marks a public method as a client-callable action. The optional <code>name:</code> argument overrides the URL slug: <code>resetTab</code> is exposed as <code>/_action/reset-tab</code>.',
-                '<strong>Components + GLOBAL signals</strong>: <code>VoteWidget</code> is mounted three times with <code>#[Signal(Scope::GLOBAL)] votes</code>. SignalFactory puts the component namespace into scoped signal IDs, giving each animal its own persistent global counter: <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>, <code>global_parrots_votes____kn</code>.',
+                '<strong>Components + GLOBAL signals</strong>: <code>VoteWidget</code> is mounted three times with <code>#[Signal(Scope::GLOBAL)] votes</code>. SignalFactory puts the component namespace into scoped signal IDs, giving each animal its own global counter: <code>global_cats_votes____kn</code>, <code>global_dogs_votes____kn</code>, <code>global_parrots_votes____kn</code>.',
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'nameInput', 'type' => 'string', 'scope' => 'TAB', 'default' => "''", 'desc' => 'Client-writable input bound via data-bind. Holds the typed name until saveName is called.'],
-                    ['name' => 'name', 'type' => 'string', 'scope' => 'SESSION', 'default' => 'Anonymous', 'desc' => 'Promoted from nameInput by saveName. SESSION scope auto-broadcasts to all tabs of this session.'],
+                    ['name' => 'nameInput', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Client-writable input bound via data-bind. Holds the typed name until saveName is called.'],
+                    ['name' => 'name', 'type' => 'string', 'scope' => 'SESSION', 'default' => '"Anonymous"', 'desc' => 'Promoted from nameInput by saveName. SESSION scope auto-broadcasts to all tabs of this session.'],
                     ['name' => 'count', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Per-tab counter. Each click adds the current multiplier: grows +1, +2, +3… proving #[Persist] survives between actions.'],
                     ['name' => 'multiplier', 'type' => 'int', 'scope' => 'Persist', 'default' => '1', 'desc' => 'Server-only instance property (not a signal). Invisible to the client. Grows by 1 on each increment call.'],
                     ['name' => 'totalClicks', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Counts every action call by every user. GLOBAL scope auto-broadcasts to all connected sessions.'],
-                    ['name' => 'votes (VoteWidget)', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Per-animal vote counter. SignalFactory namespaces the ID: global_cats_votes____kn, global_dogs_votes____kn, global_parrots_votes____kn. Persistent and shared across all users.'],
+                    ['name' => 'votes (VoteWidget)', 'type' => 'int', 'scope' => 'GLOBAL', 'default' => '0', 'desc' => 'Per-animal vote counter. SignalFactory namespaces the ID: global_cats_votes____kn, global_dogs_votes____kn, global_parrots_votes____kn. Shared across all users, and back to 0 once no context uses the GLOBAL scope.'],
                 ],
                 'actions' => [
                     ['name' => 'increment', 'desc' => 'Adds multiplier to count, then bumps both multiplier and totalClicks.'],
                     ['name' => 'reset-tab', 'desc' => 'Resets count and multiplier for this tab only. Custom slug via #[Action(name: \'reset-tab\')].'],
-                    ['name' => 'saveName', 'desc' => 'Copies nameInput → name (SESSION signal). Auto-broadcasts to all of this user\'s tabs.'],
-                    ['name' => 'vote', 'desc' => 'VoteWidget action. Independent per instance: cats.vote, dogs.vote, parrots.vote. Votes persist globally across all users.'],
+                    ['name' => 'saveName', 'desc' => 'Copies nameInput to name (SESSION signal). Auto-broadcasts to all of this user\'s tabs.'],
+                    ['name' => 'vote', 'desc' => 'VoteWidget action. Independent per instance: cats.vote, dogs.vote, parrots.vote. Every user sees the same votes.'],
                 ],
                 'views' => [
                     ['name' => 'composition.html.twig', 'desc' => 'Page shell. Renders all signals and three embedded VoteWidget components.'],
@@ -98,7 +95,7 @@ final class CompositionDemo {
             'cats' => $cats(),
             'dogs' => $dogs(),
             'parrots' => $parrots(),
-        ]), cacheUpdates: false);
+        ]);
     }
 
     #[Action]

@@ -12,13 +12,13 @@ use Mbolli\PhpVia\Via;
 /**
  * Composition API version of the theme builder.
  *
- * The undo/redo history is per-connection state, which maps directly onto #[Persist]:
- * each connection gets its own instance, so $history and $historyIdx live for exactly
- * as long as the tab is open and are freed automatically when it closes. That removes
- * the closure version's static maps keyed by context id, and its onDisconnect cleanup.
+ * The undo/redo history is per-tab state, which maps directly onto #[Persist]:
+ * each tab gets its own instance, so $history and $historyIdx live as long as the
+ * tab's context and are freed with it. No static maps keyed by context id, no
+ * onCleanup hook.
  *
  * There are no signals: the visual state is server-authoritative. Each action mutates
- * the history array and calls $ctx->sync() to re-render the (callable) demo view.
+ * the history array and calls $ctx->sync() to re-render the demo block.
  */
 final class ThemeBuilderExample {
     /** @var array<string, string> slot => default hex color */
@@ -62,20 +62,20 @@ final class ThemeBuilderExample {
     public int $historyIdx = 0;
 
     public function view(Context $ctx): void {
-        $ctx->view(fn (): string => $ctx->render('examples/theme_builder.html.twig', [
-            'title' => '🎨 Theme Builder',
-            'description' => 'Composition API: undo/redo history lives in a <code>#[Persist]</code> array (per-connection server state, no signals). Click swatches to repaint the preview card server-side.',
+        $ctx->view('examples/theme_builder.html.twig', fn (): array => [
+            'title' => 'Theme Builder',
+            'description' => 'Click the swatches to repaint the preview card, then undo and redo your changes. The history is a <code>#[Persist]</code> array: server state per tab, with no signals.',
             'summary' => [
-                '<strong>#[Persist] history</strong>: the undo/redo stack is a plain instance array. Each connection gets its own instance, so no static maps keyed by context id are needed; the state is freed automatically when the tab closes.',
-                '<strong>No signals, no onDisconnect</strong>: the visual state is fully server-authoritative and bound to the instance lifetime. The closure version\'s manual onDisconnect cleanup disappears entirely.',
+                '<strong>#[Persist] history</strong>: the undo/redo stack is a plain instance array. Each tab gets its own instance, so no static maps keyed by context id are needed; the state is freed with the tab\'s context.',
+                '<strong>No signals, no onCleanup</strong>: the visual state is fully server-authoritative and bound to the instance lifetime, so there is nothing to clean up by hand.',
                 '<strong>Undo/redo without JavaScript</strong>: setColor pushes a new entry; undo decrements <code>$this->historyIdx</code>, redo increments it. History truncation on branch is a single array_slice.',
-                '<strong>Callable view + $ctx->sync()</strong>: each #[Action] mutates the history, then calls sync() to re-render. The view closure re-reads the live <code>$this->history</code> entry every render.',
+                '<strong>Data closure + $ctx->sync()</strong>: each #[Action] mutates the history, then calls sync() to re-render. The view\'s data closure re-reads the live <code>$this->history</code> entry every render.',
                 '<strong>Input validation</strong>: only pre-approved swatch hex values are accepted. The server ignores any color not in its whitelist, making the action safe from injected values.',
                 '<strong>block: \'demo\'</strong>: on every undo/redo/setColor, only the demo block is re-rendered and morphed. The page header and anatomy panel stay static.',
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'history', 'type' => 'array', 'scope' => 'Persist', 'default' => '[default theme]', 'desc' => '#[Persist] undo/redo stack. Per-connection instance state, not a signal, never sent to the client.'],
+                    ['name' => 'history', 'type' => 'array', 'scope' => 'Persist', 'default' => '[default theme]', 'desc' => '#[Persist] undo/redo stack. Per-tab instance state, not a signal, never sent to the client.'],
                     ['name' => 'historyIdx', 'type' => 'int', 'scope' => 'Persist', 'default' => '0', 'desc' => '#[Persist] index of the active history entry. Undo/redo move this pointer.'],
                 ],
                 'actions' => [
@@ -85,7 +85,7 @@ final class ThemeBuilderExample {
                     ['name' => 'reset', 'desc' => 'Resets history to the single default theme entry.'],
                 ],
                 'views' => [
-                    ['name' => 'theme_builder.html.twig', 'desc' => 'Unchanged from the closure version. Preview uses inline CSS from the current history entry. Full demo block re-renders on each action.'],
+                    ['name' => 'theme_builder.html.twig', 'desc' => 'Preview uses inline CSS from the current history entry. The demo block re-renders on each action.'],
                 ],
             ],
             'githubLinks' => [
@@ -99,7 +99,7 @@ final class ThemeBuilderExample {
             'historyIdx' => $this->historyIdx,
             'swatches' => self::SWATCHES,
             'slotLabels' => self::SLOT_LABELS,
-        ]), block: 'demo', cacheUpdates: false);
+        ], block: 'demo');
     }
 
     #[Action]

@@ -132,13 +132,42 @@ describe('page render', function (): void {
         expect($via->contexts)->toBe([]);
         expect($via->contextSessions)->toBe([]);
         expect($via->getApp()->getAllContexts())->toBe([]);
-        expect($via->getContextsByScope(Scope::routeScope('/viewthrow')))->toBe([]);
+        expect($via->getLocalContexts(Scope::routeScope('/viewthrow')))->toBe([]);
 
         $renders = 0;
         ob_start();
         $via->broadcast(Scope::routeScope('/viewthrow'));
         ob_end_clean();
         expect($renders)->toBe(0);
+    });
+
+    test('in dev mode the 500 names the exception class and its escaped message', function (): void {
+        $via = createVia((new Config())->withDevMode(true));
+        $via->page('/devthrow', function (Context $c): void {
+            $c->view('<p>markup</p>');
+        });
+
+        [, $response] = getThroughRequestHandler($via, '/devthrow');
+
+        expect($response->statusCode)->toBe(500)
+            ->and($response->headers['Content-Type'] ?? null)->toBe('text/html; charset=utf-8')
+            ->and($response->body)->toContain('InvalidArgumentException: view() takes a template name')
+            ->and($response->body)->toContain('&lt;div&gt;')
+            ->and($response->body)->not->toContain('<div>')
+        ;
+    });
+
+    test('outside dev mode the 500 body stays generic', function (): void {
+        $via = createVia();
+        $via->page('/prodthrow', function (Context $c): void {
+            throw new RuntimeException('secret detail');
+        });
+
+        [, $response] = getThroughRequestHandler($via, '/prodthrow');
+
+        expect($response->statusCode)->toBe(500)
+            ->and($response->body)->toBe('Internal Server Error')
+        ;
     });
 
     test('a page handler that throws clears the timers and scopes it registered', function (): void {
@@ -164,7 +193,7 @@ describe('page render', function (): void {
         expect($log)->toContain('Page handler exception on /handlerthrow: RuntimeException: handler failed');
         expect($alive)->toBeFalse();
         expect($via->contextSessions)->toBe([]);
-        expect($via->getContextsByScope('room:doomed'))->toBe([]);
+        expect($via->getLocalContexts('room:doomed'))->toBe([]);
     });
 });
 

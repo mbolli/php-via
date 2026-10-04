@@ -6,7 +6,6 @@
         "php": "^8.4",
         "ext-openswoole": "^26.0",
         "starfederation/datastar-php": "^1.0",
-        "twig/twig": "^3.0",
         "psr/http-server-middleware": "^1.0",
         "nyholm/psr7": "^1.8",
         "openswoole/core": "^26.2"
@@ -18,7 +17,11 @@
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan-deprecation-rules": "^2.0",
         "pestphp/pest": "^5.0",
-        "openswoole/ide-helper": "^26.2"
+        "openswoole/ide-helper": "^26.2",
+        "twig/twig": "^3.10"
+    },
+    "conflict": {
+        "twig/twig": "<3.10"
     },
     "license": "MIT",
     "autoload": {
@@ -40,7 +43,8 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "suggest": {
-        "ext-brotli": "Required for Config::withBrotli(): Native Brotli compression for pages, static assets, and SSE streams"
+        "twig/twig": "Twig templates for views, with Config::withTemplateDir() or withTemplateEngine(new Mbolli\\PhpVia\\Twig\\TwigEngine(...))",
+        "ext-brotli": "Brotli level 11 for static files as soon as it is loaded (compressed before the server listens), and for pages and SSE streams with Config::withBrotli()"
     },
     "config": {
         "process-timeout": 0,

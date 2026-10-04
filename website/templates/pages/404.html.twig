@@ -3,13 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#2563eb">
+    <meta name="theme-color" content="#0c0e24" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#f3f4fa" media="(prefers-color-scheme: light)">
     <link rel="stylesheet" href="{{ basePath }}css/site.css?v={{ assetVersion }}">
-    <title>404: Page Not Found · php-via</title>
-    <meta name="description" content="The page you're looking for doesn't exist or was moved.">
+    <link rel="icon" href="{{ basePath }}logo-icon-128.png" type="image/png">
+    <title>Page not found (404) · php-via</title>
+    <meta name="description" content="This address has no page on the php-via website.">
     <meta name="robots" content="noindex">
 </head>
-<body>
+<body class="page-px">
     <div class="bg-watermark" aria-hidden="true"></div>
     <nav class="site-nav" role="navigation" aria-label="Main navigation">
         <div class="nav-inner">
@@ -35,20 +37,25 @@
     </nav>
 
     <main id="content">
-        <section class="error-page">
-            <div class="error-page-inner">
-                <div class="hero-eyebrow">
-                    <span>⚠️</span> Error
+        <section class="px-hero px-hero--page px-error">
+            <div class="px-wrap px-hero-grid">
+                <div class="px-hero-copy">
+                    <p class="px-error-code" aria-hidden="true">404</p>
+                    <h1 class="px-page-title">Page not found</h1>
+                    <p class="px-hero-lead">
+                        This site has no page at <code>{{ requestedPath }}</code>. The page may have
+                        moved, or the link may contain a typo.
+                    </p>
+                    <div class="px-actions">
+                        <a href="{{ basePath }}" class="px-btn px-btn--primary"><span aria-hidden="true">←</span> Homepage</a>
+                        <a href="{{ basePath }}docs/getting-started" class="px-btn">Docs</a>
+                        <a href="{{ basePath }}examples" class="px-btn px-btn--ghost">Examples</a>
+                    </div>
                 </div>
-                <p class="error-code">404</p>
-                <h1>Route not found.</h1>
-                <p class="hero-tagline">
-                    The page you're looking for doesn't exist or was moved.<br>
-                    <code>{{ requestedPath }}</code>
-                </p>
-                <div class="hero-ctas">
-                    <a href="{{ basePath }}" class="btn btn-primary">← Back home</a>
-                    <a href="{{ basePath }}docs/getting-started" class="btn btn-secondary">Read the docs</a>
+                <div class="px-terminal" role="group" aria-label="The request and the server's answer">
+                    <div class="px-terminal-bar">HTTP</div>
+                    <pre class="px-terminal-body"><span class="px-terminal-prompt" aria-hidden="true">&gt; </span>GET {{ requestedPath }} HTTP/1.1
+<span class="px-terminal-err"><span aria-hidden="true">&lt; </span>HTTP/1.1 404 Not Found</span></pre>
                 </div>
             </div>
         </section>

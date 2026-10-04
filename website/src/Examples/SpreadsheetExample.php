@@ -10,14 +10,12 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
+use PhpVia\Website\Support\Sqlite;
 
 final class SpreadsheetExample {
     public const string SLUG = 'spreadsheet';
 
     private const string SCOPE = 'example:spreadsheet';
-
-    /** Matches the framework's cap on revival records. */
-    private const int MAX_POSITIONS = 10_000;
 
     /** @var array<string, array{row: int, col: int, hue: int}> contextId => cursor */
     private static array $cursors = [];
@@ -28,16 +26,9 @@ final class SpreadsheetExample {
     /** @var array<string, true> contextId => an edit startEdit opened that no commit, Escape or move has ended yet */
     private static array $openEdits = [];
 
-    /**
-     * Position of a destroyed context, for a revival. Focus and viewport are server-owned, so the
-     * revival snapshot the browser sends cannot restore them. Kept for the revival window. Without
-     * an entry (another worker, or past the window) a revived tab starts at A1 with no open edit.
-     *
-     * @var array<string, array{row: int, col: int, viewRow: int, viewCol: int, sel: array{r1: int, c1: int, r2: int, c2: int}, edit: bool, expiresAt: int}>
-     */
-    private static array $positions = [];
-
     private static ?\SQLite3 $db = null;
+
+    private static ?Via $app = null;
 
     /** @var null|array{maxRow: int, maxCol: int} Raw DB max (without padding), updated on writes */
     private static ?array $extentCache = null;
@@ -60,6 +51,7 @@ final class SpreadsheetExample {
     private static array $rangeCache = [];
 
     public static function register(Via $app): void {
+        self::$app = $app;
         self::db(); // initialize on registration
 
         $app->page('/examples/spreadsheet', function (Context $c) use ($app): void {
@@ -67,8 +59,10 @@ final class SpreadsheetExample {
             $contextId = $c->getId();
             $hue = self::hueForSession($sessionId);
 
-            $pos = self::$positions[$contextId] ?? ['row' => 0, 'col' => 0, 'viewRow' => 0, 'viewCol' => 0, 'sel' => ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1], 'edit' => false];
-            unset(self::$positions[$contextId]);
+            // Focus and viewport are server-owned, so the values the browser sends on a revival cannot
+            // restore them: the onCleanup() below keeps them in the tab's state for that.
+            /** @var array{row: int, col: int, viewRow: int, viewCol: int, sel: array{r1: int, c1: int, r2: int, c2: int}, edit: bool} $pos */
+            $pos = $c->tabState('position', ['row' => 0, 'col' => 0, 'viewRow' => 0, 'viewCol' => 0, 'sel' => ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1], 'edit' => false]);
             if ($pos['edit']) {
                 self::$openEdits[$contextId] = true;
             } else {
@@ -107,33 +101,24 @@ final class SpreadsheetExample {
             // Jump-to-coordinate input value
             $c->signal('', 'jump', Scope::TAB);
 
-            // Scope-level version counter: bumped on every cursor/edit change
-            // so that broadcast() has a changed signal to deliver, triggering re-renders
-            $c->signal(0, 'v', self::SCOPE, autoBroadcast: false);
-
             // Selection range stored server-side per context (not as signals)
             if (!isset(self::$selections[$contextId])) {
                 self::$selections[$contextId] = $pos['sel'];
             }
 
-            $c->onDisconnect(function () use ($contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
-                $windowMs = $app->getConfig()->getContextRevivalWindowMs();
-                if ($windowMs > 0) {
-                    self::$positions[$contextId] = [
-                        'row' => $focusRowSignal->int(),
-                        'col' => $focusColSignal->int(),
-                        'viewRow' => $viewRowSignal->int(),
-                        'viewCol' => $viewColSignal->int(),
-                        'sel' => self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1],
-                        'edit' => isset(self::$openEdits[$contextId]),
-                        'expiresAt' => time() + (int) ceil($windowMs / 1000),
-                    ];
-                }
-                self::prunePositions();
+            $c->onCleanup(function () use ($c, $contextId, $app, $viewRowSignal, $viewColSignal, $focusRowSignal, $focusColSignal): void {
+                $c->setTabState('position', [
+                    'row' => $focusRowSignal->int(),
+                    'col' => $focusColSignal->int(),
+                    'viewRow' => $viewRowSignal->int(),
+                    'viewCol' => $viewColSignal->int(),
+                    'sel' => self::$selections[$contextId] ?? ['r1' => -1, 'c1' => -1, 'r2' => -1, 'c2' => -1],
+                    'edit' => isset(self::$openEdits[$contextId]),
+                ]);
 
                 unset(self::$cursors[$contextId], self::$selections[$contextId], self::$openEdits[$contextId]);
 
-                if ($app->getContextsByScope(self::SCOPE) !== []) {
+                if ($app->countClients(self::SCOPE) > 0) {
                     $app->broadcast(self::SCOPE);
                 }
             });
@@ -154,16 +139,14 @@ final class SpreadsheetExample {
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
 
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $row = $targetRow->int();
                 $col = $targetCol->int();
                 $isShift = $shift->bool();
 
                 self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
 
-                $focusRow->setValue($row, broadcast: false);
-                $focusCol->setValue($col, broadcast: false);
+                $focusRow->setValue($row);
+                $focusCol->setValue($col);
 
                 $sel = &self::$selections[$contextId];
                 if ($isShift) {
@@ -178,7 +161,6 @@ final class SpreadsheetExample {
                 }
 
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
-                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'focusCell');
 
@@ -194,8 +176,6 @@ final class SpreadsheetExample {
                 /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
 
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
 
                 /** @var Signal $key */ $key = $ctx->getSignal('key');
 
@@ -229,8 +209,8 @@ final class SpreadsheetExample {
                     default => null,
                 };
 
-                $focusRow->setValue($fr, broadcast: false);
-                $focusCol->setValue($fc, broadcast: false);
+                $focusRow->setValue($fr);
+                $focusCol->setValue($fc);
 
                 $sel = &self::$selections[$contextId];
                 if ($isShift) {
@@ -257,11 +237,10 @@ final class SpreadsheetExample {
                 } elseif ($fc >= $vc + $viewportCols->int()) {
                     $vc = $fc - $viewportCols->int() + 1;
                 }
-                $viewRow->setValue($vr, broadcast: false);
-                $viewCol->setValue($vc, broadcast: false);
+                $viewRow->setValue($vr);
+                $viewCol->setValue($vc);
 
                 self::$cursors[$contextId] = ['row' => $fr, 'col' => $fc, 'hue' => self::hueForSession($sessionId)];
-                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'navigate');
 
@@ -278,8 +257,8 @@ final class SpreadsheetExample {
                 $keyVal = $key->string();
                 $prefill = mb_strlen($keyVal) === 1 ? $keyVal : '';
                 $currentValue = self::getCell($focusRow->int(), $focusCol->int());
-                $editing->setValue(true, broadcast: false);
-                $editValue->setValue($prefill !== '' ? $prefill : $currentValue, broadcast: false);
+                $editing->setValue(true);
+                $editValue->setValue($prefill !== '' ? $prefill : $currentValue);
                 self::$openEdits[$contextId] = true;
                 $ctx->sync();
             }, 'startEdit');
@@ -292,13 +271,10 @@ final class SpreadsheetExample {
                 /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
 
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 if (!$editing->bool()) {
                     return;
                 }
                 self::endEdit($contextId, $editing, $editValue, $focusRow->int(), $focusCol->int(), commit: true);
-                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'commitEdit');
 
@@ -310,8 +286,8 @@ final class SpreadsheetExample {
                 /** @var Signal $scrollDr */ $scrollDr = $ctx->getSignal('dr');
 
                 /** @var Signal $scrollDc */ $scrollDc = $ctx->getSignal('dc');
-                $viewRow->setValue(max(0, $viewRow->int() + $scrollDr->int()), broadcast: false);
-                $viewCol->setValue(max(0, $viewCol->int() + $scrollDc->int()), broadcast: false);
+                $viewRow->setValue(max(0, $viewRow->int() + $scrollDr->int()));
+                $viewCol->setValue(max(0, $viewCol->int() + $scrollDc->int()));
                 $ctx->sync();
             }, 'scroll');
 
@@ -329,10 +305,10 @@ final class SpreadsheetExample {
                 /** @var Signal $scrollToCol */ $scrollToCol = $ctx->getSignal('stc');
                 // Each scrollbar sends -1 for the other axis, so it cannot undo a scroll there.
                 if ($scrollToRow->int() >= 0) {
-                    $viewRow->setValue($scrollToRow->int(), broadcast: false);
+                    $viewRow->setValue($scrollToRow->int());
                 }
                 if ($scrollToCol->int() >= 0) {
-                    $viewCol->setValue($scrollToCol->int(), broadcast: false);
+                    $viewCol->setValue($scrollToCol->int());
                 }
                 $ctx->sync();
             }, 'scrollTo');
@@ -347,10 +323,8 @@ final class SpreadsheetExample {
                 /** @var Signal $editValue */ $editValue = $ctx->getSignal('editValue');
 
                 /** @var Signal $pasted */ $pasted = $ctx->getSignal('pasted');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 $data = $pasted->string();
-                $pasted->setValue('', broadcast: false);
+                $pasted->setValue('');
                 if ($data === '') {
                     return;
                 }
@@ -371,7 +345,6 @@ final class SpreadsheetExample {
                 }
                 self::setCells($cells);
                 self::endEdit($contextId, $editing, $editValue, $startRow, $startCol, commit: false);
-                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'paste');
 
@@ -392,16 +365,16 @@ final class SpreadsheetExample {
                     $tsv .= implode("\t", $row) . "\n";
                 }
 
-                $tsvJson = json_encode(rtrim($tsv, "\n"));
-                $ctx->execScript("navigator.clipboard.writeText({$tsvJson})");
+                // The template's data-on:ss-copy__window listener writes it to the clipboard.
+                $ctx->dispatch('ss-copy', rtrim($tsv, "\n"));
             }, 'getCopyData');
 
             $c->action(function (Context $ctx): void {
                 /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
 
                 /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
-                $viewportRows->setValue(max(3, min(100, $viewportRows->int())), broadcast: false);
-                $viewportCols->setValue(max(3, min(52, $viewportCols->int())), broadcast: false);
+                $viewportRows->setValue(max(3, min(100, $viewportRows->int())));
+                $viewportCols->setValue(max(3, min(52, $viewportCols->int())));
                 $ctx->sync();
             }, 'resize');
 
@@ -416,13 +389,11 @@ final class SpreadsheetExample {
 
                 /** @var Signal $jumpTarget */ $jumpTarget = $ctx->getSignal('jump');
 
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
-
                 /** @var Signal $viewportRows */ $viewportRows = $ctx->getSignal('vrows');
 
                 /** @var Signal $viewportCols */ $viewportCols = $ctx->getSignal('vcols');
                 $target = trim($jumpTarget->string());
-                $jumpTarget->setValue('', broadcast: false);
+                $jumpTarget->setValue('');
                 if (!preg_match('/^([A-Za-z]+)(\d+)$/i', $target, $matches)) {
                     $ctx->sync();
 
@@ -431,18 +402,17 @@ final class SpreadsheetExample {
                 $col = self::colNameToIndex($matches[1]);
                 $row = max(0, (int) $matches[2] - 1);
 
-                $focusRow->setValue($row, broadcast: false);
-                $focusCol->setValue($col, broadcast: false);
+                $focusRow->setValue($row);
+                $focusCol->setValue($col);
 
                 $vr = max(0, $row - intdiv($viewportRows->int(), 2));
                 $vc = max(0, $col - intdiv($viewportCols->int(), 2));
-                $viewRow->setValue($vr, broadcast: false);
-                $viewCol->setValue($vc, broadcast: false);
+                $viewRow->setValue($vr);
+                $viewCol->setValue($vc);
 
                 self::$cursors[$contextId] = ['row' => $row, 'col' => $col, 'hue' => self::hueForSession($sessionId)];
                 self::$selections[$contextId] = ['r1' => $row, 'c1' => $col, 'r2' => $row, 'c2' => $col];
 
-                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'jumpTo');
 
@@ -452,8 +422,6 @@ final class SpreadsheetExample {
                 /** @var Signal $focusCol */ $focusCol = $ctx->getSignal('focusCol');
 
                 /** @var Signal $editing */ $editing = $ctx->getSignal('editing');
-
-                /** @var Signal $version */ $version = $ctx->getSignal('v');
                 if ($editing->bool()) {
                     return;
                 }
@@ -476,7 +444,6 @@ final class SpreadsheetExample {
                     self::setCells($cells);
                 }
 
-                $version->increment(broadcast: false);
                 $app->broadcast(self::SCOPE);
             }, 'clearCells');
 
@@ -615,18 +582,19 @@ final class SpreadsheetExample {
                     'clearCellsUrl' => $clearCells->url(),
                     'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
-                    'clientCount' => \count($app->getContextsByScope(self::SCOPE)),
-                    'title' => '📊 Spreadsheet',
-                    'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
+                    'clientCount' => $app->countClients(self::SCOPE),
+                    'title' => 'Spreadsheet',
+                    'perWorker' => 'the cursors, the selections and a cache of the cells',
+                    'description' => 'Click a cell and type, move with the arrow keys, and see the cursors of other visitors. Cells are stored in SQLite, only the visible range is rendered, and edits broadcast the custom <code>example:spreadsheet</code> scope.',
                     'summary' => [
                         '<strong>SQLite persistence</strong>: cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
                         '<strong>Virtual scrolling</strong>: only the visible cells are rendered at a time. Arrow keys, Page Up/Down, Home, mouse wheel, and Tab navigate the viewport. The server fetches only the visible range from SQLite on every render.',
                         '<strong>Dynamic resize</strong>: drag the bottom-right handle to make the grid any size. A <code>ResizeObserver</code> dispatches a throttled event; the browser computes how many rows and columns fit, writes them into signals, and posts to a <code>resize</code> action that re-renders exactly the right number of cells.',
                         '<strong>Jump to coordinate</strong>: type a cell reference like <code>AB2000</code> into the toolbar input and press Enter. The server parses column letters and row number, centers the viewport, and moves the cursor in one round-trip.',
                         '<strong>Collaborative cursors</strong>: each user gets a hue derived from their session ID. Other users\' focused cells show a colored border in real time, broadcast via a custom <code>example:spreadsheet</code> scope.',
-                        '<strong>Copy & paste</strong>: Ctrl+C copies the selected range as tab-separated values to the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
+                        '<strong>Copy & paste</strong>: Ctrl+C asks the server for the selected range, which <code>$ctx->dispatch()</code> sends back as tab-separated values for the clipboard. Ctrl+V pastes TSV from the clipboard starting at the focused cell, compatible with Google Sheets and Excel.',
                         '<strong>Keyboard-first UX</strong>: a single <code>data-on:keydown__window</code> handler covers arrows, Tab, Enter, Escape, F2, Delete, Ctrl+C, and printable-character-to-edit, with an explicit guard so the jump input is never intercepted.',
-                        '<strong>Scope design</strong>: viewport position and editing state are TAB-scoped (private per tab). Cell data and cursor positions use a custom <code>example:spreadsheet</code> scope, so every connected user sees live updates without leaking private state.',
+                        '<strong>Scope design</strong>: viewport position and editing state are TAB signals (private per tab). Every tab joins a custom <code>example:spreadsheet</code> scope, and each edit or cursor move broadcasts it, so every connected user sees live updates without leaking private state. A tab that comes back after it was away gets its position back from <code>$c->tabState()</code>.',
                         '<strong>Raw PHP rendering</strong>: SSE update hot path uses plain PHP string building instead of Twig. Bypassing the template engine on every broadcast yields a 3 to 4× throughput increase under concurrent load.',
                     ],
                     'anatomy' => [
@@ -634,10 +602,9 @@ final class SpreadsheetExample {
                             ['name' => 'viewRow / viewCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Top-left corner of the visible viewport. Private per tab and server-owned (clientWritable: false), so a POST carrying an older value cannot undo a scroll.'],
                             ['name' => 'focusRow / focusCol', 'type' => 'int', 'scope' => 'TAB', 'default' => '0', 'desc' => 'Currently focused cell coordinates. Server-owned, so a key pressed before the last move reached the browser still applies from the new cell.'],
                             ['name' => 'editing', 'type' => 'bool', 'scope' => 'TAB', 'default' => 'false', 'desc' => 'Whether the focused cell is in edit mode. A commit also needs the edit startEdit opened on the server, so a key pressed before the last commit or Escape arrived writes nothing.'],
-                            ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '\"\"', 'desc' => 'Current cell editor input value.'],
+                            ['name' => 'editValue', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => 'Current cell editor input value.'],
                             ['name' => 'Navigation params', 'type' => 'mixed', 'scope' => 'TAB', 'desc' => 'tr, tc, key, shift, dr, dc, pasted: client-writable action parameters for keyboard and mouse events.'],
-                            ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20×10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
-                            ['name' => 'version', 'type' => 'int', 'scope' => 'Custom', 'desc' => 'Shared scope version counter. Bumped on every cursor/edit change to trigger broadcasts.'],
+                            ['name' => 'vrows / vcols', 'type' => 'int', 'scope' => 'TAB', 'default' => '20, 10', 'desc' => 'Dynamic viewport dimensions written by a client-side ResizeObserver.'],
                         ],
                         'actions' => [
                             ['name' => 'focusCell', 'desc' => 'Moves cursor to a cell. Commits pending edits, updates selection, broadcasts cursor position.'],
@@ -667,7 +634,7 @@ final class SpreadsheetExample {
                 return $c->render('examples/spreadsheet.html.twig', array_merge($d, [
                     'initialDynamic' => self::renderDynamic($d),
                 ]));
-            }, cacheUpdates: false);
+            });
         });
     }
 
@@ -744,7 +711,7 @@ final class SpreadsheetExample {
             . ' data-on:blur="$' . $jumpId . ' !== \'\' && @post(\'' . $jumpUrl . '\')"'
             . '>';
         $out .= '<div class="ss-formula-bar">' . $h($focusedCellValue) . '</div>';
-        $out .= '<div class="ss-users">👥 ' . $clientCount . ' connected</div>';
+        $out .= '<div class="ss-users">' . $clientCount . ' connected</div>';
         $out .= '<div class="ss-pos">Row ' . ($fr + 1) . ', Col ' . $h($colDisplay)
             . ' · Viewing from ' . $h(($colNames[0] ?? 'A') . ($vr + 1)) . '</div>';
         $out .= '</div>';
@@ -877,19 +844,8 @@ final class SpreadsheetExample {
         if ($commit && $open) {
             self::setCell($row, $col, $editValue->string());
         }
-        $editing->setValue(false, broadcast: false);
-        $editValue->setValue('', broadcast: false);
-    }
-
-    /** Drop expired entries, then the oldest past the cap. Entries are appended in expiry order. */
-    private static function prunePositions(): void {
-        $now = time();
-        foreach (self::$positions as $id => $entry) {
-            if ($entry['expiresAt'] > $now && \count(self::$positions) <= self::MAX_POSITIONS) {
-                break;
-            }
-            unset(self::$positions[$id]);
-        }
+        $editing->setValue(false);
+        $editValue->setValue('');
     }
 
     /**
@@ -913,21 +869,29 @@ final class SpreadsheetExample {
     }
 
     private static function db(): \SQLite3 {
-        if (self::$db === null) {
-            self::$db = new \SQLite3(__DIR__ . '/../../spreadsheet.db');
-            self::$db->exec('PRAGMA journal_mode=WAL');
-            self::$db->exec('PRAGMA synchronous=NORMAL');
-            self::$db->exec(
-                'CREATE TABLE IF NOT EXISTS cells (
-                    row INTEGER NOT NULL,
-                    col INTEGER NOT NULL,
-                    value TEXT NOT NULL DEFAULT \'\',
-                    PRIMARY KEY (row, col)
-                )'
-            );
-        }
+        return self::$db ??= Sqlite::open(
+            __DIR__ . '/../../spreadsheet.db',
+            'CREATE TABLE IF NOT EXISTS cells (
+                row INTEGER NOT NULL,
+                col INTEGER NOT NULL,
+                value TEXT NOT NULL DEFAULT \'\',
+                PRIMARY KEY (row, col)
+            )'
+        );
+    }
 
-        return self::$db;
+    /**
+     * Run a write while another worker may hold the lock. Returns false, and logs, when it stayed held.
+     *
+     * @param callable(): mixed $write
+     */
+    private static function write(callable $write): bool {
+        if (Sqlite::retry($write) !== null) {
+            return true;
+        }
+        self::$app?->log('warn', 'Spreadsheet write skipped: spreadsheet.db stayed locked');
+
+        return false;
     }
 
     private static function getCell(int $row, int $col): string {
@@ -982,7 +946,9 @@ final class SpreadsheetExample {
                 $stmt = self::db()->prepare('DELETE FROM cells WHERE row = :row AND col = :col');
                 $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
                 $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-                $stmt->execute();
+                if (!self::write(static fn () => $stmt->execute())) {
+                    return;
+                }
                 // Shrink extent cache if the deleted cell was at the boundary.
                 if (self::$extentCache !== null
                     && ($row >= self::$extentCache['maxRow'] || $col >= self::$extentCache['maxCol'])) {
@@ -996,7 +962,9 @@ final class SpreadsheetExample {
                 $stmt->bindValue(':value', $value, SQLITE3_TEXT);
                 $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
                 $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-                $stmt->execute();
+                if (!self::write(static fn () => $stmt->execute())) {
+                    return;
+                }
                 // Grow extent cache if the new cell exceeds the known boundary.
                 if (self::$extentCache !== null) {
                     if ($row > self::$extentCache['maxRow']) {
@@ -1026,7 +994,9 @@ final class SpreadsheetExample {
             // busy handler, so busy_timeout offers no protection and a writer can starve
             // indefinitely. Taking the write lock up front keeps read and write on one
             // snapshot. See tests/Feature/SqliteTransactionSafetyTest.php.
-            self::db()->exec('BEGIN IMMEDIATE');
+            if (!self::write(static fn () => self::db()->exec('BEGIN IMMEDIATE'))) {
+                return;
+            }
 
             try {
                 foreach ($cells as $cell) {

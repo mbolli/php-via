@@ -19,8 +19,8 @@ use Mbolli\PhpVia\Via;
  * TAB-scoped #[Signal], private per tab. The shared list lives in a static array
  * (plain shared state, no attribute needed); each action mutates it and broadcasts.
  *
- * The view is a callable so the static $todos array is re-read on every render
- * (a string-template view would freeze the data array captured at setup time).
+ * The view's data is a closure, so the static $todos array is re-read on every render
+ * (an array would freeze the data captured at setup time).
  */
 #[Broadcast(Scope::ROUTE)]
 final class TodoExample {
@@ -38,19 +38,20 @@ final class TodoExample {
     private static int $nextId = 4;
 
     public function view(Context $ctx): void {
-        $ctx->view(fn (): string => $ctx->render('examples/todo.html.twig', [
-            'title' => '✓ Todo List',
-            'description' => 'Composition API: a static shared list + a TAB-scoped <code>#[Signal]</code> draft. <code>#[Broadcast(Scope::ROUTE)]</code> makes every action fan out to all viewers.',
+        $ctx->view('examples/todo.html.twig', fn (): array => [
+            'title' => 'Todo List',
+            'perWorker' => 'the todo list',
+            'description' => 'Add, tick off and delete todos on a list that everyone on this page shares. The list is a static array, your draft is a TAB <code>#[Signal]</code>, and <code>#[Broadcast(Scope::ROUTE)]</code> sends every change to all viewers.',
             'summary' => [
                 '<strong>#[Broadcast(Scope::ROUTE)]</strong> on the class sets ROUTE as the primary scope. A bare <code>$ctx->broadcast()</code> then re-renders the list for every browser on this route. No scope argument needed.',
                 '<strong>Mixed state</strong>: the todo list is a plain <code>static</code> array (shared across the worker, no attribute required), while the input is a TAB-scoped <code>#[Signal]</code> so your draft stays private.',
                 '<strong>#[Action] methods</strong> mutate the static array, then call <code>$ctx->broadcast()</code>. Adding clears the draft via <code>$this->newTodo = \'\'</code>, which syncs back to the input automatically.',
-                '<strong>Callable view</strong>: the view passes a closure so <code>self::$todos</code> is re-read on every render. A string-template view would freeze the data captured at setup.',
-                '<strong>cacheUpdates: false</strong> disables view caching so every broadcast re-renders the full list. Partial rendering sends only the <code>#todo-list</code> block, keeping SSE payloads small.',
+                '<strong>Data closure</strong>: the view passes its data as a closure, so <code>self::$todos</code> is re-read on every render. An array would freeze the data captured at setup.',
+                '<strong>One render per tab</strong> (the default), since each tab shows its own draft. <code>block: \'demo\'</code> sends only the block with the <code>#todo-list</code> on updates, which keeps SSE payloads small.',
             ],
             'anatomy' => [
                 'signals' => [
-                    ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '""', 'desc' => '#[Signal] draft input, private per tab so your typing doesn\'t leak to others.'],
+                    ['name' => 'newTodo', 'type' => 'string', 'scope' => 'TAB', 'default' => '', 'desc' => '#[Signal] draft input, private per tab so your typing doesn\'t leak to others.'],
                 ],
                 'actions' => [
                     ['name' => 'addTodo', 'desc' => 'Appends the trimmed draft to the static list, clears it, and broadcasts to all viewers.'],
@@ -58,7 +59,7 @@ final class TodoExample {
                     ['name' => 'toggleTodo', 'desc' => 'Flips the completed state of a todo and broadcasts.'],
                 ],
                 'views' => [
-                    ['name' => 'todo.html.twig', 'desc' => 'Unchanged from the closure version. Renders only the #todo-list block on updates.'],
+                    ['name' => 'todo.html.twig', 'desc' => 'Renders only the demo block, the #todo-list, on updates.'],
                 ],
             ],
             'githubLinks' => [
@@ -66,7 +67,7 @@ final class TodoExample {
                 ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/todo.html.twig'],
             ],
             'todos' => self::$todos,
-        ]), block: 'demo', cacheUpdates: false);
+        ], block: 'demo');
     }
 
     #[Action]

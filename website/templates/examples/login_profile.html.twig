@@ -28,13 +28,13 @@
 </div>
 
 <div class="login-middleware-note">
-    <p>🛡️ <strong>Protected by the same <code>AuthMiddleware</code> as the dashboard</strong>:
+    <p><strong>Protected by the same <code>AuthMiddleware</code> as the dashboard</strong>:
     both routes sit inside a <code>Via::group()</code>, so a single <code>->middleware(new AuthMiddleware(...))</code>
     call covers both. No duplication.</p>
 </div>
 
 <div class="login-nav">
-    <a href="/examples/login/dashboard" class="btn">← Dashboard</a>
+    <a href="/examples/login/dashboard" class="btn">Back to the dashboard</a>
     <button class="danger login-logout-btn" data-on:click="@post('{{ logout.url }}')">Log out</button>
 </div>
 

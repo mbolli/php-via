@@ -25,12 +25,12 @@
                    type="text"
                    placeholder="Ada Lovelace"
                    autocomplete="off"
-                   data-bind="{{ name.id }}">
+                   {{ bind(name) }}>
         </div>
 
         <div class="wizard-field">
             <label for="wizard-role">Role</label>
-            <select id="wizard-role" data-bind="{{ role.id }}">
+            <select id="wizard-role" {{ bind(role) }}>
                 {% for r in roles %}
                 <option value="{{ r }}"{% if role.string == r %} selected{% endif %}>{{ r }}</option>
                 {% endfor %}
@@ -38,11 +38,11 @@
         </div>
 
         <div class="wizard-field">
-            <label for="wizard-years">Years of experience: <strong data-text="${{ years.id }}">{{ years.int }}</strong></label>
+            <label for="wizard-years">Years of experience: <strong data-text="{{ years.ref }}">{{ years.int }}</strong></label>
             <input id="wizard-years"
                    type="range"
                    min="0" max="30" step="1"
-                   data-bind="{{ years.id }}">
+                   {{ bind(years) }}>
         </div>
     </div>
 
@@ -55,7 +55,7 @@
             <div class="stack-grid">
                 {% for opt in stackOptions %}
                 <label class="stack-option">
-                    <input type="checkbox" data-bind="{{ stack[opt.key].id }}">
+                    <input type="checkbox" {{ bind(stack[opt.key]) }}>
                     <span>{{ opt.label }}</span>
                 </label>
                 {% endfor %}
@@ -64,7 +64,7 @@
 
         <div class="wizard-field">
             <label for="wizard-editor">Favourite editor</label>
-            <select id="wizard-editor" data-bind="{{ editor.id }}">
+            <select id="wizard-editor" {{ bind(editor) }}>
                 {% for e in editors %}
                 <option value="{{ e }}"{% if editor.string == e %} selected{% endif %}>{{ e }}</option>
                 {% endfor %}
@@ -85,11 +85,11 @@
             </div>
             <div class="dev-card-body">
                 <div class="dev-card-row">
-                    <span class="dev-card-icon">📅</span>
-                    {{ years.int }} year{{ years.int != 1 ? 's' : '' }} of experience
+                    <span class="dev-card-label">Experience</span>
+                    {{ years.int }} year{{ years.int != 1 ? 's' : '' }}
                 </div>
                 <div class="dev-card-row">
-                    <span class="dev-card-icon">🔧</span>
+                    <span class="dev-card-label">Stack</span>
                     {% if selectedStack|length > 0 %}
                         {{ selectedStack|join(', ') }}
                     {% else %}
@@ -97,7 +97,7 @@
                     {% endif %}
                 </div>
                 <div class="dev-card-row">
-                    <span class="dev-card-icon">💻</span>
+                    <span class="dev-card-label">Editor</span>
                     {{ editor.string|e }}
                 </div>
             </div>
@@ -110,15 +110,15 @@
 
     <div class="wizard-nav">
         {% if step > 1 %}
-        <button class="secondary" data-on:click="@post('{{ back.url }}')">← Back</button>
+        <button class="secondary" data-on:click="@post('{{ back.url }}')">Back</button>
         {% else %}
         <span></span>
         {% endif %}
 
         {% if step < 3 %}
-        <button data-on:click="@post('{{ next.url }}')">Next →</button>
+        <button data-on:click="@post('{{ next.url }}')">Next</button>
         {% else %}
-        <button class="secondary" data-on:click="@post('{{ restart.url }}')">↺ Start over</button>
+        <button class="secondary" data-on:click="@post('{{ restart.url }}')">Start over</button>
         {% endif %}
     </div>
 </div>
@@ -221,8 +221,8 @@
 .dev-card-name { font-size: 1rem; font-weight: 600; }
 .dev-card-role { font-size: .75rem; margin-top: .15rem; background: rgba(255,255,255,.2); color: #fff; }
 .dev-card-body { padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: .5rem; }
-.dev-card-row  { display: flex; align-items: center; gap: .5rem; font-size: .9rem; }
-.dev-card-icon { font-size: 1rem; flex-shrink: 0; }
+.dev-card-row  { display: flex; align-items: baseline; gap: .5rem; font-size: .9rem; }
+.dev-card-label { flex: 0 0 6.5em; font-family: var(--font-ui); font-size: .75rem; font-weight: 700; color: var(--text-2); }
 .dev-card-footer {
     padding: .5rem 1.25rem;
     border-top: 1px solid var(--border, #e2e8f0);

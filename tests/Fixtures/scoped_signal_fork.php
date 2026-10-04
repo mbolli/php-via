@@ -39,10 +39,10 @@ function mountWorker(SharedSignalStore $store, string $contextId, string $mode):
     $app->page('/probe', function (Context $c) use ($mode): void {
         $c->scope(Scope::ROUTE);
         if ($mode === 'append' || $mode === 'mutate') {
-            $items = $c->signal([], 'items');
+            $items = $c->signal([], 'items', Scope::ROUTE);
             $c->view(fn (): string => 'count=' . count($items->array()));
         } else {
-            $count = $c->signal(0, 'count');
+            $count = $c->signal(0, 'count', Scope::ROUTE);
             $c->view(fn (): string => 'count=' . $count->int());
         }
     });
@@ -72,20 +72,20 @@ for ($w = 0; $w < $workers; ++$w) {
 
         for ($i = 0; $i < $each; ++$i) {
             if ($mode === 'increment') {
-                $signal->increment(1, broadcast: false);
+                $signal->increment(1);
             } elseif ($mode === 'mutate') {
                 $signal->mutate(static function (mixed $list) use ($w, $i): array {
                     $list = is_array($list) ? $list : [];
                     $list[] = $w . ':' . $i;
 
                     return $list;
-                }, broadcast: false);
+                });
             } elseif ($mode === 'append') {
                 $list = $signal->array();
                 $list[] = $w . ':' . $i;
-                $signal->setValue($list, broadcast: false);
+                $signal->setValue($list);
             } else {
-                $signal->setValue($signal->int() + 1, broadcast: false);
+                $signal->setValue($signal->int() + 1);
             }
         }
 

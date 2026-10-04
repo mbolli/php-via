@@ -15,39 +15,44 @@
 
     <section class="ex-intro-grid">
         <div class="ex-intro-card">
-            <div class="ex-intro-icon">⚡</div>
             <h3>Reactive without JavaScript</h3>
             <p>Signals live on the server. Actions are PHP closures. The browser sends a POST and receives DOM patches over SSE. No client framework required.</p>
         </div>
         <div class="ex-intro-card">
-            <div class="ex-intro-icon">👥</div>
             <h3>Built-in multiplayer</h3>
             <p>Scope signals to a route, a session, or every connected client. Open two tabs and watch them stay in sync automatically.</p>
         </div>
         <div class="ex-intro-card">
-            <div class="ex-intro-icon">🔀</div>
             <h3>MPA navigation</h3>
             <p>Full page loads, real URLs, browser history. No SPA router. SESSION-scoped signals follow the user across every page change.</p>
         </div>
     </section>
 
-    <section class="ex-intro-levels">
-        <h2>Where to start</h2>
-        <dl class="ex-intro-dl">
-            <div>
-                <dt><span class="badge badge-beginner">Beginner</span></dt>
-                <dd>Counter, Greeter, Live Search: signals, actions, and two-way binding in under 50 lines of PHP.</dd>
-            </div>
-            <div>
-                <dt><span class="badge badge-intermediate">Intermediate</span></dt>
-                <dd>Shopping Cart, Login Flow, Multi-step Form: SESSION scope, PSR-15 middleware, file uploads, and server-side validation.</dd>
-            </div>
-            <div>
-                <dt><span class="badge badge-advanced">Advanced</span></dt>
-                <dd>Chat Room, Game of Life, SharedWorker Upload: custom scope strings, NATS pub/sub, and <code>extendedLifetime</code> SharedWorkers.</dd>
-            </div>
-        </dl>
+    <p class="ex-catalog-hint">Examples marked <span class="badge badge-multiplayer">multiplayer</span> share their state between visitors. Open them in two windows to see it.</p>
+
+    {% for group in constant('PhpVia\\Website\\ExampleCatalog::GROUPS') %}
+    <section class="ex-catalog-group">
+        <h2 class="ex-catalog-heading">{{ group.name }}</h2>
+        <ul class="ex-catalog" role="list">
+            {% for item in group.items %}
+            <li>
+                <a class="ex-catalog-card" href="{{ basePath }}{{ item.route }}">
+                    <span class="ex-catalog-title">{{ item.label }}</span>
+                    <span class="ex-catalog-blurb">{{ item.blurb }}</span>
+                    {% if group.multiplayer %}<span class="badge badge-multiplayer">multiplayer</span>{% endif %}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
     </section>
+    {% endfor %}
+
+    <p class="ex-catalog-note">
+        The server runs one worker. Several demos, such as Todo, Stock Ticker and Game of Life, keep their
+        state in PHP statics, which each worker holds on its own. Move that state into scoped signals,
+        GlobalState or a database before you run them with <code>withWorkerNum()</code>. See
+        <a href="/docs/deployment#per-worker">What stays per worker</a>. Each of those demos says so on its page.
+    </p>
 
 </article>
 {% endblock %}

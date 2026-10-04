@@ -33,4 +33,8 @@ final class FakeActionRequest extends Request {
     public function getContent(): false|string {
         return $this->body;
     }
+
+    public function rawContent(): false|string {
+        return $this->body;
+    }
 }

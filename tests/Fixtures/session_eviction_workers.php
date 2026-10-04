@@ -19,13 +19,13 @@ use Mbolli\PhpVia\Broker\SwooleBroker;
 use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
+use Tests\Support\FixturePort;
 
 $sessions = (int) ($argv[1] ?? 90);
 
-// Derived from the PID rather than fixed: see client_registry_workers.php.
 $app = new Via(
     (new Config())
-        ->withHost('127.0.0.1')->withPort(4950 + (getmypid() % 150))->withLogLevel('error')
+        ->withHost('127.0.0.1')->withPort(FixturePort::pick(4950, 150))->withLogLevel('error')
         ->withWorkerNum(2)->withBroker(new SwooleBroker())
         ->withSessionTableSize(64)
 );

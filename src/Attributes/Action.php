@@ -25,7 +25,7 @@ final class Action {
     public function __construct(
         /** Override the action name used in the URL (defaults to the method name). */
         public readonly ?string $name = null,
-        /** Register as a scoped action (e.g. Scope::SESSION). Defaults to TAB scope. */
+        /** Register as a scoped action (e.g. Scope::SESSION). Defaults to TAB scope. Either way the method runs on the calling tab's instance. */
         public readonly ?string $scope = null,
     ) {}
 }

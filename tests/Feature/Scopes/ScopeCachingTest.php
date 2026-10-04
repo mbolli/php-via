@@ -8,10 +8,10 @@ use Mbolli\PhpVia\Scope;
 /*
  * Scope Caching Tests - The Most Important Tests
  *
- * Tests that view caching works correctly based on scope:
+ * Tests that view caching works correctly based on scope, for views that pass shareRender: true:
  * - ROUTE scope: Views are cached and shared across all contexts on the same route
  * - TAB scope: Views are rendered fresh each time (no caching)
- * - GLOBAL scope: Views are cached globally across all routes
+ * - GLOBAL scope: Views are cached per route, shared by every context of that route
  */
 
 describe('Route Scope Caching', function (): void {
@@ -27,7 +27,7 @@ describe('Route Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Render ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Initial render (not cached)
         $html1 = $context->renderView(isUpdate: false);
@@ -59,7 +59,7 @@ describe('Route Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Context 2 - same route
         $ctx2 = new Context('ctx2', '/game', $app);
@@ -69,7 +69,7 @@ describe('Route Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Initial renders are NOT cached (each context gets unique HTML with context IDs)
         $html1 = $ctx1->renderView(isUpdate: false);
@@ -99,7 +99,7 @@ describe('Route Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Game ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // First update render
         $context->renderView(isUpdate: true);
@@ -190,7 +190,7 @@ describe('Global Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Global ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Initial render (not cached)
         $html1 = $context->renderView(isUpdate: false);
@@ -209,7 +209,7 @@ describe('Global Scope Caching', function (): void {
         expect($html4)->toBe($html3);
     });
 
-    test('global scope shares cache across ALL routes', function (): void {
+    test('global scope keeps one shared render per route', function (): void {
         $app = createVia();
         $renderCount = 0;
 
@@ -221,7 +221,7 @@ describe('Global Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Global ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Context on route 2
         $ctx2 = new Context('ctx2', '/page2', $app);
@@ -231,7 +231,7 @@ describe('Global Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Global ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // Initial renders not cached
         $html1 = $ctx1->renderView(isUpdate: false);
@@ -240,13 +240,17 @@ describe('Global Scope Caching', function (): void {
         $html2 = $ctx2->renderView(isUpdate: false);
         expect($renderCount)->toBe(2);
 
-        // UPDATE renders ARE cached globally
+        // Update renders are shared per route: two routes are two views
         $html3 = $ctx1->renderView(isUpdate: true);
         expect($renderCount)->toBe(3);
 
         $html4 = $ctx2->renderView(isUpdate: true);
-        expect($renderCount)->toBe(3, 'Global cache shared across routes for updates');
-        expect($html4)->toBe($html3);
+        expect($renderCount)->toBe(4, 'Another route renders its own update');
+        expect($html4)->not->toBe($html3);
+
+        expect($ctx1->renderView(isUpdate: true))->toBe($html3);
+        expect($ctx2->renderView(isUpdate: true))->toBe($html4);
+        expect($renderCount)->toBe(4);
     });
 
     test('broadcastGlobal invalidates global cache', function (): void {
@@ -261,7 +265,7 @@ describe('Global Scope Caching', function (): void {
             ++$renderCount;
 
             return '<div>Global ' . $renderCount . '</div>';
-        });
+        }, shareRender: true);
 
         // First update render
         $context->renderView(isUpdate: true);
@@ -325,19 +329,18 @@ describe('Route Scope Signal Sharing', function (): void {
         expect($html2Updated)->toContain('Price: 105.5'); // Client 2 sees update
     });
 
-    test('signals without explicit scope inherit context scope', function (): void {
+    test('signals declared with the context scope are shared', function (): void {
         $app = createVia();
 
         // First client connects with ROUTE scope
         $client1 = new Context('client1', '/stock/NFLX', $app);
         $client1->scope(Scope::ROUTE);
-        // Signal inherits context's ROUTE scope
-        $price1 = $client1->signal(100.0, 'price');
+        $price1 = $client1->signal(100.0, 'price', Scope::ROUTE);
 
         // Second client connects with ROUTE scope
         $client2 = new Context('client2', '/stock/NFLX', $app);
         $client2->scope(Scope::ROUTE);
-        $price2 = $client2->signal(100.0, 'price');
+        $price2 = $client2->signal(100.0, 'price', Scope::ROUTE);
 
         // These should be the same Signal object (shared)
         expect($price1)->toBe($price2);

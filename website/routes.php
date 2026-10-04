@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Route registration: loaded inside each worker via onStart() so that USR1 hot reload
+ * Route registration: loaded inside each worker via onWorkerStart() so that USR1 hot reload
  * picks up fresh class definitions from disk. Master process never includes this file
  * directly, which is the key condition for hot reload to work.
  *

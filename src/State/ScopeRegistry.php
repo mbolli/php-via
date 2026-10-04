@@ -10,28 +10,33 @@ use Mbolli\PhpVia\Scope;
 /**
  * Manages context registration and lookup by scope.
  *
- * Tracks which contexts belong to which scopes and handles
- * scope cleanup when contexts disconnect.
+ * Keeps two things per scope: the contexts a broadcast renders (the registry), and how many live
+ * contexts use the scope (its members). A tab whose stream ends leaves the registry but stays a
+ * member until it is destroyed, so its scope keeps its signals and actions for a reconnect.
  */
 class ScopeRegistry {
     /** @var array<string, array<string, Context>> Scope registry: scope => [contextId => Context] */
     private array $registry = [];
 
     /**
-     * Where each context object is registered, so teardown finds every entry. A context's own
-     * scope list can miss some: scope() replaces the list, and the TAB entry is added outside it.
-     * Keyed by object, because a revived context reuses the ID of the one being torn down.
+     * The scopes each context object uses, true where a broadcast renders it. A context's own scope list
+     * can miss some: scope() replaces the list, and the TAB entry is added outside it. Keyed by object,
+     * because a revived context reuses the ID of the one being torn down.
      *
-     * @var \WeakMap<Context, array<string, true>>
+     * @var \WeakMap<Context, array<string, bool>>
      */
     private \WeakMap $scopesByContext;
+
+    /** @var array<string, int> Live member contexts per scope */
+    private array $members = [];
 
     public function __construct() {
         $this->scopesByContext = new \WeakMap();
     }
 
     /**
-     * Register a context under a specific scope.
+     * Register a context under a specific scope: broadcasts of the scope render it, and it is a member until
+     * unregisterContextFromAllScopes().
      *
      * @param Context $context Context to register
      * @param string  $scope   Scope identifier
@@ -41,56 +46,53 @@ class ScopeRegistry {
             $this->registry[$scope] = [];
         }
         $this->registry[$scope][$context->getId()] = $context;
-        $scopes = $this->scopesByContext[$context] ?? [];
-        $scopes[$scope] = true;
-        $this->scopesByContext[$context] = $scopes;
+        $this->setMembership($context, $scope, true);
     }
 
     /**
-     * Unregister a context from a specific scope.
+     * Make a context a member of a scope without registering it for its broadcasts, as a scoped action
+     * that is found without joining its scope does.
+     */
+    public function retain(Context $context, string $scope): void {
+        $this->setMembership($context, $scope, $this->scopesByContext[$context][$scope] ?? false);
+    }
+
+    /**
+     * Stop rendering a context on broadcasts of a scope. It stays a member, so the scope keeps its signals
+     * and actions until the context is destroyed.
      *
      * @param Context $context Context to unregister
      * @param string  $scope   Scope identifier
-     *
-     * @return bool True if scope became empty after unregistration
      */
-    public function unregisterContext(Context $context, string $scope): bool {
+    public function unregisterContext(Context $context, string $scope): void {
         $scopes = $this->scopesByContext[$context] ?? [];
-        unset($scopes[$scope]);
-        if ($scopes === []) {
-            unset($this->scopesByContext[$context]);
-        } else {
+        if (($scopes[$scope] ?? false) === true) {
+            $scopes[$scope] = false;
             $this->scopesByContext[$context] = $scopes;
         }
 
-        // The entry may belong to a newer context with the same ID (a revival); leave it.
-        if (($this->registry[$scope][$context->getId()] ?? null) !== $context) {
-            return false;
-        }
-
-        unset($this->registry[$scope][$context->getId()]);
-        if ($this->registry[$scope] === []) {
-            unset($this->registry[$scope]);
-
-            return true;
-        }
-
-        return false;
+        $this->removeEntry($context, $scope);
     }
 
     /**
-     * Unregister a context from every scope it is registered in.
+     * Unregister a context from every scope it uses, for good.
      *
      * @param Context $context Context to unregister
      *
-     * @return array<string> List of scopes that became empty
+     * @return array<string> the scopes it was the last member of
      */
     public function unregisterContextFromAllScopes(Context $context): array {
         $emptyScopes = [];
-        $scopes = array_keys($this->scopesByContext[$context] ?? []);
+        $scopes = $this->scopesByContext[$context] ?? [];
+        unset($this->scopesByContext[$context]);
 
-        foreach (array_unique([...$context->getScopes(), ...$scopes]) as $scope) {
-            if ($this->unregisterContext($context, $scope)) {
+        foreach (array_unique([...$context->getScopes(), ...array_keys($scopes)]) as $scope) {
+            $this->removeEntry($context, $scope);
+            if (!isset($scopes[$scope])) {
+                continue;
+            }
+            if (--$this->members[$scope] <= 0) {
+                unset($this->members[$scope]);
                 $emptyScopes[] = $scope;
             }
         }
@@ -158,5 +160,33 @@ class ScopeRegistry {
      */
     public function getContextCount(string $scope): int {
         return \count($this->registry[$scope] ?? []);
+    }
+
+    /**
+     * How many live contexts use a scope, registered for its broadcasts or not.
+     */
+    public function getMemberCount(string $scope): int {
+        return $this->members[$scope] ?? 0;
+    }
+
+    private function setMembership(Context $context, string $scope, bool $registered): void {
+        $scopes = $this->scopesByContext[$context] ?? [];
+        if (!isset($scopes[$scope])) {
+            $this->members[$scope] = ($this->members[$scope] ?? 0) + 1;
+        }
+        $scopes[$scope] = $registered;
+        $this->scopesByContext[$context] = $scopes;
+    }
+
+    private function removeEntry(Context $context, string $scope): void {
+        // The entry may belong to a newer context with the same ID (a revival); leave it.
+        if (($this->registry[$scope][$context->getId()] ?? null) !== $context) {
+            return;
+        }
+
+        unset($this->registry[$scope][$context->getId()]);
+        if ($this->registry[$scope] === []) {
+            unset($this->registry[$scope]);
+        }
     }
 }

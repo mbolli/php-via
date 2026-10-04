@@ -1,10 +1,11 @@
 # php-via: Full LLM Reference
 
-**Version**: 0.13.0 (MIT) | **Requires**: PHP 8.4+, ext-openswoole 26
-**Install**: `composer require mbolli/php-via`
+**Version**: 0.14.0 (MIT) | **Requires**: PHP 8.4+, ext-openswoole 26
+**Install**: `composer require mbolli/php-via`, plus `composer require twig/twig` for Twig templates
 **Homepage**: https://via.zweiundeins.gmbh/
 **GitHub**: https://github.com/mbolli/php-via
 **Packagist**: https://packagist.org/packages/mbolli/php-via
+**Upgrading from 0.13**: https://via.zweiundeins.gmbh/docs/upgrading
 **Author**: Michael Bolli <michael@bolli.us>
 
 ---
@@ -14,8 +15,8 @@
 php-via is a real-time reactive web framework for PHP. It runs as a persistent
 OpenSwoole server that keeps a long-lived SSE (Server-Sent Events) connection to every
 browser tab. When state changes on the server, it pushes HTML and signal patches to the
-connected tabs, and Datastar morphs them into the page. No JavaScript to write, no build
-step, multiplayer by default.
+connected tabs, and Datastar (1.0.4, served by php-via) morphs them into the page. No
+JavaScript to write, no build step, multiplayer by default.
 
 The name "via" means "the way". From one PHP process you get server-pushed real-time
 updates without WebSockets, polling or a frontend framework.
@@ -35,12 +36,13 @@ Browser ──── POST /_action/:id ────────► ActionHandler
                                          │   ├── PatchManager   (Channel → SSE queue)
                                          │   ├── SignalFactory
                                          │   ├── ComponentManager (sub-contexts)
-                                         │   └── ContextLifecycle (timers, cleanup)
+                                         │   └── ContextLifecycle (timers, tasks, cleanup)
                                          ├── Broadcast flush (per worker, once per tick)
                                          └── Broker        (InMemory / Swoole / Redis / NATS)
 ```
 
-**Public API surface**: `Via`, `Context`, `Signal`, `Action`, `Scope`, `Config`
+**Public API surface**: `Via`, `Context`, `Signal`, `Action`, `Scope`, `Config`, plus `PatchMode`,
+`ErrorPhase`, `Testing\TestApp`, `Rendering\TemplateEngine` and `Twig\TwigEngine`.
 
 ---
 
@@ -51,12 +53,14 @@ Browser ──── POST /_action/:id ────────► ActionHandler
 - PHP 8.4 or higher
 - OpenSwoole extension 26 (`pecl install openswoole-26.2.0`)
 - Composer
-- Optional: `ext-brotli` for Brotli compression
+- Optional: `twig/twig` 3.10+ for Twig templates
+- Optional: `ext-brotli`: static files get Brotli level 11 once it is loaded, pages and SSE with `withBrotli()`
 
 ### Installation
 
 ```bash
 composer require mbolli/php-via
+composer require twig/twig   # for Twig templates (withTemplateDir()); closure views need nothing more
 ```
 
 ### Minimal counter app (complete working example)
@@ -76,14 +80,13 @@ $app = new Via(new Config());
 $app->page('/', function (Context $c): void {
     $count = $c->signal(0, 'count');
 
-    $increment = $c->action(function (Context $c) use ($count): void {
-        $count->setValue($count->int() + 1);
-        $c->sync();
+    $increment = $c->action(function () use ($count): void {
+        $count->setValue($count->int() + 1); // sent to the tab when the action ends
     }, 'increment');
 
-    $c->view(fn () => <<<HTML
-        <main>
-            <p data-text="\${$count->id()}">{$count->int()}</p>
+    $c->view(fn (): string => <<<HTML
+        <main id="counter">
+            <p data-text="{$count->ref()}">{$count->int()}</p>
             <button data-on:click="@post('{$increment->url()}')">+1</button>
         </main>
     HTML);
@@ -102,53 +105,71 @@ Signals are reactive PHP values scoped to a tab, a route, a session, the whole s
 custom group. Their values are sent to the browser's Datastar store and kept in sync.
 
 ```php
-// Create a signal with an initial value and an optional name
+// Every signal needs a name; without a scope it is private to the tab
 $count  = $c->signal(0, 'count');        // integer
 $name   = $c->signal('', 'name');        // string
 $active = $c->signal(false, 'active');   // bool
 $items  = $c->signal([], 'items');       // array → JSON
+$votes  = $c->signal(0, 'votes', Scope::ROUTE);              // shared by every tab on this route
+$quiet  = $c->signal(0, 'quiet', Scope::GLOBAL, autoBroadcast: false); // shared, never broadcasts by itself
 
 // Read values (typed)
 $count->int();
 $name->string();
-$active->bool();
+$active->bool();   // strings via filter_var, other values by PHP truthiness
 $items->array();
 $count->getValue(); // mixed, raw
 
-// Write a value; a scoped signal (not TAB) broadcasts its scope
+// Write. A scoped signal schedules a broadcast of its scope (unless autoBroadcast: false).
 $count->setValue(42);
-$count->setValue(42, broadcast: false);  // write without broadcasting
+$count->markSynced();   // the tab already shows this value: send no patch for it
 
 // Shared counters and lists: update without losing writes from other workers
-$count->increment();                                   // atomic, returns the new value
+$votes->increment();                                   // atomic, returns the new value
 $items->mutate(fn (array $list) => [...$list, $item]); // read-modify-write under a lock
 
-// The id the browser uses
-$count->id();
+// Datastar references
+$count->id();          // the id the browser uses
+$count->ref();         // '$' . id, for data-text and other expressions
+$count->bind();        // data-bind="<id>"
+$count->bind('value'); // data-bind__prop.value="<id>", for web components
 ```
 
+`setValue()`, `increment()` and `mutate()` take no flags: `broadcast:` and `markChanged:`
+throw an `ArgumentCountError`. Declare `autoBroadcast: false` for a quiet scoped signal, and
+call `markSynced()` after a write the tab already shows. Render a value with
+`<span data-text="{$s->ref()}">{$s->string()}</span>`.
+
 **Ids**: a signal's id is unique per tab and includes the tab for TAB signals, so always
-write it from the signal object: `$signal->id()`, `bind()`, `text()` in PHP, or
-`{{ count.id }}` in Twig. A scoped signal outside a component whose name and scope are
-plain letters and digits keeps a readable id such as `global_count`; every other id ends in
-`____` plus codes, so names that differ only in punctuation never collide. To find a scoped
-signal from code outside a context (a timer), use
-`$app->getScopedSignalByName($scope, $name)`.
+write it from the signal object: `id()`, `ref()`, `bind()` in PHP, or `{{ count.id }}`,
+`{{ count.ref }}` in Twig. A scoped signal outside a component keeps a readable id when its
+name is letters and digits and its scope is letters and digits joined by `:` or a route of
+such segments: `global_count`, `room_lobby_online` for `room:lobby`, `route___likes` for
+`route:/`. Every other id ends in `____` plus codes. SESSION signal ids carry a hash of the session id. To find a scoped
+signal from code outside a context (a timer), use `$app->getScopedSignalByName($scope, $name)`
+with a resolved scope such as `Scope::routeScope('/board')`.
 
 **Who may write a signal from the browser**: Datastar posts every signal with each action.
 By default TAB signals take the posted value and scoped signals are server-owned.
 `clientWritable: true` or `false` on `signal()` (or `#[Signal]`) overrides this for any
 scope, and `Config::withStrictTabSignals()` makes TAB signals server-owned by default.
+A posted value must have the type of the signal's initial value; lossless strings convert
+(`'5'` to 5, `'false'` to false), anything else is refused. A signal declared with `null`
+takes any type.
+
+**Browser-owned initial value**: `$c->signal($fallback, 'name', clientSeeded: true)` declares
+a TAB signal whose value the browser holds first (declared on `<html>` or in `<head>` before
+`via_head`): the page seed leaves it out, and every SSE connect gives it the browser's value
+before the view renders, until the server writes it.
 
 ### 2. Actions
 
 Actions are server-side handlers registered on a context and called from the browser with a
-Datastar expression such as `@post(...)`.
+Datastar expression such as `@post(...)`. An action runs for the tab that posts it.
 
 ```php
 $inc = $c->action(function (Context $c) use ($count): void {
     $count->setValue($count->int() + 1);
-    $c->sync(); // push this tab's changes now
 }, 'increment');
 
 $inc->url(); // "/_action/increment"
@@ -156,8 +177,8 @@ $inc->url(); // "/_action/increment"
 // In HTML: <button data-on:click="@post('/_action/increment')">+1</button>
 
 // Signal values the browser posts are written into the signals before the action runs
-$greet = $c->action(function (Context $c) use ($name): void {
-    $greeting = 'Hello ' . $name->string();
+$greet = $c->action(function (Context $c) use ($name, $greeting): void {
+    $greeting->setValue('Hello ' . $name->string());
 }, 'greet');
 
 // Read input that is not a signal (POST body or query string)
@@ -166,35 +187,91 @@ $c->action(function (Context $c): void {
 }, 'vote');
 ```
 
-An action that throws answers 500 `Action failed`; the worker keeps running and the error
-is logged. Registering a second TAB action under the same name replaces the first with a
-warning.
+After an action, php-via sends the signals it changed to its tab, also when it throws, for the
+page and its components. A trailing `syncSignals()` is not needed. Call `$c->sync()` to
+re-render the view. Keep `syncSignals()` in timers, `spawn()` tasks and hooks, and for
+scoped signals declared `autoBroadcast: false`. `action()` takes two arguments: a third
+(the removed scope) throws an `ArgumentCountError`.
+
+An action that throws answers 500 `Action failed`; the worker keeps running, the error is
+logged and goes to `$app->onError()`. Registering a second TAB action under the same name
+replaces the first with a warning.
+
+Each action reads its own request: `input()`, `file()`, `cookie()` and
+`getRequestAttribute()` return the values of the request that posted it, and a cookie from
+`setCookie()`, like the new session cookie of `regenerateSession()`, goes out with that
+action's response, also when two actions of one tab run at once. A `spawn()` task keeps the
+request of its action, but `file()` is null once the action has answered (OpenSwoole deletes
+the temporary file). Code outside an action, such as a timer, reads the page request, and a
+cookie it sets goes out with the tab's next action response. On a page load `input()` reads
+the query string. Signals are tab state: an action that waits sees values a later action
+posted.
+
+Datastar cancels an in-flight request when the page sends another one with the same method
+and URL, from any element. A request cancelled before it reaches the server never runs its
+action. Where every request counts, or two elements post the same action for different
+reasons, give each a query string or turn cancellation off:
+
+```html
+<button data-on:click="@post('/_action/send?from=button')">Send</button>
+<button data-on:click="@post('/_action/paint', {requestCancellation: 'disabled'})">Paint</button>
+```
 
 ### 3. Views
 
-Views render a context's HTML. They run on page load, on `$c->sync()` and on every
-broadcast flush that reaches the context.
+Views render a context's HTML. They run on page load, on `$c->sync()`, on every SSE connect
+and on every broadcast flush that reaches the context.
 
 ```php
-// Simple string view
-$c->view('<p>Hello</p>');
+// view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false)
 
-// Twig template; the context's signals and actions are passed in by name
+// Closure view returning HTML
+$c->view(fn (): string => '<p id="hello">Hello</p>');
+
+// Twig template (needs twig/twig); the context's signals and actions are passed in by name
 $c->view('pages/home.html.twig', ['title' => 'Home']);
 
-// Closure view
-$c->view(fn (): string => $c->render('counter.html.twig'));
+// Only send a named block on SSE updates
+$c->view('page.html.twig', block: 'counter');
 
-// Only send a named Twig block on SSE updates
-$c->view(fn () => $c->render('page.html.twig'), block: 'counter');
+// Data read on every render, for values that change after page load
+$c->view('presence.html.twig', fn (): array => ['count' => $app->countClients(Scope::GLOBAL)]);
 
-// Views that read per-client or fast-changing data must not use the update cache
-$c->view(fn () => $c->render('presence.html.twig', ['count' => count($app->getClients())]), cacheUpdates: false);
+// One render per broadcast for every tab in the primary scope (only for views identical for all tabs)
+$c->scope(Scope::ROUTE);
+$c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], block: 'board', shareRender: true);
 ```
 
-Compute values inside the view closure, as above. A value computed in the page handler,
-such as `count($app->getClients())` passed to `$c->view('tpl', [...])`, is frozen at page
-load.
+A string is always a template name: a string of HTML throws, and so does a callable view
+with `$data` or `block:`. Every view renders per tab unless it passes `shareRender: true`,
+which needs a shared primary scope set with `scope()` (on a TAB-primary context it throws)
+and is ignored for a view that renders a whole document. The shared render is keyed by scope,
+route pattern and component. Never share a view that shows TAB signals, per-user data or
+components.
+
+Pass changing data as a closure, as above. An array computed in the page handler is frozen
+at page load.
+
+Every update, and every SSE connect and reconnect, morphs the view into the page, which sets
+each element's attributes to the server's markup. An attribute the browser set itself, such
+as the `open` that `showModal()` puts on a `<dialog>`, would go, so list it in
+`data-preserve-attr` in the rendered markup:
+
+```html
+<dialog id="confirm" data-preserve-attr="open">...</dialog>
+```
+
+Outside the view:
+
+```php
+use Mbolli\PhpVia\PatchMode;
+
+$c->patchElements('<li>new row</li>', '#log', PatchMode::Append); // Outer and Replace need no selector
+$c->patchElements(selector: '#toast', mode: PatchMode::Remove);
+$c->dispatch('toast', ['text' => 'Saved']);   // CustomEvent on window: data-on:toast__window="..."
+$c->execScript('console.log("hi")');
+$c->isConnected();                            // the tab's stream is open on this worker
+```
 
 ### 4. Scopes
 
@@ -204,45 +281,54 @@ Scope controls which contexts share signals and receive broadcasts together.
 |---|---|
 | `Scope::TAB` (default) | Fully isolated per browser tab |
 | `Scope::ROUTE` | All tabs on the same route |
-| `Scope::SESSION` | All tabs in the same browser session |
+| `Scope::SESSION` | All tabs of one browser session (each session has its own scope) |
 | `Scope::GLOBAL` | Every connected client |
 | `"room:lobby"` | Custom string, any group you define |
 | `"room:*"` | Wildcard, matches all `room:…` scopes |
 
 ```php
-// Set the scope for a context
+// Primary scope of the context: what its view shares and $c->broadcast() reaches
 $c->scope(Scope::ROUTE);
-$c->scope(Scope::SESSION);
 $c->scope('room:' . $roomId);
 
-// Join a second scope
+// A shared signal names its scope; after scope() a signal without one throws
+$c->signal(0, 'count', Scope::ROUTE);
+$c->signal('', 'draft', Scope::TAB);
+
+// Join a second scope to receive its broadcasts (a scoped signal joins by itself)
 $c->addScope('room:lobby');
 
 // Broadcast to a scope from anywhere
 $app->broadcast(Scope::GLOBAL);
-$app->broadcast(Scope::routeScope('/dashboard'));  // one route
+$app->broadcast(Scope::routeScope('/dashboard'));        // one route
+$app->broadcast(Scope::sessionScope($c->getSessionId())); // one session
 $app->broadcast('room:lobby');
+$app->countClients('room:lobby');                        // connected tabs it reaches, every worker
 
-// Broadcast the context's own primary scope
+// Broadcast the context's own primary scope; on a TAB-primary context, only this tab
 $c->broadcast();
 
 // Push this tab only (no broadcast)
 $c->sync();
 ```
 
-A bare `Scope::ROUTE` passed to `broadcast()` reaches every route, like `Scope::GLOBAL`.
-Use `Scope::routeScope('/path')` to target one route.
+`scope()`, `addScope()`, `removeScope()`, `signal()` and `#[Action(scope: ...)]` resolve
+`Scope::ROUTE` and `Scope::SESSION` to this route's and this session's scope. `scope()`
+replaces only the primary scope and keeps the scopes the context joined. A bare
+`Scope::ROUTE`, `Scope::SESSION` or `Scope::TAB` passed to `$app->broadcast()`,
+`$app->countClients()` or `$app->getScopedSignalByName()` throws.
 
 ### 5. Components
 
 Components are isolated sub-contexts inside a page. Each has its own signals, actions and
 view. Calling the component returns its HTML, already wrapped in a `<div id="c-…">` that
-php-via targets with the component's own patches.
+php-via targets with the component's own patches. The namespace is required, unique on its
+page, and made of letters, digits, `_` and `-`.
 
 ```php
 $counter = function (Context $k): void {
     $count = $k->signal(0, 'count');
-    $inc = $k->action(fn (Context $k) => $count->setValue($count->int() + 1) & $k->sync(), 'inc');
+    $k->action(fn () => $count->setValue($count->int() + 1), 'inc');
     $k->view(fn () => $k->render('components/counter.html.twig')); // count and inc passed in by name
 };
 
@@ -260,7 +346,44 @@ $app->page('/dashboard', function (Context $c) use ($counter): void {
 
 In the template: `{{ first|raw }}`. Do not call a component in the page handler and pass
 the string to `$c->view('tpl', [...])`: that HTML is frozen at page load, and every later
-page render resets the component.
+page render resets the component. In a loop: `$c->component($row, 'row-' . $id)`.
+`$k->getPageContext()` returns the page a component sits on.
+
+### 6. Composition (class-based pages)
+
+```php
+use Mbolli\PhpVia\Attributes\Action;
+use Mbolli\PhpVia\Attributes\OnCleanup;
+use Mbolli\PhpVia\Attributes\Signal;
+
+final class Counter {
+    #[Signal] public int $count = 0;                          // TAB
+    #[Signal(Scope::ROUTE, atomic: true)] public int $total = 0; // shared, ++ adds across workers
+
+    public function view(Context $ctx): void {
+        // Properties are hydrated before each action, and scoped ones before each render
+        $ctx->view(fn (): string => '<main id="counter">' . $this->count . ' / ' . $this->total . '</main>');
+    }
+
+    #[Action]
+    public function increment(Context $ctx): void {
+        ++$this->count;
+        ++$this->total;
+    }
+
+    #[OnCleanup]
+    public function bye(Context $ctx): void {}
+}
+
+$app->mount(Counter::class, '/counter');
+$c->component(VoteWidget::class, 'cats'); // class components need a namespace too
+```
+
+In a Twig template the signals arrive by name (`{{ total.int }}`). `#[Broadcast(Scope::ROUTE)]`
+on the class sets the primary scope. `#[Action(scope: ...)]`
+registers a scoped action, which still runs on the posting tab's own instance; in a component
+its URL starts with the namespace (`/_action/cats-vote`). `#[OnDisconnect]` is removed and
+throws at `mount()`: use `#[OnCleanup]`, several per class allowed.
 
 ---
 
@@ -269,8 +392,8 @@ page render resets the component.
 Inside a coroutine (actions, timers, hooks), `broadcast()`, a scoped signal write and a
 message from the broker only mark the scope. Each worker flushes the marked scopes once:
 at the end of the event-loop turn when it is idle, otherwise at most once per tick
-(`Config::withBroadcastTickMs()`, default 25 ms). A flush renders each scope once and each
-context once, and publishes each scope to the broker once.
+(`Config::withBroadcastTickMs()`, default 25 ms). A flush renders each shared view once,
+each other context once, and publishes each scope to the broker once.
 
 What this means for app code:
 - Views render the state at flush time. Several writes in one action produce one frame.
@@ -283,21 +406,24 @@ What this means for app code:
 ```php
 $app->broadcast(Scope::GLOBAL);   // marks the scope; the flush renders it
 $app->flushBroadcasts();          // render the pending flush now, in this coroutine
+
+// At most one render per interval for busy scopes; the last state of a burst always goes out
+$config->withBroadcastThrottle('import:*', 250);
 ```
 
-`Config::withBroadcastCoalescing(false)` renders on every call, synchronously. Outside a
-coroutine (CLI scripts, tests) `broadcast()` is always synchronous.
-`$app->getStats()->getBroadcastStats()` reports flushes, coalesced broadcasts and flush
-times per worker.
+`Config::withBroadcastCoalescing(false)` is deprecated (removed in 0.15): call
+`$app->flushBroadcasts()` where a broadcast has to land first. Outside a coroutine (CLI
+scripts, tests) `broadcast()` is synchronous. `$app->getStats()->getBroadcastStats()` reports
+flushes, coalesced broadcasts and flush times per worker.
 
 ---
 
 ## Lifecycle
 
 ```php
-// Server lifecycle: onStart and onShutdown run once in every worker process
-$app->onStart(function () use ($app): void { /* ... */ });
-$app->onShutdown(function () use ($app): void { /* runs on stop, reload and recycle */ });
+// Server lifecycle: runs in every worker process, with its id; worker 0 for one-shot work
+$app->onWorkerStart(function (int $workerId) use ($app): void { /* ... */ });
+$app->onWorkerStop(function (int $workerId) use ($app): void { /* runs on stop, reload and recycle */ });
 
 // Per-client lifecycle
 $app->onClientConnect(function (Context $c) use ($app): void {
@@ -305,9 +431,16 @@ $app->onClientConnect(function (Context $c) use ($app): void {
 });
 $app->onClientDisconnect(function (Context $c) use ($app): void { /* ... */ });
 
+// Every throw php-via catches from app code: action, render, timer, task or route
+$app->onError(function (\Throwable $e, ?Context $c, ErrorPhase $phase, ?string $action): void {
+    if ($phase === ErrorPhase::Action && $c !== null) {
+        $c->getSignal('error')?->setValue('Failed: ' . $e->getMessage()); // goes out with the 500
+    }
+});
+
 // Server timer: runs on one worker, once per interval for the whole server
 $app->setInterval(function () use ($app): void {
-    if (empty($app->getClients())) {
+    if ($app->countClients(Scope::GLOBAL) === 0) {
         return;
     }
     $app->broadcast(Scope::GLOBAL);
@@ -317,26 +450,76 @@ $app->setInterval($perProcessWork, 1000, everyWorker: true); // in every worker
 // Tab timer: start it in the page handler; it stops with the context
 $c->setInterval(fn () => $c->sync(), 1000);
 
-// Context cleanup hooks
-$c->onDisconnect(function (Context $c): void { /* ... */ });
+// Work that outlives the action: throws go to onError(), a stopping worker waits for it
+$c->spawn(function (Context $c): void {
+    $result = runLongQuery();
+    if (!$c->isDestroyed()) {
+        $c->setTabState('result', $result);
+        $c->sync();
+    }
+});
+
+// Context cleanup hook, when the context is destroyed
+$c->onCleanup(function (Context $c): void { /* ... */ });
 ```
 
 - **A closed tab is noticed at once.** A stream ends about 1 ms after the browser closes
   the connection: `onClientDisconnect` runs, the client leaves `getClients()`, and
-  `onDisconnect`/`onCleanup` run after the cleanup delay (`withContextCleanupDelay()`,
+  `onCleanup` runs after the cleanup delay (`withContextTimeouts(cleanupDelayMs: ...)`,
   5 s by default).
 - **Idle streams stay open behind proxies.** A stream silent for 15 s writes an SSE
   comment (`withSseKeepAliveMs()`, `0` turns it off).
+- **SSE needs no proxy setting.** Caddy's `reverse_proxy` flushes `text/event-stream`
+  responses immediately, so no `flush_interval` is needed; behind TLS, use
+  `reverse_proxy h2c://127.0.0.1:3000` with `withH2c()` for one worker (see Scaling for
+  several). The SSE response's `X-Accel-Buffering: no` header turns nginx's proxy buffering
+  off for it.
 - **A context whose stream never connects is freed** after the connect timeout
-  (`withContextConnectTimeout()`, 30 s by default), running its cleanup hooks.
+  (`withContextTimeouts(connectMs: ...)`, 30 s by default), running its cleanup hooks.
 - **An action on a tab whose stream is down keeps it for the reconnect.** The stream
   dropped or the action revived the context: it is freed the reconnect timeout
-  (`withContextReconnectTimeout()`, 60 s by default) after the last action, longer than
+  (`withContextTimeouts(reconnectMs: ...)`, 60 s by default) after the last action, longer than
   Datastar's 30 s `retryMaxWait`. A context freed before its stream returns drops its
   queued patches; the revived tab gets its signals and a fresh view, not one-off patches.
 - **Revival.** A tab that comes back after its context was cleaned up is rebuilt with the
   same id and the signal values it still holds, within the revival window
-  (`withContextRevivalWindow()`, 10 minutes by default), instead of reloading.
+  (`withContextTimeouts(revivalWindowMs: ...)`, 10 minutes by default), instead of reloading.
+  Its page handler runs behind the route's middleware again, on a GET of the page's URL, and
+  reads the attributes it and the reviving request's middleware set. `$c->tabState($key)`
+  values set with `$c->setTabState($key, $value)` come back; other server-only state such as
+  `#[Persist]` starts over. When the route's middleware answers instead, the tab reloads, from
+  an SSE reconnect or an action, and the page load gets that answer.
+- **Reconnects.** After a network error Datastar retries the stream after 1, 2, 4, 8 and
+  16 s, then every 30 s, ten times in all, each time with the tab's current signals. Once
+  the retries run out or the stream ends, `via_head` opens a new one within 15 s, and at once
+  when the server ends a stream for a session rotation or a stopping worker.
+
+---
+
+## Pages, Routes and Downloads
+
+```php
+$app->page('/blog/{slug}', function (Context $c, string $slug): void { /* ... */ }); // decoded params
+$app->mount(Counter::class, '/counter');
+$app->group('/admin', function (Via $app): void { /* ... */ })->middleware(new AuthMiddleware());
+
+// Plain PSR-15 handler: no context, shell or template (JSON, webhooks, MCP)
+$app->route(['GET', 'POST'], '/api/items/{id}', new ItemHandler())->middleware(new ApiKeyMiddleware());
+$app->route('*', '/hooks/{name}', new WebhookHandler()); // every method
+
+// One-shot download URL for this tab's session, outside the SSE stream
+$url = $c->download(function () use ($rows): \Generator {
+    foreach ($rows as $row) {
+        yield implode(',', $row) . "\n";
+    }
+}, 'rows.csv', 'text/csv; charset=utf-8');
+$c->execScript('window.location = ' . json_encode($url));
+```
+
+Route parameters arrive percent-decoded; an encoded slash arrives as `/`. A `route()` request
+carries `via.session`, path parameters as attributes and uploaded files; php-via checks no
+Origin header there, so add CSRF or auth middleware to routes that change state. A tab keeps
+its newest 100 download URLs.
 
 ---
 
@@ -345,22 +528,37 @@ $c->onDisconnect(function (Context $c): void { /* ... */ });
 ### Several workers on one machine
 
 ```php
-use Mbolli\PhpVia\Broker\SwooleBroker;
-
 $config = (new Config())
-    ->withWorkerNum(swoole_cpu_num())
-    ->withBroker(new SwooleBroker());
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum()); // SwooleBroker is the default with more than one worker
 ```
 
-Scoped signal values, GlobalState, session data, the client list, the action rate limit and
-a context directory live in shared memory, so an action that lands on any worker reaches its
-tab. No sticky sessions are needed. What stays per worker: PHP statics in app code, and
-server-owned TAB signals. Read-modify-write on shared values loses updates between workers:
-use `increment()`/`mutate()` on signals, `incrementGlobalState()`/`mutateGlobalState()` on
-GlobalState, and `#[Signal(..., atomic: true)]` in the composition API. Session data values
-must be serializable. `withScopedSignalTableSize()`, `withContextDirectorySize()`,
-`withSessionTableSize()` and `withGlobalStateTableSize()` size the shared tables. Deploy a
-new version with a full restart, not a worker reload (`SIGUSR1`).
+Scoped signal values, GlobalState, session data, tab state, the client list, the action rate
+limit and a context directory live in shared memory. A tab lives on the worker of its SSE
+stream, and an action or download that lands on another worker is passed there over the
+worker pipe, at about twice the CPU of an action that lands on the tab's worker. No sticky
+sessions are needed. When a tab's stream reconnects to another worker, the worker that held it
+hands over the TAB signal values the browser cannot send and what its running actions send.
+
+OpenSwoole hands each connection to one worker. Behind an h2c proxy (Caddy `h2c://`) every
+client shares one upstream connection, and so one worker, until it carries 1,280 streams.
+Over HTTP/1.1 (`reverse_proxy 127.0.0.1:3000`) connections spread across workers and about
+(N-1)/N of a tab's actions are passed on. Keep `withH2c()` with an HTTP/1.1 upstream: the port
+answers both protocols and `withBrotli()` keeps compressing pages and streams.
+
+What stays per worker: PHP statics in app code; server-owned TAB signals start over when the
+worker that held the tab stopped. Read-modify-write on shared values loses updates between
+workers: use `increment()`/`mutate()` on signals, `incrementGlobalState()`/`mutateGlobalState()`
+on GlobalState, and `#[Signal(..., atomic: true)]` in the composition API. Session data and tab
+state values must be serializable; tab state gets 1,024 serialized bytes per tab by default
+(raise it with `withContextDirectorySize(4096, maxTabStateBytes: ...)`, 4096 being the default
+row count). `withScopedSignalTableSize()`,
+`withContextDirectorySize()`, `withSessionTableSize()` and `withGlobalStateTableSize()` size
+the shared tables. `worker_num` in `withSwooleSettings()` that differs from `withWorkerNum()`
+throws at `start()`.
+
+A worker reload (`SIGUSR1`) keeps the shared tables, so open tabs are revived; with one worker
+they reload their page. Code the master loaded before `start()`, php-via itself included,
+changes only with a full restart.
 
 ### Several servers
 
@@ -374,19 +572,31 @@ $config->withBroker(new NatsBroker('127.0.0.1', 4222));
 
 The broker carries broadcasts between servers. Shared memory is per machine, so contexts,
 scoped signal values and GlobalState are not shared between servers: route each browser
-session to one server with cookie-sticky load balancing.
+session to one server with cookie-sticky load balancing. Servers that share a broker run the
+same php-via version.
 
 ### Capacity and memory
 
-Measured on the website (one worker, two cores, Brotli level 4): a page view costs 1.3 to 4.1 ms
-of CPU and 13 to 35 KB until its stream connects or the connect timeout (30 s) passes; an open tab
-costs 570 to 650 KB with Brotli level 4, 70 to 125 KB at level 1 and 45 to 75 KB without Brotli,
-mostly the stream encoder's window; a private action about 1 ms; a broadcast about 0.05 ms per
-receiving tab. A broadcast to a page's scope re-renders every component on the page, so give busy
-widgets a custom scope and broadcast to it, and keep presence indicators out of Scope::GLOBAL. A
-view that returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`, with
-`cacheUpdates: false`) renders a static page once. Size the shared context directory for peak open
-tabs plus peak page views per second times 630. The harness is bench/capacity in the repository.
+Measured on the website with 0.14.0 (one worker, two cores at full clock, Brotli level 4): a page
+view costs 1.5 to 5.8 ms of CPU with the onGrowth collector below, and 20 to 55 KB until its stream
+connects or the connect timeout (30 s) passes; an open tab costs 590 to 670 KB with Brotli level 4, 75 to 145 KB at level 1 and 50
+to 95 KB without Brotli, mostly the stream encoder's window; a private action 0.11 to 0.14 ms; a
+broadcast about 0.05 ms per receiving tab. A broadcast to a page's scope re-renders every component
+on the page, so give busy widgets a custom scope and broadcast to it, keep presence indicators out of
+Scope::GLOBAL, and pass `shareRender: true` to views that are the same for every tab. A view that
+returns '' on updates (`fn (bool $isUpdate) => $isUpdate ? '' : ...`) renders a static page once.
+Size the shared context directory for peak open tabs plus peak page views per second times 630.
+The harness is bench/capacity in the repository.
+
+Workers keep PHP's own cycle collector runs and also run the collector every `withGcIntervalMs()`
+(30 s; 0 for no timed runs). `withGcIntervalMs(30_000, onGrowth: true)` turns PHP's runs off: a worker
+then runs the collector, checked every 100 ms between coroutines, when its memory has grown by half
+since the last run (by 32 MiB at least, or by half the room left below `memory_limit` when that is
+less), or every interval while possible roots wait. In a 250,000-view burst that is 9 runs instead of
+25. A loop that creates cycles without waiting on I/O, such as a CPU-bound import in one action, then
+frees them only once it ends; when they outgrow `memory_limit` first, the worker dies with a fatal
+error and every tab on it with it. Use `onGrowth` only where no request runs such a loop, or call
+`gc_collect_cycles()` in it. https://via.zweiundeins.gmbh/docs/performance#cycle-collector
 
 ---
 
@@ -397,6 +607,15 @@ $app->setGlobalState('motd', 'Hello');
 $app->globalState('motd', 'default');
 $app->incrementGlobalState('visits');                                   // atomic
 $app->mutateGlobalState('log', fn (?array $l) => [...$l ?? [], $entry]); // under a lock
+
+// Session data, per browser session
+$c->setSessionData('cart', $items);
+$c->sessionData('cart', []);
+$app->getSessionData($request->getAttribute('via.session'), 'auth'); // in middleware
+
+// Per-tab server values that survive a revival and a move to another worker
+$c->setTabState('result', $rows);
+$c->tabState('result', []);
 
 // Keep GlobalState in SQLite across restarts (written behind, every $flushMs)
 $config->withPersistentGlobalState(__DIR__ . '/state.db', flushMs: 1000);
@@ -409,36 +628,129 @@ With shared memory in use (`worker_num > 1` or persistence), GlobalState keys ar
 
 ## Config Reference
 
+Every `with*` call goes before `new Via($config)`, which freezes the Config: a later call
+throws a `LogicException`. A clone of a frozen Config is not frozen.
+
 ```php
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort(3000)                          // default 3000
-    ->withTemplateDir(__DIR__ . '/templates')
-    ->withStaticDir(__DIR__ . '/public')      // serves static files
-    ->withDevMode(true)                       // verbose logging, no cache headers
-    ->withLogLevel('info')                    // debug | info | warn | error
-    ->withBrotli()                            // requires ext-brotli and HTTPS or h2c
-    ->withH2c()                               // HTTP/2 cleartext (behind a TLS proxy)
+    ->withTemplateDir(__DIR__ . '/templates') // Twig templates; needs composer require twig/twig
+    ->withTwigCacheDir(sys_get_temp_dir() . '/twig')
+    // or ->withTemplateEngine(new TwigEngine($dir, $cacheDir)), or any Rendering\TemplateEngine
+    ->withShellTemplate(__DIR__ . '/shell.html')
+    ->withStaticDir(__DIR__ . '/public')      // serves static files, see Static Files
+    ->withDevMode(true)                       // error details, Dev Bar, warnings, no cache headers
+    ->withLogLevel('info')                    // debug | info | warn | error (PSR-3 names too); others throw
+    ->withBrotli()                            // pages and SSE; needs ext-brotli and withCertificate() or withH2c()
+    ->withBrotli(true, 1)                     // level 1 for pages and SSE: far less memory per stream
+    ->withBrotli(false)                       // no Brotli, static files included
+    ->withBrotli(false, staticLevel: 11)      // Brotli for static files only
+    ->withH2c()                               // HTTP/2 cleartext behind a TLS proxy; HTTP/1.1 still works
     ->withCertificate($crt, $key)             // HTTPS directly
     ->withBasePath('/app/')                   // when mounted at a sub-path
-    ->withWorkerNum(4)                        // default 1
-    ->withBroker(new SwooleBroker())          // or RedisBroker / NatsBroker
+    ->withDatastarRocket()                    // Datastar + Rocket for web components
+    ->withImportMap(['charts' => '/js/charts.js'], ['/js/charts.js' => 'sha384-...'])
+    ->withWorkerNum(4)                        // default 1; never worker_num in withSwooleSettings()
+    ->withBroker(new RedisBroker('127.0.0.1', 6379)) // several servers; SwooleBroker is the default with workers
     ->withBroadcastTickMs(25)                 // broadcast flush tick; 0 = every turn
-    ->withBroadcastCoalescing(true)           // false = synchronous broadcasts
+    ->withBroadcastThrottle('import:*', 250)  // at most one render per 250 ms for matching scopes
     ->withSseKeepAliveMs(15_000)              // SSE comment on silent streams; 0 = off
-    ->withSseMaxQueuedBytes(1_048_576)        // drop element frames for a slow client
-    ->withContextCleanupDelay(5_000)          // after a stream closes
-    ->withContextConnectTimeout(30_000)       // free a context whose stream never connects
-    ->withContextReconnectTimeout(60_000)     // keep a tab whose stream is down after an action
-    ->withContextRevivalWindow(600_000)       // rebuild a returning tab
+    ->withSseMaxQueuedBytes(1_048_576)        // drop view frames for a slow client
+    ->withContextTimeouts(
+        cleanupDelayMs: 5_000,                // after a stream closes
+        connectMs: 30_000,                    // free a context whose stream never connects
+        reconnectMs: 60_000,                  // keep a tab whose stream is down after an action
+        revivalWindowMs: 600_000,             // rebuild a returning tab
+        forwardMs: 60_000,                    // wait for the worker that holds a tab, then answer 504
+    )
+    ->withContextDirectorySize(4096, maxTabStateBytes: 1024)
+    ->withGcIntervalMs(30_000)                // timed collector runs next to PHP's; onGrowth: true replaces PHP's runs
     ->withStrictTabSignals()                  // TAB signals server-owned by default
     ->withPersistentGlobalState(__DIR__ . '/state.db')
     ->withTrustedOrigins(['https://example.com'])
     ->withAllowMissingOrigin()                // accept actions without an Origin header
     ->withActionRateLimit(100, 60)            // per IP, counted across workers
     ->withSecureCookie(true)
+    ->withDevBar(false)                       // default follows devMode; on in production it is read-only
+    ->withDevBarOptions(writes: false, traces: 100, pollMs: 50)
+    ->withSwooleSettings(['max_request' => 10_000]) // raw OpenSwoole settings, win over php-via's
 ;
 ```
+
+Apps read only `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`,
+`getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`; the other getters
+are internal. Setters renamed in 0.14 are listed under Upgrading from 0.13.
+
+---
+
+## Static Files
+
+`withStaticDir()` serves a path with a file extension before routing and any other once no route
+matched. A path with a segment that starts with a dot (`/.env`, `/.git/config`, `%2e` included),
+except `/.well-known/`, and PHP sources (`.php`, `.php5` and other numbered forms, `.phps`, `.phpt`,
+`.pht`, `.phtml`, `.phar`, `.inc`) answer 404 without a look at the disk, and so does a link in the
+directory to such a file. Paths are percent-decoded, so `/my%20file.css` finds `my file.css`. Each
+worker keeps files of up to 2 MiB in memory (16 MiB in all) and reads one again when it changes;
+bigger files go out with `sendfile()`.
+
+Whenever ext-brotli is loaded, compressible files (css, js, mjs, json, map, webmanifest, wasm,
+svg, ico, ttf, otf, txt, md, csv, html, htm, xml, rss, atom), `/datastar.js`, `/via.css` and the
+Dev Bar assets go out with Brotli level 11 to clients that accept it, with or without
+`withBrotli()`, with `Vary: Accept-Encoding` and one weak ETag for every encoding. woff2, woff,
+raster images (png, jpg, webp, gif, avif), pdf, audio and video are sent as they are. A worker
+never compresses at level 11 itself: files of up to 128 KiB present at start are compressed in the
+master process before the port opens (2.3 s at most, the website takes 0.3 s; not in dev mode) and
+shared by all workers, and a helper process at the lowest CPU priority compresses bigger ones right
+after start; a file that changes later goes to the helper on its first request, and until the
+result arrives workers send it at level 4 up to 256 KB, uncompressed above, with
+`Cache-Control: no-store`. A sidecar `foo.css.br` next to `foo.css`, at least as new, is sent as
+it is, even without ext-brotli: the way to ship large assets (`brotli --best app.js`). Build
+sidecars in the deploy step and keep them out of git: after a fresh clone a stale sidecar has the
+same mtime as its file and counts as fresh. Memory: 32 MiB of Brotli forms from start, shared;
+per worker 16 MiB uncompressed and 16 MiB of Brotli forms, 2 MiB per file; files over 8 MiB, or
+whose Brotli form exceeds 2 MiB, go out uncompressed without a sidecar.
+
+`/datastar.js?v=<hash>` (`Config::getDatastarUrl()`) is cached for a year; `via_foot` loads it.
+A `withStaticCacheControl()` closure may return null to keep the default for a file.
+
+---
+
+## Coroutine Hooks
+
+A worker serves all its tabs from one thread, so a blocking call stops every stream on it.
+php-via sets `hook_flags` to `Via::defaultHookFlags()`: `SWOOLE_HOOK_ALL`, without
+`SWOOLE_HOOK_NATIVE_CURL` on libcurl 8.20 or newer, where that hook segfaults the worker on a
+curl request to any host name (curl#21558). MySQL (mysqlnd) and Redis (phpredis, predis) calls,
+HTTP calls over PHP streams, file access, `sleep()`/`usleep()`, `proc_open()` and shell commands
+then suspend the coroutine instead of blocking the worker. Curl requests (Guzzle's curl handlers,
+Symfony's `CurlHttpClient`) suspend only under `SWOOLE_HOOK_NATIVE_CURL`, so on libcurl 8.20 or
+newer each one blocks the worker until it returns. File and stdio calls go through a per-worker
+thread pool: a 91 KB read costs 142 µs instead of 4.5 µs.
+
+Never hooked, so they block the worker under any flags: pgsql/pdo_pgsql (use
+`OpenSwoole\Coroutine\PostgreSQL`), SQLite, the mongodb, amqp and grpc extensions, the stat
+family (`stat()`, `filemtime()`, `file_exists()`, `realpath()`), `include`, `echo` and
+`error_log()`. A hooked connection must not be shared by two coroutines at once.
+
+```php
+// No file or stdio hooks, and native curl only where it does not crash (libcurl before 8.20).
+// Only for apps that run no exec()/system()/popen() and hold no flock() across a suspension.
+$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
+
+// Cap the file thread pool: setAio(), before start(); aio_* in withSwooleSettings() fail at start-up
+OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);
+```
+
+`start()` throws for `hook_flags` with `SWOOLE_HOOK_STDIO` but not `SWOOLE_HOOK_FILE` (includes
+would suspend halfway and concurrent requests fail with "Class not found") and for a
+`RedisBroker` without the socket hook it needs. The Dev Bar's Stats panel and the dev-mode `/_stats`
+show the flags, the thread pool and the event loop lag. OpenSwoole 26.2 bugs: Guzzle 7.15's default
+client throws on every request under `SWOOLE_HOOK_NATIVE_CURL` (use its `StreamHandler`); that
+hook leaks about 2.8 KB per request with a header callback on PHP 8.4+; `mysqli_init()` plus a
+failed `real_connect()` crashes the worker (use `new mysqli()` or PDO); Symfony Lock's
+`FlockStore` hangs; `fsync()` returns false under the file or stdio hooks. Details:
+https://via.zweiundeins.gmbh/docs/deployment#hooks
 
 ---
 
@@ -449,6 +761,33 @@ $config = (new Config())
   `withAllowMissingOrigin()`. The Dev Bar endpoints and the tab-close beacon apply the same
   check.
 - A context only accepts actions and streams from the session that created it.
+- `$c->getSessionId()` and the `via.session` request attribute are a hash of the session
+  cookie, never the cookie. Middleware reads the session id from `via.session`. Only cookie
+  values of 32 lowercase hex characters are accepted; under `withSecureCookie(true)` only the
+  `__Host-` cookie. SESSION scopes are `Scope::sessionScope($id)`, a SHA-256 hash.
+- `$c->regenerateSession()` at login (and logout) gives the session a new cookie with the
+  response; `$app->regenerateSession($request)` does it in middleware or a `route()` handler.
+  The session id, session data and tabs stay. The session rotates at the call: the old cookie
+  works for 10 more seconds, then its SSE streams end and the tabs reconnect with the new one.
+  Call it before the login writes anything: it throws an `OverflowException` when the rotation
+  record is full.
+- CSP nonces: global middleware sets the `via.csp_nonce` request attribute; every tag of
+  `via_head`, `via_foot` and the Dev Bar carries it. Datastar reads the nonce from
+  `<html data-nonce="...">`; without it, it compiles expressions with `Function()`
+  (`'unsafe-eval'`) and a nonce policy blocks the scripts of `execScript()` and `dispatch()`.
+  The default shell writes `data-nonce` when the page request has a nonce; a custom shell
+  writes `<html{{ via_html_attrs }}>`, a Twig layout `<html{{ via_html_attrs() }}>`. Both write
+  nothing without a nonce and in update renders. Dev mode warns about a page with a nonce and
+  no `data-nonce`.
+  The middleware sends the policy as a header on the response from `$handler->handle()`, or
+  the layout as `<meta http-equiv="Content-Security-Policy">` in the head. Read the nonce in
+  the page handler, since an action's request carries a nonce of its own.
+- Headers middleware adds to the response from `$handler->handle()` go out with pages and
+  actions. php-via keeps `Content-Type`, `Content-Length`, `Content-Encoding`,
+  `Transfer-Encoding`, `Connection`, its session cookie and any header or cookie it set;
+  `Vary` and `Content-Security-Policy` get both values.
+- `withDevBar(true)` in production is read-only but shows every visitor's traces, scopes and
+  context ids, and the server's logs and stats (`/_via/stats`), to anyone who opens a page.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
 
 ---
@@ -458,7 +797,7 @@ $config = (new Config())
 php-via supports PSR-15 middleware for authentication, rate limiting, CORS, etc.
 
 ```php
-// Global middleware (runs on every request)
+// Global middleware (runs on pages, actions and plain routes)
 $app->middleware(new CorsMiddleware([...]));
 
 // Per-route middleware (chained on RouteDefinition)
@@ -469,35 +808,187 @@ $app->group('/admin', function (Via $app) use ($handler): void {
     $app->page('/dashboard', $handler);
     $app->page('/users',     $handler);
 })->middleware(new AuthMiddleware());
+
+// In middleware: the session id, never the cookie
+$sessionId = $request->getAttribute('via.session');
 ```
+
+`$c->getRequestAttribute()` reads what middleware set with `$request->withAttribute()`. In an
+action it is the action request's, and only global middleware runs on actions: read an
+attribute from per-route middleware in the page handler and pass it to the action's closure.
+A revived tab runs the route's middleware again. Implement `SseAwareMiddleware` to run on SSE
+connects too.
 
 ---
 
-## Twig Integration
+## Templates
 
-`Via::getTwig()` returns the Twig environment for registering extensions. `Context::render()`
-passes the context's signals and actions to the template by name, plus:
+Twig is optional: `composer require twig/twig`, then `withTemplateDir()` or
+`withTemplateEngine(new \Mbolli\PhpVia\Twig\TwigEngine($dir, $cacheDir))`. Without an engine,
+`view('x.html.twig')`, `render()` and `getTwig()` throw with the command to run.
+`Via::getTwig()` returns the Twig environment for extensions and templates held as strings
+(`$app->getTwig()->createTemplate($src)->render($data)`). `Context::render()` passes the context's signals and actions to the template
+by name, plus:
 
 | Variable | Value |
 |---|---|
 | `contextId` | The tab's context id |
 | `currentRoute` | The matched route, e.g. `/docs/signals` |
 | `basePath` | Base URL path, always ends with `/` (default: `/`) |
+| `via_head()` | The tags that connect the page (via_ctx, the import map, the SSE connect, the close beacon), right after `<meta charset>` |
+| `via_foot()` | The Datastar module script from `Config::getDatastarUrl()`, before `</body>` |
 
 Datastar attributes in templates, with ids written from the signal objects:
 ```twig
 {# Display a signal value #}
-<span data-text="${{ count.id }}">{{ count.int }}</span>
+<span data-text="{{ count.ref }}">{{ count.int }}</span>
 
 {# Two-way bind an input to a signal #}
 <input data-bind="{{ name.id }}" type="text">
+
+{# Bind a web component's property: renders data-bind__prop.value="<id>" #}
+<sb-slider {{ bind(volume, 'value') }}></sb-slider>
 
 {# Trigger an action on click #}
 <button data-on:click="@post('{{ increment.url }}')">+1</button>
 
 {# Show/hide based on a signal #}
-<div data-show="${{ loggedIn.id }}">Protected content</div>
+<div data-show="{{ loggedIn.ref }}">Protected content</div>
 ```
+
+**Layouts and shells.** A Twig layout that renders the whole document writes
+`{{ via_head() }}` right after `<meta charset>` and `{{ via_foot() }}` before `</body>`; a
+closure that returns a document writes `$c->viaHead()` and `$c->viaFoot()`. A shell template
+(`withShellTemplate()`) uses string placeholders, not Twig: `{{ via_head }}`, `{{ via_foot }}`,
+`{{ via_html_attrs }}` (on `<html>`), `{{ head_content }}`, `{{ content }}`, `{{ foot_content }}`, `{{ base_path }}`,
+`{{ context_id }}`, and `{{ name }}` / `{{ name.id }}` per signal. A layout that loads its own
+Datastar bundle keeps its script, leaves out `via_foot`, and leaves `withDatastarRocket()` and
+`withImportMap()` off. php-via warns once per shell or route without `via_head`. In a template
+rendered outside a context, such as a `notFound()` page, `via_head()` and `via_foot()` write the
+import map and the Datastar script.
+
+---
+
+## Web Components (Rocket, Starbase)
+
+Rocket is Datastar's web component layer; Starbase (https://starbase.zweiundeins.gmbh) is a
+catalog of Rocket components. `Config::withDatastarRocket()` makes `/datastar.js` serve
+Starbase's build of Datastar 1.0.4 with Rocket (22 KB with Brotli, against 12 KB for the
+plain bundle). Configure it before `new Via()`.
+
+**One engine per page.** Components `import { rocket } from 'datastar'`, so the page needs an
+import map that maps `datastar` to exactly the URL of the Datastar `<script type="module">`,
+query string included, before any module script. Another URL loads a second Datastar
+engine. `via_head` writes the map (with the option on, or once `withImportMap()` added
+entries) and `via_foot` the script, both from `Config::getDatastarUrl()`
+(`/datastar.js?v=<10 hex digits of the bundle's sha256>`). The default shell, a shell with
+`{{ via_head }}`/`{{ via_foot }}` and a Twig layout with `{{ via_head() }}`/`{{ via_foot() }}`
+need nothing else.
+
+The map is an inline script: under a CSP, set the `via.csp_nonce` request attribute and
+`via_head` puts the nonce on it.
+
+**Own modules and integrity.** `Config::withImportMap(array $imports, array $integrity = [])`
+merges entries into php-via's map: specifier => URL (absolute or starting with `/`; `./` and
+`../` throw, since every page gets the same map), and module URL => Subresource Integrity
+(`sha256-`/`sha384-`/`sha512-` + base64). Later
+calls replace entries with the same key. Invalid entries and the reserved `datastar` specifier
+throw `InvalidArgumentException`. `getImportMap()` returns the map. `getDatastarIntegrity()` is
+the served bundle's sha384; pin Datastar with
+`$config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarIntegrity()])`
+after `withDatastarRocket()` and `withBasePath()`. php-via never pins it by itself: a proxy
+that rewrites `/datastar.js` would break every page, since the pin covers the script tag too.
+`new Via()` warns about a pin for `/datastar.js` at another URL than `getDatastarUrl()`.
+
+**Loading components.** Take the script tag from a Starbase component page's Installation
+section (pinned version with `integrity`) and add it with `$app->appendToHead(...)`. Put the
+snippet's other `integrity` entries into `withImportMap()` and leave out its `datastar`
+entries. To pin a whole catalog snapshot, save `https://starbase.zweiundeins.gmbh/c/@<catalog>/importmap.json`
+with the app, pass its `integrity` to `withImportMap([], ...)` and load
+`/c/@<catalog>/autoloader.js` with its hash from that file (93 hashes, 6 KB per page with
+Brotli). Or copy the component's files into `withStaticDir()`; `.js` and `.mjs` are served as
+JavaScript. A copy can get a name and its hashes with `withImportMap(['sb-qr-code' => '/vendor/starbase/qr-code@<hash>/qr-code.min.js'], [...])`,
+and a page imports it with `<script type="module">import 'sb-qr-code'</script>`. Keep the version
+in the folder name: a cached old file under the same URL fails the new hash.
+
+**Binding.** Use `$signal->bind('value')` / `{{ bind(signal, 'value') }}`
+(`data-bind__prop.value`) on components, and the property form for any other property
+(`bind('checked')`). Plain `data-bind` binds a custom element's `value` property only if its
+tag is already defined, and the `value` attribute otherwise.
+
+**Server state.** Render the server's value into the component's attribute in the view and
+post the component's `change` event to an action, which decides the value and syncs:
+
+```twig
+<sb-slider label="Thrust" value="{{ thrust.int }}" {{ bind(thrust, 'value') }}
+    data-on:change="@post('{{ setThrust.url }}')"></sb-slider>
+```
+
+**Keyed lists.** The official Datastar 1.0.4 Rocket bundle crashes when a morph reorders
+keyed elements that contain a Rocket component; Starbase's build fixes it, which is why
+php-via serves that build.
+
+---
+
+## Testing
+
+```php
+use Mbolli\PhpVia\Testing\TestApp;
+
+$app = new TestApp(new Config(), function (Via $via): void {
+    $via->page('/', function (Context $c): void {
+        $count = $c->signal(0, 'count');
+        $c->action(fn () => $count->setValue($count->int() + 1), 'increment');
+        $c->view(fn (): string => "<main id=\"counter\">{$count->int()}</main>");
+    });
+});
+$tab = $app->open('/');            // page load plus SSE connect
+$tab->patches();                   // what the stream sent so far
+$tab->action('increment', ['q' => '1']);
+$tab->signal('count');             // 1, the value the browser holds
+$tab->html();                      // the page from server state
+$tab->disconnect(expire: true);    // destroy the context; connect() or action() revives it
+$app->request('GET', '/api/health'); // a plain request, to a route() or a download() URL
+$app->runTasks();                  // run spawn() tasks; setInterval() timers fire meanwhile
+$app->shutdown();
+```
+
+TestApp runs php-via's own request, action and SSE handlers in the test's process, with no
+server, no port and no `VIA_TEST_MODE`, as one worker, with broadcasts rendered at once.
+TestApp arms `$app->setInterval()` timers as worker 0 does; they and `$c->setInterval()` fire
+only while `runTasks()` waits for a task or a broadcast. A test that needs an interval's work
+calls it directly.
+
+---
+
+## Upgrading from 0.13
+
+The full guide is https://via.zweiundeins.gmbh/docs/upgrading. The changes that break code:
+
+- `composer require twig/twig` for `withTemplateDir()`, template views, `render()` and `getTwig()`.
+- `new Via($config)` freezes the Config. Renamed setters throw and name the new call:
+  `withContextCleanupDelay()`, `withContextConnectTimeout()` and `withContextRevivalWindow()` are
+  `withContextTimeouts(...)`; `withTracing()` is `withDevBar()`;
+  `withTracingWrites()`, `withTraceBufferSize()` and `withSsePollIntervalMs()` are
+  `withDevBarOptions(...)`; `getDevMode()` is `isDevMode()`; `withGcInterval()` is
+  `withGcIntervalMs()`.
+- `onStart()`/`onShutdown()` are `onWorkerStart()`/`onWorkerStop()`; `config()` is `getConfig()`;
+  `getContextsByScope()` is `getLocalContexts()`; `getRenderStats()` is `getStats()->getStats()`;
+  `activeSseCount[$id]` is `$c->isConnected()`; `onDisconnect()`/`#[OnDisconnect]` are
+  `onCleanup()`/`#[OnCleanup]`; `interval($ms, $fn)` is `setInterval($fn, $ms)`; `renderString()`
+  (`$app->getTwig()->createTemplate($src)->render($data)`) and `Signal::text()` (`data-text` with
+  `ref()`) are removed; `Via::parseSignals()` is gone.
+- `signal()` needs a name and takes its scope as an argument; after `scope()` a signal without one
+  throws. `action()` takes no scope.
+- `setValue()`/`increment()`/`mutate()` take no `broadcast:`/`markChanged:`.
+- `view()`: a string is a template name; `cacheUpdates:` is gone, `shareRender: true` opts into one
+  render per scope.
+- `component()` needs a namespace.
+- Custom shells and layouts write `via_head`/`via_foot` instead of a copied bootstrap.
+- `getSessionId()` and `via.session` are a hash of the cookie; SESSION scopes are per session.
+- `$app->broadcast(Scope::ROUTE)` throws: `Scope::routeScope('/path')`.
+- `worker_num` in `withSwooleSettings()` throws: `withWorkerNum()`.
+- Datastar 1.0.4 cancels requests per method and URL, from any element.
 
 ---
 
@@ -532,35 +1023,55 @@ php-via.
 ## Common Pitfalls (Quick Reference)
 
 1. **Hand-written signal ids**: ids include the tab and may carry a `____` suffix; write
-   them from the signal object (`$signal->id()`, `{{ count.id }}`), never by hand.
+   them from the signal object (`$signal->id()`, `$signal->ref()`, `{{ count.id }}`), never by hand.
 2. **Broadcast shows stale data for other clients**: views that show shared state must read
    shared state (a scoped signal or `$app->globalState()`), not a per-client TAB signal.
 3. **Dual state (globalState + Signal)**: scoped signals are already shared; use
-   `$c->scope(Scope::ROUTE); $s = $c->signal(...)` instead of mirroring into GlobalState.
-4. **Lost updates with several workers**: `setValue($s->int() + 1)` or
+   `$s = $c->signal(0, 'count', Scope::ROUTE)` instead of mirroring into GlobalState.
+4. **Signal stays private on a shared page**: `scope()` no longer gives signals its scope; pass
+   it as the third argument of `signal()`.
+5. **One tab's HTML on every tab**: `shareRender: true` on a view that shows TAB signals,
+   per-user data or components. Share only views that are the same for every tab.
+6. **Lost updates with several workers**: `setValue($s->int() + 1)` or
    `setGlobalState($k, globalState($k) + 1)` lose writes; use `increment()`/`mutate()`.
-5. **Transient state never shown**: a value set, broadcast and reset in one action never
+7. **Transient state never shown**: a value set, broadcast and reset in one action never
    reaches clients, because the flush renders later; call `$app->flushBroadcasts()` first.
-6. **Script runs before the morph**: `execScript()` after `broadcast()` reaches the tab
+8. **Script runs before the morph**: `execScript()` after `broadcast()` reaches the tab
    before the broadcast frame; call `$app->flushBroadcasts()` before `execScript()`.
-7. **Value frozen at page load**: compute it inside the view closure, not in the page
-   handler (applies to `count($app->getClients())` and to component HTML).
-8. **Variable null in view closure**: add it to both outer and inner `use` lists.
-9. **Stale cached view after broadcast**: pass `cacheUpdates: false` to `$c->view()`.
-10. **PatchElementsNoTargetsFound**: the root element of your rendered block must have a
-    unique `id` attribute.
-11. **Timer fires with no clients**: guard `$app->broadcast()` with
-    `if (empty($app->getClients())) return;`.
-12. **Shell templates ignore Twig**: shell HTML files use string placeholders, not Twig; put
+9. **Value frozen at page load**: compute it inside the view closure, not in the page
+   handler (applies to `countClients()` and to component HTML).
+10. **Variable null in view closure**: add it to both outer and inner `use` lists.
+11. **Stale view after broadcast**: pass the view data as a closure, `$c->view('t', fn (): array => [...])`.
+12. **PatchElementsNoTargetsFound**: the root element of your rendered view or block must have
+    a unique `id` attribute. Dev mode logs a warning once per route for a page update without one.
+13. **Timer fires with no clients**: guard `$app->broadcast()` with
+    `if ($app->countClients($scope) === 0) return;`.
+14. **Shell templates ignore Twig**: shell HTML files use string placeholders, not Twig; put
     layout logic in `{% extends %}` / `{% block %}` templates.
-13. **Action returns 403**: a POST without an `Origin` header when `withTrustedOrigins()` is
-    set; browsers always send one, scripts need `withAllowMissingOrigin()`.
+15. **Action returns 403**: outside dev mode, a POST without an `Origin` header, with or
+    without `withTrustedOrigins()`; browsers always send one, scripts need
+    `withAllowMissingOrigin()`. An `Origin` that is not in `withTrustedOrigins()`, or without
+    an allowlist does not match the `Host`, gets 403 too.
+16. **Rocket component fails or the page runs two Datastar engines**: enable
+    `withDatastarRocket()` and write `via_head`/`via_foot` (`{{ via_head }}` in a shell,
+    `{{ via_head() }}` in Twig) instead of an own map or script. Add other modules with
+    `withImportMap()` instead of a second map.
+17. **Two elements post the same action and one request is lost**: Datastar cancels
+    in-flight requests per method and URL; add a query string (`?from=button`) or pass
+    `{requestCancellation: 'disabled'}`.
+18. **Dialog closes on every update**: list browser-set attributes in `data-preserve-attr`
+    (`<dialog data-preserve-attr="open">`).
+19. **Middleware finds no session data**: read `$request->getAttribute('via.session')`, not the
+    session cookie.
+20. **`Config::withX() was called after new Via()`**: make every `with*` call before
+    `new Via($config)`.
 
 ---
 
 ## Links
 
 - Website & docs: https://via.zweiundeins.gmbh/
+- Upgrading to 0.14: https://via.zweiundeins.gmbh/docs/upgrading
 - GitHub: https://github.com/mbolli/php-via
 - Packagist: https://packagist.org/packages/mbolli/php-via
 - Changelog: https://github.com/mbolli/php-via/blob/master/CHANGELOG.md

@@ -1,7 +1,7 @@
 {% extends 'examples/_wrapper.html.twig' %}
 
 {% block demo %}
-<div class="stock-grid">
+<div id="stock-grid" class="stock-grid">
     {% for symbol, stock in stocks %}
     <a href="{{ basePath }}examples/stock-ticker/stock/{{ symbol }}" class="card stock-card">
         <div class="stock-card-header">
@@ -12,7 +12,7 @@
             ${{ stock.price|round(2) }}
         </div>
         <div class="stock-cta">
-            View Chart →
+            View chart
         </div>
     </a>
     {% endfor %}

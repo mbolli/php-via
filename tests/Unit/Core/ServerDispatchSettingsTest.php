@@ -36,7 +36,7 @@ use Mbolli\PhpVia\Via;
  */
 
 test('multi-worker settings do not install a PHP dispatch callback', function (): void {
-    $settings = Via::serverSettings((new Config())->withWorkerNum(8));
+    $settings = Via::serverSettings((new Config())->withWorkerNum(8)->freeze());
 
     expect($settings)->not->toHaveKey('dispatch_func');
 });
@@ -44,20 +44,20 @@ test('multi-worker settings do not install a PHP dispatch callback', function ()
 test('multi-worker settings do not pin a dispatch_mode', function (): void {
     // Leaving it unset keeps OpenSwoole's connection-sticky default. Pinning any
     // mode here would need the same empirical justification 7 never had.
-    $settings = Via::serverSettings((new Config())->withWorkerNum(8));
+    $settings = Via::serverSettings((new Config())->withWorkerNum(8)->freeze());
 
     expect($settings)->not->toHaveKey('dispatch_mode');
 });
 
 test('single-worker settings are unaffected', function (): void {
-    $settings = Via::serverSettings(new Config());
+    $settings = Via::serverSettings((new Config())->freeze());
 
     expect($settings)->not->toHaveKey('dispatch_func');
     expect($settings['worker_num'])->toBe(1);
 });
 
 test('worker_num reaches the server settings', function (): void {
-    expect(Via::serverSettings((new Config())->withWorkerNum(6))['worker_num'])->toBe(6);
+    expect(Via::serverSettings((new Config())->withWorkerNum(6)->freeze())['worker_num'])->toBe(6);
 });
 
 test('caller overrides win over defaults', function (): void {
@@ -66,7 +66,7 @@ test('caller overrides win over defaults', function (): void {
         ->withSwooleSettings(['backlog' => 128, 'dispatch_mode' => 2])
     ;
 
-    $settings = Via::serverSettings($config);
+    $settings = Via::serverSettings($config->freeze());
 
     // An operator who has set zend.max_allowed_stack_size can still opt in to a
     // custom dispatch via withSwooleSettings(); nothing here blocks that.

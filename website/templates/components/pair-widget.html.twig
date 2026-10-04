@@ -1,0 +1,18 @@
+{# The part of the pairing demo both screens share: the pair's colour and five swatches. #}
+{% if colour is null %}
+<p class="px-pairw-ended">{{ expired }}</p>
+{% else %}
+<div class="px-pairw">
+    <div class="px-pairw-screen px-colour--{{ colour }}">
+        <span class="px-pairw-stars" aria-hidden="true"></span>
+        <span class="px-pairw-name" role="status">{{ colour }}</span>
+    </div>
+    <div class="px-pairw-swatches" role="group" aria-label="Shared colour">
+        {% for swatch in swatches %}
+        <button type="button" class="px-swatch px-colour--{{ swatch.name }}"
+                aria-label="{{ swatch.name | capitalize }}" aria-pressed="{{ swatch.active ? 'true' : 'false' }}"
+                data-on:click="@post('{{ swatch.url }}')"></button>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Context;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Via;
+use OpenSwoole\Coroutine;
 use OpenSwoole\Timer;
 
 /**
@@ -15,6 +17,7 @@ use OpenSwoole\Timer;
  * Handles:
  * - Cleanup callbacks
  * - Timer management
+ * - Background tasks
  * - Disconnect handling
  * - Resource cleanup
  */
@@ -25,8 +28,11 @@ class ContextLifecycle {
     /** @var array<int> Timer IDs created by this context */
     private array $timerIds = [];
 
+    /**
+     * @param \WeakReference<Context> $context weak, so a destroyed context leaves no cycle for PHP's collector
+     */
     public function __construct(
-        private Context $context,
+        private \WeakReference $context,
         private Via $via,
     ) {}
 
@@ -52,7 +58,9 @@ class ContextLifecycle {
             try {
                 $callback(...$args);
             } catch (\Throwable $e) {
-                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $this->context);
+                $context = $this->context->get();
+                $this->via->log('error', 'Interval callback failed: ' . Logger::describe($e), $context);
+                $this->via->reportError($e, $context, ErrorPhase::Timer);
             }
         });
         $this->timerIds[] = $timerId;
@@ -61,9 +69,47 @@ class ContextLifecycle {
     }
 
     /**
+     * Run $task in a coroutine of its own and count it in Via::$runningTasks while it runs.
+     * A throw is logged and reported with ErrorPhase::Task, unless an onError() callback started the task.
+     * The task keeps the request of the action that starts it, also once that action has answered.
+     *
+     * @param callable(Context): void $task
+     *
+     * @throws \RuntimeException when OpenSwoole creates no coroutine, at max_coroutine
+     */
+    public function spawn(callable $task): void {
+        $context = $this->context->get() ?? throw new \LogicException('spawn() on a freed context');
+        // Reported, the throw of a task that reports an error would start the callbacks, and the task, again.
+        $fromErrorCallback = $this->via->inErrorCallbacks();
+        $request = RequestScope::current($context);
+
+        $cid = Coroutine::create(function () use ($task, $context, $fromErrorCallback, $request): void {
+            $request?->bind();
+            ++$this->via->runningTasks;
+
+            try {
+                $task($context);
+            } catch (\Throwable $e) {
+                $this->via->log('error', 'Task failed: ' . Logger::describe($e), $context);
+                if (!$fromErrorCallback) {
+                    $this->via->reportError($e, $context, ErrorPhase::Task);
+                }
+            } finally {
+                --$this->via->runningTasks;
+            }
+        });
+
+        if ($cid === false) {
+            throw new \RuntimeException('Context::spawn() could not start a coroutine: the worker is at max_coroutine.');
+        }
+    }
+
+    /**
      * Execute cleanup callbacks and release resources.
      */
     public function cleanup(): void {
+        $context = $this->context->get() ?? throw new \LogicException('Cleanup of a freed context');
+
         // Clear all timers first
         foreach ($this->timerIds as $timerId) {
             Timer::clear($timerId);
@@ -72,7 +118,7 @@ class ContextLifecycle {
 
         foreach ($this->cleanupCallbacks as $callback) {
             try {
-                $callback($this->context);
+                $callback($context);
             } catch (\Throwable $e) {
                 error_log('Cleanup callback error: ' . $e->getMessage());
             }

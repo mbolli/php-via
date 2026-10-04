@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia;
 
 use Mbolli\PhpVia\State\SharedSignalStore;
+use Mbolli\PhpVia\Support\ClientValue;
+use Mbolli\PhpVia\Support\Removed;
 
 /**
  * Signal represents a reactive value synchronized between server and browser.
  *
  * Signals can be TAB-scoped (per-context) or shared across a scope.
  */
-class Signal {
+final class Signal {
     private string $id;
     private mixed $value = null;
     private bool $changed = true;
@@ -19,6 +21,12 @@ class Signal {
     private bool $autoBroadcast = true;
     private ?bool $clientWritable = null;
     private ?Via $app = null;
+
+    /** @var null|list<string> The types a client write may have (see ClientValue), null for any */
+    private ?array $clientTypes;
+
+    /** Whether the browser holds the initial value, so the page sends the server's only once it writes one. */
+    private bool $clientSeeded;
 
     /**
      * Monotonic count of value-changing writes made through this Signal object.
@@ -42,21 +50,27 @@ class Signal {
     /** Store read epoch $value was loaded under (see SharedSignalStore::readEpoch()); 0 means read it again. */
     private int $readEpoch = 0;
 
+    /**
+     * @internal
+     */
     public function __construct(
         string $id,
         mixed $initialValue,
         ?string $scope = null,
         bool $autoBroadcast = true,
         ?bool $clientWritable = null,
-        ?Via $app = null
+        ?Via $app = null,
+        bool $clientSeeded = false,
     ) {
         $this->id = $id;
         $this->scope = $scope;
         $this->autoBroadcast = $autoBroadcast;
         $this->clientWritable = $clientWritable;
         $this->app = $app;
-        $this->setValue($initialValue, false); // Don't trigger broadcast on init
-        $this->changed = true; // But mark as changed for initial sync
+        $this->value = $initialValue;
+        $this->clientTypes = ClientValue::typesOf($initialValue);
+        $this->clientSeeded = $clientSeeded;
+        $this->changed = !$clientSeeded;
     }
 
     /**
@@ -88,7 +102,7 @@ class Signal {
      */
     public function attachSharedStore(SharedSignalStore $store): void {
         $this->store = $store;
-        $this->value = $store->initialize($this->sharedKey(), $this->value);
+        $this->value = $store->initialize($this->sharedKey(), $this->value, $this->scope);
         $this->readEpoch = 0;
     }
 
@@ -129,11 +143,16 @@ class Signal {
      *
      * @template T
      *
-     * @param callable(mixed): T $mutator Receives the current value, returns the new one
+     * @param callable(mixed): T $mutator    Receives the current value, returns the new one
+     * @param mixed              ...$removed The broadcast flag removed in 0.14: any argument here throws
      *
      * @return T the value written
      */
-    public function mutate(callable $mutator, bool $broadcast = true): mixed {
+    public function mutate(callable $mutator, mixed ...$removed): mixed {
+        if ($removed !== []) {
+            self::rejectRemovedFlags('mutate', 'the mutator', $removed);
+        }
+
         $next = $this->store !== null
             ? $this->store->mutate($this->sharedKey(), $mutator)
             : $mutator($this->value);
@@ -143,7 +162,7 @@ class Signal {
         $this->changed = true;
         ++$this->writes;
 
-        if ($broadcast && $this->isScoped() && $this->autoBroadcast && $this->app !== null) {
+        if ($this->isScoped() && $this->autoBroadcast && $this->app !== null) {
             $this->app->broadcast($this->scope);
         }
 
@@ -160,11 +179,15 @@ class Signal {
      *
      * Single-worker behaviour is identical to the equivalent setValue().
      *
-     * @param bool $broadcast Whether to auto-broadcast (scoped signals with autoBroadcast only)
+     * @param mixed ...$removed The broadcast flag removed in 0.14: any argument here throws
      *
      * @throws \LogicException if the signal does not hold an integer
      */
-    public function increment(int $by = 1, bool $broadcast = true): int {
+    public function increment(int $by = 1, mixed ...$removed): int {
+        if ($removed !== []) {
+            self::rejectRemovedFlags('increment', '$by', $removed);
+        }
+
         if ($this->store !== null) {
             $next = $this->store->increment($this->sharedKey(), $by);
         } else {
@@ -182,7 +205,7 @@ class Signal {
         $this->changed = true;
         ++$this->writes;
 
-        if ($broadcast && $this->isScoped() && $this->autoBroadcast && $this->app !== null && $by !== 0) {
+        if ($this->isScoped() && $this->autoBroadcast && $this->app !== null && $by !== 0) {
             $this->app->broadcast($this->scope);
         }
 
@@ -190,39 +213,49 @@ class Signal {
     }
 
     /**
-     * Set the signal value.
+     * Set the signal value and queue it for the next sync.
      *
-     * @param mixed $value       The new value to set
-     * @param bool  $markChanged Whether to mark signal as changed for sync
-     * @param bool  $broadcast   Whether to auto-broadcast (only applies if markChanged=true)
+     * A scoped signal also broadcasts its scope when the value changed, unless it was declared
+     * with autoBroadcast: false. Broadcast coalescing renders several writes in one action once.
+     *
+     * @param mixed $value      The new value to set
+     * @param mixed ...$removed The markChanged and broadcast flags removed in 0.14: any argument here throws
      */
-    public function setValue(mixed $value, bool $markChanged = true, bool $broadcast = true): void {
-        // Check if value actually changed. With a shared backing the comparison has to be
-        // against what is actually stored, not against this worker's last-seen copy or a
-        // flush's read snapshot, so it bypasses getValue().
+    public function setValue(mixed $value, mixed ...$removed): void {
+        if ($removed !== []) {
+            self::rejectRemovedFlags('setValue', 'the value', $removed);
+        }
+
+        // With a shared backing the comparison has to be against what is actually stored, not
+        // against this worker's last-seen copy or a flush's read snapshot, so it bypasses getValue().
         $oldValue = $this->store !== null ? $this->store->get($this->sharedKey(), $this->value) : $this->value;
 
         $this->value = $value;
         $this->readEpoch = 0;
         $this->store?->set($this->sharedKey(), $value);
+        $this->changed = true;
+        ++$this->writes;
 
-        if ($markChanged) {
-            $this->changed = true;
-            ++$this->writes;
-
-            // Auto-broadcast for scoped signals (if enabled, broadcast=true, and value changed)
-            if ($broadcast
-                && $this->isScoped()
-                && $this->autoBroadcast
-                && $this->app !== null
-                && $oldValue !== $this->value) {
-                $this->app->broadcast($this->scope);
-            }
+        if ($this->isScoped() && $this->autoBroadcast && $this->app !== null && $oldValue !== $this->value) {
+            $this->app->broadcast($this->scope);
         }
     }
 
     /**
+     * Store a value the browser already holds: it is not queued for a sync, counted as a write or broadcast.
+     *
+     * @internal client values posted with an action or carried by the SSE seed
+     */
+    public function injectValue(mixed $value): void {
+        $this->value = $value;
+        $this->readEpoch = 0;
+        $this->store?->set($this->sharedKey(), $value);
+    }
+
+    /**
      * Check if this signal is scoped (non-TAB scope).
+     *
+     * @internal
      */
     public function isScoped(): bool {
         return $this->scope !== null && $this->scope !== Scope::TAB;
@@ -230,6 +263,8 @@ class Signal {
 
     /**
      * Get the signal's scope.
+     *
+     * @internal
      */
     public function getScope(): ?string {
         return $this->scope;
@@ -240,9 +275,42 @@ class Signal {
      *
      * An explicit clientWritable (true or false) always wins. Without one, TAB signals are
      * client-writable and scoped signals are server-authoritative.
+     *
+     * @internal
      */
     public function isClientWritable(): bool {
         return $this->clientWritable ?? !$this->isScoped();
+    }
+
+    /**
+     * Whether the browser holds this signal's initial value; see Context::signal().
+     *
+     * @internal
+     */
+    public function isClientSeeded(): bool {
+        return $this->clientSeeded;
+    }
+
+    /**
+     * Set the types a client write may have, in place of the initial value's.
+     *
+     * @internal PageMount passes a #[Signal] property's declared type
+     *
+     * @param null|list<string> $types see ClientValue, null for any
+     */
+    public function acceptClientTypes(?array $types): void {
+        $this->clientTypes = $types;
+    }
+
+    /**
+     * A value the browser sent, as this signal's type, wrapped in a list; null when it has another type.
+     *
+     * @internal used by SignalFactory before it stores a client write
+     *
+     * @return null|array{mixed}
+     */
+    public function acceptClientValue(mixed $value): ?array {
+        return $this->clientTypes === null ? [$value] : ClientValue::coerce($value, $this->clientTypes);
     }
 
     /**
@@ -250,6 +318,8 @@ class Signal {
      *
      * Only useful as a before/after comparison around a call into other code: an unchanged
      * count means that code did not write this signal.
+     *
+     * @internal
      */
     public function writeCount(): int {
         return $this->writes;
@@ -257,13 +327,19 @@ class Signal {
 
     /**
      * Check if signal has changed.
+     *
+     * @internal
      */
     public function hasChanged(): bool {
         return $this->changed;
     }
 
     /**
-     * Mark signal as synced.
+     * Drop this signal's pending patch, so neither the page seed nor the next sync sends the
+     * current value. It does not stop a scoped signal's broadcast.
+     *
+     * Use it after setValue() on a TAB signal the browser already shows. For a value the browser
+     * seeds itself, declare the signal with signal(..., clientSeeded: true) instead.
      */
     public function markSynced(): void {
         $this->changed = false;
@@ -303,17 +379,18 @@ class Signal {
 
     /**
      * Get value as boolean.
+     *
+     * A string is true when it reads 'true', '1', 'yes' or 'on' (any case), and any other string is
+     * false. A value that is not a string follows PHP's truthiness, so int 2 and float 0.5 are true.
      */
     public function bool(): bool {
         $value = $this->store === null ? $this->value : $this->getValue();
 
-        if (\is_array($value) || \is_object($value)) {
-            return !empty($value);
+        if (\is_string($value)) {
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
         }
 
-        $val = mb_strtolower((string) $value);
-
-        return \in_array($val, ['true', '1', 'yes', 'on'], true);
+        return (bool) $value;
     }
 
     /**
@@ -328,18 +405,62 @@ class Signal {
     }
 
     /**
-     * Bind this signal to an HTML input element
-     * Returns the data-bind attribute.
+     * Bind this signal to a form field or custom element. Returns the data-bind attribute.
+     *
+     * $prop binds that element property instead, as data-bind__prop.<prop> (Datastar's own modifier).
+     * Use it for custom elements such as Rocket components ('value', 'checked'): plain data-bind binds a
+     * custom element's value property only if its tag is already defined, and the value attribute if not.
+     * A camelCase name is written in kebab case, which Datastar turns back into camelCase.
+     *
+     * @throws \InvalidArgumentException if $prop is not a property name
      */
-    public function bind(): string {
-        return 'data-bind="' . $this->id . '"';
+    public function bind(?string $prop = null): string {
+        if ($prop === null) {
+            return 'data-bind="' . $this->id . '"';
+        }
+
+        if (preg_match('/^[a-z][a-zA-Z0-9]*(?:-[a-z0-9]+)*$/', $prop) !== 1) {
+            throw new \InvalidArgumentException("Invalid property name '{$prop}' for bind()");
+        }
+
+        return 'data-bind__prop.' . strtolower((string) preg_replace('/[A-Z]/', '-$0', $prop)) . '="' . $this->id . '"';
     }
 
     /**
-     * Display this signal's value as text in an HTML element
-     * Returns a span element with the signal binding.
+     * This signal as a Datastar expression reference: '$' plus its id.
+     *
+     * Use it in any data-* expression, for example data-text="{$count->ref()}" or
+     * data-show="{$open->ref()}".
      */
-    public function text(): string {
-        return '<span data-text="$' . $this->id . '"></span>';
+    public function ref(): string {
+        return '$' . $this->id;
+    }
+
+    /**
+     * @deprecated removed in 0.14; throws and names ref()
+     */
+    public function text(): never {
+        Removed::method('Signal::text()', 'Use <span data-text="{$signal->ref()}">{$signal->string()}</span>, which also renders the current value.');
+    }
+
+    /**
+     * PHP silently drops extra positional arguments to a userland method, so the flags removed in
+     * 0.14 are caught here rather than left to mean nothing.
+     *
+     * @param array<int|string, mixed> $removed
+     */
+    private static function rejectRemovedFlags(string $method, string $kept, array $removed): never {
+        $named = array_filter(array_keys($removed), \is_string(...));
+        $positional = \count($removed) - \count($named);
+        $passed = array_map(static fn (string $name): string => $name . ':', $named);
+        if ($positional > 0) {
+            $passed[] = $positional . ' more positional argument' . ($positional > 1 ? 's' : '');
+        }
+
+        throw new \ArgumentCountError(
+            "Signal::{$method}() takes only {$kept} since php-via 0.14, but got " . implode(' and ', $passed) . '. '
+            . 'Delete the broadcast: and markChanged: arguments: a scoped signal broadcasts on write unless declared '
+            . "with autoBroadcast: false, and markSynced() drops a TAB signal's pending patch."
+        );
     }
 }

@@ -13,12 +13,12 @@ final class StockTickerExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Simulated market data</strong> updates every 2 seconds via a server-side OpenSwoole timer. Prices drift randomly and history is tracked for each symbol.',
-        '<strong>ROUTE scope</strong> on the dashboard means all viewers share the same rendered output. Per-stock detail pages use custom scopes so each symbol updates independently.',
-        '<strong>Lazy timers</strong>: the price ticker only runs while at least one client is connected. Zero viewers means zero CPU cost.',
+        '<strong>Simulated market data</strong> updates every 2 seconds from a <code>$app->setInterval()</code> timer. Prices drift randomly and history is tracked for each symbol.',
+        '<strong>ROUTE scope</strong> on the dashboard, with <code>shareRender: true</code>: one render per tick serves every viewer. Each detail page declares its signals in a custom scope per symbol, so each symbol updates independently.',
+        '<strong>Idle when unwatched</strong>: the timer skips its work while <code>countClients()</code> finds no open dashboard or detail page on any worker.',
         '<strong>Deep linking</strong>: each stock has its own URL (<code>/stock/{symbol}</code>). Navigate directly to a ticker or click through from the dashboard.',
-        '<strong>Signal-driven charts</strong> on detail pages. Price history is stored in signals so the chart data updates live without re-rendering the entire page.',
-        '<strong>Apache ECharts</strong> renders sparklines on the dashboard and the full chart on detail pages. The chart library receives updated data via Datastar signals: no manual JS refresh needed.',
+        '<strong>Signal-driven charts</strong> on detail pages. The timer writes the price history into the symbol\'s signals, and each write broadcasts to its viewers, so the chart updates without rendering the page again.',
+        '<strong>Apache ECharts</strong> draws the chart on detail pages. Datastar writes the history signals into the chart element\'s attributes, and the element redraws when they change.',
     ];
 
     /** @var array<string, list<array{name: string, desc?: string, type?: string, scope?: string, default?: string}>> */
@@ -30,8 +30,8 @@ final class StockTickerExample {
         ],
         'actions' => [],
         'views' => [
-            ['name' => 'stock_dashboard.html.twig', 'desc' => 'ROUTE-scoped dashboard with sparklines for all 8 stocks. Shared by all viewers.'],
-            ['name' => 'stock_detail.html.twig', 'desc' => 'Per-symbol detail page with full ECharts chart. Custom scope per stock symbol.'],
+            ['name' => 'stock_dashboard.html.twig', 'desc' => 'ROUTE-scoped dashboard with the price of all 8 stocks. One shared render per tick for all viewers.'],
+            ['name' => 'stock_detail.html.twig', 'desc' => 'Per-symbol detail page with the ECharts chart. Rendered once; the signals carry every later price.'],
             ['name' => 'stock_not_found.html.twig', 'desc' => 'Fallback for unknown stock symbols.'],
         ],
     ];
@@ -63,90 +63,62 @@ final class StockTickerExample {
         // Dashboard
         $app->page('/examples/stock-ticker', function (Context $c): void {
             $c->scope(Scope::ROUTE);
-            $c->view(fn (): string => $c->render('examples/stock_dashboard.html.twig', [
-                'title' => '📈 Stock Ticker',
-                'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
+            $c->view('examples/stock_dashboard.html.twig', fn (): array => [
+                'title' => 'Stock Ticker',
+                'description' => 'Watch simulated prices change every two seconds, and open a stock for its chart. A server timer moves the prices and broadcasts the ROUTE scope, and one shared render serves every viewer.',
+                'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
                 'stocks' => self::$stocks,
-            ]));
+            ], block: 'demo', shareRender: true);
         });
 
         // Individual stock page
         $app->page('/examples/stock-ticker/stock/{symbol}', function (Context $c, string $symbol): void {
-            $c->scope(Scope::build('example:stock', $symbol));
-
-            $c->view(function (bool $isUpdate, string $basePath) use ($symbol, $c): string {
-                $stock = self::$stocks[$symbol] ?? null;
-
-                if (!$stock) {
-                    return $c->render('examples/stock_not_found.html.twig', [
-                        'title' => '📈 Stock Ticker',
-                        'description' => 'Stock not found.',
-                        'summary' => self::SUMMARY,
-                        'anatomy' => self::ANATOMY,
-                        'githubLinks' => self::GITHUB_LINKS,
-                        'symbol' => $symbol,
-                    ]);
-                }
-
-                $price = $stock['price'];
-                $history = $stock['history'];
-                $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
-                $prices = array_map(fn (array $h) => $h['price'], $history);
-
-                $priceSignal = $c->signal(number_format($price, 2), 'price');
-                $timesSignal = $c->signal($times, 'times');
-                $pricesSignal = $c->signal($prices, 'prices');
-
-                if ($isUpdate) {
-                    return '';
-                }
-
-                $allStocks = self::$stocks;
-                $otherStocks = '';
-                foreach ($allStocks as $sym => $st) {
-                    if ($sym === $symbol) {
-                        continue;
-                    }
-                    $otherStocks .= "<a href='{$basePath}examples/stock-ticker/stock/{$sym}' style='display:inline-block;padding:var(--size-1) var(--size-3);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin:2px;font-weight:var(--font-weight-6);text-decoration:none;'>{$sym}</a> ";
-                }
-
-                return $c->render('examples/stock_detail.html.twig', [
-                    'title' => '📈 Stock Ticker',
-                    'description' => $symbol . ' · ' . $stock['name'],
+            $stock = self::$stocks[$symbol] ?? null;
+            if ($stock === null) {
+                $c->view('examples/stock_not_found.html.twig', [
+                    'title' => 'Stock Ticker',
+                    'description' => 'There is no stock with this symbol. Go back to the dashboard to pick one.',
+                    'perWorker' => 'the prices',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,
                     'symbol' => $symbol,
-                    'name' => $stock['name'],
-                    'color' => $stock['color'],
-                    'priceSignal' => $priceSignal,
-                    'timesSignal' => $timesSignal,
-                    'pricesSignal' => $pricesSignal,
-                    'otherStocks' => $otherStocks,
                 ]);
-            }, cacheUpdates: false);
+
+                return;
+            }
+
+            // The symbol's scope, so every viewer of this stock shares these signals and the timer's writes reach them.
+            $stockScope = Scope::build('example:stock', $symbol);
+            $c->signal(number_format($stock['price'], 2), 'price', $stockScope);
+            $c->signal(self::times($stock['history']), 'times', $stockScope);
+            $c->signal(self::prices($stock['history']), 'prices', $stockScope);
+
+            // Rendered once: the signals carry every later change.
+            $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('examples/stock_detail.html.twig', [
+                'title' => 'Stock Ticker',
+                'description' => 'Watch the price of ' . $stock['name'] . ' (' . $symbol . ') change every two seconds. The timer writes it into signals in a custom scope per symbol, so the chart updates without rendering the page again.',
+                'perWorker' => 'the prices',
+                'summary' => self::SUMMARY,
+                'anatomy' => self::ANATOMY,
+                'githubLinks' => self::GITHUB_LINKS,
+                'symbol' => $symbol,
+                'name' => $stock['name'],
+                'color' => $stock['color'],
+                'otherSymbols' => array_values(array_diff(array_keys(self::$stocks), [$symbol])),
+            ]));
         });
 
         $app->setInterval(fn () => self::tick($app), 2000);
     }
 
     private static function tick(Via $app): void {
-        // Skip if nobody is watching any stock ticker page
-        if ($app->getContextsByScope(Scope::routeScope('/examples/stock-ticker')) === []) {
-            $hasDetailViewers = false;
-            foreach (array_keys(self::$stocks) as $symbol) {
-                if ($app->getContextsByScope(Scope::build('example:stock', $symbol)) !== []) {
-                    $hasDetailViewers = true;
-
-                    break;
-                }
-            }
-            if (!$hasDetailViewers) {
-                return;
-            }
+        // Skip while nobody has the dashboard or a detail page open, on any worker.
+        if ($app->countClients(Scope::routeScope('/examples/stock-ticker')) === 0 && $app->countClients('example:stock:*') === 0) {
+            return;
         }
 
         foreach (self::$stocks as $symbol => &$stock) {
@@ -168,25 +140,34 @@ final class StockTickerExample {
                 array_shift($stock['history']);
             }
 
+            // Each write broadcasts the stock's scope, which sends the new values to its detail pages.
             $scope = Scope::build('example:stock', $symbol);
-            $history = $stock['history'];
-            $times = array_map(fn (array $h) => date('H:i:s', $h['time']), $history);
-            $prices = array_map(fn (array $h) => $h['price'], $history);
-
-            $priceSignal = $app->getScopedSignalByName($scope, 'price');
-            $priceSignal?->setValue(number_format($newPrice, 2), markChanged: true, broadcast: false);
-
-            $timesSignal = $app->getScopedSignalByName($scope, 'times');
-            $timesSignal?->setValue($times, markChanged: true, broadcast: false);
-
-            $pricesSignal = $app->getScopedSignalByName($scope, 'prices');
-            $pricesSignal?->setValue($prices, markChanged: true, broadcast: false);
-
-            $app->broadcast(Scope::build('example:stock', $symbol));
+            $app->getScopedSignalByName($scope, 'price')?->setValue(number_format($newPrice, 2));
+            $app->getScopedSignalByName($scope, 'times')?->setValue(self::times($stock['history']));
+            $app->getScopedSignalByName($scope, 'prices')?->setValue(self::prices($stock['history']));
         }
         unset($stock);
 
+        // The dashboard reads the prices from the static array, not from signals.
         $app->broadcast(Scope::routeScope('/examples/stock-ticker'));
+    }
+
+    /**
+     * @param array<array{time: int, price: float}> $history
+     *
+     * @return list<string>
+     */
+    private static function times(array $history): array {
+        return array_map(static fn (array $h): string => date('H:i:s', $h['time']), $history);
+    }
+
+    /**
+     * @param array<array{time: int, price: float}> $history
+     *
+     * @return list<float>
+     */
+    private static function prices(array $history): array {
+        return array_map(static fn (array $h): float => $h['price'], $history);
     }
 
     private static function init(): void {

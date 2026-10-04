@@ -115,7 +115,7 @@ describe('full-document views: initial render', function (): void {
     });
 
     test('the seed escapes what Datastar would compile as code', function (): void {
-        $values = ['foo@bar(baz)', '@media(max-width: 600px)', 'C:\\temp\\', 'color:red;', "\u{1F595}JS_DS\u{1F680}", 'a\\"b', 'grüße'];
+        $values = ['foo@bar(baz)', '@media(max-width: 600px)', 'C:\\temp\\', 'color:red;', 'a\\"b', 'grüße'];
         $via = createVia();
         $ctx = new Context('/_/doc14', '/doc', $via);
         $ids = [];
@@ -151,6 +151,23 @@ describe('full-document views: initial render', function (): void {
             ->and(strpos($html, 'via_ctx'))->toBeLessThan($boot)
             ->and(strpos($html, '__ifmissing'))->toBeLessThan($boot)
             ->and(strpos($html, '/global.css'))->toBeGreaterThan($boot)->toBeLessThan(stripos($html, '</head>'))
+        ;
+    });
+
+    test('the seed goes right after via_head\'s via_ctx meta, behind <meta charset> and ahead of the SSE connect', function (): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc18', '/doc', $via);
+        $ctx->signal(5, 'count');
+        $ctx->view(fn () => "<!DOCTYPE html>\n<html><head><meta charset=\"UTF-8\">" . $ctx->viaHead() . '<title>t</title></head><body></body></html>');
+
+        $html = $via->buildHtmlDocument($ctx);
+        $seed = strpos($html, '__ifmissing');
+
+        expect(metaSignals($html, 'data-signals__ifmissing'))->toBe([$ctx->getSignal('count')?->id() => 5])
+            ->and($html)->toContain('<meta charset="UTF-8"><meta data-via-head ')
+            ->and(strpos($html, 'data-via-head'))->toBeLessThan($seed)
+            ->and($seed)->toBeLessThan(strpos($html, '_sse'))
+            ->and(substr_count($html, 'via_ctx'))->toBe(1)
         ;
     });
 
@@ -193,6 +210,33 @@ describe('full-document views: initial render', function (): void {
         expect(substr_count($html, 'via_ctx'))->toBe(1);
     });
 
+    test('a layout that seeds via_ctx another way is not given a second one', function (string $own): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc5', '/doc', $via);
+        $ctx->view(fn () => fullDocument($own));
+
+        $html = $via->buildHtmlDocument($ctx);
+
+        expect(substr_count($html, 'via_ctx'))->toBe(1);
+    })->with([
+        'entity-encoded' => ['<meta data-signals="{&quot;via_ctx&quot;:&quot;/_/doc5&quot;}">'],
+        'keyed attribute' => ['<meta data-signals:via_ctx="\'/_/doc5\'">'],
+        'if missing' => ['<meta data-signals__ifmissing=\'{"via_ctx":"/_/doc5"}\'>'],
+    ]);
+
+    test('a page that only mentions via_ctx still gets the via_ctx meta', function (): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc5', '/doc', $via);
+        // nfsen-ng's list requests post only via_ctx; the text is not a via_ctx signal.
+        $body = '<button data-on:click="@post(\'/_action/x\', {filterSignals: {include: /^via_ctx$/}})">x</button>'
+            . '<p>Send via_ctx in every action body.</p>';
+        $ctx->view(fn () => fullDocument('', $body));
+
+        $html = $via->buildHtmlDocument($ctx);
+
+        expect(metaSignals($html, 'data-signals'))->toBe(['via_ctx' => '/_/doc5', '_disconnected' => false]);
+    });
+
     test('an include the layout already contains is not duplicated', function (): void {
         $via = createVia();
         $tag = '<link rel="stylesheet" href="/global.css">';
@@ -221,7 +265,7 @@ describe('full-document views: initial render', function (): void {
 });
 
 describe('full-document views: update render', function (): void {
-    test('includes are re-added to the update HTML, without via_ctx or seed', function (): void {
+    test('includes are re-added to the update HTML, with via_ctx and an empty seed', function (): void {
         $via = createVia();
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx = new Context('/_/doc8', '/doc', $via);
@@ -236,13 +280,54 @@ describe('full-document views: update render', function (): void {
         $html = $elements[0]['content'];
         expect($html)->toContain('/global.css')
             ->and($html)->toContain('/page.js')
-            ->and($html)->not->toContain('via_ctx')
-            ->and($html)->not->toContain('__ifmissing')
+            ->and(metaSignals($html, 'data-signals'))->toBe(['via_ctx' => '/_/doc8', '_disconnected' => false])
+            ->and(metaSignals($html, 'data-signals__ifmissing'))->toBe([])
+        ;
+    });
+
+    test('an update has the head tags of the initial render in their order, so the morph leaves via_head\'s connect alone', function (string $layout): void {
+        $via = createVia();
+        $ctx = new Context('/_/doc16', '/doc', $via);
+        $ctx->signal(1, 'count');
+        $ctx->view(fn (): string => match ($layout) {
+            'via_head' => '<!DOCTYPE html><html><head><meta charset="utf-8">' . $ctx->viaHead() . '<title>t</title></head><body><main id="m">x</main>' . $ctx->viaFoot() . '</body></html>',
+            'none' => fullDocument(),
+        });
+        $headTags = static function (string $html): array {
+            $head = substr($html, 0, (int) stripos($html, '</head>'));
+            preg_match_all('/<([a-z]+)((?:\s+[a-z][\w:.-]*)*)/i', $head, $m, PREG_SET_ORDER);
+
+            return array_map(static fn (array $tag): string => $tag[0], $m);
+        };
+
+        $initial = $via->buildHtmlDocument($ctx);
+        $ctx->sync();
+        $update = elementPatches($ctx)[0];
+
+        expect(metaSignals($initial, 'data-signals__ifmissing'))->not->toBe([])
+            ->and($headTags($update))->toBe($headTags($initial))
+        ;
+    })->with(['via_head', 'none']);
+
+    test('an update leaves the CSP nonce off via_head and via_foot, where the browser hid it', function (): void {
+        $via = createVia((new Config())->withImportMap(['app' => '/app.js']));
+        $ctx = new Context('/_/doc17', '/doc', $via);
+        $ctx->setRequestAttributes(['via.csp_nonce' => 'n1']);
+        $ctx->view(fn (): string => '<!DOCTYPE html><html><head><meta charset="utf-8">' . $ctx->viaHead() . '</head><body><main id="m">x</main>' . $ctx->viaFoot() . '</body></html>');
+
+        $initial = $via->buildHtmlDocument($ctx);
+        $ctx->sync();
+        $update = elementPatches($ctx)[0];
+
+        expect(substr_count($initial, 'nonce="n1"'))->toBe(5)
+            ->and($update)->toContain('<script type="importmap"')
+            ->and($update)->not->toContain('nonce=')
+            ->and($ctx->viaHead())->toContain('nonce="n1"')
         ;
     });
 
     test('update includes keep their place: head before </head>, foot before </body> and the Dev Bar', function (): void {
-        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via = createVia((new Config())->withDevMode()->withDevBar(true));
         $owned = '<link rel="stylesheet" href="/owned.css">';
         $via->appendToHead($owned);
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
@@ -266,7 +351,7 @@ describe('full-document views: update render', function (): void {
     });
 
     test('component updates are not decorated', function (): void {
-        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via = createVia((new Config())->withDevMode()->withDevBar(true));
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx = new Context('/_/doc16', '/doc', $via);
         $inner = null;
@@ -290,7 +375,7 @@ describe('full-document views: update render', function (): void {
     });
 
     test('an update with <body> but no <html> keeps the Dev Bar and gets no includes', function (): void {
-        $via = createVia((new Config())->withDevMode()->withTracing(true));
+        $via = createVia((new Config())->withDevMode()->withDevBar(true));
         $via->appendToHead('<link rel="stylesheet" href="/global.css">');
         $ctx = new Context('/_/doc18', '/doc', $via);
         $ctx->view(fn () => '<body><main id="app">x</main></body>');

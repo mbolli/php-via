@@ -6,14 +6,17 @@
     <p>
         php-via runs as a long-lived <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> server process.
         Unlike traditional PHP-FPM setups, the process stays running: all state lives in memory.
-        This page covers production setup with systemd, Caddy, and process management.
+        This page covers the service, the reverse proxy, several workers, static files, coroutine hooks
+        and security settings.
     </p>
 
     <h2 id="requirements">Requirements</h2>
     <ul>
         <li>PHP 8.4+</li>
-        <li>OpenSwoole extension (<code>pecl install openswoole</code> or packaged as <code>php8.4-openswoole</code>)</li>
-        <li>A reverse proxy (Caddy or nginx) to handle TLS and serve static assets</li>
+        <li>OpenSwoole 26 (<code>pecl install openswoole-26.2.0</code>, or a <code>php8.4-openswoole</code> package of version 26)</li>
+        <li><code>twig/twig</code> 3.10 or newer, only for Twig templates: <code>composer require twig/twig</code></li>
+        <li>ext-brotli, optional: static files get Brotli level 11 once it is loaded, pages and streams with <code>withBrotli()</code></li>
+        <li>A reverse proxy (Caddy or nginx) to handle TLS</li>
     </ul>
 
     <h2 id="systemd">systemd service</h2>
@@ -28,6 +31,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/var/www/myapp
 ExecStart=/usr/bin/php /var/www/myapp/app.php
+ExecReload=/bin/kill -USR1 $MAINPID
 Restart=on-failure
 RestartSec=5s
 Environment=APP_ENV=production
@@ -42,15 +46,23 @@ systemctl enable myapp
 systemctl start myapp
 systemctl status myapp
     {% endverbatim %}{% endcode %}
+    <p>
+        <code>ExecReload</code> makes <code>systemctl reload</code> send <code>SIGUSR1</code> to the OpenSwoole master, which
+        restarts the workers (see <a href="#graceful-restart">Graceful restart</a>). With ext-brotli loaded, the server
+        compresses the static files present at start before it opens its port, for up to 2.3&nbsp;s (see
+        <a href="#static-compression">Static compression</a>), so a health check right after <code>start</code> can fail.
+    </p>
 
     <h2 id="caddy">Caddy reverse proxy</h2>
     <p>
-        Caddy handles TLS automatically. The key requirement is disabling response buffering for SSE
-        (the <code>/_sse</code> endpoint streams indefinitely):
+        Caddy handles TLS automatically, and SSE needs no setting: <code>reverse_proxy</code> flushes a
+        response with <code>Content-Type: text/event-stream</code> to the client immediately, whatever
+        <code>flush_interval</code> says (<a href="https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#flush_interval" target="_blank" rel="noopener">Caddy docs</a>).
+        A plain <code>reverse_proxy</code> streams <code>/_sse</code> as php-via writes it:
     </p>
     {% code 'caddy' %}{% verbatim %}
 myapp.example.com {
-    # Serve static assets directly
+    # Files in /var/www/myapp/public, linked as /public/...
     handle /public/* {
         root * /var/www/myapp
         file_server
@@ -63,6 +75,32 @@ myapp.example.com {
 }
     {% endverbatim %}{% endcode %}
 
+    <p>
+        The live site runs this pattern: HTTP/2 cleartext from Caddy to php-via, which runs with
+        <code>withH2c()</code> (see <a href="#brotli-prod">Brotli</a>) and one worker, and no flush setting.
+        <code>versions h2c</code> is what an <code>h2c://</code> upstream sets, and the zero timeouts
+        state Caddy's default of none, so a stream that stays open for hours is never cut. With more than
+        one worker, h2c sends every client to one of them: see <a href="#tab-worker">which worker holds a tab</a>
+        before you pick the upstream protocol.
+    </p>
+    {% code 'caddy' %}{% verbatim %}
+myapp.example.com {
+    reverse_proxy 127.0.0.1:3000 {
+        transport http {
+            versions h2c
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+}
+    {% endverbatim %}{% endcode %}
+
+    <p>
+        Behind nginx, the <code>X-Accel-Buffering: no</code> header of every SSE response turns off
+        nginx's proxy buffering for it (<a href="https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering" target="_blank" rel="noopener">nginx docs</a>).
+        Set <code>proxy_buffering off</code> for <code>/_sse</code> only if <code>proxy_ignore_headers</code>
+        drops that header.
+    </p>
     <p>
         An idle <code>/_sse</code> stream writes an SSE comment after 15 seconds without output, so a proxy
         idle timeout longer than that, such as nginx's default <code>proxy_read_timeout</code> of 60 seconds,
@@ -80,10 +118,11 @@ $config = (new Config())
     ->withBasePath('/myapp');   // also accepts '/myapp/' (trailing slash is added automatically)
     {% endverbatim %}{% endcode %}
     <p>
-        This sets the <code>{{ basePath }}</code> Twig global used by all action URLs and navigation
-        links throughout your templates. The value must be a relative path (<code>/myapp</code>,
-        <code>/sub/path</code>, etc.). An <code>\InvalidArgumentException</code> is thrown at startup
-        if an invalid value is supplied (absolute URL, protocol-relative path, etc.).
+        Action URLs, the SSE and Datastar URLs that <code>via_head</code> and <code>via_foot</code> write, the
+        {% verbatim %}<code>{{ base_path }}</code>{% endverbatim %} shell placeholder and the <code>basePath</code> Twig
+        global all carry it. The value must be a relative path (<code>/myapp</code>, <code>/sub/path</code>, etc.).
+        <code>withBasePath()</code> throws an <code>\InvalidArgumentException</code> for anything else, such as an
+        absolute URL or a protocol-relative path. Call it before <code>new Via()</code>, which freezes the Config.
     </p>
     <p>Configure the matching Caddy block:</p>
     {% code 'caddy' %}{% verbatim %}
@@ -96,10 +135,13 @@ example.com {
 
     <h2 id="brotli">Brotli compression</h2>
     <p>
-        php-via can compress pages, static assets, and live SSE streams with Brotli.
+        <code>withBrotli()</code> compresses pages and live SSE streams with Brotli.
         It requires the <a href="https://github.com/kjdev/php-ext-brotli" target="_blank" rel="noopener">ext-brotli</a>
-        PHP extension and HTTP/2 (needed for streaming compression to work in browsers).
-        A hard error is thrown at startup if either requirement is missing.
+        PHP extension and either <code>withCertificate()</code> or <code>withH2c()</code>, since browsers ask for Brotli
+        over HTTPS only; <code>start()</code> throws when one is missing. <code>withH2c()</code> turns on HTTP/2 on the port,
+        which keeps answering HTTP/1.1 too, and pages and streams get Brotli over either protocol. Static assets get
+        Brotli whenever ext-brotli is loaded, without <code>withBrotli()</code> and unless <code>withBrotli(false)</code>:
+        see <a href="#static-compression">Static compression</a>.
     </p>
     <p>
         Each SSE stream holds its own Brotli encoder, which grows with the traffic it carries and never
@@ -153,7 +195,7 @@ $config = (new Config())
     <p>Compression levels:</p>
     <ul>
         <li><strong>Pages and SSE</strong>: level 4 (fast; runs in the hot path)</li>
-        <li><strong>Static assets</strong>: level 11 (max ratio; compressed once and cached for the worker lifetime)</li>
+        <li><strong>Static assets</strong>: level 11 (max ratio; never compressed in a worker's event loop, see <a href="#static-compression">Static compression</a>)</li>
     </ul>
 
     <h2 id="production-config">Production config</h2>
@@ -163,9 +205,13 @@ $config = (new Config())
     ->withHost('127.0.0.1')    // bind locally, let Caddy handle external
     ->withPort(3000)
     ->withLogLevel(getenv('APP_ENV') === 'production' ? 'info' : 'debug')
-    ->withTemplateDir(__DIR__ . '/templates')
-    ->withStaticDir(__DIR__ . '/public');
-    // For multi-worker CPU parallelism, see "Multi-worker scaling" below.
+    ->withTemplateDir(__DIR__ . '/templates')   // Twig: composer require twig/twig
+    ->withStaticDir(__DIR__ . '/public')
+    ->withSecureCookie(true)
+    ->withTrustedOrigins(['https://myapp.example.com']);
+// For multi-worker CPU parallelism, see "Multi-worker scaling" below.
+
+$app = new Via($config);   // freezes the Config: every with* call goes before this line
     {% endverbatim %}{% endcode %}
 
     <h2 id="opcache-jit">OPcache &amp; JIT</h2>
@@ -214,11 +260,167 @@ opcache.jit_buffer_size=32M
         <li>
             <strong>Never use <code>opcache.jit=function</code> with OpenSwoole.</strong> Function-mode
             JIT compiles <code>usleep()</code> / <code>sleep()</code> as regular blocking calls, bypassing
-            OpenSwoole's coroutine hook (<code>SWOOLE_HOOK_ALL</code>). This turns a non-blocking 2 ms
+            OpenSwoole's sleep hook (<code>SWOOLE_HOOK_SLEEP</code>, see <a href="#hooks">Coroutine hooks</a>). This turns a non-blocking 2 ms
             yield into a thread-blocking sleep and reduces IO concurrency by ~89%.
             Use <code>jit=tracing</code> instead: it does not have this regression.
         </li>
     </ul>
+
+    <h2 id="hooks">Coroutine hooks</h2>
+    <p>
+        A worker serves all its tabs from one thread, so a call that blocks the thread stops every stream,
+        action and page view on that worker until it returns. OpenSwoole's coroutine hooks replace blocking
+        PHP functions with versions that suspend only the calling coroutine, and the
+        <code>hook_flags</code> server setting picks which ones.
+    </p>
+    <p>
+        php-via sets <code>hook_flags</code> to <code>Via::defaultHookFlags()</code>:
+        <code>SWOOLE_HOOK_ALL</code>, without <code>SWOOLE_HOOK_NATIVE_CURL</code> when libcurl is 8.20 or
+        newer, where that hook crashes workers (see <a href="#hooks-bugs">the bug list</a>). The framework
+        itself needs only the socket hooks, for <a href="/docs/broker#redisbroker">RedisBroker</a>: the rest
+        of it uses OpenSwoole's coroutine APIs, and it reads its shell template, static files and Dev Bar
+        assets once per worker. The other hooks are for your code, so that database queries, HTTP calls
+        over PHP streams, file access, sleeps and shell commands in actions and views suspend instead of
+        stopping the worker. Curl requests, such as Guzzle's curl handlers and Symfony's
+        <code>CurlHttpClient</code>, suspend only under <code>SWOOLE_HOOK_NATIVE_CURL</code>: on libcurl 8.20
+        or newer the default leaves it out, and each curl request blocks the worker until it returns.
+    </p>
+    <p>
+        File and stdio hooks cost CPU: each hooked file call is handed to a thread pool and back, 6 to
+        8&nbsp;µs per handoff, and a 91&nbsp;KB read takes 142&nbsp;µs instead of 4.5&nbsp;µs. Change the flags
+        with <code>withSwooleSettings(['hook_flags' =&gt; ...])</code>, which wins over the default.
+    </p>
+
+    <h3 id="hooks-flags">What each hook covers</h3>
+    <table>
+        <thead>
+            <tr><th>Flag</th><th>Makes these suspend instead of block</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>SWOOLE_HOOK_TCP</code>, <code>_UDP</code>, <code>_UNIX</code>, <code>_UDG</code>, <code>_SSL</code>, <code>_TLS</code></td><td>PHP stream sockets: PDO MySQL and mysqli (mysqlnd), phpredis, predis, php-amqplib, <code>file_get_contents('https://...')</code>. Host names resolve on the thread pool. RedisBroker needs <code>TCP</code>, <code>TLS</code> with <code>tls: true</code>, or <code>UNIX</code> for a socket path.</td></tr>
+            <tr><td><code>SWOOLE_HOOK_STREAM_FUNCTION</code></td><td><code>stream_select()</code> and <code>stream_socket_pair()</code></td></tr>
+            <tr><td><code>SWOOLE_HOOK_FILE</code></td><td>Opening, reading, writing and seeking files, <code>fstat()</code>, <code>unlink()</code>, <code>mkdir()</code>, <code>rename()</code> and directory reads, each on the thread pool. <code>stat()</code>, <code>realpath()</code>, <code>include</code> and <code>fclose()</code> still block.</td></tr>
+            <tr><td><code>SWOOLE_HOOK_STDIO</code></td><td>Every stream on a file descriptor: <code>STDIN</code>, <code>STDOUT</code>, <code>STDERR</code>, temporary files, and the pipes of <code>exec()</code>, <code>system()</code>, <code>passthru()</code>, <code>shell_exec()</code>, backticks and <code>popen()</code></td></tr>
+            <tr><td><code>SWOOLE_HOOK_SLEEP</code></td><td><code>sleep()</code>, <code>usleep()</code> and <code>time_nanosleep()</code>, which become timers</td></tr>
+            <tr><td><code>SWOOLE_HOOK_PROC</code></td><td><code>proc_open()</code> and the other <code>proc_*</code> functions</td></tr>
+            <tr><td><code>SWOOLE_HOOK_NATIVE_CURL</code></td><td>All <code>curl_*</code> functions, so Guzzle's curl handlers and Symfony's <code>CurlHttpClient</code> run on the event loop. Only in an OpenSwoole built with <code>--enable-hook-curl</code>: <code>php --ri openswoole</code> then shows <code>hook-curl =&gt; enabled</code>.</td></tr>
+        </tbody>
+    </table>
+    <p>
+        <code>SWOOLE_HOOK_ALL</code> leaves out <code>SWOOLE_HOOK_BLOCKING_FUNCTION</code>
+        (<code>gethostbyname()</code> and <code>exec()</code> on the thread pool), <code>SWOOLE_HOOK_SOCKETS</code>
+        (ext-sockets) and <code>SWOOLE_HOOK_CURL</code>, which has no effect in OpenSwoole 26.2.
+    </p>
+
+    <h3 id="hooks-never">Calls no hook covers</h3>
+    <p>These block the worker under every flag set, and every tab on it waits:</p>
+    <ul>
+        <li>PostgreSQL through <code>pgsql</code> or <code>pdo_pgsql</code>. OpenSwoole's own <code>OpenSwoole\Coroutine\PostgreSQL</code> client suspends; <code>php --ri openswoole</code> shows <code>postgresql =&gt; enabled</code> when the extension has it.</li>
+        <li>SQLite. Short queries on a local file are fine.</li>
+        <li>Extensions with their own network client, such as <code>mongodb</code>, <code>amqp</code> and <code>grpc</code>.</li>
+        <li>The stat family: <code>stat()</code>, <code>filemtime()</code>, <code>file_exists()</code>, <code>is_file()</code>, <code>realpath()</code>.</li>
+        <li><code>include</code> and <code>require</code>.</li>
+        <li><code>echo</code> and <code>error_log()</code>. php-via's logger writes with <code>echo</code>, so a log pipe that backs up stalls the worker.</li>
+    </ul>
+    <p>
+        A hooked connection belongs to one coroutine at a time. When two coroutines use the same PDO or Redis
+        connection at once, OpenSwoole stops the worker with a "bound to another coroutine" error, so give each
+        coroutine its own connection or take one from a pool.
+    </p>
+
+    <h3 id="hooks-bugs">OpenSwoole 26.2 bugs and workarounds</h3>
+    <table>
+        <thead>
+            <tr><th>Bug</th><th>Workaround</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>With libcurl 8.20 or newer, the native curl hook segfaults the worker on a curl request to any host name, whether it resolves or not (<a href="https://github.com/curl/curl/issues/21558" target="_blank" rel="noopener">curl#21558</a>). IP addresses work.</td><td><code>Via::defaultHookFlags()</code> leaves <code>SWOOLE_HOOK_NATIVE_CURL</code> out on these versions, so a curl request blocks the worker until it returns. Flags you pass need the same, and <code>start()</code> logs a warning when they keep it. Guzzle's <code>StreamHandler</code> and <code>OpenSwoole\Coroutine\Http\Client</code> use the socket hooks and still suspend.</td></tr>
+            <tr><td>The hooked <code>curl_setopt()</code> rejects <code>CURLOPT_PREREQFUNCTION</code>, so with <code>SWOOLE_HOOK_NATIVE_CURL</code> on, Guzzle 7.15's default client throws a <code>ValueError</code> on every request, sync and async.</td><td>Guzzle's <code>StreamHandler</code>, Symfony's <code>CurlHttpClient</code>, or <code>OpenSwoole\Coroutine\Http\Client</code></td></tr>
+            <tr><td>With <code>SWOOLE_HOOK_NATIVE_CURL</code> on PHP 8.4 or newer, every request with a header callback leaks about 2.8&nbsp;KB (OpenSwoole issue #391). Guzzle's curl handlers and Symfony's <code>CurlHttpClient</code> always set one.</td><td>Recycle workers with the <code>max_request</code> setting, or use a client without curl</td></tr>
+            <tr><td><code>mysqli_init()</code> followed by a failed <code>real_connect()</code> corrupts the heap and crashes the worker, so a database restart takes workers down.</td><td><code>new mysqli(...)</code> or PDO MySQL, which survive a refused connection</td></tr>
+            <tr><td>The coroutine <code>flock()</code> treats <code>LOCK_UN | LOCK_NB</code> as a lock request, so Symfony Lock's <code>FlockStore</code> hangs on its second acquire in a worker.</td><td>A Redis or database lock store</td></tr>
+            <tr><td><code>fsync()</code> returns <code>false</code> with the warning "Can't fsync this stream!" under <code>SWOOLE_HOOK_FILE</code> or <code>SWOOLE_HOOK_STDIO</code>, and the file is not synced.</td><td>Call it in a process whose flags have neither, such as <code>Via::noFileIoHookFlags()</code></td></tr>
+        </tbody>
+    </table>
+
+    <h3 id="hooks-narrow">Hooks without file and stdio I/O</h3>
+    <p>
+        <code>Via::noFileIoHookFlags()</code> keeps the socket, stream, sleep and <code>proc_open()</code> hooks and drops
+        <code>SWOOLE_HOOK_FILE</code> and <code>SWOOLE_HOOK_STDIO</code>. It keeps <code>SWOOLE_HOOK_NATIVE_CURL</code> where
+        libcurl is older than 8.20 and leaves it out where the hook crashes workers; on OpenSwoole 26.2 with libcurl 8.20
+        or newer it returns 1790. File and stdio calls then run on the worker's own thread: a 1.3&nbsp;KB
+        read takes 2&nbsp;µs instead of 44&nbsp;µs and <code>flock()</code> 0.7&nbsp;µs instead of 28&nbsp;µs,
+        <code>fsync()</code> works, and workers start no thread pool for files. A connection by host name still
+        starts one for DNS.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Via;
+
+$config->withSwooleSettings(['hook_flags' => Via::noFileIoHookFlags()]);
+    {% endverbatim %}{% endcode %}
+    <p>
+        It suits an app that runs no shell commands, holds no file lock across a suspension and reads only
+        small local files. Under it:
+    </p>
+    <ul>
+        <li><code>exec()</code>, <code>system()</code>, <code>passthru()</code>, <code>shell_exec()</code>, backticks and <code>popen()</code> block the worker while the command runs: a command that takes one second froze it for 1&nbsp;002&nbsp;ms, against 1.5&nbsp;ms under the default. <code>proc_open()</code> still suspends.</li>
+        <li>A <code>flock()</code> held across a database query, an HTTP call or a sleep deadlocks the worker for good once a second request on it waits for the same lock: the waiting request blocks the worker, so the holder never resumes to release it. A lock around a write with nothing in between is fine.</li>
+        <li>Large reads and reads from slow volumes such as NFS or FUSE block the worker: a 64&nbsp;MB read held it for 36&nbsp;ms.</li>
+        <li>Writes to <code>STDERR</code> block when the pipe behind it backs up, as Docker's and supervisord's log capture can.</li>
+        <li>On libcurl 8.20 or newer, curl requests block the worker until they return, as under the default. On older
+            libcurl the flags include <code>SWOOLE_HOOK_NATIVE_CURL</code>, so curl requests suspend, and the other two
+            native curl bugs in <a href="#hooks-bugs">the list above</a> apply.</li>
+    </ul>
+    <p>
+        Never drop <code>SWOOLE_HOOK_FILE</code> alone. With <code>SWOOLE_HOOK_STDIO</code> still on,
+        <code>include</code> reads through the thread pool and suspends halfway through a file, and a concurrent
+        request then fails with "Class not found". In a load test, php-via's website lost about half its requests that way.
+        <code>start()</code> throws a <code>\RuntimeException</code> for that combination before it binds the
+        port, and for a <code>RedisBroker</code> whose flags lack the socket hook its connection needs.
+    </p>
+
+    <h3 id="hooks-aio">Capping the AIO thread pool</h3>
+    <p>
+        With <code>SWOOLE_HOOK_FILE</code> or <code>SWOOLE_HOOK_STDIO</code> on, each worker starts a thread pool
+        on its first hooked file call: one thread per CPU core, growing to eight per core while tasks wait
+        longer than 1&nbsp;ms, with the extra threads exiting after a second idle. With <code>worker_num</code>
+        at the core count, the thread count grows with the square of the cores. Cap it with
+        <code>OpenSwoole\Util::setAio()</code> before <code>start()</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+OpenSwoole\Util::setAio(['aio_core_worker_num' => 2, 'aio_worker_num' => 4]);
+$app->start();
+    {% endverbatim %}{% endcode %}
+    <p>
+        The same keys in <code>withSwooleSettings()</code> stop the server at start-up with "Invalid server
+        option". <code>setAio()</code> accepts misspelled keys without an error, so check the thread count in
+        <code>/_stats</code>.
+    </p>
+
+    <h3 id="hooks-check">Checking the flags at runtime</h3>
+    <p>
+        <code>OpenSwoole\Runtime::getHookFlags()</code> returns the flags in effect in a worker; test one hook
+        with <code>(OpenSwoole\Runtime::getHookFlags() &amp; SWOOLE_HOOK_FILE) !== 0</code>. The Dev Bar's Stats panel
+        shows them wherever the Dev Bar is on. In dev mode, <code>/_stats</code> reports them under <code>runtime</code>, with the worker's thread pool
+        (<code>aio_worker_num</code> threads, <code>aio_task_num</code> tasks) and its event loop lag, which
+        grows when a call blocks the worker:
+    </p>
+    {% code 'json' %}{% verbatim %}
+"runtime": {
+    "hook_flags": 2147452927,
+    "aio_task_num": 0,
+    "aio_worker_num": 2,
+    "event_loop_lag_ms": 0,
+    "event_loop_lag_max_ms": 0,
+    "event_loop_lag_avg_ms": 0
+}
+    {% endverbatim %}{% endcode %}
+    <p>
+        2147452927 is <code>SWOOLE_HOOK_ALL</code> without <code>SWOOLE_HOOK_NATIVE_CURL</code> on OpenSwoole
+        26.2. Scripts and tests that call <code>Coroutine::run()</code> get <code>SWOOLE_HOOK_ALL</code> when
+        no flags are set, and <code>Coroutine::set(['hook_flags' =&gt; 0])</code> does not turn it off; only a
+        server runs under exactly the flags it is given.
+    </p>
 
     <h2 id="security">Security hardening</h2>
 
@@ -265,6 +467,15 @@ $config->withAllowMissingOrigin();
 $config->withSecureCookie(true);
     {% endverbatim %}{% endcode %}
     <p>Do not enable this in local HTTP development: the browser will silently drop the cookie.</p>
+    <p>
+        php-via accepts only session ids in the form it issues, 32 lowercase hex characters, and starts a new session for
+        any other cookie value. Under <code>withSecureCookie(true)</code> it reads only the <code>__Host-</code> cookie. Code
+        never needs the cookie: <code>$c->getSessionId()</code> and the <code>via.session</code> request attribute hold a
+        hash of it, which stays the same when the cookie changes. Give the session a new cookie at login and logout with
+        <code>$c->regenerateSession()</code>, or <code>$app->regenerateSession($request)</code> in middleware, so that a
+        cookie someone planted or read before opens no page of the account, and reaches its open tabs for 2 seconds at most.
+        <a href="/docs/middleware#session-rotation">Middleware</a> shows a login.
+    </p>
 
     <h3 id="security-embedding">Embedding in a cross-origin iframe</h3>
     <p>
@@ -289,31 +500,120 @@ $config->withEmbeddable('https://parent.example');   // origins allowed to frame
         check unchanged.
     </p>
 
+    <h3 id="csp">Content Security Policy</h3>
+    <p>
+        For a policy with nonces, a global middleware creates the nonce and passes it to php-via in the
+        <code>via.csp_nonce</code> request attribute. php-via puts the nonce on every tag of
+        <code>via_head</code> and <code>via_foot</code>, the import map included, and on the Dev Bar's tags:
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+
+final class CspNonce implements MiddlewareInterface {
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        $nonce = base64_encode(random_bytes(16));
+        $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
+
+        return $response->withHeader('Content-Security-Policy', "default-src 'self'; script-src 'nonce-{$nonce}'; object-src 'none'; base-uri 'none'");
+    }
+}
+
+$app->middleware(new CspNonce());
+    {% endverbatim %}{% endcode %}
+    <p>
+        The header the middleware adds to the response it gets back from <code>$handler-&gt;handle()</code> goes
+        out with the page, and so does any other security header. A
+        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head, before <code>via_head</code>,
+        works too, but a meta policy cannot set <code>frame-ancestors</code> or <code>report-to</code>. With
+        <code>withEmbeddable()</code>, php-via sends its <code>frame-ancestors</code> policy in the same header,
+        and the browser enforces both.
+    </p>
+    <p>
+        Datastar reads the nonce from a <code>data-nonce</code> attribute on the <code>&lt;html&gt;</code> element. With it,
+        Datastar runs <code>data-*</code> expressions, the scripts of <code>execScript()</code> and <code>dispatch()</code>,
+        and the reload php-via sends a tab it cannot rebuild, through script elements that carry the nonce. Without it,
+        Datastar compiles expressions with <code>Function()</code>, which needs <code>'unsafe-eval'</code> in
+        <code>script-src</code>, and a nonce policy blocks those scripts. The default shell writes the attribute when the
+        page request carries a nonce. A shell of your own writes it with
+        {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %}, a Twig layout with
+        {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
+    </p>
+    {% code 'twig' %}{% verbatim %}
+{# layout.html.twig #}
+<!DOCTYPE html>
+<html lang="en"{{ via_html_attrs() }}>
+<head>
+    <meta charset="utf-8">
+    {{ via_head() }}
+</head>
+<body>
+    {% block content %}{% endblock %}
+    {{ via_foot() }}
+</body>
+</html>
+    {% endverbatim %}{% endcode %}
+    <p>
+        With the policy above, the default shell, a shell with the placeholder and this layout run the counter,
+        <code>dispatch()</code> and <code>execScript()</code> in Chromium with no CSP errors. See
+        <a href="/docs/twig#csp">Templates → Content-Security-Policy</a> for a callable that returns a whole document.
+    </p>
+
+    <h3 id="security-devbar">Dev Bar in production</h3>
+    <p>
+        The Dev Bar is off outside dev mode, and its endpoints answer 404. <code>withDevBar(true)</code> turns it on in
+        production, read-only: signal writes stay off whatever <code>withDevBarOptions(writes:)</code> says, and no
+        visitor can clear the trace buffer. Read-only does
+        not mean private. Everyone who opens a page sees the traces, logs, scopes and context ids of every visitor's tabs,
+        with SESSION scopes as hashes, and the server's request counts and runtime figures in the Stats panel. Its endpoints under <code>/_via/</code> do not pass through
+        your middleware, so keep it off on a site where that is too much, or block <code>/_via</code>, <code>/_via/*</code>
+        and <code>/_traces</code> for other visitors in the proxy. See <a href="/docs/dev-bar">Dev Bar</a>.
+    </p>
+
     <h3 id="security-checklist">Quick checklist</h3>
     <ul>
         <li>Set <code>withTrustedOrigins([…])</code> to your production domain(s).</li>
         <li>Set <code>withSecureCookie(true)</code> when serving over HTTPS.</li>
         <li>Bind the server to <code>127.0.0.1</code> (not <code>0.0.0.0</code>) and let Caddy/nginx face the internet.</li>
         <li>Use <code>@post()</code> (not <code>@get()</code>) for all action buttons and form submissions.</li>
+        <li>Call <code>regenerateSession()</code> at login and logout.</li>
+        <li>Read the session id from the <code>via.session</code> attribute in middleware, never from the cookie.</li>
+        <li>Leave <code>withDevBar()</code> off unless every visitor may see every other visitor's traces.</li>
     </ul>
 
     <h2 id="graceful-restart">Graceful restart</h2>
     <p>
-        To deploy new code without dropping connections, reload the service:
+        To deploy new app code without stopping the server, reload it. <code>SIGUSR1</code> to the master process
+        restarts the workers:
     </p>
     {% code 'bash' %}{% verbatim %}
-systemctl reload myapp
-# or:
-kill -USR1 $(cat /var/run/myapp.pid)
+systemctl reload myapp          # with ExecReload in the unit above
+# or, with ['pid_file' => '/run/myapp.pid'] in withSwooleSettings():
+kill -USR1 $(cat /run/myapp.pid)
     {% endverbatim %}{% endcode %}
 
     <p>
-        On a reload each old worker ends its SSE streams, which fires
-        <code>onClientDisconnect</code> (the browsers reconnect to the new workers), and then runs your
-        <code>onShutdown</code> callbacks, exactly as on <code>SIGTERM</code> or <code>SIGINT</code>. The same
-        happens when a worker is recycled after <code>max_request</code>. A callback cannot tell a reload from a
-        stop, so keep "server going down" announcements out of <code>onShutdown</code>. Register cleanup callbacks
-        for any timers or open resources.
+        A stopping worker asks its tabs to reconnect at once and ends their streams, which fires
+        <code>onClientDisconnect</code>. It waits for its <code>spawn()</code> tasks and then runs your
+        <code>onWorkerStop</code> callbacks, exactly as on <code>SIGTERM</code> or <code>SIGINT</code>, within
+        <code>max_wait_time</code> (3&nbsp;s by default). The same happens when a worker is recycled after
+        <code>max_request</code>. A callback cannot tell a reload from a stop, so keep "server going down" announcements
+        out of <code>onWorkerStop</code>.
+    </p>
+    <p>
+        What a reconnecting tab gets depends on the worker count. With one worker, the records that let php-via rebuild a
+        tab live in the worker's memory and go with it, so each open tab reloads its page. With several workers, the
+        records are in shared memory and survive the reload, so each tab is rebuilt by
+        <a href="/docs/lifecycle#revival">revival</a> and keeps the signal values it holds.
+    </p>
+    <p>
+        A reload runs new code only for classes the master process has not loaded. php-via's own classes, and whatever
+        <code>app.php</code> loads before <code>start()</code>, stay as they were: see the
+        <a href="/docs/development#thin-bootstrap">thin bootstrap pattern</a>. Upgrading php-via, or changing code the
+        master loaded, needs a full restart (<code>systemctl restart myapp</code>), and with several workers that also
+        clears the shared tables.
     </p>
 
     <h2 id="multiple-instances">Multi-worker scaling</h2>
@@ -324,34 +624,94 @@ kill -USR1 $(cat /var/run/myapp.pid)
         and need parallelism on a multi-core machine.
     </p>
 
-    <h3 id="same-machine">Same machine: <code>withWorkerNum()</code> + SwooleBroker</h3>
+    <h3 id="same-machine">Same machine: <code>withWorkerNum()</code></h3>
     <p>
         One php-via process with several OpenSwoole workers. No external infrastructure, and no sticky
         routing: the load balancer sees one port and OpenSwoole picks the worker for each connection.
-        <a href="/docs/broker#swoolebbroker">SwooleBroker</a> carries broadcasts between workers.
+        Without <code>withBroker()</code>, <a href="/docs/broker#swoolebbroker">SwooleBroker</a> carries broadcasts
+        between the workers.
     </p>
     {% code 'php' %}{% verbatim %}
-use Mbolli\PhpVia\Broker\SwooleBroker;
-
 $config = (new Config())
-    ->withWorkerNum(swoole_cpu_num())
-    ->withBroker(new SwooleBroker());
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum());
     {% endverbatim %}{% endcode %}
     <p>
-        A tab's context lives on the worker that rendered the page. Every worker can still reach it:
-        contexts are recorded in a shared-memory directory, and an action or SSE reconnect that lands on
-        another worker rebuilds the context by re-running the route handler. Scoped signal values,
-        GlobalState, session data and the connected-client list are in shared memory as well, and
-        <code>withActionRateLimit()</code> counts across workers.
+        Set the count with <code>withWorkerNum()</code>. A <code>worker_num</code> in <code>withSwooleSettings()</code> that
+        differs from it makes <code>start()</code> throw, since php-via sets up its shared tables for the count
+        <code>withWorkerNum()</code> gives.
+    </p>
+    <p id="tab-worker">
+        A tab lives on one worker: the one that holds its SSE stream, or until the stream connects the one
+        that rendered the page. A worker that gets an action or a <code>download()</code> URL of a tab it does not
+        hold passes the request to the tab's worker over OpenSwoole's worker pipe and sends back that worker's
+        answer, with its cookies and a rotated session cookie. Middleware and the handler run on the tab's
+        worker only. Passing a request on adds about 0.04&nbsp;ms to it, and a passed action costs the server
+        about twice the CPU of one that reaches the tab's worker (0.18 against 0.09&nbsp;ms in a benchmark of
+        TAB actions). An upload goes over as it arrived, so <code>file()</code> and <code>move_uploaded_file()</code>
+        work there. A <code>download()</code> URL names the worker that made it, so once the tab's stream has moved
+        to another worker, the URLs made before answer 404.
+    </p>
+    <p>
+        OpenSwoole hands each connection to one worker, and every request on that connection goes there. So which
+        worker a request reaches depends on how the proxy talks to php-via:
+    </p>
+    <ul>
+        <li>
+            <strong>h2c</strong>, as in the <a href="#caddy">Caddy setup above</a>: every client shares the proxy's one upstream
+            connection, and with it one worker, until that connection carries 1&nbsp;280 streams at once, OpenSwoole's limit
+            per connection. OpenSwoole&nbsp;26.2 ignores a lower <code>http2_max_concurrent_streams</code>. Below that,
+            further workers take no load and nothing is passed on.
+        </li>
+        <li>
+            <strong>HTTP/1.1</strong>: the proxy opens a connection per concurrent request, and the connections spread across
+            the workers. A tab's stream and its actions then travel on different connections, so with N workers about
+            (N&minus;1)/N of a tab's actions reach a worker that passes them on.
+        </li>
+    </ul>
+    <p>
+        Use HTTP/1.1 when several workers are there for CPU-bound handlers. In Caddy that is a plain upstream address
+        without <code>h2c://</code>. Keep <code>withH2c()</code> in the config: the port then answers both protocols, and
+        <code>withBrotli()</code> still compresses pages and streams over HTTP/1.1. With one worker per server, h2c
+        costs nothing.
+    </p>
+    {% code 'caddy' %}{% verbatim %}
+myapp.example.com {
+    reverse_proxy 127.0.0.1:3000 {
+        transport http {
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+}
+    {% endverbatim %}{% endcode %}
+    <p>
+        The stream is not passed on. When it reconnects to another worker, that worker rebuilds the context by
+        re-running the route handler, as a <a href="/docs/lifecycle#revival">revival</a> does, and the worker
+        that held the tab drops its copy and hands over what the browser cannot send: the scripts and
+        <code>patchElements()</code> patches still queued, the TAB signal values the browser has not received,
+        and the values of server-owned TAB signals. An action still running there finishes on the old copy,
+        and what it sends follows the tab once it ends; a <code>spawn()</code> task still running there sends
+        nothing more, as for a destroyed context. Other server-side state, such as
+        <code>#[Persist]</code> properties, starts over. Scoped signal values, GlobalState, session data, tab
+        state and the connected-client list are in shared memory, and <code>withActionRateLimit()</code>
+        counts across workers.
+    </p>
+    <p>
+        A worker waits up to <code>withContextTimeouts(forwardMs: ...)</code> (60&nbsp;s by default) for the tab's
+        worker to answer, and then answers 504; the action may still finish, and its cookies go out with the
+        tab's next action response. When the tab's worker stops or crashes after it got the request, the
+        worker that passed it answers 503 and does not run the action itself, since it may have run. The
+        next request of the tab finds no live worker for it, so the worker it reaches rebuilds the context
+        and takes the tab. A stopping worker asks its tabs to reconnect at once, so their streams move to the workers that
+        remain.
     </p>
     <p>
         Each worker rewrites the directory entries of its open streams every quarter of the directory TTL
         or of the revival window, whichever is shorter (150&nbsp;s by default). A context that does not fit
-        in the directory is logged, and its actions on other workers answer 400. A copy that an action
-        rebuilt on a worker the tab does not stream from is freed after the connect timeout
-        (<code>withContextConnectTimeout()</code>); every action on it starts the timeout again. A tab
-        that streams from no worker keeps the reconnect timeout instead
-        (<code>withContextReconnectTimeout()</code>), see <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
+        in the directory is logged, and its actions on other workers answer 400. An action of a tab whose
+        context no running worker holds any more rebuilds it on the worker it reaches, which then holds the
+        tab for the reconnect timeout (<code>withContextTimeouts(reconnectMs: ...)</code>), see
+        <a href="/docs/lifecycle#without-stream">Lifecycle</a>.
     </p>
     <p>
         Each worker keeps the <code>getClients()</code> list it built last, about 2.3&nbsp;KB per client,
@@ -361,7 +721,7 @@ $config = (new Config())
         as OpenSwoole restarts it, and every 60&nbsp;s the first worker drops the clients of processes that
         no longer exist.
     </p>
-    <p>
+    <p id="per-worker">
         <strong>What stays per worker.</strong> The server logs these at start-up:
     </p>
     <ul>
@@ -382,16 +742,25 @@ $config = (new Config())
             per worker.
         </li>
         <li>
-            <strong>Server-owned TAB signals.</strong> A rebuilt context starts them from the handler's initial
-            value. Use a scoped signal for that state.
+            <strong>Server-owned TAB signals.</strong> When a tab's stream reconnects to another worker after
+            the worker that held it stopped or crashed, the context rebuilt there starts them from the handler's
+            initial value. Keep state that has to survive that in a scoped signal or in <code>tabState()</code>.
         </li>
     </ul>
-    <p>
+    <p id="shared-tables">
         The shared tables are sized at startup. <code>Config::withGlobalStateTableSize()</code> (default
         1&nbsp;024 keys &times; 32&nbsp;KB per value), <code>withScopedSignalTableSize()</code> and
         <code>withContextDirectorySize()</code> tune them. Row counts are a floor: OpenSwoole admits more keys
         than requested, then rejects by hash, and a full GlobalState table throws
         <code>\OverflowException</code>. GlobalState keys are at most 63 characters.
+    </p>
+    <p>
+        The scoped signal table takes one row per scoped signal of every scope that a context on some worker
+        uses, and the row goes when the last such context is destroyed. Size it for the peak: live scopes
+        &times; signals per scope, so 300 open chat rooms with 3 signals each take 900 rows. The default
+        1&nbsp;024 rows covers that. When it is full, a write that needs a new row is dropped and an error that
+        names <code>withScopedSignalTableSize()</code> is logged at most every 10&nbsp;s per worker. The
+        signal's value then no longer reaches the other workers.
     </p>
     <p>
         The context directory keeps a row for every page view until its revival window ends. A page whose
@@ -400,8 +769,9 @@ $config = (new Config())
         per second &times; 630; the default 4&nbsp;096 rows (about 8&nbsp;000 in practice) covers about
         12 page views per second. When it is full, new contexts get no row and a warning is logged at most
         every 10&nbsp;s per worker; those tabs work, but their actions on other workers answer 400. With
-        <code>withContextRevivalWindow(0)</code> no worker rebuilds another worker's context, so no rows
-        are written.
+        <code>withContextTimeouts(revivalWindowMs: 0)</code> a row holds only the tab's worker and goes when the
+        context is destroyed: actions on other workers still reach the tab, but a stream that reaches another worker
+        reloads the page, since no worker rebuilds a tab.
     </p>
     <p>
         Session data takes one row per session that holds data, with all of its keys, and
@@ -475,48 +845,171 @@ $config = (new Config())
 
     <h2 id="static-assets">Static assets</h2>
     <p>
-        Configure a static directory to serve files directly from OpenSwoole in development:
+        <code>withStaticDir()</code> serves the files of a directory from the workers, out of memory and with Brotli
+        level 11 (see <a href="#static-compression">Static compression</a>); a 91&nbsp;KB stylesheet costs 0.054&nbsp;ms of
+        CPU per request.
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withStaticDir(__DIR__ . '/public');
     {% endverbatim %}{% endcode %}
 
-    <p>In production, serve static files from Caddy (or nginx) directly: it's faster and avoids passing binary content through PHP.</p>
+    <p>A proxy can serve the same directory instead, which keeps those requests off the workers entirely.</p>
     <p>
-        If you do serve <code>withStaticDir()</code> files through php-via itself (no reverse proxy, or a
-        proxy that isn't handling <code>/public/*</code>), every response, including the framework's own
+        Leave <code>/datastar.js</code> to php-via: it serves the plain Datastar bundle, or the Rocket build
+        with <code>withDatastarRocket()</code>. A proxy that serves it from disk has to pick the matching
+        file, <code>datastar.js</code> or <code>datastar-rocket.js</code> from
+        <code>vendor/mbolli/php-via/public/</code>. An app that
+        <a href="/docs/web-components#pin-datastar">pins Datastar</a> with
+        <code>getDatastarIntegrity()</code> needs a proxy that passes the file on unchanged; compressing
+        it is fine.
+    </p>
+    <p>
+        Every static response from php-via, including the framework's own
         <code>/datastar.js</code> and <code>/via.css</code>, carries an <code>ETag</code> and
         <code>Last-Modified</code>, and honors <code>If-None-Match</code> / <code>If-Modified-Since</code>
-        with a <code>304</code>. The <code>Cache-Control</code> policy on top of that follows
+        with a <code>304</code>. A <code>HEAD</code> request gets the same headers and no body, with the
+        <code>Content-Length</code> of the body a <code>GET</code> would get; over HTTP/2, OpenSwoole 26.2 leaves
+        that header out. The <code>Cache-Control</code> policy on top of that follows
         <code>devMode</code> by default (<code>no-cache</code> in dev, so edits show up on the next reload;
-        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly:
+        <code>public, max-age=3600, must-revalidate</code> otherwise) and can be overridden explicitly.
+        The default policy caches <code>/datastar.js?v=&lt;hash&gt;</code> with the served bundle's hash for a
+        year (<code>immutable</code>), since a new bundle gets a new URL.
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withStaticCacheControl('public, max-age=31536000, immutable'); // e.g. if you fingerprint filenames yourself
     {% endverbatim %}{% endcode %}
     <p>
         Or pass a closure to fine-tune the value per file. It receives the absolute file path and the
-        resolved MIME type (no charset suffix, e.g. <code>text/css</code>):
+        resolved MIME type (no charset suffix, e.g. <code>text/css</code>), and returns
+        <code>null</code> to keep the default policy for that file, the year for
+        <code>/datastar.js?v=</code> included:
     </p>
     {% code 'php' %}{% verbatim %}
-$config->withStaticCacheControl(function (string $filePath, string $mimeType): string {
+$config->withStaticCacheControl(function (string $filePath, string $mimeType): ?string {
     if (preg_match('/\.[0-9a-f]{8,}\./', basename($filePath)) || str_starts_with($mimeType, 'font/')) {
         return 'public, max-age=31536000, immutable'; // fingerprinted assets and fonts
     }
 
-    return 'public, max-age=3600, must-revalidate';
+    return null;
 });
     {% endverbatim %}{% endcode %}
     <p>
         A string is always taken literally, never invoked as a function name. Pass a closure, or
         first-class callable syntax (<code>$obj->method(...)</code>) for an existing method.
     </p>
+    <p>
+        Each worker keeps a file in memory after its first request and reads it again only when its modification
+        time or size changes. It keeps files up to 2&nbsp;MiB, and up to 16&nbsp;MiB in all; a bigger file, or one
+        that no longer fits, goes out with <code>sendfile()</code>. Brotli forms have their own memory, see
+        <a href="#static-compression">Static compression</a>. Dev mode checks the file on every
+        request, so an edit shows up on the next reload, and when the memory is used up it first drops files
+        that were deleted or changed, such as earlier builds of a bundle with a hash in its name. In
+        production, reload the workers after changing files (see <a href="#graceful-restart">Graceful restart</a>).
+    </p>
+    <p>
+        A request path whose last segment has a file extension, such as <code>/css/site.css</code>, is
+        looked up in the static directory before routing. A path without one, such as an ACME challenge
+        token, is looked up only when no route matches, so a route and an extension-less file with the same
+        path serve the route. Paths under <code>/_action/</code>, <code>/_via/</code> and
+        <code>/_session/</code> are never looked up before routing, even with a dot in them. php-via
+        resolves the directory's real path once per worker, so a static directory behind a symlink that a
+        deployment switches keeps serving the old target until the workers reload.
+    </p>
+
+    <h3 id="static-refused">Paths never served</h3>
+    <p>
+        php-via answers 404 without a look at the disk for a path with a segment that starts with a dot, such as
+        <code>/.env</code>, <code>/.git/config</code> or <code>/assets/.cache/app.js</code>, and for PHP sources:
+        <code>.php</code> with or without a version digit (<code>.php5</code>), <code>.phps</code>,
+        <code>.phpt</code>, <code>.pht</code>, <code>.phtml</code>, <code>.phar</code> and <code>.inc</code>.
+        <code>/.well-known/</code> is the exception, for ACME challenges and similar. The path is percent-decoded
+        first, so <code>/%2eenv</code> is refused too and <code>/my%20file.css</code> finds <code>my file.css</code>.
+        A link inside the directory that points at such a file answers 404 as well. A route with such a path still
+        works.
+    </p>
+
+    <h3 id="static-compression">Static compression</h3>
+    <p>
+        Whenever ext-brotli is loaded, php-via sends compressible static files with Brotli at level 11 to clients
+        that accept it: <code>withStaticDir()</code> files of the types below, <code>/datastar.js</code>,
+        <code>/via.css</code> and the Dev Bar assets. This needs neither <code>withBrotli()</code> nor HTTP/2, since
+        a static response is compressed whole, but browsers ask for Brotli over HTTPS only. Each of these responses carries <code>Vary: Accept-Encoding</code>
+        and the same weak <code>ETag</code> for every encoding, so a revalidation gets a <code>304</code> whichever
+        form the client holds.
+    </p>
+    <ul>
+        <li><strong>Compressed</strong>: css, js, mjs, json, map, webmanifest, wasm, svg, ico, ttf, otf, txt, md, csv, html, htm, xml, rss, atom.</li>
+        <li><strong>Sent as they are</strong>: woff2, woff, png, jpg, webp, gif, avif, pdf, mp4, webm and mp3, which are compressed already, and any type php-via does not list.</li>
+    </ul>
+    <p>
+        Level 11 takes 90 to 140&nbsp;ms per 100&nbsp;KB of JavaScript or CSS, 2.1&nbsp;s for a 1.7&nbsp;MB library,
+        so a worker never compresses at that level itself:
+    </p>
+    <ul>
+        <li>
+            <strong>At start</strong>, php-via compresses the files of up to 128&nbsp;KiB that exist, in the master
+            process, so every worker inherits them without a copy of its own. It starts a file only while its expected
+            time fits a 2&nbsp;s budget. Level 11 takes 1.3 to 2.1&nbsp;&micro;s per byte of JavaScript or CSS, and a
+            file can take longer than expected, so the step ends at most one 128&nbsp;KiB file, about 0.3&nbsp;s, past
+            the budget: by 2.3&nbsp;s. The port opens after this step, so a restart takes
+            that much longer, and readiness checks and rolling restarts have to allow for it: the website (11 files,
+            300&nbsp;KB compressed to 64&nbsp;KB) takes 0.3&nbsp;s. Dev mode skips it.
+        </li>
+        <li>
+            <strong>Right after start</strong>, the first worker has a helper process compress the files left out,
+            bigger files and those past the budget, up to 32&nbsp;MiB of them, and keeps the results with the files
+            compressed at start. Another worker asks the helper on its first request for such a file, and the helper
+            answers from the results it keeps. php-via starts the helper with <code>withStaticDir()</code> or in dev
+            mode.
+        </li>
+        <li>
+            <strong>Later</strong>, a file that changed, or one left out that the helper has not compressed yet, goes
+            to the helper on its first Brotli request. Until
+            its result arrives, a worker sends the file at level 4 when it is up to 256&nbsp;KB and uncompressed when it is bigger, with
+            <code>Cache-Control: no-store</code>, so neither a browser nor a CDN keeps that stand-in. The helper
+            compresses one file at a time at the lowest CPU priority, so on a core a worker needs, the worker goes
+            first. An edited 91&nbsp;KB stylesheet got level 11 after 0.1&nbsp;s, a 546&nbsp;KB library after
+            0.9&nbsp;s and a 2.3&nbsp;MB bundle after 3&nbsp;s.
+        </li>
+    </ul>
+    <p>
+        To skip that work for a file, ship it precompressed: <code>foo.css.br</code> next to <code>foo.css</code>.
+        php-via sends the sidecar as it is when it is at least as new as the file, even without ext-brotli. That is
+        the way to ship large assets:
+    </p>
+    {% code 'bash' %}{% verbatim %}
+brotli --best public/js/app.js    # writes public/js/app.js.br; rerun after each build
+    {% endverbatim %}{% endcode %}
+    <p>
+        Build sidecars in the deploy step, after the files are in place, and keep them out of git. A fresh clone,
+        or a Docker <code>COPY</code> of one, gives a file and its sidecar the same modification time even when the
+        sidecar was not rebuilt after the file's last change. php-via then takes the stale sidecar for a fresh one,
+        and Brotli clients get the old content.
+    </p>
+    <p>
+        Memory stays bounded: up to 32&nbsp;MiB of Brotli forms compressed at start, shared by all workers, which
+        the first worker tops up for itself with those the helper compressed right after start; per worker up to
+        16&nbsp;MiB of Brotli forms of files compressed later, 2&nbsp;MiB each; the helper keeps
+        16&nbsp;MiB of results for the other workers and needs about 50&nbsp;MB more while it compresses. A file
+        over 8&nbsp;MiB, or one whose Brotli form exceeds 2&nbsp;MiB, goes out uncompressed unless it has a sidecar,
+        and a sidecar over 2&nbsp;MiB goes out with <code>sendfile()</code>. With the website's own files a server
+        uses about as much memory as before; with three large libraries added (2.3&nbsp;MB, 1.7&nbsp;MB and
+        546&nbsp;KB) it uses about 15&nbsp;MB more in all, for the helper and the forms compressed at start.
+    </p>
+    <p>
+        Turn static Brotli off with <code>withBrotli(false)</code>, or keep Brotli for pages and SSE only with
+        <code>withBrotli(staticLevel: 0)</code>, for example when a CDN compresses. A proxy in front needs no
+        change: Caddy's <code>encode</code> and nginx's <code>gzip</code> leave a response alone that already
+        carries a <code>Content-Encoding</code>.
+    </p>
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: onStart, onShutdown, cleanup hooks</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: onWorkerStart, onWorkerStop, cleanup hooks</li>
         <li><a href="/docs/actions#url">Actions → URL</a>: why <code>@post()</code> is required</li>
         <li><a href="/docs/broker">Broker</a>: SwooleBroker, RedisBroker, NatsBroker</li>
+        <li><a href="/docs/performance">Performance</a>: what a page view, a tab and a broadcast cost, and how many fit on a server</li>
+        <li><a href="/docs/upgrading">Upgrading to 0.14</a>: what to change in a 0.13 app</li>
         <li><a href="/docs/api">API Reference</a>: Config class options (<code>withBasePath</code>, <code>withBrotli</code>, <code>withCertificate</code>, <code>withH2c</code>, <code>withTrustedOrigins</code>, <code>withSecureCookie</code>, <code>withEmbeddable</code>)</li>
     </ul>
 </article>

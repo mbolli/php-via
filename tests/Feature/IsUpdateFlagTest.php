@@ -123,14 +123,14 @@ test('cached view should not be empty string from update render', function (): v
 
             // Simulate what stock ticker does
             $price = 100.0;
-            $c->signal($price, 'price');
+            $c->signal($price, 'price', Scope::build('stock', $symbol));
 
             if ($isUpdate) {
                 return '';  // Don't re-render HTML on updates
             }
 
             return "<div>Stock: {$symbol} - Price: \$<span data-text='price'></span></div>";
-        }, cacheUpdates: false); // Opt-out since we return empty string on updates
+        });
     };
 
     $this->app->page('/stock/{symbol}', $handler);
@@ -195,7 +195,7 @@ test('ROUTE scope uses cache for update renders only', function (): void {
             ++$renderCount;
 
             return $isUpdate ? "<div>Update #{$renderCount}</div>" : "<div>Initial #{$renderCount}</div>";
-        });
+        }, shareRender: true);
     };
 
     $this->app->page('/dashboard', $handler);

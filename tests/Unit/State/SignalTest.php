@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Mbolli\PhpVia\Config;
 use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Signal;
 
@@ -75,13 +76,26 @@ describe('Signal Names', function (): void {
         expect($signal->id())->toContain('mySignal');
     });
 
-    test('signal generates name if not provided', function (): void {
-        $app = createVia();
-        $context = new Context(testContextId(), '/test', $app);
+    test('a signal without a name fails instead of sharing one object with every other unnamed signal', function (): void {
+        $context = new Context(testContextId(), '/test', createVia());
+        $signal = $context->signal(...);
 
-        $signal = $context->signal('value');
+        expect(fn () => $signal('value'))->toThrow(ArgumentCountError::class, 'Too few arguments')
+            ->and(fn () => $signal('value', scope: 'room:a'))->toThrow(ArgumentCountError::class, '($name) not passed')
+            ->and(fn () => $signal('value', ''))->toThrow(InvalidArgumentException::class, "\$c->signal(0, 'count')")
+        ;
+    });
 
-        expect($signal->id())->not->toBeEmpty();
+    test('two signals with different names are two objects', function (): void {
+        $context = new Context(testContextId(), '/test', createVia());
+
+        $a = $context->signal(1, 'a');
+        $b = $context->signal(2, 'b');
+
+        expect($a)->not->toBe($b)
+            ->and($a->int())->toBe(1)
+            ->and($b->int())->toBe(2)
+        ;
     });
 });
 
@@ -194,5 +208,38 @@ describe('Signal Name Validation', function (): void {
         $signal = $context->signal('value', 'valid_signal_name_123');
 
         expect($signal->id())->toContain('valid_signal_name_123');
+    });
+});
+
+describe('Signal::bind()', function (): void {
+    test('binds the element value by default', function (): void {
+        $signal = (new Context(testContextId(), '/test', createVia()))->signal('', 'name');
+
+        expect($signal->bind())->toBe('data-bind="' . $signal->id() . '"');
+    });
+
+    test('binds an element property with Datastar\'s prop modifier', function (): void {
+        $signal = (new Context(testContextId(), '/test', createVia()))->signal('', 'name');
+
+        expect($signal->bind('value'))->toBe('data-bind__prop.value="' . $signal->id() . '"')
+            ->and($signal->bind(prop: 'checked'))->toBe('data-bind__prop.checked="' . $signal->id() . '"')
+            ->and($signal->bind('selectedIndex'))->toBe('data-bind__prop.selected-index="' . $signal->id() . '"')
+            ->and($signal->bind('selected-index'))->toBe('data-bind__prop.selected-index="' . $signal->id() . '"')
+        ;
+    });
+
+    test('rejects a property name that is not one', function (string $prop): void {
+        $signal = (new Context(testContextId(), '/test', createVia()))->signal('', 'name');
+
+        expect(fn () => $signal->bind($prop))->toThrow(InvalidArgumentException::class);
+    })->with(['', 'Value', 'value"', 'a b', 'value__event.input', 'value.x', '-value', 'value-']);
+
+    test('Twig passes the property through bind()', function (): void {
+        $via = createVia((new Config())->withTemplateEngine(arrayTwig([])));
+        $signal = (new Context(testContextId(), '/test', $via))->signal('', 'name');
+
+        $out = $via->getTwig()->createTemplate('{{ bind(s) }}|{{ bind(s, "value") }}')->render(['s' => $signal]);
+
+        expect($out)->toBe($signal->bind() . '|' . $signal->bind('value'));
     });
 });

@@ -78,7 +78,7 @@ final class DirectPage {
     public function bump(Context $ctx): void {
         // The escape hatch. syncBack() must leave this alone rather than writing the stale
         // hydrated property back over it.
-        $ctx->getSignal('votes')->increment(broadcast: false);
+        $ctx->getSignal('votes')->increment();
     }
 }
 

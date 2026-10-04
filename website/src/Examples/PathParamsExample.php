@@ -10,6 +10,8 @@ use Mbolli\PhpVia\Via;
 final class PathParamsExample {
     public const string SLUG = 'path-params';
 
+    private const string DESCRIPTION = 'Follow either link and the page shows the year, month and slug it read from the URL. The blog route calls <code>$c->getPathParam()</code>; the article route gets the values as arguments of its handler.';
+
     /** @var string[] */
     private const array SUMMARY = [
         '<strong>{year}/{month}/{slug}</strong> placeholders in the route pattern are captured and passed to your handler automatically.',
@@ -39,7 +41,7 @@ final class PathParamsExample {
         $app->page('/examples/path-params', function (Context $c): void {
             $c->view('examples/path_params.html.twig', [
                 'title' => 'Path Parameters',
-                'description' => 'Dynamic routing with automatic type-cast parameter injection.',
+                'description' => self::DESCRIPTION,
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
@@ -54,7 +56,7 @@ final class PathParamsExample {
 
             $c->view('examples/path_params_detail.html.twig', [
                 'title' => 'Path Parameters',
-                'description' => 'Dynamic routing with automatic type-cast parameter injection.',
+                'description' => self::DESCRIPTION,
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
@@ -70,7 +72,7 @@ final class PathParamsExample {
         $app->page('/examples/path-params/articles/{year}/{month}/{slug}', function (Context $c, string $year, string $month, string $slug): void {
             $c->view('examples/path_params_detail.html.twig', [
                 'title' => 'Path Parameters',
-                'description' => 'Dynamic routing with automatic type-cast parameter injection.',
+                'description' => self::DESCRIPTION,
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,

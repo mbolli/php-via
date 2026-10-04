@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Mbolli\PhpVia\Http;
 
+use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Context\RequestScope;
+use Mbolli\PhpVia\ErrorPhase;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
@@ -14,6 +17,9 @@ use OpenSwoole\Http\Response;
  * Handles action triggers from the client.
  */
 class ActionHandler {
+    /** The body of an action answer that reloads the tab: Datastar runs a text/javascript answer. */
+    public const string RELOAD_SCRIPT = 'window.location.reload()';
+
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
@@ -31,7 +37,7 @@ class ActionHandler {
         // Allocated here (Via's constructor, so the master process, before $server->start()
         // forks the workers) because an OpenSwoole\Table is only shared with processes that
         // inherit it. Single-worker deployments keep plain per-process counters.
-        $this->rateLimiter = new RateLimiter(shared: $via->getConfig()->getWorkerNum() > 1);
+        $this->rateLimiter = new RateLimiter(shared: $via->getSettings()->workerNum > 1);
     }
 
     public function setRequestLogger(RequestLogger $logger): void {
@@ -40,13 +46,15 @@ class ActionHandler {
 
     /**
      * Handle action triggers from the client.
+     *
+     * @param array<string, mixed> $attributes PSR-7 request attributes from the middleware that ran on the request
      */
-    public function handleAction(Request $request, Response $response, string $actionId): void {
+    public function handleAction(Request $request, Response $response, string $actionId, array $attributes = []): void {
         $actionStart = hrtime(true);
 
         // CSRF: Datastar posts with fetch(), so browsers always send Origin (see OriginPolicy).
         $origin = $request->header['origin'] ?? null;
-        if (!OriginPolicy::allows($this->via->getConfig(), $origin, $request->header['host'] ?? null)) {
+        if (!OriginPolicy::allows($this->via->getSettings(), $origin, $request->header['host'] ?? null)) {
             if ($origin === null) {
                 $this->reportMissingOrigin($actionId);
             }
@@ -60,14 +68,14 @@ class ActionHandler {
         $ip = $request->server['remote_addr'] ?? 'unknown';
         if (!$this->checkRateLimit($ip)) {
             $response->status(429);
-            $response->header('Retry-After', (string) $this->via->getConfig()->getActionRateWindow());
+            $response->header('Retry-After', (string) $this->via->getSettings()->actionRateWindow);
             $response->end('Too Many Requests');
 
             return;
         }
 
         // Read signals from request
-        $signals = Via::readSignals($request);
+        $signals = SignalParser::read($request);
 
         // For multipart/form-data (Datastar contentType:'form'), signals are not included in the
         // request: only raw FormData fields are sent. Fall back to $request->post for via_ctx.
@@ -85,7 +93,19 @@ class ActionHandler {
         // action success tracked 1/worker_num: every other worker answered 400. Also covers
         // the single-worker case SseHandler already handled: a backgrounded tab whose context
         // was cleaned up, then fires an action before its SSE stream reconnects.
-        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request) === null) {
+        $refused = null;
+        if (!isset($this->via->contexts[$contextId]) && $this->via->reviveContext($contextId, $request, attributes: $attributes, refused: $refused) === null) {
+            // The route's middleware, such as an auth gate, refused: the page load the reload makes gets its answer.
+            // Datastar would follow a redirect and morph what it leads to into the tab.
+            if ($refused !== null) {
+                $this->via->writeSessionCookie($request, $response);
+                $response->status(200);
+                $response->header('Content-Type', 'text/javascript');
+                $response->header('Cache-Control', 'no-store');
+                $response->end(self::RELOAD_SCRIPT);
+
+                return;
+            }
             $response->status(400);
             $response->end('Invalid context');
 
@@ -116,49 +136,89 @@ class ActionHandler {
             $tracer->setAttribute('context.route', $context->getRoute());
         }
 
-        try {
-            // Inject HTTP request params so action callbacks can use $c->input() / $c->file() / $c->cookie()
-            $context->setRequestInput($request->get ?? [], $request->post ?? [], $request->files ?? []);
-            $context->setRequestCookies($request->cookie ?? []);
+        // input(), file(), cookie(), getRequestAttribute() and setCookie() reach this request from this coroutine
+        // and those it starts, so a second action of the tab that runs meanwhile keeps its own.
+        $scope = new RequestScope(
+            $context,
+            array_merge($request->get ?? [], $request->post ?? []),
+            $request->files ?? [],
+            $request->cookie ?? [],
+            $attributes,
+            $this->via->getRequestSession($request),
+        );
+        $scope->bind();
+        $this->via->actionStarted($contextId);
+        $this->via->getStats()->trackAction();
 
+        try {
             // Inject signals into context
             $context->injectSignals($signals);
 
             // Execute the context-level action
+            $context->getPatchManager()->beginAction();
             $context->executeAction($actionId);
+            $this->syncSignalsAfterAction($context, $actionId);
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, true);
 
-            // Apply any cookies queued by the action callback
-            foreach ($context->flushPendingCookies() as $cookie) {
-                $response->cookie(
-                    $cookie['name'],
-                    $cookie['value'],
-                    $cookie['expires'],
-                    $cookie['path'],
-                    $cookie['domain'],
-                    $cookie['secure'],
-                    $cookie['httpOnly'],
-                    $cookie['sameSite'],
-                );
-            }
-
+            $this->sendCookies($request, $response, $context, $scope);
             $response->status(200);
             $response->end();
         } catch (\Throwable $e) {
             $this->via->log('error', "Action {$actionId} failed: " . Logger::describe($e));
             $tracer?->markError(\get_class($e) . ': ' . $e->getMessage());
+            // Before the send below, so that what the onError callbacks write reaches the tab with it.
+            $this->via->reportError($e, $context, ErrorPhase::Action, $actionId);
+            // The values the action wrote before it threw are already the server's.
+            $this->syncSignalsAfterAction($context, $actionId);
 
             $durationUs = (hrtime(true) - $actionStart) / 1000;
             $this->requestLogger?->logAction($actionId, $contextId, $durationUs, false);
 
+            $this->sendCookies($request, $response, $context, $scope);
             $response->status(500);
             $response->end('Action failed');
         } finally {
+            $scope->unbind();
             if ($traceStarted) {
                 $tracer->endTrace();
             }
+            $this->via->actionEnded($contextId);
+        }
+    }
+
+    /**
+     * Set the cookies queued outside an action (a timer's, say) and then those of this action, which win a tie, and
+     * the session cookie of a rotation this action or one outside a request asked for.
+     */
+    private function sendCookies(Request $request, Response $response, Context $context, RequestScope $scope): void {
+        $rotateQueued = $context->takeSessionRotation();
+        $pending = $context->takePendingSessionToken();
+        if ($pending !== null) {
+            $this->via->getSessionManager()->adoptIssued($request, $this->via->getSettings()->secureCookie, $pending);
+        }
+        foreach ([...$context->flushPendingCookies(), ...$scope->answer()] as $cookie) {
+            $response->cookie(
+                $cookie['name'],
+                $cookie['value'],
+                $cookie['expires'],
+                $cookie['path'],
+                $cookie['domain'],
+                $cookie['secure'],
+                $cookie['httpOnly'],
+                $cookie['sameSite'],
+            );
+        }
+        $this->via->writeSessionCookie($request, $response, rotate: $rotateQueued);
+    }
+
+    private function syncSignalsAfterAction(Context $context, string $actionId): void {
+        try {
+            $context->getPatchManager()->syncSignalsAfterAction();
+        } catch (\Throwable $e) {
+            $this->via->log('error', "Sending the signals changed by action {$actionId} failed: " . Logger::describe($e));
+            $this->via->reportError($e, $context, ErrorPhase::Action, $actionId);
         }
     }
 
@@ -171,9 +231,9 @@ class ActionHandler {
      * See tests/Feature/ActionRateLimitTest.php.
      */
     private function checkRateLimit(string $ip): bool {
-        $config = $this->via->getConfig();
+        $settings = $this->via->getSettings();
 
-        $allowed = $this->rateLimiter->allow($ip, $config->getActionRateLimit(), $config->getActionRateWindow());
+        $allowed = $this->rateLimiter->allow($ip, $settings->actionRateLimit, $settings->actionRateWindow);
 
         if (!$allowed || !$this->rateLimiter->hasOverflowed() || $this->overflowReported) {
             return $allowed;

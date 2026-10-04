@@ -10,6 +10,10 @@
         a <strong>broker</strong> fans out <code>broadcast()</code> calls so every worker can react
         to changes that happened on any other worker.
     </p>
+    <p>
+        The broker carries broadcasts only. Passing an action or a download to the worker that holds the tab
+        goes through OpenSwoole's worker pipe, whichever broker is set, and it stays within one server.
+    </p>
 
     <h2 id="when-you-need-it">When do you need a broker?</h2>
 
@@ -18,8 +22,8 @@
             <tr><th>Scenario</th><th>Broker</th><th>External dep?</th></tr>
         </thead>
         <tbody>
-            <tr><td>Single worker (default)</td><td><code>InMemoryBroker</code></td><td>None</td></tr>
-            <tr><td>Multiple workers, same machine</td><td><code>SwooleBroker</code></td><td>None</td></tr>
+            <tr><td>Single worker (default)</td><td><code>InMemoryBroker</code>, without a <code>withBroker()</code> call</td><td>None</td></tr>
+            <tr><td>Multiple workers, same machine</td><td><code>SwooleBroker</code>, without a <code>withBroker()</code> call</td><td>None</td></tr>
             <tr><td>Multiple servers / containers</td><td><code>RedisBroker</code> or <code>NatsBroker</code></td><td>Redis / NATS</td></tr>
         </tbody>
     </table>
@@ -32,24 +36,25 @@
         <a href="/docs/broadcasting#timing">Broadcasting → When the update is sent</a>.
     </p>
 
-    <h2 id="inmemorybroker">InMemoryBroker (default)</h2>
+    <h2 id="inmemorybroker">InMemoryBroker (default with one worker)</h2>
     <p>
-        No configuration needed. Correct for single-worker deployments. Has zero overhead and no
-        external dependencies. Calling <code>withWorkerNum(N)</code> with <code>N &gt; 1</code> and
-        leaving <code>InMemoryBroker</code> as the broker is a startup error: php-via will throw
-        a <code>\RuntimeException</code> with a clear message.
+        No configuration needed. It is the broker of a single worker: it publishes nothing and costs nothing.
+        Passing it to <code>withBroker()</code> together with <code>withWorkerNum()</code> above 1 makes
+        <code>start()</code> throw a <code>\RuntimeException</code>, since the other workers would never hear
+        a broadcast.
     </p>
     {% code 'php' %}{% verbatim %}
-// These are equivalent: InMemoryBroker is the implicit default
+// These are equivalent with one worker
 $config = new Config();
 $config = (new Config())->withBroker(new InMemoryBroker());
 {% endverbatim %}{% endcode %}
 
-    <h2 id="swoolebbroker">SwooleBroker (multi-worker, same machine)</h2>
+    <h2 id="swoolebbroker">SwooleBroker (default with several workers)</h2>
     <p>
         Uses OpenSwoole's built-in inter-worker pipe (<code>Server::sendMessage</code> /
-        <code>onPipeMessage</code>) to fan-out scope invalidations across all worker processes on
-        the same machine. <strong>No external infrastructure required.</strong>
+        <code>onPipeMessage</code>) to fan out scope invalidations across all worker processes on
+        the same machine. <strong>No external infrastructure required.</strong> With
+        <code>withWorkerNum()</code> above 1 and no <code>withBroker()</code> call, php-via uses it by itself.
         GlobalState is backed by <code>OpenSwoole\Table</code>, shared memory that is
         allocated in the master process and mmap'd into every worker on fork.
     </p>
@@ -57,14 +62,19 @@ $config = (new Config())->withBroker(new InMemoryBroker());
 use Mbolli\PhpVia\Broker\SwooleBroker;
 
 $config = (new Config())
-    ->withWorkerNum(swoole_cpu_num())  // use all CPU cores
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum());  // SwooleBroker by default
+
+// The same, spelled out:
+$config = (new Config())
+    ->withWorkerNum(\OpenSwoole\Util::getCPUNum())
     ->withBroker(new SwooleBroker());
 {% endverbatim %}{% endcode %}
     <p>
         <strong>No sticky routing needed.</strong> Every worker sits behind the same port, so a load balancer
-        cannot pick one anyway. An action or SSE reconnect that lands on a worker other than the one that
-        rendered the page rebuilds the context there. Scoped signal values, GlobalState, session data and the
-        client list are shared; server-owned TAB signals and PHP statics stay per worker. See
+        cannot pick one anyway. A tab lives on the worker that holds its stream, and an action or a download
+        that lands on another worker is passed there. Scoped signal values, GlobalState, session data and the
+        client list are shared; PHP statics stay per worker, and server-owned TAB signals start over when a
+        tab's stream reconnects after the worker that held it stopped. See
         <a href="/docs/deployment#same-machine">Deployment → Same machine</a> for the details and for the
         atomic update methods.
     </p>
@@ -80,9 +90,13 @@ $config = (new Config())
     <h2 id="redisbroker">RedisBroker</h2>
     <p>
         Uses Redis pub/sub to relay scope invalidations across nodes. Requires the
-        <code>ext-redis</code> PHP extension and <code>SWOOLE_HOOK_ALL</code> (enabled automatically
-        by php-via). The broker opens two coroutine connections per worker: one for publish, one
-        for the subscribe loop.
+        <code>ext-redis</code> PHP extension and the coroutine hook for its connection:
+        <code>SWOOLE_HOOK_TCP</code>, <code>SWOOLE_HOOK_TLS</code> with <code>tls: true</code>, or
+        <code>SWOOLE_HOOK_UNIX</code> for a socket path. php-via's default <code>hook_flags</code> include
+        all three, and <code>start()</code> throws if flags set with <code>withSwooleSettings()</code>
+        leave out the one the broker needs, since every Redis call would then block the worker. See
+        <a href="/docs/deployment#hooks">Coroutine hooks</a>. The broker opens two coroutine connections
+        per worker: one for publish, one for the subscribe loop.
     </p>
 
     <h3 id="redis-basic">Basic setup</h3>
@@ -242,7 +256,7 @@ curl https://myapp.example.com/_health
     {% code 'json' %}{% verbatim %}
 {
   "status": "ok",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "broker": {
     "driver": "RedisBroker",
     "connected": true
@@ -256,7 +270,9 @@ curl https://myapp.example.com/_health
     <p>
         HTTP <strong>200</strong> when the broker is connected. HTTP <strong>503</strong> when the
         broker is in the reconnect window (<code>"status":"degraded"</code>). The response contains
-        no IP addresses, credentials, or per-user data.
+        no IP addresses, credentials, or per-user data. <code>connections</code> counts the contexts and
+        open streams of the worker that answered, not of the whole server. <code>version</code> is
+        <code>Via::VERSION</code>.
     </p>
     <p>Example Caddy health check to remove a degraded node from rotation:</p>
     {% code 'caddy' %}{% verbatim %}
@@ -267,6 +283,13 @@ reverse_proxy node1:3000 node2:3000 {
     health_status   200
 }
 {% endverbatim %}{% endcode %}
+
+    <h2 id="upgrades">Upgrading nodes that share a broker</h2>
+    <p>
+        A broker message names a scope, and the form of some scopes can change between releases: in 0.14 a
+        session's scope became a hash of its id. Upgrade every node that shares a broker together, so all of
+        them name a scope the same way.
+    </p>
 
     <h2 id="connection-count">Connection count</h2>
     <p>

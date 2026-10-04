@@ -7,7 +7,6 @@
         <div class="products-grid">
             {% for product in products %}
             <div class="product-card">
-                <div class="product-emoji">{{ product.emoji }}</div>
                 <div class="product-name">{{ product.name }}</div>
                 <div class="product-price">
                     {% if product.price == 0 %}
@@ -28,7 +27,7 @@
     {% block cart %}
     <div id="cart-col">
         <h3 class="cart-heading">
-            🛒 Cart
+            Cart
             {% if cart|length > 0 %}
             <span class="cart-count-badge">{{ cart|length }}</span>
             {% endif %}
@@ -41,7 +40,6 @@
         <div class="cart-items">
             {% for item in cart %}
             <div class="cart-item" id="cart-item-{{ item.id }}">
-                <span class="cart-item-emoji">{{ item.emoji }}</span>
                 <div class="cart-item-info">
                     <span class="cart-item-name">{{ item.name }}</span>
                     <span class="cart-item-sub">
@@ -51,7 +49,8 @@
                 <div class="cart-item-right">
                     <span class="cart-item-total">CHF {{ (item.price * item.qty)|number_format(2) }}</span>
                     <button class="danger small cart-remove-btn"
-                            data-on:click="@delete('{{ removeItem.url }}?id={{ item.id }}')">✕</button>
+                            data-on:click="@delete('{{ removeItem.url }}?id={{ item.id }}')"
+                            aria-label="Remove {{ item.name }} from the cart">Remove</button>
                 </div>
             </div>
             {% endfor %}
@@ -67,7 +66,7 @@
         {% endif %}
 
         <p class="cart-hint">
-            <small>💡 Open a new tab and visit this page: your cart will already be here.</small>
+            <small>Open a new tab and visit this page: your cart will already be here.</small>
         </p>
         </div>{# .cart-box #}
     </div>{# #cart-col #}
@@ -102,7 +101,6 @@
     flex-direction: column;
     gap: .25rem;
 }
-.product-emoji { font-size: 1.75rem; line-height: 1; }
 .product-name  { font-size: .8rem; font-weight: 500; line-height: 1.3; }
 .product-price { font-size: .85rem; color: var(--text-muted, #64748b); }
 .price-free    { color: #22c55e; font-weight: 600; }
@@ -169,7 +167,6 @@
         color: var(--brand, #6366f1);
     }
 }
-.cart-item-emoji { font-size: 1.25rem; flex-shrink: 0; }
 .cart-item-info  { flex: 1; min-width: 0; }
 .cart-item-name  { font-size: .8rem; font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cart-item-sub   { font-size: .75rem; color: var(--text-2, #64748b); }

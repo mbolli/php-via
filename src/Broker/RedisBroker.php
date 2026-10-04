@@ -9,12 +9,13 @@ use OpenSwoole\Coroutine;
 /**
  * Redis pub/sub broker for multi-node broadcasting.
  *
- * Uses ext-redis (phpredis) with OpenSwoole's coroutine hook (SWOOLE_HOOK_ALL),
- * which makes all blocking ext-redis calls coroutine-compatible automatically.
- * Via already sets hook_flags => SWOOLE_HOOK_ALL in its server configuration.
+ * Uses ext-redis (phpredis) with OpenSwoole's socket hooks, which make its blocking
+ * calls yield the coroutine: SWOOLE_HOOK_TCP, SWOOLE_HOOK_TLS with tls: true, or
+ * SWOOLE_HOOK_UNIX for a socket path. Via's default hook_flags include all three,
+ * and Via::start() refuses hook_flags without the one this broker needs.
  *
  * Note: OpenSwoole\Coroutine\Redis is deprecated since OpenSwoole v4.3+.
- * The recommended approach is ext-redis + HOOK_TCP (included in HOOK_ALL).
+ * The recommended approach is ext-redis with the socket hooks.
  * See: https://openswoole.com/docs/modules/swoole-coroutine-redis
  *
  * Two connections are required because subscribing blocks the connection for
@@ -142,11 +143,24 @@ final class RedisBroker implements MessageBroker {
     }
 
     /**
+     * The hook_flags bit that makes this broker's socket yield: TLS, UNIX for a socket path, else TCP.
+     *
+     * @internal
+     */
+    public function requiredHookFlag(): int {
+        return match (true) {
+            $this->tls => SWOOLE_HOOK_TLS,
+            str_starts_with($this->host, '/'), str_starts_with($this->host, 'unix://') => SWOOLE_HOOK_UNIX,
+            default => SWOOLE_HOOK_TCP,
+        };
+    }
+
+    /**
      * Spawn a coroutine that blocks on Redis SUBSCRIBE and dispatches incoming messages.
      *
      * On connection loss the loop reconnects with exponential backoff (1 s → 2 s → … → 30 s cap).
      * ext-redis subscribe() accepts a callback invoked for every received message.
-     * With SWOOLE_HOOK_ALL this yields the coroutine (not the worker) while waiting.
+     * The socket hook ({@see requiredHookFlag()}) makes it yield the coroutine, not the worker, while waiting.
      */
     private function startReadLoop(): void {
         Coroutine::create(function (): void {

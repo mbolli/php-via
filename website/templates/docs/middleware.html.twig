@@ -4,24 +4,50 @@
 <article>
     <h1>Middleware</h1>
     <p>
-        php-via supports <strong>PSR-15 middleware</strong> for cross-cutting concerns like authentication,
-        CORS, logging, and rate limiting. Middleware runs on page and action requests by default;
-        implement <code>SseAwareMiddleware</code> to also run on SSE handshakes.
+        php-via runs <strong>PSR-15 middleware</strong> for cross-cutting concerns such as authentication,
+        CORS, logging and rate limiting. Middleware runs on page loads, actions and plain routes; implement
+        <code>SseAwareMiddleware</code> to run on SSE connects too.
     </p>
 
     <h2 id="how-it-works">How it works</h2>
     <p>
-        Middleware follows the standard <a href="https://www.php-fig.org/psr/psr-15/" target="_blank" rel="noopener">PSR-15</a>
-        onion model. Each middleware receives a PSR-7 <code>ServerRequestInterface</code> and can either
-        short-circuit (return a response directly) or delegate to the next handler. php-via converts the
-        OpenSwoole request to PSR-7 at the boundary and converts any PSR-7 response back, so the
-        middleware layer is zero-overhead when no middleware is registered.
+        Middleware follows the <a href="https://www.php-fig.org/psr/psr-15/" target="_blank" rel="noopener">PSR-15</a>
+        onion model. Each middleware gets a PSR-7 <code>ServerRequestInterface</code> and either answers
+        itself or passes the request on with <code>$handler-&gt;handle()</code>. php-via converts the
+        OpenSwoole request to PSR-7 only when middleware is registered, so an app without middleware pays
+        nothing.
     </p>
+    <p>
+        On a page load and an action, php-via writes the status and the body itself once the request reaches it.
+        A response the middleware returns without calling <code>$handler-&gt;handle()</code>, such as a redirect
+        to a login page, goes out as it is. The response that <code>$handler-&gt;handle()</code> returns has an
+        empty body, and the headers a middleware adds to it go out with php-via's response, such as
+        <code>Content-Security-Policy</code>, <code>Strict-Transport-Security</code> or
+        <code>X-Frame-Options</code>. php-via keeps its own headers: it writes <code>Content-Type</code>,
+        <code>Content-Length</code>, <code>Content-Encoding</code>, <code>Transfer-Encoding</code> and
+        <code>Connection</code>, and the session cookie, a cookie it set and a header it set win over the
+        middleware's. A <code>Vary</code> or <code>Content-Security-Policy</code> header of both goes out with
+        both values, so a browser enforces both policies. Dev mode logs a warning once for each header of the
+        middleware it leaves out. See <a href="/docs/deployment#csp">Content Security Policy</a> for a policy
+        with a nonce. On a <a href="#plain-routes">plain route</a> the handler's response goes out as it is,
+        with what middleware added.
+    </p>
+    <table>
+        <thead>
+            <tr><th>Request</th><th>Global middleware</th><th>Route middleware</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Page load</td><td>yes</td><td>yes</td></tr>
+            <tr><td>Rebuilding a tab that was away (revival)</td><td>as for the action or connect that rebuilds it</td><td>yes, on a GET of the page's URL</td></tr>
+            <tr><td>Action</td><td>yes</td><td>no</td></tr>
+            <tr><td>SSE connect</td><td><code>SseAwareMiddleware</code> only</td><td>no</td></tr>
+            <tr><td><code>route()</code></td><td>yes</td><td>yes</td></tr>
+        </tbody>
+    </table>
 
     <h2 id="global-middleware">Global middleware</h2>
     <p>
-        Global middleware runs on <em>every</em> page and action request. Register it with
-        <code>$app-&gt;middleware()</code> before <code>$app-&gt;start()</code>:
+        Register global middleware with <code>$app-&gt;middleware()</code> before <code>$app-&gt;start()</code>:
     </p>
     {% code 'php' %}{% verbatim %}
 use Tuupola\Middleware\CorsMiddleware;
@@ -36,151 +62,194 @@ $app->middleware(new CorsMiddleware([
 
     <h2 id="route-middleware">Per-route middleware</h2>
     <p>
-        Attach middleware to specific routes using the fluent API returned by <code>$app-&gt;page()</code>:
+        Attach middleware to one route with the <code>RouteDefinition</code> that <code>page()</code>,
+        <code>mount()</code> and <code>route()</code> return, or to several with <code>group()</code>:
     </p>
     {% code 'php' %}{% verbatim %}
-$app->page('/admin', fn(Context $c) => $c->view('admin.html.twig'))
-    ->middleware(new AuthMiddleware());
+$app->page('/admin', fn (Context $c) => $c->view('admin.html.twig'))
+    ->middleware(new AuthMiddleware($app));
 
-$app->page('/api/data', fn(Context $c) => $c->view('data.html.twig'))
-    ->middleware(new AuthMiddleware(), new RateLimitMiddleware());
+$app->page('/reports', fn (Context $c) => $c->view('reports.html.twig'))
+    ->middleware(new AuthMiddleware($app), new AuditMiddleware());
+
+$app->group('/account', function (Via $app): void {
+    $app->page('/', fn (Context $c) => $c->view('account.html.twig'));
+    $app->page('/billing', fn (Context $c) => $c->view('billing.html.twig'));
+})->middleware(new AuthMiddleware($app));
     {% endverbatim %}{% endcode %}
     <p>
-        Per-route middleware runs <em>after</em> global middleware. The full pipeline is:
-        global → route-specific → page handler.
+        Route middleware runs after the global middleware: global, then route, then the page handler.
     </p>
 
     <h2 id="writing-middleware">Writing middleware</h2>
     <p>
-        Implement <code>Psr\Http\Server\MiddlewareInterface</code>. Use
-        <code>$request-&gt;withAttribute()</code> to pass data downstream: the attributes are
-        automatically bridged to <code>$context-&gt;getRequestAttribute()</code> in your page handler.
+        Implement <code>Psr\Http\Server\MiddlewareInterface</code>. Every request carries the visitor's session
+        id in the <code>via.session</code> attribute, the id <code>$c-&gt;getSessionId()</code> returns, so
+        middleware never reads the session cookie, whose name <code>withSecureCookie()</code> changes. A request
+        without the cookie gets the id of the session the page then starts. Pass data on with
+        <code>$request-&gt;withAttribute()</code>: the page handler reads it with
+        <code>$c-&gt;getRequestAttribute()</code>.
     </p>
     {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Via;
+use Nyholm\Psr7\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Nyholm\Psr7\Response;
 
-class AuthMiddleware implements MiddlewareInterface
-{
-    public function process(
-        ServerRequestInterface $request,
-        RequestHandlerInterface $handler
-    ): ResponseInterface {
-        $sessionId = $this->extractSessionId($request);
+final class AuthMiddleware implements MiddlewareInterface {
+    public function __construct(private Via $app) {}
 
-        if (!$this->isAuthenticated($sessionId)) {
-            // Short-circuit: return 302 redirect to login
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        $user = $this->app->getSessionData($request->getAttribute('via.session'), 'user');
+        if ($user === null) {
             return new Response(302, ['Location' => '/login']);
         }
 
-        // Pass user info downstream → available via $c->getRequestAttribute('user')
-        return $handler->handle(
-            $request->withAttribute('user', $this->getUser($sessionId))
-        );
+        // Available in the page handler as $c->getRequestAttribute('user')
+        return $handler->handle($request->withAttribute('user', $user));
     }
 }
     {% endverbatim %}{% endcode %}
 
     <div class="callout callout-warning">
-        <strong>Swoole warning:</strong> Middleware instances are long-lived. They persist across all
-        requests in the worker process. Do <strong>not</strong> store per-request state on middleware
-        properties. Use <code>$request-&gt;withAttribute()</code> to pass data downstream.
+        <strong>Middleware lives as long as the worker.</strong> One instance serves every request in the
+        worker process, so never keep per-request state on its properties. Pass data on with
+        <code>$request-&gt;withAttribute()</code>.
     </div>
 
     <h2 id="sse-middleware">SSE-aware middleware</h2>
     <p>
-        By default, middleware only runs on page and action requests, not on the SSE handshake.
-        If you need middleware to also guard the SSE connection (e.g. auth), implement the
-        <code>SseAwareMiddleware</code> marker interface:
+        Global middleware skips the SSE connect unless it implements the <code>SseAwareMiddleware</code>
+        marker interface. Implement it when the stream needs the same gate as the page, such as an auth check:
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Http\Middleware\SseAwareMiddleware;
 
-class AuthMiddleware implements SseAwareMiddleware
-{
-    // This now runs on page, action, AND SSE requests
-    public function process(
-        ServerRequestInterface $request,
-        RequestHandlerInterface $handler
-    ): ResponseInterface {
-        // ...
+final class AuthMiddleware implements SseAwareMiddleware {
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
+        // runs on page loads, actions and SSE connects
+        return $handler->handle($request);
     }
 }
-    {% endverbatim %}{% endcode %}
 
-    <h2 id="request-attributes">Accessing middleware data in handlers</h2>
+$app->middleware(new AuthMiddleware());
+    {% endverbatim %}{% endcode %}
     <p>
-        Middleware attributes set via <code>$request-&gt;withAttribute()</code> are automatically
-        bridged to the <code>Context</code>:
+        The marker counts only for global middleware. Route middleware never runs on an SSE connect, so a
+        tab that was open before a logout keeps its stream until it reloads or its context expires.
+    </p>
+
+    <h2 id="request-attributes">Request attributes in handlers and actions</h2>
+    <p>
+        The attributes middleware sets reach the <code>Context</code>:
     </p>
     {% code 'php' %}{% verbatim %}
 $app->page('/dashboard', function (Context $c): void {
     $user = $c->getRequestAttribute('user');
 
-    $c->view('dashboard.html.twig', [
-        'name' => $user['name'],
-    ]);
-})->middleware(new AuthMiddleware());
+    $c->view('dashboard.html.twig', ['name' => $user['name']]);
+})->middleware(new AuthMiddleware($app));
     {% endverbatim %}{% endcode %}
-
-    <h2 id="example">Live example: Auth middleware</h2>
     <p>
-        The <a href="/examples/login">Login Flow example</a> demonstrates a working
-        <code>AuthMiddleware</code> that protects the <code>/examples/login/dashboard</code> route.
-        Unauthenticated users are redirected to the login form. Authenticated users see a personalised
-        dashboard with their session data.
+        In an action, <code>getRequestAttribute()</code> returns what the global middleware set on that action's
+        request; each action has its own, also when two run at once. Route middleware does not run on actions,
+        so an attribute it sets is there in the page handler only: read it there and pass it into the action's
+        closure, or register the middleware globally. Outside a request, such as in a timer, the attributes are
+        those of the page request.
+    </p>
+    <p id="revival">
+        When a tab comes back after its context was destroyed, php-via rebuilds the context and runs the page
+        handler again behind the route's middleware, on a GET of the page's URL with the cookies of the request
+        that rebuilds it. An auth gate therefore applies again, and its attributes reach the handler. When the
+        middleware answers itself, such as with a redirect to the login page, the tab reloads and the page load
+        gets the middleware's answer. See <a href="/docs/lifecycle#revival">Lifecycle → Revival</a>.
+    </p>
+
+    <h2 id="plain-routes">Plain routes</h2>
+    <p>
+        <code>$app-&gt;route()</code> serves a PSR-15 handler with no context, shell or template, for JSON,
+        webhooks or an MCP server, behind the global and the route's middleware. The request carries the path
+        parameters and <code>via.session</code> as attributes, and the handler's response goes out with what the
+        middleware added. php-via checks no <code>Origin</code> header on these routes, so add CSRF or auth
+        middleware where a route changes state.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->route(['GET', 'OPTIONS'], '/api/items/{id}', new ItemHandler())
+    ->middleware(new ApiKeyMiddleware());
+    {% endverbatim %}{% endcode %}
+    <p>See <a href="/docs/api#via-route"><code>route()</code></a> for methods, HEAD and uploads.</p>
+
+    <h2 id="example">Live example: auth middleware</h2>
+    <p>
+        The <a href="/examples/login">Login Flow example</a> protects <code>/examples/login/dashboard</code>
+        with an <code>AuthMiddleware</code>. Visitors who are not logged in go to the login form; logged-in
+        visitors see a dashboard with their session data. Its login and logout call
+        <code>regenerateSession()</code>.
     </p>
 
     <h2 id="security">Built-in security</h2>
     <p>
-        php-via includes several security features out of the box, independent of middleware:
+        php-via has these protections without any middleware:
     </p>
 
     <h3 id="csrf">CSRF protection</h3>
     <p>
-        Actions validate the <code>Origin</code> header against a configurable allowlist.
-        Configure with <code>withTrustedOrigins()</code>:
+        Actions check the <code>Origin</code> header. Configure the allowed origins with
+        <code>withTrustedOrigins()</code>:
     </p>
     {% code 'php' %}{% verbatim %}
 $config = (new Config())
     ->withTrustedOrigins(['https://myapp.com', 'https://staging.myapp.com']);
     {% endverbatim %}{% endcode %}
     <ul>
-        <li><code>null</code> (default): the <code>Origin</code> host must match the <code>Host</code> header</li>
-        <li><code>[]</code>: block all browser-origin requests</li>
-        <li><code>['https://example.com']</code>: strict allowlist</li>
+        <li><code>null</code> (default): the origin's host must match the <code>Host</code> header</li>
+        <li><code>[]</code>: refuse every request that carries an origin</li>
+        <li><code>['https://example.com']</code>: only these origins</li>
     </ul>
     <p>
-        Outside dev mode a request without an <code>Origin</code> header gets 403 in every case,
-        unless <code>withAllowMissingOrigin()</code> is set for non-browser clients.
+        Outside dev mode an action without an <code>Origin</code> header gets 403 in every case, unless
+        <code>withAllowMissingOrigin()</code> lets non-browser clients through. Plain routes are not checked.
     </p>
 
-    <h3 id="session-cookies">Secure session cookies</h3>
+    <h3 id="session-cookies">Session cookies</h3>
     <p>
-        Enable <code>withSecureCookie()</code> in production to set the <code>__Host-</code> cookie prefix,
-        which enforces HTTPS, <code>Path=/</code>, and no <code>Domain</code> attribute:
+        php-via accepts only session ids in the form it issues, 32 lowercase hex characters; any other cookie
+        value starts a new session. Turn on <code>withSecureCookie()</code> for a site served over HTTPS: the
+        cookie gets the <code>__Host-</code> prefix, which requires HTTPS, <code>Path=/</code> and no
+        <code>Domain</code>, and the plain cookie is then ignored.
     </p>
     {% code 'php' %}{% verbatim %}
 $config = (new Config())
     ->withSecureCookie(true);       // __Host-via_session_id; Secure; SameSite=Lax
     {% endverbatim %}{% endcode %}
 
+    <h3 id="session-rotation">Session rotation</h3>
+    <p>
+        A login should give the session a new cookie, so a cookie someone planted or read before it no longer
+        reaches the account. In an action, call <code>$c-&gt;regenerateSession()</code>; in middleware or a
+        <code>route()</code> handler, <code>$app-&gt;regenerateSession($request)</code>, before
+        <code>$handler-&gt;handle()</code>. The session keeps its id, so <code>via.session</code>, session data
+        and the session's tabs stay as they are. The session rotates at the call: from then on the old cookie
+        opens no page. For 2 more seconds it reaches the actions and streams of tabs that exist, and then the
+        streams opened with it end. Call it at logout too, with
+        <code>clearSessionData()</code>. See <a href="/docs/api#context-regenerate-session">regenerateSession()</a>.
+    </p>
+
     <h3 id="rate-limiting">Action rate limiting</h3>
     <p>
-        Built-in per-IP sliding-window rate limiter for action endpoints:
+        A per-IP sliding-window limit for actions, which answers 429 past it:
     </p>
     {% code 'php' %}{% verbatim %}
 $config = (new Config())
-    ->withActionRateLimit(100, 60);  // max 100 actions per 60 seconds per IP
+    ->withActionRateLimit(100, 60);  // at most 100 actions per 60 seconds per IP
     {% endverbatim %}{% endcode %}
 
     <h2 id="next-steps">Next steps</h2>
     <ul>
         <li><a href="/docs/actions">Actions</a>: server-side event handlers</li>
-        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, intervals, cleanup</li>
+        <li><a href="/docs/lifecycle">Lifecycle</a>: connect, disconnect, revival and cleanup</li>
         <li><a href="/docs/deployment">Deployment</a>: production configuration</li>
     </ul>
 </article>

@@ -4,61 +4,174 @@
 <article>
     <h1>Signals</h1>
     <p>
-        Signals are php-via's reactive state primitive. They hold a value, and when that value changes, every browser subscribed to the context sees the update via SSE.
+        A signal holds a value that the browser shows. When an action, a timer or another tab changes it,
+        php-via sends the new value to the tabs that use it, and Datastar updates every element bound to it.
     </p>
 
     <h2 id="creating-signals">Creating a signal</h2>
     {% code 'php' %}{% verbatim %}
-$count = $c->signal(0);           // anonymous signal
-$step  = $c->signal(1, 'step');   // named signal (better Datastar binding)
+$count = $c->signal(0, 'count'); // initial value and name
+$step  = $c->signal(1, 'step');
     {% endverbatim %}{% endcode %}
 
-    <p>The first argument is the initial value. Signals can hold any JSON-serializable value: integers, strings, booleans, arrays.</p>
+    <p>
+        The first argument is the initial value, any JSON-serializable value: an integer, a string, a boolean,
+        an array or null. The second is the name, which every signal needs: <code>$c-&gt;getSignal('count')</code>
+        finds the signal by it, a template gets the signal under it, and the browser id is built from it. An
+        empty name throws.
+    </p>
+    <p>
+        Declaring a TAB signal again with a name the context already has returns the same signal and sets it to
+        the new initial value. php-via logs a warning when that changes the live value.
+    </p>
 
     <h2 id="reading-and-writing">Reading and writing</h2>
     {% code 'php' %}{% verbatim %}
-$count->int();        // read as int
-$count->string();     // read as string
-$count->getValue();   // raw value
+$count->int();      // as int
+$count->string();   // as string; an array comes out as JSON
+$count->float();    // as float
+$count->bool();     // 'true', '1', 'yes', 'on' are true, other strings false, other types as PHP casts
+$count->array();    // as array
+$count->getValue(); // as stored
 
-$count->setValue(42); // update: queues a patch to every subscribed client
+$count->setValue(42);
+$count->increment();   // adds 1 and returns the new value; increment(-1) subtracts
+$items->mutate(fn (array $list): array => [...$list, 'new item']);
     {% endverbatim %}{% endcode %}
-
-    <h2 id="binding-in-templates">Binding in templates</h2>
     <p>
-        In a Twig template, use Datastar attributes to bind signals to the DOM. A signal's id includes
-        the tab, so always write it from the signal object (<code>{% verbatim %}{{ count.id }}{% endverbatim %}</code>),
-        never by hand:
+        <code>setValue()</code>, <code>increment()</code> and <code>mutate()</code> take no other arguments.
+        With several workers, <code>increment()</code> and <code>mutate()</code> change a shared signal in one
+        step, where <code>setValue($count-&gt;int() + 1)</code> can lose a write another worker made in between.
+        <code>increment()</code> works on integers only.
+    </p>
+
+    <h2 id="syncing">When the browser gets the new value</h2>
+    <p>Where the write happens decides how the value reaches the browser:</p>
+    <ul>
+        <li>In an action, the TAB signals it changed go to its tab when it returns, also when it throws, for
+            the page and its components. The view does not render for that: call <code>$c-&gt;sync()</code> when
+            the HTML has to change too.</li>
+        <li>A write to a scoped signal broadcasts its scope, so every tab in it renders its view and gets the
+            value. See <a href="#scopes">Sharing a signal</a>.</li>
+        <li>Anywhere else, such as a timer or a <code>spawn()</code> task, call <code>$c-&gt;syncSignals()</code>
+            to send the changed signals, or <code>$c-&gt;sync()</code> to render the view as well.</li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$c->setInterval(function () use ($elapsed, $c): void {
+    $elapsed->increment();
+    $c->syncSignals(); // no action runs here, so send the value
+}, 1000);
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>$signal-&gt;markSynced()</code> drops a TAB signal's pending value, so neither the page nor the
+        next sync sends it. Use it after a write the browser already shows.
+    </p>
+
+    <h2 id="binding-in-templates">Using a signal in the page</h2>
+    <p>
+        A signal's id in the browser includes the tab, so write it from the signal object, never by hand.
+        <code>ref()</code> gives the reference for Datastar expressions, and <code>bind()</code> the
+        <code>data-bind</code> attribute:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->view(fn (): string => <<<HTML
+    <div id="form">
+        <span data-text="{$count->ref()}">{$count->int()}</span>
+        <input {$step->bind()} type="number">
+        <div data-show="{$visible->ref()}">...</div>
+    </div>
+    HTML);
+    {% endverbatim %}{% endcode %}
+    <p>In a Twig template, each signal is a variable under its name, and the <code>bind()</code> function writes the attribute:</p>
+    {% code 'html' %}{% verbatim %}
+<span data-text="{{ count.ref }}">{{ count.int }}</span>
+<input {{ bind(step) }} type="number">
+<div data-show="{{ visible.ref }}">...</div>
+    {% endverbatim %}{% endcode %}
+    <p>
+        On a web component, bind a property instead: <code>$volume-&gt;bind('value')</code> and
+        {% verbatim %}<code>{{ bind(volume, 'value') }}</code>{% endverbatim %} write
+        <code>data-bind__prop.value</code>. See <a href="/docs/web-components#binding">Web components</a>.
+    </p>
+    <p>
+        Datastar 1.0.4 updates a signal bound to a checkbox or a radio button on <code>input</code>, not on
+        <code>change</code>. A script that changes such an input and dispatches <code>change</code> has to
+        dispatch <code>input</code>, or bind with <code>__event.change</code>.
+    </p>
+
+    <h2 id="client-writes">Values the browser sends</h2>
+    <p>
+        An action's request carries the values the browser holds, and php-via stores them before the action
+        runs. Which signals take them:
+    </p>
+    <ul>
+        <li>A TAB signal takes the browser's value, so <code>data-bind</code> works on it.</li>
+        <li>A signal with a scope belongs to the server: the browser cannot write it.</li>
+        <li><code>clientWritable: true</code> or <code>false</code> sets the rule for one signal, in either direction.</li>
+        <li><code>Config::withStrictTabSignals()</code> makes TAB signals the server's too, unless they are
+            declared with <code>clientWritable: true</code>.</li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$status = $c->signal('idle', 'status', clientWritable: false);        // only the server sets it
+$note   = $c->signal('', 'note', 'room:lobby', clientWritable: true); // a shared field every tab can write
+    {% endverbatim %}{% endcode %}
+    <p>
+        A value the browser sends must have the type of the signal's initial value. A form that converts
+        without loss is stored as that type, such as <code>'5'</code> from a text field for an integer or
+        <code>'false'</code> from a radio group for a boolean. Any other value is refused like a write to a
+        signal the browser may not write, and a TAB signal sends the server's value back. A signal declared
+        with <code>null</code> takes any type. Dev mode logs a warning once per signal.
+    </p>
+
+    <h2 id="client-seeded">A value the browser holds first</h2>
+    <p>
+        Some values start in the browser, such as the section a page's own script reads from
+        <code>location.hash</code>. Declare such a signal with <code>clientSeeded: true</code>. Its initial
+        value is only the server's fallback: the page leaves the signal out, and every SSE connect gives it the
+        browser's value before the view renders, until the server writes it. Declaring it again keeps the live
+        value. It is a TAB signal, and the browser can write it.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$section = $c->signal('overview', 'section', clientSeeded: true);
+    {% endverbatim %}{% endcode %}
+    <p>
+        The browser has to hold the value when the SSE connect of <code>via_head</code> runs, so declare it on
+        <code>&lt;html&gt;</code> or in <code>&lt;head&gt;</code> before <code>via_head</code>, in a layout of
+        your own (see <a href="/docs/views#full-documents">Views that render the whole document</a>):
     </p>
     {% code 'html' %}{% verbatim %}
-<!-- Display value (one-way); data-text takes a $ expression -->
-<span data-text="${{ count.id }}"></span>
-
-<!-- Two-way binding for an input -->
-<input data-bind="{{ step.id }}" type="number">
-
-<!-- Conditional visibility -->
-<div data-show="${{ visible.id }}">...</div>
+<head>
+    <meta charset="UTF-8">
+    <meta data-signals="{ {{ section.id }}: location.hash.slice(1) || 'overview' }">
+    {{ via_head() }}
+</head>
     {% endverbatim %}{% endcode %}
-
-    <h2 id="scopes">Scopes &amp; sharing</h2>
     <p>
-        By default, signals are <strong>TAB-scoped</strong>: each visitor has their own independent copy.
-        You can change the scope to share state across visitors:
+        Datastar applies attributes in document order, and a value declared in <code>&lt;body&gt;</code> misses
+        the first connect, which then renders the fallback.
     </p>
+
+    <h2 id="scopes">Sharing a signal</h2>
+    <p>A signal without a scope is private to its tab. Pass a scope as the third argument to share it:</p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\Scope;
 
-// Only this browser tab sees this
-$private = $c->signal(0, 'count');
-
-// Everyone on this URL sees the same value
-$shared = $c->signal(0, 'count', Scope::routeScope('/'));
-$c->scope(Scope::ROUTE);  // equivalent shorthand
+$count  = $c->signal(0, 'count');                       // this tab only
+$likes  = $c->signal(0, 'likes', Scope::ROUTE);         // every tab on this route
+$theme  = $c->signal('light', 'theme', Scope::SESSION); // every tab of this browser session
+$online = $c->signal(0, 'online', 'room:lobby');        // the tabs in this custom scope
     {% endverbatim %}{% endcode %}
+    <p>
+        A scoped signal joins its context to its scope, so its writes reach the tab. Its initial value counts
+        only when the scope does not have the signal yet; every later declaration gets the live value.
+        <code>Scope::ROUTE</code> and <code>Scope::SESSION</code> resolve to this route's and this session's
+        scope. After <code>$c-&gt;scope()</code> set a shared primary scope, <code>signal()</code> without a scope
+        throws a <code>LogicException</code>: pass the shared scope to share the signal, or
+        <code>Scope::TAB</code> to keep it private.
+    </p>
 
     <div class="docs-demo">
-        <div class="docs-demo-header">▶ TAB scope vs ROUTE scope: live comparison</div>
+        <div class="docs-demo-header">A TAB counter beside a ROUTE counter</div>
         <div class="docs-demo-body">
             <p style="font-size: var(--font-size-0); color: var(--text-3); margin-block-end: var(--size-4);">
                 Open another browser tab with this page open, then increment both counters. The TAB counter is yours alone; the ROUTE counter is shared.
@@ -70,17 +183,25 @@ $c->scope(Scope::ROUTE);  // equivalent shorthand
         </div>
     </div>
 
-    <h2 id="syncing">Syncing</h2>
     <p>
-        When signals change inside an action, the framework automatically queues patches for connected clients.
-        If you update signals <em>outside</em> an action (e.g., in a timer callback), call <code>$c-&gt;sync()</code> or <code>$app-&gt;broadcast($scope)</code>:
+        A write to a scoped signal broadcasts its scope, so every tab in it renders its view again. Declare it
+        with <code>autoBroadcast: false</code> to send the value yourself: <code>$c-&gt;syncSignals()</code> sends
+        it to the acting tab and <code>$app-&gt;broadcast()</code> to the scope. An action sends only its TAB
+        signals by itself, so such a signal stays where it is until you do.
     </p>
-    {% code 'php' %}{% verbatim %}
-$c->setInterval(function () use ($count, $c): void {
-    $count->setValue($count->int() + 1);
-    $c->sync(); // push the update
-}, 1000);
-    {% endverbatim %}{% endcode %}
+    <p>
+        Code outside a context, such as a server timer, finds a scoped signal by its name:
+        <code>$app-&gt;getScopedSignalByName(Scope::routeScope('/'), 'likes')</code>. See
+        <a href="/docs/scopes">Scopes</a> for who a scope reaches.
+    </p>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/actions">Actions</a>: where most signal writes happen</li>
+        <li><a href="/docs/views">Views</a>: when the HTML around the signals renders</li>
+        <li><a href="/docs/scopes">Scopes</a>: who shares a signal</li>
+        <li><a href="/docs/api#signal">API: Signal</a>: every method</li>
+    </ul>
 </article>
 
 {% endblock %}

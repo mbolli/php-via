@@ -38,7 +38,7 @@ describe('Scoped Signal Injection', function (): void {
         $app = createVia();
         $ctx = new Context('ctx1', '/test', $app);
         $ctx->scope(Scope::ROUTE);
-        $count = $ctx->signal(0, 'count'); // inherits ROUTE scope
+        $count = $ctx->signal(0, 'count', Scope::ROUTE);
 
         $ctx->injectSignals([$count->id() => 99]);
 
@@ -49,7 +49,7 @@ describe('Scoped Signal Injection', function (): void {
         $app = createVia();
         $ctx = new Context('ctx1', '/test', $app);
         $ctx->scope(Scope::ROUTE);
-        $note = $ctx->signal('', 'note', clientWritable: true);
+        $note = $ctx->signal('', 'note', Scope::ROUTE, clientWritable: true);
 
         $ctx->injectSignals([$note->id() => 'hello']);
 
@@ -60,7 +60,7 @@ describe('Scoped Signal Injection', function (): void {
         $app = createVia();
         $ctx = new Context('ctx1', '/test', $app);
         $ctx->scope(Scope::ROUTE);
-        $signal = $ctx->signal(0, 'count');
+        $signal = $ctx->signal(0, 'count', Scope::ROUTE);
 
         expect($signal->isClientWritable())->toBeFalse();
     });
@@ -69,7 +69,7 @@ describe('Scoped Signal Injection', function (): void {
         $app = createVia();
         $ctx = new Context('ctx1', '/test', $app);
         $ctx->scope(Scope::ROUTE);
-        $signal = $ctx->signal('', 'note', clientWritable: true);
+        $signal = $ctx->signal('', 'note', Scope::ROUTE, clientWritable: true);
 
         expect($signal->isClientWritable())->toBeTrue();
     });
@@ -91,11 +91,11 @@ describe('Scoped Signal Injection', function (): void {
 
         $ctx1 = new Context('ctx1', '/test', $app);
         $ctx1->scope(Scope::ROUTE);
-        $shared = $ctx1->signal(0, 'shared');
+        $shared = $ctx1->signal(0, 'shared', Scope::ROUTE);
 
         $ctx2 = new Context('ctx2', '/test', $app);
         $ctx2->scope(Scope::ROUTE);
-        $ctx2->signal(0, 'shared'); // returns same signal object
+        $ctx2->signal(0, 'shared', Scope::ROUTE); // returns same signal object
 
         // Neither context allows injection for this server-authoritative signal
         $ctx2->injectSignals([$shared->id() => 99]);

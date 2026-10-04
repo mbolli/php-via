@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\Http;
 
 use Mbolli\PhpVia\Context;
+use Mbolli\PhpVia\Context\PatchManager;
+use Mbolli\PhpVia\ErrorPhase;
+use Mbolli\PhpVia\PatchMode;
+use Mbolli\PhpVia\Rendering\Bootstrap;
+use Mbolli\PhpVia\State\SessionTokens;
 use Mbolli\PhpVia\Support\Logger;
 use Mbolli\PhpVia\Support\RequestLogger;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
-use OpenSwoole\Timer;
 use starfederation\datastar\enums\ElementPatchMode;
 
 /**
@@ -29,6 +33,15 @@ class SseHandler {
 
     private const string KEEP_ALIVE = ": keep-alive\n\n";
 
+    /** How long a context told to reload is closed silently on its next connects. */
+    private const int RELOAD_MEMORY_SECONDS = 300;
+
+    /** Contexts told to reload that the handler remembers, so ids a client makes up cannot fill the worker. */
+    private const int RELOAD_MEMORY_MAX = 10_000;
+
+    /** Longer than any context id RequestHandler makes: the route pattern, '_/' and 16 hex characters. */
+    private const int CONTEXT_ID_MAX_BYTES = 512;
+
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
@@ -37,9 +50,9 @@ class SseHandler {
      * Subsequent reconnects from the same dead context (e.g. backgrounded tab
      * that can't execute JS) are closed silently instead of spamming the log
      * and re-sending a reload that will never execute.
-     * Entries are evicted after 5 minutes via a timer set on first insert.
+     * An entry counts for RELOAD_MEMORY_SECONDS, and past RELOAD_MEMORY_MAX entries the oldest goes.
      *
-     * @var array<string, true>
+     * @var array<string, int> the time of the reload, oldest first
      */
     private array $reloadedContextIds = [];
 
@@ -60,6 +73,9 @@ class SseHandler {
 
     private bool $heartbeating = false;
 
+    /** See dropThreshold(), resolved with the first stream. */
+    private ?int $dropThreshold = null;
+
     public function __construct(Via $via) {
         $this->via = $via;
     }
@@ -71,15 +87,16 @@ class SseHandler {
     /**
      * Handle SSE connection for real-time updates.
      *
-     * @param null|callable $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
-     * @param null|callable $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
+     * @param null|callable        $brotliWrite  Brotli flush writer set by BrotliMiddleware (fn(string): string|false)
+     * @param null|callable        $brotliFinish Brotli finish finalizer set by BrotliMiddleware (fn(): string|false)
+     * @param array<string, mixed> $attributes   PSR-7 request attributes from the SSE-aware middleware, for a context this connect revives
      */
-    public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null): void {
+    public function handleSSE(Request $request, Response $response, ?callable $brotliWrite = null, ?callable $brotliFinish = null, array $attributes = []): void {
         // Get context ID from signals
-        $signals = Via::readSignals($request);
+        $signals = SignalParser::read($request);
         $contextId = $signals['via_ctx'] ?? null;
 
-        if (!$contextId) {
+        if (!\is_string($contextId) || !self::isContextIdShape($contextId)) {
             $response->status(400);
             $response->end('Invalid context');
 
@@ -91,6 +108,8 @@ class SseHandler {
         foreach (SwooleSSEGenerator::headers() as $name => $value) {
             $response->header($name, $value);
         }
+        // For a rotation SSE-aware middleware asked for.
+        $this->via->writeSessionCookie($request, $response);
 
         // If context doesn't exist, it was cleaned up. First try to rebuild it (same ID) so the
         // tab keeps its view without a reload; on success we fall through to normal SSE handling.
@@ -100,22 +119,23 @@ class SseHandler {
         // NOTE: brotli headers are intentionally NOT set on the reload path: we write raw SSE and
         // close immediately, so compression is pointless and would corrupt the payload.
         if (!isset($this->via->contexts[$contextId])) {
-            if ($this->via->reviveContext($contextId, $request, byConnect: true) !== null) {
+            if ($this->via->reviveContext($contextId, $request, byConnect: true, attributes: $attributes) !== null) {
                 // Rebuilt: clear any stale reload marker and continue with the revived context.
                 unset($this->reloadedContextIds[$contextId]);
             } else {
-                if (isset($this->reloadedContextIds[$contextId])) {
+                $now = time();
+                if ($now - ($this->reloadedContextIds[$contextId] ?? PHP_INT_MIN) < self::RELOAD_MEMORY_SECONDS) {
                     // Already told this context to reload; just close cleanly.
                     $response->end();
 
                     return;
                 }
 
-                $this->reloadedContextIds[$contextId] = true;
-                // Evict after 5 minutes so the set doesn't grow unbounded.
-                Timer::after(300_000, function () use ($contextId): void {
-                    unset($this->reloadedContextIds[$contextId]);
-                });
+                unset($this->reloadedContextIds[$contextId]);
+                $this->reloadedContextIds[$contextId] = $now;
+                if (\count($this->reloadedContextIds) > self::RELOAD_MEMORY_MAX) {
+                    unset($this->reloadedContextIds[array_key_first($this->reloadedContextIds)]);
+                }
 
                 $this->via->log('info', "Context expired, sending reload: {$contextId}");
                 $response->write($sse->executeScript('window.location.reload()'));
@@ -133,12 +153,15 @@ class SseHandler {
         $context = $this->via->contexts[$contextId];
 
         // Verify the caller's session owns this context to prevent unauthorized SSE attachment.
-        if (!$this->isSessionAuthorized($contextId, $this->via->getSessionId($request))) {
+        $session = $this->via->getRequestSession($request);
+        if (!$this->isSessionAuthorized($contextId, $session->key)) {
             $response->status(403);
             $response->end('Forbidden');
 
             return;
         }
+        $owner = $this->via->getContextSessionId($contextId);
+        $cookie = $owner !== null ? SessionTokens::key($session->token) : null;
 
         // If the context exists but its view was cleared (cleanup ran and removed it from Via::$contexts
         // but the callback hadn't fired yet), force a reload so the page re-initialises cleanly.
@@ -165,10 +188,14 @@ class SseHandler {
         // context that is still parked, and that stream must not undo them as the last one.
         $this->via->activeSseCount[$contextId] = ($this->via->activeSseCount[$contextId] ?? 0) + 1;
         ++$this->via->runningSseStreams;
+        $this->via->getStats()->trackSseConnection();
 
         try {
-            // A context an action revived without signals takes the tab's values from this connect.
+            // A context an action revived without signals, and a clientSeeded signal, take the tab's values from this connect.
             $this->via->seedFromConnect($context, $signals);
+
+            // The stream's worker holds the tab: actions that reach another worker are passed here.
+            $this->via->claimStream($contextId);
 
             // Track client info when SSE connects (not at page load)
             if (!isset($this->via->clients[$contextId])) {
@@ -206,7 +233,7 @@ class SseHandler {
             // OpenSwoole Channels are coroutine-specific and can't be shared across request coroutines
             $context->getPatchManager()->recreatePatchChannel();
 
-            $this->stream($context, $contextId, $response, $sse, $brotliWrite, $brotliFinish);
+            $this->stream(new SseStream($context, $contextId, $response, $cookie, $owner), $sse, $brotliWrite, $brotliFinish);
         } finally {
             // Runs even if the loop throws, or the count never drops to zero.
             $this->releaseStream($context, $contextId);
@@ -228,18 +255,34 @@ class SseHandler {
      * where the latest supersedes the rest, so a backed-up client simply catches up on
      * the next broadcast. `signals` are deltas (self-healing only because delivery is
      * acknowledged), and `script` patches are one-shot side effects with no resend
-     * path, so neither is ever sacrificed here.
+     * path, so neither is ever sacrificed here. Nor are the element patches of
+     * patchElements() (PatchManager::isOneShot()), which the stream loop leaves out before asking.
+     *
+     * A connection stays backed up until its backlog is empty: once the backlog passes socket_buffer_size,
+     * OpenSwoole parks every write until it is empty, and the backlog can fall below the threshold before
+     * that as the kernel takes more of it.
      *
      * @param string $type           patch type
      * @param int    $queuedBytes    `send_queued_bytes` for the connection
-     * @param int    $maxQueuedBytes threshold; 0 or less disables dropping
+     * @param int    $maxQueuedBytes threshold, see dropThreshold(); 0 or less disables dropping
+     * @param bool   $backedUp       whether the connection was backed up at the last check
      */
-    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes): bool {
+    public static function shouldDropFrame(string $type, int $queuedBytes, int $maxQueuedBytes, bool $backedUp = false): bool {
         if ($maxQueuedBytes <= 0 || $type !== 'elements') {
             return false;
         }
 
-        return $queuedBytes > $maxQueuedBytes;
+        return $queuedBytes > $maxQueuedBytes || ($backedUp && $queuedBytes > 0);
+    }
+
+    /**
+     * The backlog past which element frames are dropped: Config::withSseMaxQueuedBytes(), at most half of
+     * socket_buffer_size, so frames still in the worker pipe when a stream checks its backlog do not fill the buffer.
+     *
+     * @internal
+     */
+    public static function dropThreshold(int $maxQueuedBytes, int $socketBufferSize): int {
+        return $maxQueuedBytes <= 0 ? $maxQueuedBytes : min($maxQueuedBytes, max(1, intdiv($socketBufferSize, 2)));
     }
 
     /**
@@ -320,21 +363,28 @@ class SseHandler {
     }
 
     /**
+     * Whether $id could be a context id: bounded and without control characters or spaces, so that one a client made up
+     * is refused before it is logged or kept.
+     */
+    public static function isContextIdShape(string $id): bool {
+        return \strlen($id) <= self::CONTEXT_ID_MAX_BYTES && preg_match('#^[^\x00-\x20\x7f]+$#D', $id) === 1;
+    }
+
+    /**
      * Run the SSE loop for an authorised context until the client, the context or the server goes away.
      */
-    private function stream(Context $context, string $contextId, Response $response, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
-        $key = $this->openStream($context, $contextId, $response);
+    private function stream(SseStream $stream, SwooleSSEGenerator $sse, ?callable $brotliWrite, ?callable $brotliFinish): void {
+        $key = $this->openStream($stream);
 
         try {
-            $this->runStream($this->streams[$key], $response, $sse, $brotliWrite, $brotliFinish);
+            $this->runStream($stream, $stream->response, $sse, $brotliWrite, $brotliFinish);
         } finally {
             $this->closeStream($key);
         }
     }
 
-    private function openStream(Context $context, string $contextId, Response $response): int {
+    private function openStream(SseStream $stream): int {
         $key = ++$this->nextStreamId;
-        $stream = new SseStream($context, $contextId, $response);
         // A connection that closed before this point had no stream to tell.
         $stream->clientGone = $this->via->getServer()?->exists($stream->fd) === false;
 
@@ -386,6 +436,7 @@ class SseHandler {
             } catch (\Throwable) {
                 // Client already gone.
             }
+            $this->via->reportError($e, $context, ErrorPhase::Render);
         }
 
         // A tab whose sync fails never counts as connected, so a view that always throws
@@ -396,13 +447,13 @@ class SseHandler {
             $this->via->triggerClientConnect($context);
         }
 
-        // Slow-consumer bookkeeping: $backedUp tracks the stall episode so the log
-        // records transitions rather than every dropped frame.
+        // Slow-consumer bookkeeping: $backedUp holds from the backlog passing the threshold until it is
+        // empty (see shouldDropFrame()), and the log records its transitions rather than every dropped frame.
         $backedUp = false;
         $droppedFrames = 0;
 
         // A tenth of slack: the park's millisecond timer can end just short of the full interval.
-        $keepAliveNs = $this->via->getConfig()->getSseKeepAliveMs() * 900_000;
+        $keepAliveNs = $this->via->getSettings()->sseKeepAliveMs * 900_000;
         $lastWriteNs = hrtime(true);
 
         // Keep connection alive and listen for patches
@@ -429,22 +480,30 @@ class SseHandler {
                     break;
                 }
 
-                // Drop this frame rather than parking in write() behind a client that
-                // is not draining its socket. See shouldDropFrame().
-                if ($this->isBackedUp($response, $patch['type'])) {
-                    ++$droppedFrames;
+                if ($this->cookieRetired($stream)) {
+                    $context->getPatchManager()->returnPatch($patch);
+                    $this->askToReconnect($stream, $sse, $brotliWrite, 'The session cookie of this stream was retired');
 
-                    // Log the transition only. A stalled client can drop thousands of
-                    // frames, and one line per frame would bury everything else.
-                    if (!$backedUp) {
-                        $backedUp = true;
-                        $this->via->log('debug', "Client backlog exceeded, dropping element frames: {$contextId}", $context);
-                    }
-
-                    continue;
+                    break;
                 }
 
-                $backedUp = false;
+                // Drop this frame rather than parking in write() behind a client that
+                // is not draining its socket. See shouldDropFrame().
+                if (!PatchManager::isOneShot($patch) && $patch['type'] === 'elements') {
+                    $wasBackedUp = $backedUp;
+                    $backedUp = $this->isBackedUp($response, $backedUp);
+                    if ($backedUp) {
+                        ++$droppedFrames;
+
+                        // Log the transition only. A stalled client can drop thousands of
+                        // frames, and one line per frame would bury everything else.
+                        if (!$wasBackedUp) {
+                            $this->via->log('debug', "Client backlog exceeded, dropping element frames: {$contextId}", $context);
+                        }
+
+                        continue;
+                    }
+                }
 
                 try {
                     if (!$this->writeOutput($response, $this->sendSSEPatch($sse, $patch), $brotliWrite)) {
@@ -502,18 +561,32 @@ class SseHandler {
                     break;
                 }
 
-                // Skipped behind a backlog, so the comment never parks the loop in write().
-                if ($keepAliveNs > 0 && hrtime(true) - $lastWriteNs >= $keepAliveNs && !$this->isBackedUp($response, 'elements')) {
-                    try {
-                        if (!$this->writeOutput($response, self::KEEP_ALIVE, $brotliWrite)) {
+                if ($this->cookieRetired($stream)) {
+                    $this->askToReconnect($stream, $sse, $brotliWrite, 'The session cookie of this stream was retired');
+
+                    break;
+                }
+
+                if ($keepAliveNs > 0 && hrtime(true) - $lastWriteNs >= $keepAliveNs) {
+                    // Skipped behind a backlog, so the comment never parks the loop in write().
+                    $backedUp = $this->isBackedUp($response, $backedUp);
+                    if (!$backedUp) {
+                        try {
+                            if (!$this->writeOutput($response, self::KEEP_ALIVE, $brotliWrite)) {
+                                break;
+                            }
+                        } catch (\Throwable) {
                             break;
                         }
-                    } catch (\Throwable) {
-                        break;
+                        $lastWriteNs = hrtime(true);
                     }
-                    $lastWriteNs = hrtime(true);
                 }
             }
+        }
+
+        // A stopping worker sends its tabs to another one at once, not after the client's reconnect interval.
+        if ($synced && $this->via->isShuttingDown() && !$stream->clientGone && $response->isWritable()) {
+            $this->askToReconnect($stream, $sse, $brotliWrite, 'This worker stops');
         }
 
         // Flush the final brotli block so the decompressor sees a complete stream
@@ -573,6 +646,35 @@ class SseHandler {
     }
 
     /**
+     * Whether the session cookie the stream connected with no longer names its session: a rotation retired it.
+     * Whoever connected with a cookie planted or read before a login then gets nothing more of the session.
+     */
+    private function cookieRetired(SseStream $stream): bool {
+        if ($stream->cookie === null || $stream->session === null) {
+            return false;
+        }
+
+        return !$this->via->getSessionManager()->tokens()->stillNames($stream->cookie, $stream->session, $stream->cookieCheck);
+    }
+
+    /**
+     * Ask the tab of a stream that ends to reconnect at once: after a rotation retired its cookie, a browser that
+     * took the new cookie keeps its context and one that holds only the old cookie is refused; after this worker
+     * stopped, another one takes the tab.
+     *
+     * @param null|callable(string): (false|string) $brotliWrite
+     */
+    private function askToReconnect(SseStream $stream, SwooleSSEGenerator $sse, ?callable $brotliWrite, string $why): void {
+        $this->via->log('debug', $why . ', asking the tab to reconnect', $stream->context);
+
+        try {
+            $this->writeOutput($stream->response, $sse->patchSignals([Bootstrap::RECONNECT_SIGNAL => bin2hex(random_bytes(6))]), $brotliWrite);
+        } catch (\Throwable) {
+            // Client already gone.
+        }
+    }
+
+    /**
      * Whether the client has left: its connection closed, or it reset this HTTP/2 stream.
      * exists() is the backstop for a close this worker is not told about (dispatch_mode 1, 3 or 7).
      */
@@ -599,14 +701,17 @@ class SseHandler {
     }
 
     /**
-     * Check the connection's unsent backlog before writing.
+     * Whether the connection is backed up, from its unsent backlog, checked before writing an element frame.
      *
      * getClientInfo() costs ~0.32us, negligible against a patch write.
+     *
+     * @param bool $backedUp whether it was at the last check
      */
-    private function isBackedUp(Response $response, string $patchType): bool {
-        $maxQueued = $this->via->getConfig()->getSseMaxQueuedBytes();
+    private function isBackedUp(Response $response, bool $backedUp): bool {
+        $settings = $this->via->getSettings();
+        $this->dropThreshold ??= self::dropThreshold($settings->sseMaxQueuedBytes, (int) (Via::serverSettings($settings)['socket_buffer_size'] ?? 0));
 
-        if ($maxQueued <= 0 || $patchType !== 'elements') {
+        if ($this->dropThreshold <= 0) {
             return false;
         }
 
@@ -620,19 +725,22 @@ class SseHandler {
             return false;
         }
 
-        return self::shouldDropFrame($patchType, (int) ($info['send_queued_bytes'] ?? 0), $maxQueued);
+        return self::shouldDropFrame('elements', (int) ($info['send_queued_bytes'] ?? 0), $this->dropThreshold, $backedUp);
     }
 
     /**
      * Send SSE patch to client using Datastar SDK.
      *
-     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode, confirm?: callable(): void} $patch
+     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void} $patch
      */
     private function sendSSEPatch(SwooleSSEGenerator $sse, array $patch): string {
         $type = $patch['type'];
         $content = $patch['content'];
         $selector = $patch['selector'] ?? null;
         $mode = $patch['mode'] ?? null;
+        if ($mode instanceof PatchMode) {
+            $mode = ElementPatchMode::from($mode->value);
+        }
 
         return match ($type) {
             'elements' => $sse->patchElements($content, array_filter([

@@ -1,0 +1,784 @@
+{% extends 'shells/docs.html.twig' %}
+{% block title %}Upgrading to 0.14 · php-via Docs{% endblock %}
+{% block content %}
+<article>
+    <h1>Upgrading to 0.14</h1>
+    <p>
+        This page takes a 0.13 app to 0.14 in the order you meet the problems: Composer first, then
+        what throws when the server starts, then what throws on the first page view, and last what
+        behaves differently without throwing. Most renamed or removed methods still exist in 0.14 and
+        throw an exception whose message names the replacement, so a run of your test suite or one page
+        load per route finds most of the work. They go in 0.15.
+    </p>
+    <p>
+        The <a href="https://github.com/mbolli/php-via/blob/master/CHANGELOG.md" target="_blank" rel="noopener">changelog</a>
+        lists every change. Its <em>Upgrading from 0.13</em> section has one line per renamed name, if all
+        you need is a search and replace list.
+    </p>
+
+    <h2 id="composer">Update the package and install Twig</h2>
+    <p>
+        The requirements are the same as for 0.13: PHP 8.4 and ext-openswoole 26.
+    </p>
+    {% code 'bash' %}{% verbatim %}
+composer require mbolli/php-via:^0.14
+composer require twig/twig    # only for Twig templates
+    {% endverbatim %}{% endcode %}
+    <p>
+        php-via no longer installs Twig. An app whose views are closures that return HTML needs nothing
+        more. An app with <code>withTemplateDir()</code>, template views such as
+        <code>$c->view('page.html.twig')</code>, <code>$c->render()</code> or <code>$app->getTwig()</code>
+        needs <code>twig/twig</code> 3.10 or newer. Without it, <code>new Via()</code> throws for
+        <code>withTemplateDir()</code>, and the other three throw with the command to run.
+    </p>
+    <p>
+        <code>withTemplateDir()</code> works as before. <code>Config::withTemplateEngine()</code> is the
+        explicit form and takes any <code>Rendering\TemplateEngine</code>; php-via's Twig adapter is
+        <code>Twig\TwigEngine</code>, whose second argument is the cache directory. Set one of the two:
+        passing both throws.
+    </p>
+    {% code 'php' %}{% verbatim %}
+use Mbolli\PhpVia\Twig\TwigEngine;
+
+$config->withTemplateDir(__DIR__ . '/templates');
+// or
+$config->withTemplateEngine(new TwigEngine(__DIR__ . '/templates', sys_get_temp_dir() . '/twig'));
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>starfederation/datastar-php</code> 1.0.1 keeps working. The Datastar bundle php-via serves to the
+        browser is now 1.0.4, see <a href="#datastar">Datastar 1.0.4 in the browser</a>.
+    </p>
+
+    <h2 id="config">Config is frozen once <code>new Via()</code> has it</h2>
+    <p>
+        <code>new Via($config)</code> takes a snapshot of the settings and freezes the Config. A
+        <code>with*</code> call afterwards throws:
+    </p>
+    {% code 'php' %}{% verbatim %}
+LogicException: Config::withBasePath() was called after new Via($config), which freezes the Config:
+a later change would be ignored or only half applied. Make every with* call before new Via().
+    {% endverbatim %}{% endcode %}
+    <p>
+        In 0.13 such a call was ignored or half applied: a late <code>withTemplateDir()</code> left the
+        template loader empty, a late <code>withBasePath()</code> left Twig's <code>basePath</code> at
+        <code>/</code>. Move every <code>with*</code> call before <code>new Via()</code>. A clone of a frozen
+        Config is a new Config that is not frozen, for tests that build several apps from one base.
+    </p>
+
+    <h3 id="config-renamed">Renamed and merged Config methods</h3>
+    <p>
+        The old names throw a <code>BadMethodCallException</code> that names the new call, except
+        <code>getTraceMaxBytes()</code>, which is undefined.
+    </p>
+    <table>
+        <thead><tr><th>0.13</th><th>0.14</th></tr></thead>
+        <tbody>
+            <tr><td><code>withContextCleanupDelay($ms)</code></td><td><code>withContextTimeouts(cleanupDelayMs: $ms)</code></td></tr>
+            <tr><td><code>withContextConnectTimeout($ms)</code></td><td><code>withContextTimeouts(connectMs: $ms)</code></td></tr>
+            <tr><td><code>withContextRevivalWindow($ms)</code></td><td><code>withContextTimeouts(revivalWindowMs: $ms)</code></td></tr>
+            <tr><td><code>withTracing($on)</code></td><td><code>withDevBar($on)</code>; the argument is required</td></tr>
+            <tr><td><code>withTracingWrites($on)</code></td><td><code>withDevBarOptions(writes: $on)</code></td></tr>
+            <tr><td><code>withTraceBufferSize($n)</code></td><td><code>withDevBarOptions(traces: $n)</code></td></tr>
+            <tr><td><code>withSsePollIntervalMs($ms)</code></td><td><code>withDevBarOptions(pollMs: $ms)</code></td></tr>
+            <tr><td><code>getDevMode()</code></td><td><code>isDevMode()</code></td></tr>
+            <tr><td><code>withGcInterval($ms)</code></td><td><code>withGcIntervalMs($ms)</code></td></tr>
+            <tr><td><code>getTraceMaxBytes()</code></td><td>undefined; its limit was never enforced</td></tr>
+        </tbody>
+    </table>
+    <p>
+        <code>withContextTimeouts()</code> changes only the timers you name, so one call can replace several
+        of the old setters. A second <code>withDevBarOptions()</code> call changes only what it names too.
+    </p>
+    <p>Four more changes break code that ran on 0.13:</p>
+    <ul>
+        <li>
+            <code>withSwooleSettings(['worker_num' => $n])</code> throws at <code>start()</code> when it differs from
+            <code>withWorkerNum()</code>, which defaults to 1. php-via set up its shared tables and its broker for one
+            worker while N started. Pass the count to <code>withWorkerNum($n)</code>.
+        </li>
+        <li>
+            <code>start()</code> throws for <code>hook_flags</code> with <code>SWOOLE_HOOK_STDIO</code> and without
+            <code>SWOOLE_HOOK_FILE</code>. See <a href="/docs/deployment#hooks">Coroutine hooks</a>.
+        </li>
+        <li>
+            <code>withLogLevel()</code> throws for a name it does not know. It used to read any unknown name as
+            <code>info</code>. <code>warning</code>, <code>err</code> and the other PSR-3 and syslog names work.
+        </li>
+        <li><code>Config</code>, <code>Signal</code>, <code>Action</code> and <code>Scope</code> are final, so a subclass of one of them no longer compiles.</li>
+    </ul>
+    <p>
+        The Config getters other than <code>getBasePath()</code>, <code>isDevMode()</code>, <code>isHttps()</code>,
+        <code>getDatastarUrl()</code>, <code>getDatastarIntegrity()</code>, <code>getImportMap()</code> and
+        <code>getContextRevivalWindowMs()</code> are tagged <code>@internal</code>. They still answer, but they
+        may change without notice. The same holds for these 0.13 public methods:
+        <code>Signal::isScoped()</code>, <code>getScope()</code>, <code>isClientWritable()</code>,
+        <code>writeCount()</code> and <code>hasChanged()</code>; <code>Scope::parse()</code>, <code>matches()</code>,
+        <code>isBuiltIn()</code>, <code>isRouteBased()</code> and <code>isValidWireScope()</code>;
+        <code>Context::getNamedSignals()</code>, <code>getNamedActions()</code>, <code>hasView()</code> and
+        <code>getShellTemplate()</code>; <code>Via::getScopedSignal()</code>, <code>getNotFoundHandler()</code> and
+        <code>runGcCycle()</code>; and the <code>Stats::track*()</code> methods and <code>reset()</code>.
+        <code>withBroadcastCoalescing()</code> is deprecated: <code>new Via()</code>
+        logs a warning when coalescing is off, and 0.15 removes the method. Call
+        <code>$app->flushBroadcasts()</code> where a broadcast has to land before the next step.
+    </p>
+
+    <h2 id="removed">Removed and renamed methods</h2>
+    <p>
+        Each row's old call fails in 0.14, except <code>$app->activeSseCount</code>, which still answers but is
+        internal. Most throw an exception that names the new call, such as "Via::onStart() was removed in php-via
+        0.14. Use $app->onWorkerStart($fn)...". Calls marked <em>undefined</em> fail with PHP's "Call to undefined
+        method", <code>$c->signal($value)</code> and <code>$c->component($fn)</code> with PHP's "Too few
+        arguments", and <code>cacheUpdates:</code> with PHP's "Unknown named parameter".
+    </p>
+    <table>
+        <thead><tr><th>0.13</th><th>0.14</th></tr></thead>
+        <tbody>
+            <tr><td><code>$app->onStart($fn)</code></td><td><code>$app->onWorkerStart($fn)</code>. It runs in every worker and passes <code>int $workerId</code>: run work meant for one worker where <code>$workerId === 0</code>.</td></tr>
+            <tr><td><code>$app->onShutdown($fn)</code></td><td><code>$app->onWorkerStop($fn)</code>, which passes the worker id too</td></tr>
+            <tr><td><code>$app->config()</code></td><td><code>$app->getConfig()</code></td></tr>
+            <tr><td><code>$app->getContextsByScope($scope)</code></td><td><code>$app->getLocalContexts($scope)</code>, this worker's contexts only. <code>$app->countClients($scope)</code> counts the connected tabs on every worker.</td></tr>
+            <tr><td><code>$app->getRenderStats()</code></td><td><code>$app->getStats()->getStats()</code></td></tr>
+            <tr><td><code>$app->activeSseCount[$id]</code></td><td><code>$c->isConnected()</code>. Via's public properties are <code>@internal</code>.</td></tr>
+            <tr><td><code>Via::parseSignals()</code></td><td>undefined; php-via writes posted signals itself</td></tr>
+            <tr><td><code>$c->onDisconnect($fn)</code></td><td><code>$c->onCleanup($fn)</code>, which runs at the same moment</td></tr>
+            <tr><td><code>#[OnDisconnect]</code></td><td><code>#[OnCleanup]</code>. A class that uses the old attribute throws at <code>Via::mount()</code> and <code>component()</code>.</td></tr>
+            <tr><td><code>$c->interval($ms, $fn)</code></td><td>undefined; <code>$c->setInterval($fn, $ms)</code></td></tr>
+            <tr><td><code>$c->renderString($src, $data)</code></td><td><code>$app->getTwig()->createTemplate($src)->render($data)</code></td></tr>
+            <tr><td><code>$signal->text()</code></td><td><code>&lt;span data-text="{$signal->ref()}"&gt;{$signal->string()}&lt;/span&gt;</code></td></tr>
+            <tr><td><code>$c->action($fn, 'name', $scope)</code></td><td><code>$c->action($fn, 'name')</code>; the third argument throws an <code>ArgumentCountError</code>. See <a href="#scopes">Scopes</a>.</td></tr>
+            <tr><td><code>$c->signal($value)</code></td><td><code>$c->signal($value, 'name')</code>, see <a href="#signals">Signals</a></td></tr>
+            <tr><td><code>$c->component($fn)</code></td><td><code>$c->component($fn, 'namespace')</code>, see <a href="#composition">Components</a></td></tr>
+            <tr><td><code>$c->view($fn, cacheUpdates: ...)</code></td><td><code>shareRender: true</code>, or nothing, see <a href="#views">Views</a></td></tr>
+            <tr><td><code>setValue($v, broadcast: false)</code>, <code>markChanged:</code></td><td>see <a href="#signals">Signals</a></td></tr>
+        </tbody>
+    </table>
+    <p>
+        Code that reached into internals has public replacements now. A patch queued by hand becomes
+        <code>patchElements()</code>, and <code>PatchMode</code> replaces Datastar's
+        <code>ElementPatchMode</code> there:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// 0.13
+$c->getPatchManager()->queuePatch([
+    'type' => 'elements',
+    'content' => $html,
+    'selector' => '#exports',
+    'mode' => ElementPatchMode::Append,
+]);
+
+// 0.14
+use Mbolli\PhpVia\PatchMode;
+
+$c->patchElements($html, '#exports', PatchMode::Append);
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>$c->getComponentManager()->getParentPageContext() ?? $c</code> becomes
+        <code>$c->getPageContext()</code>. Tests that built a <code>Context</code> by hand move to
+        <code>TestApp</code>, see <a href="#tests">Tests</a>.
+    </p>
+
+    <h2 id="scopes">Scopes and sessions</h2>
+    <p>
+        In 0.13, <code>$c->scope()</code> also decided the scope of every signal and action declared after it,
+        and a view outside <code>Scope::TAB</code> shared its update render. In 0.14 a context shares only what
+        you declare: a signal's scope is its third argument, an action runs for the tab that posts it, and a
+        view shares its render with <code>shareRender: true</code>.
+    </p>
+
+    <h3 id="scopes-signals">Pass the scope to every shared signal</h3>
+    <p>
+        A signal without a scope is private to its tab. After <code>scope()</code> set a shared primary scope,
+        <code>signal()</code> without a scope throws, so that no signal silently changes from shared to private:
+    </p>
+    {% code 'php' %}{% verbatim %}
+LogicException: Context::signal() for 'count' has no scope, and this context's primary scope is 'route:/board'.
+Since php-via 0.14 a signal no longer takes the primary scope: pass the scope given to scope() as the third
+argument to share it, or Scope::TAB to keep it private to the tab.
+    {% endverbatim %}{% endcode %}
+    {% code 'php' %}{% verbatim %}
+// 0.13
+$c->scope(Scope::ROUTE);
+$moves = $c->signal(0, 'moves');
+$c->action(fn () => $moves->increment(), 'move', Scope::ROUTE);
+
+// 0.14
+$c->scope(Scope::ROUTE);
+$moves = $c->signal(0, 'moves', Scope::ROUTE);
+$draft = $c->signal('', 'draft', Scope::TAB);   // private on a shared page
+$c->action(fn () => $moves->increment(), 'move');
+    {% endverbatim %}{% endcode %}
+    <p>
+        Each tab now registers its own action, and the shared state lives in the scoped signal.
+        <code>#[Action(scope: ...)]</code> in the composition API keeps working.
+    </p>
+    <p>
+        A scoped signal joins its context to its scope, so its writes reach the tab without
+        <code>addScope()</code>. <code>scope()</code> replaces only the primary scope and keeps the scopes joined
+        this way or with <code>addScope()</code>; in 0.13 it replaced the whole list.
+    </p>
+
+    <h3 id="scopes-lifetime">A scope's signals go with its last context</h3>
+    <p>
+        In 0.13 a ROUTE, GLOBAL or custom-scope signal kept its value for the life of the worker. In 0.14 a
+        worker drops a scope's signals once the last context that uses the scope is destroyed. With one worker,
+        the next visitor then sees the initial value again, so a vote count or a board kept only in a scoped
+        signal resets when every tab has left. Seed such a signal from GlobalState or your database:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$votes = $c->signal($app->globalState('votes', 0), 'votes', Scope::GLOBAL);
+$c->action(function () use ($app, $votes): void {
+    $votes->increment();
+    $app->setGlobalState('votes', $votes->int());
+}, 'vote');
+    {% endverbatim %}{% endcode %}
+    <p>
+        See <a href="/docs/scopes#scope-lifetime">When a scope's signals go</a>.
+    </p>
+
+    <h3 id="scopes-resolve">ROUTE and SESSION resolve everywhere</h3>
+    <p>
+        <code>scope()</code>, <code>addScope()</code>, <code>removeScope()</code>, <code>signal()</code> and
+        <code>#[Action(scope: ...)]</code> turn <code>Scope::ROUTE</code> and <code>Scope::SESSION</code> into this
+        route's and this session's scope. In 0.13, <code>addScope(Scope::ROUTE)</code> joined a scope literally named
+        <code>route</code>. Calls outside a tab have no route or session to resolve against, so
+        <code>$app->broadcast()</code>, <code>$app->countClients()</code> and <code>$app->getScopedSignalByName()</code>
+        throw for a bare <code>Scope::TAB</code>, <code>Scope::ROUTE</code> or <code>Scope::SESSION</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$app->broadcast(Scope::routeScope('/board'));                // was $app->broadcast(Scope::ROUTE)
+$app->broadcast(Scope::sessionScope($c->getSessionId()));    // was $app->broadcast(Scope::SESSION)
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="scopes-broadcast">What <code>$c->broadcast()</code> reaches</h3>
+    <p>
+        On a context whose primary scope is <code>Scope::TAB</code>, <code>$c->broadcast()</code> updates that tab
+        only. In 0.13 it re-rendered every tab on the worker. To reach a scope the tab joined, call
+        <code>$app->broadcast($scope)</code>; dev mode warns once for a TAB-primary tab that joined other scopes. On a
+        context with a shared primary scope, <code>$c->broadcast()</code> broadcasts that scope, as before.
+    </p>
+
+    <h3 id="scopes-session">One SESSION scope per session</h3>
+    <p>
+        <code>$c->scope(Scope::SESSION)</code> put every user's tabs into one scope named <code>session</code>, so its
+        broadcasts and shared render reached other users. Each session has its own scope now,
+        <code>Scope::sessionScope($id)</code>. If your app used <code>Scope::SESSION</code> for cross-tab state, it is
+        private to each visitor from 0.14 on, which is what the scope promised. The scope's name changed too, see
+        <a href="#session-id">The session id is a hash of the cookie</a>.
+    </p>
+
+    <h3 id="scopes-request">Each action reads its own request</h3>
+    <p>
+        Two actions of one tab that ran at the same time shared one request in 0.13. Each action has its own now:
+        <code>input()</code>, <code>file()</code>, <code>cookie()</code> and <code>getRequestAttribute()</code>
+        return the values of the request that posted it, and a cookie from <code>setCookie()</code> goes out with that
+        action's response. Two consequences can change what your code reads:
+    </p>
+    <ul>
+        <li>
+            In an action, <code>getRequestAttribute()</code> returns what global middleware set on the action's
+            request. Per-route middleware does not run on actions, so an attribute it set on the page request is
+            null there. Read it in the page handler and pass it to the action's closure.
+        </li>
+        <li>
+            Outside an action, such as in a timer, <code>input()</code> and <code>cookie()</code> read the page
+            request, where 0.13 returned the tab's last action's values. On a page load, <code>input()</code> reads the
+            query string.
+        </li>
+    </ul>
+    <p>
+        A tab rebuilt after it was away (a <a href="/docs/lifecycle#revival">revival</a>) runs the route's middleware
+        again, on a GET of the page's URL, so an auth gate applies. When the middleware answers instead of passing the
+        request on, the tab reloads and the page load gets that answer.
+    </p>
+
+    <h2 id="views">view() and shareRender</h2>
+    <p>The signature is:</p>
+    {% code 'php' %}{% verbatim %}
+public function view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void
+    {% endverbatim %}{% endcode %}
+    <p>
+        A string is a template name. <code>$data</code> and <code>block:</code> go with a template, and
+        <code>$data</code> may be a callable that runs on every render. A callable view takes neither, and a string
+        of HTML throws:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// 0.13
+$c->view(fn () => $c->render('board.html.twig', ['cells' => $board->cells()]), block: 'board');
+
+// 0.14
+$c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], block: 'board');
+$c->view(fn (): string => '<div id="hello">Hello</div>');   // HTML goes in a closure
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="views-share-render">Share the update render only where every tab sees the same</h3>
+    <p>
+        In 0.13, every view whose primary scope was not TAB rendered a broadcast once and sent that HTML to every
+        tab in the scope, unless it passed <code>cacheUpdates: false</code>. In 0.14 each tab renders its own update
+        unless the view passes <code>shareRender: true</code>. <code>cacheUpdates:</code> no longer exists, and
+        passing it fails with "Unknown named parameter $cacheUpdates":
+    </p>
+    <ul>
+        <li>Delete <code>cacheUpdates: false</code>: every view renders per tab now.</li>
+        <li>
+            Add <code>shareRender: true</code>, after <code>$c->scope(...)</code>, to views that are the same for every tab
+            in the scope, such as a shared board or a live ticker. Leave it off for views that show TAB signals,
+            per-user data or components: one tab's HTML would go to every other.
+        </li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+$c->scope(Scope::ROUTE);
+$cells = $c->signal([], 'cells', Scope::ROUTE);
+$c->view('board.html.twig', fn (): array => ['cells' => $cells->array()], block: 'board', shareRender: true);
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>shareRender: true</code> on a TAB-primary context throws when the view renders, so the page answers 500.
+        A view that renders a whole HTML document never shares its render, since the document holds the tab's context
+        id; pass <code>block:</code> for the update. The shared render is keyed by scope, route pattern and
+        component, so two routes in one <code>Scope::GLOBAL</code> no longer get each other's HTML. A view without
+        <code>shareRender</code> costs one render per tab and broadcast: <a href="/docs/performance#broadcasts">Performance</a>
+        has the numbers.
+    </p>
+    <p>
+        A component that used <code>cacheUpdates: false</code> so that every page sync re-rendered it calls
+        <code>sync()</code> on its own context after a change, or broadcasts its scope.
+    </p>
+
+    <h2 id="signals">Signal names and write flags</h2>
+    <p>
+        <code>signal()</code> needs a name: <code>$c->signal(0, 'count')</code>. In 0.13 all unnamed signals of a
+        context were one object, so two of them on a page were the same signal. A missing name is an
+        <code>ArgumentCountError</code>, an empty one an <code>InvalidArgumentException</code>.
+    </p>
+
+    <h3 id="signals-flags">setValue(), increment() and mutate() take no flags</h3>
+    <p>
+        <code>broadcast:</code> and <code>markChanged:</code>, by name or by position, throw an
+        <code>ArgumentCountError</code> whose message says what to do. What replaces them depends on what the flag
+        did:
+    </p>
+    <ul>
+        <li>
+            <code>broadcast: false</code> on a TAB signal changed nothing, since a TAB signal never broadcasts: delete
+            the argument.
+        </li>
+        <li>
+            <code>broadcast: false</code> on a scoped signal kept one write quiet. Declare the signal with
+            <code>autoBroadcast: false</code> and send its value with <code>syncSignals()</code> or a broadcast where you
+            want it to go out.
+        </li>
+        <li>
+            <code>markChanged: false</code> on a signal the page has not sent yet, such as in the page handler: write
+            <code>setValue($v)</code>, which keeps the value in the page's seed.
+        </li>
+        <li>
+            <code>markChanged: false</code> on a TAB signal the tab already shows: write <code>setValue($v)</code> and then
+            <code>$signal->markSynced()</code>.
+        </li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+// 0.13
+$c->getSignal('page')?->setValue('overview', broadcast: false);
+$filter->setValue(' ', markChanged: false, broadcast: false);
+
+// 0.14
+$c->getSignal('page')?->setValue('overview');
+$filter->setValue(' ');
+$filter->markSynced();
+    {% endverbatim %}{% endcode %}
+    <p>
+        A <code>clientSeeded: true</code> signal replaces the pattern of calling <code>markSynced()</code> right after
+        <code>signal()</code> for a value the browser holds first, such as one the page's script reads from the URL.
+        The old pattern keeps working.
+    </p>
+
+    <h3 id="signals-post-action">Changed signals go to the tab after the action</h3>
+    <p>
+        php-via sends the signals an action changed to its tab when the action ends, also when it throws, for the page
+        and its components. A trailing <code>$c->syncSignals()</code> in an action is no longer needed and sends nothing
+        twice. Keep <code>syncSignals()</code> in timers, <code>spawn()</code> tasks and lifecycle callbacks, and for
+        scoped signals declared with <code>autoBroadcast: false</code>. <code>$c->sync()</code> still re-renders the view.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->action(function () use ($count): void {
+    $count->setValue($count->int() + 1);
+    // no $c->syncSignals() needed
+}, 'increment');
+    {% endverbatim %}{% endcode %}
+
+    <h3 id="signals-types">Values the browser sends keep their type</h3>
+    <p>
+        A value the browser posts for a signal has to have the type of the signal's initial value, or of its
+        <code>#[Signal]</code> property. A lossless form is stored as that type, such as <code>'5'</code> from a textarea
+        for a number or <code>'false'</code> from a radio group for a bool. Any other value is refused like a write to a
+        signal that is not client-writable; 0.13 stored it as sent. A signal declared with <code>null</code> takes any
+        type. Dev mode warns once per signal. <code>Signal::bool()</code> follows PHP truthiness for values that are not
+        strings, so <code>2</code> is true.
+    </p>
+
+    <h2 id="composition">Components and composition</h2>
+    <ul>
+        <li>
+            <code>component()</code> needs a namespace, unique on its page, of letters, digits, <code>_</code> and
+            <code>-</code>: <code>$c->component($fn, 'cart')</code>. Two components with one namespace would share their
+            signals and actions, so the second throws. In a loop, build it from the key, such as <code>'item-' . $id</code>
+            for numeric ids or <code>'item-' . md5($key)</code> for any other key.
+        </li>
+        <li>
+            <code>#[OnDisconnect]</code> becomes <code>#[OnCleanup]</code>. A class may have several <code>#[OnCleanup]</code>
+            methods; they run in declaration order. A <code>$ctx->broadcast()</code> there reaches only the tab being
+            destroyed when the class has no <code>#[Broadcast]</code>, since its primary scope is then
+            <code>Scope::TAB</code>. To update the other tabs, add <code>#[Broadcast(Scope::ROUTE)]</code> or the scope
+            they share to the class, or call <code>$app->broadcast($scope)</code> with the <code>Via</code> that a
+            factory passed to <code>mount()</code> gives the class. See
+            <a href="/docs/composition#lifecycle">Lifecycle hooks</a>.
+        </li>
+        <li>
+            Under <code>#[Broadcast]</code> or <code>#[Action(scope: ...)]</code>, an action runs on the instance of the tab
+            that posted it. In 0.13 it ran on the first tab's instance, so one tab's click changed another tab's
+            properties.
+        </li>
+        <li>
+            A component's scoped <code>#[Action]</code> URL starts with its namespace, <code>/_action/cats-vote</code> for
+            <code>vote</code> in the component <code>cats</code>. Templates that use the action's <code>url</code> need no
+            change; a hard-coded URL breaks.
+        </li>
+        <li><code>#[Broadcast]</code> keeps the scopes of the class's scoped <code>#[Signal]</code> properties, so their writes reach the page.</li>
+        <li>Property changes an <code>#[Action]</code> method made before it threw reach their signals, as a closure action's writes do.</li>
+        <li>Components have the session of their page: <code>getSessionId()</code> and <code>sessionData()</code> work there.</li>
+    </ul>
+
+    <h2 id="bootstrap">via_head and via_foot in shells and layouts</h2>
+    <p>
+        A custom shell or a layout that renders the whole document copied the tags that connect a page to php-via
+        from the default shell. 0.14 writes them for you, with a CSP nonce when there is one:
+    </p>
+    <table>
+        <thead><tr><th>Where</th><th>Right after <code>&lt;meta charset&gt;</code></th><th>Before <code>&lt;/body&gt;</code></th></tr></thead>
+        <tbody>
+            <tr><td>Shell (<code>withShellTemplate()</code>)</td><td>{% verbatim %}<code>{{ via_head }}</code>{% endverbatim %}</td><td>{% verbatim %}<code>{{ via_foot }}</code>{% endverbatim %}</td></tr>
+            <tr><td>Twig layout</td><td>{% verbatim %}<code>{{ via_head() }}</code>{% endverbatim %}</td><td>{% verbatim %}<code>{{ via_foot() }}</code>{% endverbatim %}</td></tr>
+            <tr><td>Closure that returns a document</td><td><code>$c->viaHead()</code></td><td><code>$c->viaFoot()</code></td></tr>
+        </tbody>
+    </table>
+    <p>A 0.13 shell becomes:</p>
+    {% code 'html' %}{% verbatim %}
+<!-- 0.13: copied from the default shell -->
+<head>
+    <meta charset="UTF-8">
+    <meta data-signals='{{ signals_json }}'>
+    <meta data-indicator="_connecting" data-on-interval__duration.15s.leading="..." data-on-datastar-fetch="...">
+    <meta data-init="window.addEventListener('beforeunload', ...)">
+    {{ head_content }}
+</head>
+<body>
+    {{ content }}
+    {{ foot_content }}
+    <script type="module" src="{{ base_path }}datastar.js"></script>
+</body>
+
+<!-- 0.14 -->
+<head>
+    <meta charset="UTF-8">
+    {{ via_head }}
+    {{ head_content }}
+</head>
+<body>
+    {{ content }}
+    {{ foot_content }}
+    {{ via_foot }}
+</body>
+    {% endverbatim %}{% endcode %}
+    <p>
+        {% verbatim %}<code>{{ signals_json }}</code>{% endverbatim %} still renders for
+        older shells. A copied bootstrap keeps working, but it loads the unversioned <code>datastar.js</code>, which
+        browsers keep for up to an hour after an upgrade, and it lacks the listener that reconnects a tab at once after a
+        session rotation or when its worker stops. Such a tab waits for its next 15 s retry.
+    </p>
+    <p>
+        php-via logs a warning once per shell, and once per route that renders a whole document, when the page has no
+        <code>via_head</code>, or when it loads a Datastar script of its own while <code>via_head</code> writes an import
+        map. Dev mode also warns about <code>via_head</code> without any Datastar script, and about a second import map.
+    </p>
+    <p>
+        A layout that loads its own Datastar bundle keeps its script tag, leaves out <code>via_foot</code>, and leaves
+        <code>withDatastarRocket()</code> and <code>withImportMap()</code> off, so that <code>via_head</code> writes no
+        import map:
+    </p>
+    {% code 'twig' %}{% verbatim %}
+<head>
+    <meta charset="utf-8">
+    {{ via_head() }}
+    <script type="module" src="{{ basePath }}js/datastar.bundle.js"></script>
+</head>
+    {% endverbatim %}{% endcode %}
+    <p>
+        For a Content-Security-Policy with nonces, global middleware sets the <code>via.csp_nonce</code> request
+        attribute, and every tag of <code>via_head</code> and <code>via_foot</code> carries it, as do the Dev Bar's tags.
+        Datastar needs the nonce too, on the <code>&lt;html&gt;</code> element: <a href="/docs/deployment#csp">Content
+        Security Policy</a> shows the middleware and the layout. The default shell shows its Live Signals panel in dev
+        mode only.
+    </p>
+
+    <h2 id="session-id">The session id is a hash of the cookie</h2>
+    <p>
+        <code>$c->getSessionId()</code> and the new <code>via.session</code> request attribute return a hash of the
+        session cookie, not the cookie's value. The id therefore stays the same when <code>regenerateSession()</code> gives
+        the session a new cookie, and the cookie's value no longer appears in the page HTML, the Dev Bar, traces or broker
+        messages.
+    </p>
+    <ul>
+        <li>
+            Middleware reads <code>$request->getAttribute('via.session')</code>. Reading the cookie gives the wrong value,
+            and its name changes with <code>withSecureCookie()</code>. Every page, action, SSE and <code>route()</code>
+            request carries the attribute, and a page request without a cookie gets the id its response then sets.
+        </li>
+        <li>
+            Data your app keeps elsewhere under a 0.13 session id, such as rows in a database or keys in Redis, is not
+            found again. Expire it, or let those visitors start fresh.
+        </li>
+        <li>
+            SESSION scopes and SESSION signal ids are <code>session:</code> plus a SHA-256 hash of the id. Build the scope
+            with <code>Scope::sessionScope($id)</code>; <code>'session:' . $id</code> no longer matches. Servers that share a
+            broker have to be upgraded together.
+        </li>
+        <li>
+            php-via accepts only session ids in the form it issues, 32 lowercase hex characters; any other cookie starts a
+            new session. Under <code>withSecureCookie(true)</code> it ignores the plain <code>via_session_id</code> cookie,
+            so a visitor who carries only that one gets a new session once, which logs them out.
+        </li>
+    </ul>
+    {% code 'php' %}{% verbatim %}
+// 0.13
+$cookies = $request->getCookieParams();
+$sessionId = $cookies['__Host-via_session_id'] ?? $cookies['via_session_id'] ?? null;
+
+// 0.14
+$sessionId = $request->getAttribute('via.session');
+$auth = $this->app->getSessionData($sessionId, 'auth');
+    {% endverbatim %}{% endcode %}
+    <p>
+        Call <code>$c->regenerateSession()</code> at login and logout, or <code>$app->regenerateSession($request)</code> in
+        middleware and <code>route()</code> handlers. The session keeps its id, its data, its SESSION signals and its
+        tabs; the old cookie works for 10 more seconds. <a href="/docs/middleware#session-rotation">Middleware</a> shows a
+        login.
+    </p>
+
+    <h2 id="datastar">Datastar 1.0.4 in the browser</h2>
+    <p>
+        php-via serves Datastar 1.0.4 instead of 1.0.1. The SSE format is the same, and PHP code needs no change for it.
+        Check these in the browser:
+    </p>
+    <ul>
+        <li>
+            <strong>Requests cancel per method and URL, from any element.</strong> 1.0.1 cancelled per element. When two
+            elements post the same action, the second request cancels the first, and a request cancelled before it reaches
+            the server never runs its action. Give each element a query string, or turn cancellation off where every
+            request counts:
+            <code>@post('{$send->url()}?from=button')</code>, <code>@post('...', {requestCancellation: 'disabled'})</code>.
+            See <a href="/docs/actions#cancellation">Actions</a>.
+        </li>
+        <li>
+            <strong>Retries</strong> send the current signals and stop after 10 attempts. With <code>retry: 'error'</code>
+            or <code>'always'</code>, HTTP errors count toward them. See <a href="/docs/lifecycle#reconnect">Lifecycle</a>.
+        </li>
+        <li>The <code>retrying</code> fetch event fires only when a retry is scheduled and carries no <code>message</code>, and Datastar no longer logs each retry with <code>console.error</code>.</li>
+        <li><code>data-bind</code> on checkboxes and radios updates the signal on <code>input</code> instead of <code>change</code>. A script that dispatches <code>change</code> has to dispatch <code>input</code>, or bind with <code>__event.change</code>.</li>
+        <li>Deleting a signal, by a patch or by assigning <code>null</code>, fires <code>data-on-signal-patch</code>.</li>
+    </ul>
+    <p>
+        Every update and every SSE connect morphs the view into the page and sets each element's attributes to the
+        server's markup. An attribute the browser set, such as the <code>open</code> that <code>showModal()</code> puts on
+        a <code>&lt;dialog&gt;</code>, goes with it. List such attributes in <code>data-preserve-attr</code>:
+    </p>
+    {% code 'html' %}{% verbatim %}
+<dialog id="confirm" data-preserve-attr="open">...</dialog>
+    {% endverbatim %}{% endcode %}
+    <p>
+        <a href="/docs/views#preserve-attr">Views</a> has the whole dialog. The default shell loads
+        <code>/datastar.js?v=&lt;hash&gt;</code>, so a browser fetches the new bundle after an upgrade.
+    </p>
+
+    <h2 id="routes-static">Routes and static files</h2>
+    <ul>
+        <li>
+            A path without a file extension, such as <code>/about</code>, that matches both a route and a file in
+            <code>withStaticDir()</code> serves the route. Paths with an extension are still served from the static
+            directory first.
+        </li>
+        <li>
+            Route parameters arrive percent-decoded: <code>/files/a%20b</code> gives <code>a b</code>. An encoded slash
+            arrives as <code>/</code>, so check a parameter you build a file path from.
+        </li>
+        <li>
+            <code>withStaticDir()</code> answers 404 for paths with a segment that starts with a dot, except
+            <code>/.well-known/</code>, and for PHP sources. It served <code>.env</code> and <code>.git/config</code> in 0.13.
+        </li>
+        <li>
+            With ext-brotli loaded, compressible static files go out with Brotli level 11 without
+            <code>withBrotli()</code>, and the server opens its port only after compressing the small ones present at
+            start, 2.3 s at most. <code>withBrotli(false)</code> turns that off. A static level of 0 now means no
+            compression. See <a href="/docs/deployment#static-compression">Static compression</a>.
+        </li>
+        <li><code>.json</code>, <code>.txt</code>, <code>.html</code>, <code>.xml</code> and <code>.mjs</code> files get their content types, where <code>.json</code> was <code>application/octet-stream</code>.</li>
+    </ul>
+
+    <h2 id="workers">Several workers</h2>
+    <ul>
+        <li>
+            <code>withWorkerNum()</code> above 1 without <code>withBroker()</code> uses <code>SwooleBroker</code>; 0.13 threw at
+            <code>start()</code>. <code>withBroker(new SwooleBroker())</code> keeps working.
+        </li>
+        <li>
+            An action or a <code>download()</code> URL that reaches a worker other than the one holding its tab is passed to
+            that worker, so its TAB signals, <code>sync()</code> renders and scripts reach the browser. In 0.13 they were
+            lost for most of a tab's actions. Behind a proxy that speaks h2c, every client lands on one worker until the
+            proxy's connection carries 1,280 streams. <a href="/docs/deployment#tab-worker">Deployment</a> explains both and
+            what a passed request costs.
+        </li>
+        <li>
+            <code>tabState()</code> values survive a tab moving to another worker; with several workers each tab has
+            1,024 serialized bytes for them by default. <code>withContextDirectorySize(4096, maxTabStateBytes: ...)</code>
+            raises that, where 4096 is the default row count.
+        </li>
+        <li>
+            Deploy 0.14 with a full restart, not a worker reload: php-via's own classes load in the master process, and the
+            shared tables hold session scopes in the 0.13 form.
+        </li>
+        <li>
+            On libcurl 8.20 or newer, the default <code>hook_flags</code> leave OpenSwoole's native curl hook out, which
+            crashed the worker on every curl request to a host name. A curl request then blocks its worker until it
+            returns. See <a href="/docs/deployment#hooks">Coroutine hooks</a>.
+        </li>
+    </ul>
+
+    <h2 id="tests">Tests</h2>
+    <p>
+        The constructors of <code>Context</code>, <code>Signal</code> and <code>Action</code> are <code>@internal</code>,
+        and <code>Context::setRequestInput()</code> is gone. <code>Testing\TestApp</code> runs an app's pages through
+        php-via's own request, action and SSE handlers, with no server and no <code>VIA_TEST_MODE</code>:
+    </p>
+    {% code 'php' %}{% verbatim %}
+// 0.13
+putenv('VIA_TEST_MODE=1');
+$app = new Via(new Config());
+$c = new Context('ctx-export', '/', $app);
+ExportActions::register($c, $app);
+$c->setRequestInput(['format' => 'csv'], []);
+$c->executeAction((string) $c->getAction('export')?->id());
+$patch = $c->getPatch();
+
+// 0.14
+use Mbolli\PhpVia\Testing\TestApp;
+
+$app = new TestApp(new Config(), function (Via $via): void {
+    $via->page('/', function (Context $c) use ($via): void {
+        ExportActions::register($c, $via);
+        $c->view(fn (): string => '<main id="app"><div id="exports"></div></main>');
+    });
+});
+$tab = $app->open('/');
+$tab->patches();                          // the connect's patches
+$tab->action('export', ['format' => 'csv']);
+$patches = $tab->patches();               // what the action sent
+$app->shutdown();
+    {% endverbatim %}{% endcode %}
+    <p>
+        <code>$tab->signal('name')</code> reads what the browser holds, <code>$tab->html()</code> renders the page from
+        server state, <code>$tab->disconnect(expire: true)</code> and <code>connect()</code> test a revival, and
+        <code>$app->runTasks()</code> runs <code>spawn()</code> tasks past their first wait. TestApp runs one worker and
+        renders broadcasts at once, without the broadcast tick.
+    </p>
+
+    <h2 id="example">A worked example: a monitoring dashboard</h2>
+    <p>
+        This is how a real app moved to 0.14: a traffic monitoring dashboard with seven pages, a Twig layout that loads
+        its own Datastar bundle, and a Pest suite that drove actions through php-via's internals. The steps follow the
+        order of this page.
+    </p>
+    <ol>
+        <li><strong>Composer.</strong> <code>composer require twig/twig</code>, since the app renders Twig templates.</li>
+        <li>
+            <strong>Config and lifecycle.</strong> <code>app.php</code> stopped before the server listened, on three
+            tombstones and one <code>start()</code> check. <code>withContextConnectTimeout(90_000)</code> went: it had kept
+            tabs alive across Datastar's slow reconnects, which the 60 s reconnect timeout now covers.
+            <code>onStart()</code> and <code>onShutdown()</code> became <code>onWorkerStart()</code> and
+            <code>onWorkerStop()</code>, and <code>worker_num</code> moved from <code>withSwooleSettings()</code> to
+            <code>withWorkerNum()</code>.
+        </li>
+        <li>
+            <strong>A page that was only a path for middleware.</strong> The app served MCP over HTTP from middleware attached
+            to a page whose handler called <code>renderString('MCP endpoint')</code>. That page became a plain route, and
+            the middleware a PSR-15 request handler that answers 404 while the feature is off:
+            <code>$app->route(['GET', 'POST', 'DELETE', 'OPTIONS'], '/_mcp', new HttpEndpoint($version))</code>.
+        </li>
+        <li>
+            <strong>The layout.</strong> Eight copied bootstrap lines became {% verbatim %}<code>{{ via_head() }}</code>{% endverbatim %}.
+            The layout kept its own Datastar script and left out <code>via_foot()</code>.
+        </li>
+        <li>
+            <strong>The view.</strong> The page's view passed <code>cacheUpdates: false</code>, because its tabs show
+            different pages. The argument went; 0.14 renders per tab unless a view asks otherwise.
+        </li>
+        <li>
+            <strong>Write flags.</strong> <code>broadcast: false</code> sat on 124 <code>setValue()</code> calls in the app and
+            217 in its tests, all on TAB signals, so a search and replace deleted it. PHPStan found the 15 calls in
+            <code>catch</code> blocks, which the tests did not run. Of two <code>markChanged: false</code> calls, one in a page
+            handler became a plain <code>setValue()</code>, and one in a test became <code>setValue()</code> plus
+            <code>markSynced()</code>.
+        </li>
+        <li>
+            <strong>Internals.</strong> Four <code>activeSseCount</code> checks became <code>$c->isConnected()</code>, and
+            five hand-built element patches became <code>patchElements()</code> with <code>PatchMode</code>.
+        </li>
+        <li>
+            <strong>Tests.</strong> The suite set action input with <code>Context::setRequestInput()</code>, 23 times in 12
+            files. That method is gone, so those tests moved to <code>TestApp</code>, as in <a href="#tests">Tests</a>.
+        </li>
+    </ol>
+    <p>The app ran on 0.14 after these steps. Three optional changes then removed code the app had written around gaps in 0.13:</p>
+    <ul>
+        <li>
+            Three actions caught every exception only to write an <code>_error</code> signal. One
+            <code>$app->onError()</code> callback replaced the three <code>try</code> blocks; a failing action still answers
+            500, and the signal the callback writes goes out with it.
+        </li>
+        <li>
+            Query results a tab showed were kept across revivals in a GlobalState map of up to 200 snapshots, keyed by
+            context id. <code>$c->tabState()</code> and <code>setTabState()</code> replaced the map and its eviction code.
+        </li>
+        <li>
+            An import job broadcast its progress per file, and four static arrays and their timers held each scope to one
+            render per 250 ms. <code>Config::withBroadcastThrottle('admin:import', 250)</code> replaced them, and it always
+            delivers the last state of a burst.
+        </li>
+    </ul>
+
+    <h2 id="new-apis">New APIs that replace workarounds</h2>
+    <p>Optional, but each replaces something apps wrote by hand. The <a href="/docs/api">API reference</a> has the details.</p>
+    <table>
+        <thead><tr><th>Instead of</th><th>0.14</th></tr></thead>
+        <tbody>
+            <tr><td>A queued patch array</td><td><code>$c->patchElements($html, $selector, PatchMode::Append)</code></td></tr>
+            <tr><td>A script built for <code>execScript()</code> to show a toast</td><td><code>$c->dispatch('toast', ['text' => 'Saved'])</code>, heard with <code>data-on:toast__window</code></td></tr>
+            <tr><td>Per-action <code>try</code>/<code>catch</code> that logs</td><td><code>$app->onError(fn (\Throwable $e, ?Context $c, ErrorPhase $phase, ?string $action) => ...)</code></td></tr>
+            <tr><td><code>Coroutine::create()</code> for work that outlives an action</td><td><code>$c->spawn(fn (Context $c) => ...)</code>: its throw reaches <code>onError()</code>, a stopping worker waits for it, and <code>$c->isDestroyed()</code> tells it the tab is gone</td></tr>
+            <tr><td>Revival snapshots in GlobalState</td><td><code>$c->tabState($key)</code> and <code>$c->setTabState($key, $value)</code></td></tr>
+            <tr><td>A page with a dummy view for JSON, webhooks or MCP</td><td><code>$app->route(['GET', 'POST'], '/api/items/{id}', $psr15Handler)</code></td></tr>
+            <tr><td>An export sent through the SSE stream</td><td><code>$c->download($fileOrCallable, 'export.csv', 'text/csv')</code>, a one-shot URL</td></tr>
+            <tr><td><code>empty($app->getClients())</code> before a broadcast</td><td><code>$app->countClients($scope)</code>, on every worker</td></tr>
+            <tr><td>A hand-written broadcast throttle</td><td><code>Config::withBroadcastThrottle('import:*', 250)</code></td></tr>
+            <tr><td>Reading the session cookie in middleware</td><td>The <code>via.session</code> request attribute, and <code>regenerateSession()</code> at login</td></tr>
+            <tr><td><code>markSynced()</code> right after <code>signal()</code></td><td><code>$c->signal($fallback, 'name', clientSeeded: true)</code></td></tr>
+            <tr><td><code>new Context()</code> in tests</td><td><code>Testing\TestApp</code></td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="next-steps">Next steps</h2>
+    <ul>
+        <li><a href="/docs/scopes">Scopes</a>: what each scope shares in 0.14</li>
+        <li><a href="/docs/views">Views</a>: template and closure views, <code>shareRender</code></li>
+        <li><a href="/docs/middleware">Middleware</a>: <code>via.session</code> and session rotation</li>
+        <li><a href="/docs/deployment">Deployment</a>: several workers, static compression, coroutine hooks, CSP nonces</li>
+    </ul>
+</article>
+{% endblock %}

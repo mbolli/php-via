@@ -24,12 +24,12 @@ final class MissionControlExample {
      */
     private const array GUARANTEED_SERVICES = ['orders', 'payments'];
 
-    /** @var array<string, array{emoji: string, label: string, color: string, events: list<string>}> */
+    /** @var array<string, array{short: string, label: string, color: string, events: list<string>}> */
     private const array SERVICES = [
-        'orders' => ['emoji' => '📦', 'label' => 'Orders', 'color' => '#6366f1', 'events' => ['order.placed', 'order.shipped', 'order.cancelled']],
-        'payments' => ['emoji' => '💳', 'label' => 'Payments', 'color' => '#f59e0b', 'events' => ['payment.authorized', 'payment.failed', 'payment.refunded']],
-        'auth' => ['emoji' => '🔐', 'label' => 'Auth', 'color' => '#10b981', 'events' => ['login.success', 'login.failure', 'token.refresh']],
-        'inventory' => ['emoji' => '📊', 'label' => 'Inventory', 'color' => '#ef4444', 'events' => ['stock.restocked', 'stock.depleted', 'stock.reserved']],
+        'orders' => ['short' => 'ORD', 'label' => 'Orders', 'color' => '#6366f1', 'events' => ['order.placed', 'order.shipped', 'order.cancelled']],
+        'payments' => ['short' => 'PAY', 'label' => 'Payments', 'color' => '#f59e0b', 'events' => ['payment.authorized', 'payment.failed', 'payment.refunded']],
+        'auth' => ['short' => 'AUTH', 'label' => 'Auth', 'color' => '#10b981', 'events' => ['login.success', 'login.failure', 'token.refresh']],
+        'inventory' => ['short' => 'INV', 'label' => 'Inventory', 'color' => '#ef4444', 'events' => ['stock.restocked', 'stock.depleted', 'stock.reserved']],
     ];
 
     /** @var string[] */
@@ -51,7 +51,7 @@ final class MissionControlExample {
             ['name' => 'revive-{service} (×4)', 'desc' => 'Guaranteed services: re-subscribes to the deliver inbox; JetStream immediately delivers all buffered events in a burst. Best-effort: restarts the simulator and publishes a fresh KV heartbeat.'],
         ],
         'views' => [
-            ['name' => 'mission_control.html.twig', 'desc' => 'Flow diagram piping services → NATS → browser, service kill/revive cards with delivery-type badges, NATS topology with health tiles, and a live event stream.'],
+            ['name' => 'mission_control.html.twig', 'desc' => 'Flow diagram from the services through NATS to the browser, service kill/revive cards with delivery-type badges, NATS topology with health tiles, and a live event stream.'],
         ],
     ];
 
@@ -123,7 +123,7 @@ final class MissionControlExample {
     // ── Registration ───────────────────────────────────────────────────────────
 
     public static function register(Via $app): void {
-        $app->onShutdown(static function (): void {
+        $app->onWorkerStop(static function (): void {
             self::cleanup();
         });
 
@@ -208,7 +208,7 @@ final class MissionControlExample {
 
             // ── View ──────────────────────────────────────────────────────────
 
-            $c->view(function () use ($c, $killUrls, $reviveUrls): string {
+            $c->view('examples/mission_control.html.twig', function () use ($killUrls, $reviveUrls): array {
                 $now = microtime(true);
                 $serviceData = [];
 
@@ -222,7 +222,7 @@ final class MissionControlExample {
                     ];
 
                     $serviceData[$key] = [
-                        'emoji' => $svc['emoji'],
+                        'short' => $svc['short'],
                         'label' => $svc['label'],
                         'color' => $svc['color'],
                         'guaranteed' => \in_array($key, self::GUARANTEED_SERVICES, true),
@@ -249,7 +249,7 @@ final class MissionControlExample {
                     };
 
                     $health[$key] = [
-                        'emoji' => $svc['emoji'],
+                        'short' => $svc['short'],
                         'label' => $svc['label'],
                         'status' => $status,
                         'age' => $lastTs > 0.0 ? (string) round($age, 1) : null,
@@ -258,9 +258,10 @@ final class MissionControlExample {
 
                 $anyEmitting = \count(array_filter($serviceData, fn (array $s) => $s['isEmitting'])) > 0;
 
-                return $c->render('examples/mission_control.html.twig', [
-                    'title' => '🛰 NATS Visualizer',
-                    'description' => 'Four simulated microservices publish events over NATS. Watch Core pub/sub, JetStream persistence, and KV health heartbeats update in real time.',
+                return [
+                    'title' => 'NATS Visualizer',
+                    'perWorker' => 'the state of the services, the event log and the NATS connection',
+                    'description' => 'Stop and restart four simulated services and watch what happens to their events. Auth and Inventory use Core pub/sub and lose events while stopped; Orders and Payments use JetStream and catch up. A KV heartbeat drives the health tiles.',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,
@@ -272,8 +273,8 @@ final class MissionControlExample {
                     'anyEmitting' => $anyEmitting,
                     'auditLog' => self::$auditLog,
                     'auditTotal' => self::$auditTotal,
-                ]);
-            }, block: 'demo', cacheUpdates: false);
+                ];
+            }, block: 'demo');
         });
     }
 
@@ -480,7 +481,7 @@ final class MissionControlExample {
             ));
 
             if ($active === []) {
-                usleep(1_000_000);
+                Coroutine::usleep(1_000_000);
 
                 continue;
             }
@@ -494,7 +495,7 @@ final class MissionControlExample {
                 (string) json_encode(self::buildPayload($serviceKey, $eventType)),
             );
 
-            usleep(random_int(800_000, 2_500_000));
+            Coroutine::usleep(random_int(800_000, 2_500_000));
         }
     }
 

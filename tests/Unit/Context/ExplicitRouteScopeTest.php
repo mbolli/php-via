@@ -71,17 +71,15 @@ test('explicit Scope::ROUTE does not collide across different routes', function 
     expect($signalB->getValue())->toBe(2);
 });
 
-test('explicit Scope::ROUTE matches the implicit inherited form', function (): void {
+test('explicit Scope::ROUTE matches the resolved route scope', function (): void {
     $explicit = new Context('ctxE', '/same', $this->app);
     $explicit->scope(Scope::ROUTE);
     $explicitSignal = $explicit->signal(5, 'hits', Scope::ROUTE);
 
-    // Inheriting from the context's primary scope is the idiomatic form and already
-    // worked; both spellings must produce the same shared signal.
-    $implicit = new Context('ctxI', '/same', $this->app);
-    $implicit->scope(Scope::ROUTE);
-    $implicitSignal = $implicit->signal(5, 'hits');
+    $resolved = new Context('ctxR', '/same', $this->app);
+    $resolved->scope(Scope::ROUTE);
+    $resolvedSignal = $resolved->signal(5, 'hits', Scope::routeScope('/same'));
 
-    expect($explicitSignal->id())->toBe($implicitSignal->id());
-    expect($explicitSignal)->toBe($implicitSignal);
+    expect($explicitSignal->id())->toBe($resolvedSignal->id());
+    expect($explicitSignal)->toBe($resolvedSignal);
 });
