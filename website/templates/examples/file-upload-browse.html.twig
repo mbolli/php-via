@@ -3,9 +3,9 @@
 {% block fu_content %}
 <div class="fu-browser">
     <div class="fu-browser-toolbar">
-        <span class="fu-breadcrumb">📁 Home / Documents / Archives</span>
-        <button class="fu-toolbar-btn" disabled>⬆ Upload</button>
-        <button class="fu-toolbar-btn" disabled>📁 New folder</button>
+        <span class="fu-breadcrumb">Home / Documents / Archives</span>
+        <button class="fu-toolbar-btn" disabled>Upload</button>
+        <button class="fu-toolbar-btn" disabled>New folder</button>
     </div>
 
     <table class="fu-file-table">
@@ -16,14 +16,13 @@
         </thead>
         <tbody>
             <tr>
-                <td><span class="fu-file-icon">📁</span> Projects</td>
-                <td>—</td><td>2026-04-10</td><td>Folder</td>
+                <td>Projects</td>
+                <td>-</td><td>2026-04-10</td><td>Folder</td>
             </tr>
             <tr class="fu-row-uploading"
                 data-show="{{ uploadStatus.string == 'uploading' ? 'true' : uploadStatus.ref ~ ' === \"uploading\"' }}"
                 style="{{ uploadStatus.string == 'uploading' ? '' : 'display:none' }}">
                 <td>
-                    <span class="fu-file-icon">📦</span>
                     <span data-text="{{ uploadFileName.ref }}">{{ uploadFileName.string }}</span>
                     <span class="fu-uploading-badge">uploading
                         <span data-text="{{ uploadPct.ref }} + '%'">{{ uploadPct.int }}%</span></span>
@@ -35,26 +34,26 @@
                 data-show="{{ uploadStatus.string == 'complete' ? 'true' : uploadStatus.ref ~ ' === \"complete\"' }}"
                 style="{{ uploadStatus.string == 'complete' ? '' : 'display:none' }}">
                 <td>
-                    <span class="fu-file-icon">✅</span>
                     <span data-text="{{ uploadFileName.ref }}">{{ uploadFileName.string }}</span>
+                    <span class="fu-uploading-badge">uploaded</span>
                 </td>
                 <td><span data-text="Math.round({{ uploadTotalBytes.ref }} / 1048576) + ' MB'">{{ (uploadTotalBytes.int / 1048576)|number_format(0) }} MB</span></td>
                 <td>just now</td><td>tar.gz</td>
             </tr>
             <tr>
-                <td><span class="fu-file-icon">📄</span> quarterly-report-q1-2026.pdf</td>
+                <td>quarterly-report-q1-2026.pdf</td>
                 <td>2.4 MB</td><td>2026-04-01</td><td>PDF</td>
             </tr>
             <tr>
-                <td><span class="fu-file-icon">🖼</span> architecture-diagram.png</td>
+                <td>architecture-diagram.png</td>
                 <td>840 KB</td><td>2026-03-28</td><td>PNG</td>
             </tr>
             <tr>
-                <td><span class="fu-file-icon">📦</span> staging-backup-2026-03-15.tar.gz</td>
+                <td>staging-backup-2026-03-15.tar.gz</td>
                 <td>12.1 GB</td><td>2026-03-15</td><td>tar.gz</td>
             </tr>
             <tr>
-                <td><span class="fu-file-icon">📝</span> CHANGELOG.md</td>
+                <td>CHANGELOG.md</td>
                 <td>64 KB</td><td>2026-04-12</td><td>Markdown</td>
             </tr>
         </tbody>
@@ -63,7 +62,7 @@
     <p class="fu-browser-memo"
         data-show="{{ uploadStatus.string == 'uploading' ? 'true' : uploadStatus.ref ~ ' === \"uploading\"' }}"
         style="{{ uploadStatus.string == 'uploading' ? '' : 'display:none' }}">
-        ← You navigated here during an upload. The progress bar above is still running:
+        You navigated here during an upload. The progress bar above is still running:
         server SESSION signals survived the page change.
     </p>
 </div>
@@ -92,7 +91,6 @@
 }
 .fu-file-table tr:last-child td { border-bottom: none; }
 .fu-file-table tr:hover td { background: var(--surface-2, #f8fafc); }
-.fu-file-icon { margin-right: 6px; }
 .fu-row-uploading td { color: var(--brand, #3b82f6) !important; }
 .fu-row-complete td { color: #16a34a !important; }
 .fu-uploading-badge {

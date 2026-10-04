@@ -11,16 +11,16 @@ use Mbolli\PhpVia\Via;
 final class ShoppingCartExample {
     public const string SLUG = 'shopping-cart';
 
-    /** @var list<array{id: int, name: string, price: float, emoji: string}> */
+    /** @var list<array{id: int, name: string, price: float}> */
     private const array PRODUCTS = [
-        ['id' => 1, 'name' => 'Artisanal Bit Bucket (12L)', 'price' => 4.99, 'emoji' => '🪣'],
-        ['id' => 2, 'name' => 'Blockchain-Certified Rubber Duck', 'price' => 29.99, 'emoji' => '🦆'],
-        ['id' => 3, 'name' => 'Enterprise-Grade Left-Pad Module', 'price' => 1999.00, 'emoji' => '📦'],
-        ['id' => 4, 'name' => 'Self-Documenting Code (PDF, signed)', 'price' => 0.00, 'emoji' => '📄'],
-        ['id' => 5, 'name' => 'Quantum-Entangled HDMI Cable (5m)', 'price' => 79.99, 'emoji' => '🔌'],
-        ['id' => 6, 'name' => 'Gluten-Free Null Pointer', 'price' => 0.01, 'emoji' => '⭕'],
-        ['id' => 7, 'name' => 'Infinite Loop Coffee Mug', 'price' => 14.99, 'emoji' => '☕'],
-        ['id' => 8, 'name' => 'Zero-Day Vulnerability Insurance (Annual)', 'price' => 999.99, 'emoji' => '🛡️'],
+        ['id' => 1, 'name' => 'Artisanal Bit Bucket (12L)', 'price' => 4.99],
+        ['id' => 2, 'name' => 'Blockchain-Certified Rubber Duck', 'price' => 29.99],
+        ['id' => 3, 'name' => 'Enterprise-Grade Left-Pad Module', 'price' => 1999.00],
+        ['id' => 4, 'name' => 'Self-Documenting Code (PDF, signed)', 'price' => 0.00],
+        ['id' => 5, 'name' => 'Quantum-Entangled HDMI Cable (5m)', 'price' => 79.99],
+        ['id' => 6, 'name' => 'Gluten-Free Null Pointer', 'price' => 0.01],
+        ['id' => 7, 'name' => 'Infinite Loop Coffee Mug', 'price' => 14.99],
+        ['id' => 8, 'name' => 'Zero-Day Vulnerability Insurance (Annual)', 'price' => 999.99],
     ];
 
     public static function register(Via $app): void {
@@ -38,7 +38,7 @@ final class ShoppingCartExample {
                     return;
                 }
 
-                /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> $cart */
+                /** @var array<int, array{id: int, name: string, price: float, qty: int}> $cart */
                 $cart = $ctx->sessionData('cart', []);
 
                 if (isset($cart[$id])) {
@@ -92,7 +92,7 @@ final class ShoppingCartExample {
                     ['label' => 'View template', 'url' => 'https://github.com/mbolli/php-via/blob/master/website/templates/examples/shopping_cart.html.twig'],
                 ],
                 'products' => self::PRODUCTS,
-                /** @var array<int, array{id: int, name: string, price: float, emoji: string, qty: int}> */
+                /** @var array<int, array{id: int, name: string, price: float, qty: int}> */
                 'cart' => array_values($c->sessionData('cart', [])),
                 'total' => (float) array_sum(array_map(
                     static fn (array $item): float => (float) $item['price'] * (int) $item['qty'],
@@ -103,7 +103,7 @@ final class ShoppingCartExample {
     }
 
     /**
-     * @return null|array{id: int, name: string, price: float, emoji: string}
+     * @return null|array{id: int, name: string, price: float}
      */
     private static function findProduct(int $id): ?array {
         foreach (self::PRODUCTS as $product) {

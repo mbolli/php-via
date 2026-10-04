@@ -7,9 +7,8 @@
 {# ── WAITING lobby ──────────────────────────────────────────────────────────── #}
 {% if status == 'waiting' %}
 <div class="race-lobby">
-    <div class="race-lobby-icon">⌨️</div>
     <h2 class="race-lobby-title">Waiting for racers…</h2>
-    <p class="race-lobby-hint">Click <strong>Start Race</strong> when everyone's ready. Open this page in another tab to race yourself!</p>
+    <p class="race-lobby-hint">Click <strong>Start race</strong> when everyone is ready. Open this page in another tab to race yourself.</p>
     <div class="race-lobby-players">
         {% for id, racer in racers %}
         <div class="race-player-chip {% if id == contextId %}is-you{% endif %}">
@@ -17,7 +16,7 @@
         </div>
         {% endfor %}
     </div>
-    <button class="race-start-btn" data-on:click="@post('{{ startRace.url }}')">🏁 Start Race</button>
+    <button class="race-start-btn" data-on:click="@post('{{ startRace.url }}')">Start race</button>
 </div>
 
 {# ── COUNTDOWN ──────────────────────────────────────────────────────────────── #}
@@ -64,7 +63,7 @@
             data-on:paste="evt.preventDefault()"
             data-on:keydown="if(evt.key==='Tab'){evt.preventDefault();const s=evt.target;const v=s.value;const p=s.selectionStart;s.value=v.slice(0,p)+'\t'+v.slice(s.selectionEnd);s.selectionStart=s.selectionEnd=p+1;}"></textarea>
         {% else %}
-        <div class="race-finished-msg">✅ Finished! Waiting for others…</div>
+        <div class="race-finished-msg">Finished. Waiting for the others…</div>
         {% endif %}
     </div>
 </div>
@@ -72,15 +71,15 @@
 {# ── DONE / results ──────────────────────────────────────────────────────────── #}
 {% elseif status == 'done' %}
 <div class="race-results">
-    <h2 class="race-results-title">🏁 Race Complete!</h2>
+    <h2 class="race-results-title">Race complete</h2>
 
-    {% set medals = ['🥇', '🥈', '🥉', '4️⃣'] %}
+    {% set ranks = ['1st', '2nd', '3rd'] %}
     {% set sorted = racers|sort((a,b) => a.finishRank <=> b.finishRank) %}
     <ol class="race-podium">
         {% for id, racer in sorted %}
         {% if racer.finishRank > 0 %}
         <li class="race-podium-item rank-{{ racer.finishRank }}{% if id == contextId %} is-you{% endif %}">
-            <span class="race-podium-medal">{{ medals[racer.finishRank - 1]|default('🏅') }}</span>
+            <span class="race-podium-medal">{{ ranks[racer.finishRank - 1]|default(racer.finishRank ~ 'th') }}</span>
             <span class="race-podium-name">{{ racer.name }}{% if id == contextId %} <em>(you)</em>{% endif %}</span>
             <span class="race-podium-wpm">{{ racer.wpm }} WPM</span>
         </li>
@@ -89,7 +88,7 @@
     </ol>
 
     <button class="race-again-btn" data-on:click="@post('{{ newRace.url }}')">
-        🔄 Race Again
+        Race again
     </button>
 </div>
 {% endif %}
@@ -105,7 +104,6 @@
     text-align: center;
     padding: 2rem 1rem;
 }
-.race-lobby-icon  { font-size: 3.5rem; line-height: 1; margin-bottom: .5rem; }
 .race-lobby-title { font-size: 1.4rem; font-weight: 700; margin: 0 0 .5rem; color: var(--text-1); max-inline-size: none; }
 .race-lobby-hint  { color: var(--text-2); font-size: .88rem; margin: 0 0 1rem; max-inline-size: none; }
 .race-lobby-players { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
@@ -239,7 +237,7 @@
     font-weight: 700;
 }
 .race-podium-item.is-you .race-podium-name { color: var(--brand, #6366f1); }
-.race-podium-medal { font-size: 1.4rem; }
+.race-podium-medal { font-family: var(--font-ui); font-weight: 800; min-width: 2.5em; }
 .race-podium-name  { flex: 1; text-align: left; color: var(--text-1); }
 .race-podium-wpm   { color: var(--text-2); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .race-again-btn    { font-size: 1rem; }

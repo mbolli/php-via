@@ -5,7 +5,6 @@
 
     {# ── Item card ───────────────────────────────────────────────────────── #}
     <div class="auction-item card">
-        <div class="auction-item-emoji">🏺</div>
         <h2 class="auction-item-name">Ancient Roman Amphora</h2>
         <p class="auction-item-desc">
             A remarkably preserved 1st-century terracotta storage jar,
@@ -21,8 +20,7 @@
         {% if status == 'sold' %}
         {# ── SOLD banner ─────────────────────────────────────────────────── #}
         <div class="auction-sold-banner">
-            <div class="auction-sold-gavel">🔨</div>
-            <h2 class="auction-sold-title">SOLD!</h2>
+            <h2 class="auction-sold-title">Sold</h2>
             {% if topBidder != '' %}
             <p class="auction-sold-winner">
                 Won by <strong>{{ topBidder }}</strong> for <strong>${{ topBid }}</strong>
@@ -31,7 +29,7 @@
             <p class="auction-sold-winner">No bids placed. Item passed.</p>
             {% endif %}
             <button class="auction-reset-btn" data-on:click="@post('{{ resetAuction.url }}')">
-                🔄 Start New Auction
+                Start a new auction
             </button>
         </div>
 
@@ -42,7 +40,7 @@
         {% set urgent = timeLeft <= 10 %}
         {% set warning = timeLeft > 10 and timeLeft <= 30 %}
         <div class="auction-clock {% if urgent %}is-urgent{% elseif warning %}is-warning{% endif %}">
-            ⏱ {{ timeLeft }}s remaining
+            {{ timeLeft }}s remaining
         </div>
 
         {# Top bid #}
@@ -115,7 +113,6 @@
     text-align: center;
     padding: 1.5rem 1rem;
 }
-.auction-item-emoji { font-size: 4rem; line-height: 1; margin-bottom: .5rem; }
 .auction-item-name  { font-size: 1.1rem; font-weight: 700; margin: 0 0 .5rem; color: var(--text-1); max-inline-size: none; }
 .auction-item-desc  { font-size: .82rem; color: var(--text-2); margin: 0 0 .75rem; max-inline-size: none; }
 .auction-item-estimate { font-size: .78rem; color: var(--text-2); font-style: italic; }
@@ -170,7 +167,6 @@
     animation: sold-in .4s ease;
 }
 @keyframes sold-in { from { transform: scale(.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-.auction-sold-gavel { font-size: 3rem; }
 .auction-sold-title { font-size: 2rem; font-weight: 800; color: var(--brand, #6366f1); margin: 0; }
 .auction-sold-winner { color: var(--text-1); font-size: .95rem; margin: 0; }
 .auction-reset-btn { margin-top: .5rem; }

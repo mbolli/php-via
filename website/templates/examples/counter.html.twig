@@ -10,8 +10,8 @@
 </div>
 
 <div class="flex gap-1 justify-center">
-    <button data-on:click="@post('{{ increment.url }}')">+ Increment</button>
-    <button class="secondary" data-on:click="@post('{{ decrement.url }}')">− Decrement</button>
-    <button class="danger" data-on:click="@post('{{ reset.url }}')">Reset</button>
+    <button data-on:click="@post('{{ increment.url }}')">Increment</button>
+    <button class="secondary" data-on:click="@post('{{ decrement.url }}')">Decrement</button>
+    <button class="danger" data-on:click="@post('{{ reset.url }}')" aria-label="Reset the count to 0">Reset</button>
 </div>
 {% endblock %}

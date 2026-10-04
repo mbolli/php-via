@@ -24,12 +24,12 @@ final class MissionControlExample {
      */
     private const array GUARANTEED_SERVICES = ['orders', 'payments'];
 
-    /** @var array<string, array{emoji: string, label: string, color: string, events: list<string>}> */
+    /** @var array<string, array{short: string, label: string, color: string, events: list<string>}> */
     private const array SERVICES = [
-        'orders' => ['emoji' => '📦', 'label' => 'Orders', 'color' => '#6366f1', 'events' => ['order.placed', 'order.shipped', 'order.cancelled']],
-        'payments' => ['emoji' => '💳', 'label' => 'Payments', 'color' => '#f59e0b', 'events' => ['payment.authorized', 'payment.failed', 'payment.refunded']],
-        'auth' => ['emoji' => '🔐', 'label' => 'Auth', 'color' => '#10b981', 'events' => ['login.success', 'login.failure', 'token.refresh']],
-        'inventory' => ['emoji' => '📊', 'label' => 'Inventory', 'color' => '#ef4444', 'events' => ['stock.restocked', 'stock.depleted', 'stock.reserved']],
+        'orders' => ['short' => 'ORD', 'label' => 'Orders', 'color' => '#6366f1', 'events' => ['order.placed', 'order.shipped', 'order.cancelled']],
+        'payments' => ['short' => 'PAY', 'label' => 'Payments', 'color' => '#f59e0b', 'events' => ['payment.authorized', 'payment.failed', 'payment.refunded']],
+        'auth' => ['short' => 'AUTH', 'label' => 'Auth', 'color' => '#10b981', 'events' => ['login.success', 'login.failure', 'token.refresh']],
+        'inventory' => ['short' => 'INV', 'label' => 'Inventory', 'color' => '#ef4444', 'events' => ['stock.restocked', 'stock.depleted', 'stock.reserved']],
     ];
 
     /** @var string[] */
@@ -51,7 +51,7 @@ final class MissionControlExample {
             ['name' => 'revive-{service} (×4)', 'desc' => 'Guaranteed services: re-subscribes to the deliver inbox; JetStream immediately delivers all buffered events in a burst. Best-effort: restarts the simulator and publishes a fresh KV heartbeat.'],
         ],
         'views' => [
-            ['name' => 'mission_control.html.twig', 'desc' => 'Flow diagram piping services → NATS → browser, service kill/revive cards with delivery-type badges, NATS topology with health tiles, and a live event stream.'],
+            ['name' => 'mission_control.html.twig', 'desc' => 'Flow diagram from the services through NATS to the browser, service kill/revive cards with delivery-type badges, NATS topology with health tiles, and a live event stream.'],
         ],
     ];
 
@@ -222,7 +222,7 @@ final class MissionControlExample {
                     ];
 
                     $serviceData[$key] = [
-                        'emoji' => $svc['emoji'],
+                        'short' => $svc['short'],
                         'label' => $svc['label'],
                         'color' => $svc['color'],
                         'guaranteed' => \in_array($key, self::GUARANTEED_SERVICES, true),
@@ -249,7 +249,7 @@ final class MissionControlExample {
                     };
 
                     $health[$key] = [
-                        'emoji' => $svc['emoji'],
+                        'short' => $svc['short'],
                         'label' => $svc['label'],
                         'status' => $status,
                         'age' => $lastTs > 0.0 ? (string) round($age, 1) : null,

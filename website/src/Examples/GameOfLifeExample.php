@@ -69,7 +69,6 @@ final class GameOfLifeExample {
                 $running = self::$running;
                 $clientCount = $app->countClients(Scope::routeScope('/examples/game-of-life'));
                 $runningText = $running ? 'Pause' : 'Resume';
-                $runningEmoji = $running ? '⏸️' : '▶️';
 
                 return [
                     'title' => 'Game of Life',
@@ -104,7 +103,6 @@ final class GameOfLifeExample {
                     'generation' => $generation,
                     'clientCount' => $clientCount,
                     'runningText' => $runningText,
-                    'runningEmoji' => $runningEmoji,
                     'toggleUrl' => $toggleRunning->url(),
                     'resetUrl' => $reset->url(),
                     'tapUrl' => $tapCell->url(),

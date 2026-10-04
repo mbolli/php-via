@@ -93,7 +93,7 @@ final class AllScopesExample {
                         </div>
                         <div style="display: flex; gap: var(--size-2);">
                             <button data-on:click="@post('{$increment->url()}')">+ Increment</button>
-                            <button class="danger" data-on:click="@post('{$reset->url()}')">Reset</button>
+                            <button class="danger" data-on:click="@post('{$reset->url()}')" aria-label="Reset this page's counter">Reset</button>
                         </div>
                     </div>
                     <p class="scope-card-hint">Shared by all users on THIS page only. Different pages have different counters.</p>

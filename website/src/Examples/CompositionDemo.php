@@ -78,7 +78,7 @@ final class CompositionDemo {
                 'actions' => [
                     ['name' => 'increment', 'desc' => 'Adds multiplier to count, then bumps both multiplier and totalClicks.'],
                     ['name' => 'reset-tab', 'desc' => 'Resets count and multiplier for this tab only. Custom slug via #[Action(name: \'reset-tab\')].'],
-                    ['name' => 'saveName', 'desc' => 'Copies nameInput → name (SESSION signal). Auto-broadcasts to all of this user\'s tabs.'],
+                    ['name' => 'saveName', 'desc' => 'Copies nameInput to name (SESSION signal). Auto-broadcasts to all of this user\'s tabs.'],
                     ['name' => 'vote', 'desc' => 'VoteWidget action. Independent per instance: cats.vote, dogs.vote, parrots.vote. Every user sees the same votes.'],
                 ],
                 'views' => [

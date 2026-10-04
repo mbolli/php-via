@@ -4,7 +4,7 @@
 <div id="login-demo">
 
 {% if error.string != '' %}
-<div class="login-error">✕ {{ error.string|e }}</div>
+<div class="login-error">{{ error.string|e }}</div>
 {% endif %}
 
 <form class="login-form" onsubmit="return false">

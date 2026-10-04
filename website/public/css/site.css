@@ -1918,6 +1918,9 @@ docs-toc {
 }
 
 /* ─── Example page: two-panel layout ───────────────────── */
+/* Headings inside a demo are part of its UI, not section headings of the docs article */
+.example-demo h2 { display: block; margin-block-start: 0; padding-block-start: 0; border-block-start: 0; }
+.example-demo h2::before { content: none; }
 .example-page-header {
   margin-block-end: var(--size-8);
 }

@@ -14,12 +14,6 @@
             </div>
 
             <div class="upload-info">
-                <span class="upload-icon">
-                    {% if uploadStatus.string == 'uploading' %}📤{% endif %}
-                    {% if uploadStatus.string == 'complete' %}✅{% endif %}
-                    {% if uploadStatus.string == 'cancelled' %}🚫{% endif %}
-                </span>
-
                 <span id="upload-filename" class="upload-filename">{{ uploadFileName.string }}</span>
 
                 <span class="upload-pct-wrap">
@@ -28,12 +22,12 @@
                 </span>
 
                 {% if uploadStatus.string == 'uploading' %}
-                <button class="upload-cancel-btn" id="upload-cancel-btn" title="Cancel upload"
-                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ contextId }}')">✕</button>
+                <button class="upload-cancel-btn" id="upload-cancel-btn" aria-label="Cancel upload"
+                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ contextId }}')">Cancel</button>
                 {% endif %}
                 {% if uploadStatus.string == 'complete' or uploadStatus.string == 'cancelled' %}
-                <button class="upload-reset-btn" id="upload-reset-btn"
-                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ contextId }}')">↺ Reset</button>
+                <button class="upload-reset-btn" id="upload-reset-btn" aria-label="Reset the upload status"
+                        onclick="uploadCancelAction('{{ cancelUpload.url }}', '{{ contextId }}')">Reset</button>
                 {% endif %}
             </div>
         </div>
@@ -44,20 +38,20 @@
     <nav class="fu-subnav" aria-label="Upload example sub-pages">
         <a href="{{ basePath }}examples/file-upload"
            class="fu-subnav-link{{ activePage == 'upload' ? ' active' : '' }}"
-           {{ activePage == 'upload' ? 'aria-current="page"' : '' }}>⬆ Upload</a>
+           {{ activePage == 'upload' ? 'aria-current="page"' : '' }}>Upload</a>
         <a href="{{ basePath }}examples/file-upload/browse"
            class="fu-subnav-link{{ activePage == 'browse' ? ' active' : '' }}"
-           {{ activePage == 'browse' ? 'aria-current="page"' : '' }}>📁 Browse</a>
+           {{ activePage == 'browse' ? 'aria-current="page"' : '' }}>Browse</a>
         <a href="{{ basePath }}examples/file-upload/settings"
            class="fu-subnav-link{{ activePage == 'settings' ? ' active' : '' }}"
-           {{ activePage == 'settings' ? 'aria-current="page"' : '' }}>⚙ Settings</a>
+           {{ activePage == 'settings' ? 'aria-current="page"' : '' }}>Settings</a>
     </nav>
 
     {# Confirm dialog shown when navigating during a real upload on browsers without extendedLifetime. #}
     {# data-ignore-morph: JS owns visibility; prevent idiomorph from touching this element on SSE updates. #}
     <div id="fu-nav-confirm" class="fu-nav-confirm" style="display:none" role="alertdialog"
          aria-labelledby="fu-nav-confirm-msg" data-ignore-morph>
-        <span id="fu-nav-confirm-msg">⚠️ Navigating will cancel the upload in progress.</span>
+        <span id="fu-nav-confirm-msg">Navigating will cancel the upload in progress.</span>
         <button id="fu-nav-confirm-ok"   class="fu-nav-confirm-btn fu-nav-confirm-ok">Cancel upload &amp; navigate</button>
         <button id="fu-nav-confirm-stay" class="fu-nav-confirm-btn">Stay</button>
     </div>

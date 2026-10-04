@@ -17,6 +17,7 @@
                     <button class="tb-swatch{% if theme[slot] == fullColor %} active{% endif %}"
                             style="background: {{ fullColor }}"
                             title="{{ fullColor }}"
+                            aria-label="{{ label }}: {{ fullColor }}"
                             data-on:click="@post('{{ setColor.url }}?slot={{ slot }}&color={{ color }}')"></button>
                     {% endfor %}
                 </div>
@@ -28,7 +29,7 @@
             <div class="tb-preview-card"
                  style="background: {{ theme.bg }}; border-color: {{ theme.border }}; color: {{ theme.text }}">
                 <div class="tb-preview-header" style="background: {{ theme.primary }}">
-                    <span class="tb-preview-logo">◆</span>
+                    <span class="tb-preview-logo" aria-hidden="true"></span>
                     <strong style="color: #fff">My App</strong>
                     <span class="tb-preview-nav" style="color: rgba(255,255,255,.7)">Docs · Blog · Login</span>
                 </div>
@@ -47,7 +48,7 @@
                         </button>
                     </div>
                     <div class="tb-preview-badge" style="color: {{ theme.accent }}">
-                        ★ Featured product of the week
+                        Featured product of the week
                     </div>
                     <div class="tb-preview-input-row">
                         <input class="tb-preview-input"
@@ -67,12 +68,12 @@
 
     <div class="tb-history-bar">
         <button {% if not canUndo %}disabled{% endif %}
-                data-on:click="@post('{{ undo.url }}')">↩ Undo</button>
+                data-on:click="@post('{{ undo.url }}')">Undo</button>
         <button {% if not canRedo %}disabled{% endif %}
-                data-on:click="@post('{{ redo.url }}')">↪ Redo</button>
+                data-on:click="@post('{{ redo.url }}')">Redo</button>
         <span class="tb-history-status">Step {{ historyIdx + 1 }} / {{ historyCount }}</span>
         <button class="secondary tb-reset-btn"
-                data-on:click="@post('{{ reset.url }}')">Reset</button>
+                data-on:click="@post('{{ reset.url }}')" aria-label="Reset the theme">Reset</button>
     </div>
 </div>
 {% endblock %}
@@ -122,7 +123,7 @@
     padding: .6rem .85rem;
     transition: background .3s;
 }
-.tb-preview-logo { font-size: 1rem; color: #fff; }
+.tb-preview-logo { display: inline-block; width: .75rem; height: .75rem; background: #fff; }
 .tb-preview-nav  { margin-left: auto; font-size: .75rem; }
 .tb-preview-body { padding: .85rem; }
 .tb-preview-actions {

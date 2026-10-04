@@ -16,7 +16,7 @@
         <div class="mc-flow-box">
             <span class="mc-flow-box-title">Services</span>
             {% for key, svc in services %}
-            <span class="mc-flow-svc {{ svc.isEmitting ? 'is-emitting' : '' }}" style="--svc-color:{{ svc.color }}">{{ svc.emoji }}</span>
+            <span class="mc-flow-svc {{ svc.isEmitting ? 'is-emitting' : '' }}" style="--svc-color:{{ svc.color }}">{{ svc.short }}</span>
             {% endfor %}
         </div>
 
@@ -44,7 +44,6 @@
             </div>
             <div class="mc-flow-box">
                 <span class="mc-flow-box-title">Browser</span>
-                <span style="font-size:1.5rem">🌐</span>
             </div>
         </div>
         <div class="mc-flow-fanout-branch mc-flow-fanout-branch--audit">
@@ -54,7 +53,6 @@
             </div>
             <div class="mc-flow-box">
                 <span class="mc-flow-box-title">Audit Logger</span>
-                <span style="font-size:1.5rem">📝</span>
                 <span style="font-size:.65rem;color:var(--text-2)">{{ auditTotal }} events</span>
             </div>
         </div>
@@ -71,7 +69,7 @@
         <div class="mc-service-card {{ svc.isEmitting ? 'is-emitting' : '' }} {{ svc.killed ? (svc.guaranteed ? 'is-buffering' : 'is-dead') : '' }}"
              style="--svc-color:{{ svc.color }}">
             <div class="mc-service-dot">
-                {{ svc.emoji }}
+                {{ svc.short }}
                 {% if svc.isEmitting %}
                 <span class="mc-emit-ring" id="ring-{{ key }}-{{ svc.emitId }}"></span>
                 {% endif %}
@@ -81,22 +79,22 @@
                     {{ svc.label }}
                     <span class="mc-delivery-badge"
                           title="{{ svc.guaranteed ? 'JetStream durable, guaranteed delivery: events buffer while consumer is paused' : 'Core pub/sub, best-effort: events are lost if the service is killed' }}">
-                        {{ svc.guaranteed ? '🔒' : '📡' }}
+                        {{ svc.guaranteed ? 'durable' : 'best effort' }}
                     </span>
                 </div>
                 <div class="mc-service-last">
                     {%- if svc.killed and svc.guaranteed -%}
                     <em class="mc-buffering-label">buffering…</em>
                     {%- else -%}
-                    {{ svc.lastType ?: '— waiting —' }}
+                    {{ svc.lastType ?: 'waiting' }}
                     {%- endif -%}
                 </div>
                 <div class="mc-service-count">{{ svc.count }} events</div>
             </div>
             {% if not svc.killed %}
-            <button class="mc-kill-btn" data-on:click="@post('{{ svc.killUrl }}')" title="{{ svc.guaranteed ? 'Pause consumer: events buffer in JetStream' : 'Stop service: events will be lost' }}">⏸</button>
+            <button class="mc-kill-btn" data-on:click="@post('{{ svc.killUrl }}')" title="{{ svc.guaranteed ? 'Pause consumer: events buffer in JetStream' : 'Stop service: events will be lost' }}" aria-label="Stop {{ svc.label }}">Stop</button>
             {% else %}
-            <button class="mc-revive-btn" data-on:click="@post('{{ svc.reviveUrl }}')" title="{{ svc.guaranteed ? 'Resume: catch up buffered events' : 'Restart service' }}">▶</button>
+            <button class="mc-revive-btn" data-on:click="@post('{{ svc.reviveUrl }}')" title="{{ svc.guaranteed ? 'Resume: catch up buffered events' : 'Restart service' }}" aria-label="Start {{ svc.label }}">Start</button>
             {% endif %}
         </div>
         {% endfor %}
@@ -128,7 +126,7 @@
         <div class="mc-nats-row">
             <span class="mc-nats-badge mc-nats-badge--core">Audit</span>
             <code>via.events.*</code>
-            <span class="mc-nats-row-desc">{{ auditTotal }} ✓</span>
+            <span class="mc-nats-row-desc">{{ auditTotal }} logged</span>
         </div>
 
         <div class="mc-health-label">Health (KV age)</div>
@@ -136,12 +134,12 @@
             {% for key, tile in health %}
             <div class="mc-health-tile is-{{ tile.status }}" id="ht-{{ key }}">
                 <div class="mc-health-face mc-health-face--front">
-                    <span class="mc-health-emoji">{{ tile.emoji }}</span>
+                    <span class="mc-health-code">{{ tile.short }}</span>
                     <span class="mc-health-lbl">{{ tile.label }}</span>
-                    <span class="mc-health-age">{{ tile.age is not null ? tile.age ~ 's' : '—' }}</span>
+                    <span class="mc-health-age">{{ tile.age is not null ? tile.age ~ 's' : '-' }}</span>
                 </div>
                 <div class="mc-health-face mc-health-face--back">
-                    <span class="mc-health-emoji">{{ tile.emoji }}</span>
+                    <span class="mc-health-code">{{ tile.short }}</span>
                     <span class="mc-health-down-label">DOWN</span>
                 </div>
             </div>
@@ -157,7 +155,7 @@
             <div class="mc-event {{ loop.first and not event.isReplay ? 'is-new' : '' }} {{ event.isReplay ? 'is-replay' : '' }} mc-svc-{{ event.service }}"
                  id="evt-{{ event.id }}"
                  {% if event.isReplay %}style="animation-delay:{{ event.replayOrder * 40 }}ms"{% endif %}>
-                <span class="mc-event-badge">{{ services[event.service].emoji ?? '?' }}</span>
+                <span class="mc-event-badge">{{ services[event.service].short ?? '?' }}</span>
                 <span class="mc-event-type">{{ event.type }}</span>
                 {% if event.payload.amount is defined %}
                 <span class="mc-event-meta">${{ event.payload.amount }}{% if event.payload.currency is defined %} {{ event.payload.currency }}{% endif %}</span>
@@ -218,7 +216,8 @@
 .mc-flow-box-title { font-weight: 700; font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
 .mc-flow-nats-badges { display: flex; gap: 3px; }
 .mc-flow-svc {
-    font-size: .9rem; width: 22px; height: 22px;
+    font-family: var(--font-mono); font-size: .55rem; font-weight: 700; color: var(--svc-color);
+    min-width: 22px; height: 22px; padding: 0 3px;
     display: flex; align-items: center; justify-content: center;
     border-radius: 3px; transition: background .2s;
     position: relative;
@@ -300,12 +299,11 @@
     50%       { box-shadow: 0 0 0 5px #f59e0b30; }
 }
 .mc-buffering-label { color: #f59e0b; font-style: italic; }
-.mc-delivery-badge { font-size: .75rem; margin-left: .2rem; cursor: default; opacity: .65; vertical-align: middle; }
-.mc-delivery-badge:hover { opacity: 1; }
+.mc-delivery-badge { font-size: .62rem; font-weight: 400; margin-left: .3rem; padding: 0 .3em; border: 1px solid var(--border); color: var(--text-2); cursor: default; vertical-align: middle; }
 
 .mc-service-dot {
-    position: relative; font-size: 1.1rem;
-    width: 28px; height: 28px;
+    position: relative; font-family: var(--font-mono); font-size: .62rem; font-weight: 700; color: var(--svc-color);
+    width: 34px; height: 28px;
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .mc-emit-ring {
@@ -386,7 +384,7 @@
 .mc-health-tile.is-down .mc-health-face--front { transform: rotateY(-180deg); }
 .mc-health-tile.is-down .mc-health-face--back  { transform: rotateY(0deg); }
 
-.mc-health-emoji      { font-size: 1.1rem; }
+.mc-health-code      { font-family: var(--font-mono); font-size: .62rem; font-weight: 700; }
 .mc-health-lbl        { font-size: .62rem; font-weight: 600; }
 .mc-health-age        { font-size: .58rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .mc-health-down-label { font-size: .62rem; font-weight: 700; color: #ef4444; letter-spacing: .05em; }
@@ -422,7 +420,7 @@
 .mc-svc-auth      { border-left-color: #10b981; }
 .mc-svc-inventory { border-left-color: #ef4444; }
 
-.mc-event-badge { font-size: .82rem; flex-shrink: 0; }
+.mc-event-badge { font-family: var(--font-mono); font-size: .6rem; font-weight: 700; min-width: 3.4em; flex-shrink: 0; color: var(--text-2); }
 .mc-event-type  { font-weight: 500; flex: 1; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-event-meta  { color: var(--text-2); font-size: .68rem; flex-shrink: 0; }
 .mc-event-time  { color: var(--text-2); font-size: .67rem; font-variant-numeric: tabular-nums; flex-shrink: 0; margin-left: auto; }

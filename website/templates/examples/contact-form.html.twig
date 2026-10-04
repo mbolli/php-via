@@ -6,8 +6,7 @@
 {# ── Success panel ────────────────────────────────────────────────────── #}
 {% if submitted %}
 <div class="cf-success">
-    <div class="cf-success-icon">✓</div>
-    <h3 class="cf-success-title">Message sent!</h3>
+    <h3 class="cf-success-title">Message sent</h3>
     <p class="cf-success-body">
         Thanks for reaching out. We've received your message{% if submittedFile != '' %} along with your file <strong>{{ submittedFile|e }}</strong>{% if submittedFileInfo != '' %} <span class="cf-file-meta">({{ submittedFileInfo|e }})</span>{% endif %}{% endif %}.
     </p>
@@ -84,7 +83,7 @@
         {% if fileError != '' %}<span class="cf-field-error">{{ fileError|e }}</span>{% endif %}
     </div>
 
-    <button type="submit" class="cf-btn cf-btn-primary">Send message →</button>
+    <button type="submit" class="cf-btn cf-btn-primary">Send message</button>
 </form>
 {% endif %}
 
@@ -214,20 +213,6 @@
     border-radius: .75rem;
 }
 
-.cf-success-icon {
-    font-size: 2.5rem;
-    line-height: 1;
-    width: 3.5rem;
-    height: 3.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto;
-    background: #dcfce7;
-    color: #16a34a;
-    border-radius: 50%;
-    font-weight: 700;
-}
 
 .cf-success-title {
     margin: 0;

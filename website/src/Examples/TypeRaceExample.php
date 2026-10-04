@@ -45,7 +45,7 @@ final class TypeRaceExample {
 
     /** @var string[] */
     private const array SUMMARY = [
-        '<strong>Race state machine</strong>: each race moves through <code>waiting → countdown → racing → done</code>. All transitions happen server-side; the client just sends keystrokes.',
+        '<strong>Race state machine</strong>: each race moves through <code>waiting</code>, <code>countdown</code>, <code>racing</code> and <code>done</code>. All transitions happen server-side; the client just sends keystrokes.',
         '<strong>Custom scope per race</strong> isolates each race\'s broadcasts. Multiple races can run simultaneously. Joining players are routed to an open race automatically.',
         '<strong>Progress is server-computed</strong>: the client sends only the latest typed text; the server counts matching leading characters against the snippet. No snippet logic ships to the browser.',
         '<strong>Countdown timer</strong>: an OpenSwoole <code>Timer::tick()</code> per race counts 3…2…1 and broadcasts to all racers each tick. WPM comes from the time since the start.',
