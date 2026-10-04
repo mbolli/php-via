@@ -309,6 +309,8 @@ covers the changes that need more than a rename.
   instance, so one tab's click changed another tab's properties.
 - `#[Broadcast]` dropped the scopes of a class's scoped `#[Signal]` properties.
 - Property changes an `#[Action]` method made before it threw were lost.
+- A composition view that read a scoped `#[Signal]` property rendered the tab's stale copy when
+  another tab's write reached it. Scoped properties are hydrated before each render now.
 - `addScope(Scope::ROUTE)` and `addScope(Scope::SESSION)` joined literal `route` and `session`
   scopes, and SESSION-scoped actions were never found.
 - SESSION and custom-scope signals declared in a page closure reached no tab without `addScope()`.

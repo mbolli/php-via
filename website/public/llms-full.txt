@@ -361,9 +361,8 @@ final class Counter {
     #[Signal(Scope::ROUTE, atomic: true)] public int $total = 0; // shared, ++ adds across workers
 
     public function view(Context $ctx): void {
-        // Read the signals: a property is this instance's copy, refreshed before each action
-        $ctx->view(fn (): string => '<main id="counter">'
-            . $ctx->getSignal('count')?->int() . ' / ' . $ctx->getSignal('total')?->int() . '</main>');
+        // Properties are hydrated before each action, and scoped ones before each render
+        $ctx->view(fn (): string => '<main id="counter">' . $this->count . ' / ' . $this->total . '</main>');
     }
 
     #[Action]

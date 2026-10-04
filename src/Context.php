@@ -59,6 +59,9 @@ class Context {
     /** Set while an update render runs: Datastar read the page's data-nonce at the page load and dropped it */
     private bool $renderingUpdate = false;
 
+    /** @var null|\Closure(): void runs before the view function on every render, see beforeEachRender() */
+    private ?\Closure $beforeRender = null;
+
     /** Memo of viewKey() */
     private ?string $viewKey = null;
 
@@ -776,6 +779,7 @@ class Context {
         }
         $this->componentManager->clearComponents();
         $this->viewFn = null;
+        $this->beforeRender = null;
     }
 
     public function getRoute(): string {
@@ -1054,6 +1058,18 @@ class Context {
     }
 
     /**
+     * Run $hook before the view function on every render, whichever view() set it, as the composition API copies
+     * the scoped signals' values onto the instance first.
+     *
+     * @internal
+     *
+     * @param \Closure(): void $hook
+     */
+    public function beforeEachRender(\Closure $hook): void {
+        $this->beforeRender = $hook;
+    }
+
+    /**
      * Check if a view has been defined for this context.
      *
      * @internal
@@ -1156,11 +1172,20 @@ class Context {
             throw new \LogicException("view(shareRender: true) on {$this->route} has no scope to share the render in: its primary scope is TAB. Call \$c->scope(...) with the shared scope, or drop shareRender.");
         }
 
+        $viewFn = $this->viewFn;
+        if ($this->beforeRender !== null) {
+            $before = $this->beforeRender;
+            $viewFn = static function (mixed ...$args) use ($before, $viewFn): string {
+                $before();
+
+                return $viewFn(...$args);
+            };
+        }
         $this->renderingUpdate = $isUpdate;
 
         try {
             return $this->app->getViewRenderer()->renderView(
-                $this->viewFn,
+                $viewFn,
                 $isUpdate,
                 $scope,
                 $this,

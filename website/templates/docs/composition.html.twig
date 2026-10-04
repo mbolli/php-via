@@ -248,6 +248,12 @@ public function setUsername(Context $ctx): void { }     // one action for the se
         The changed TAB signals then go to the tab, as for any action.
     </p>
     <p>
+        Before each render, the scoped properties are hydrated too, so a view that reads
+        <code>$this-&gt;total</code> shows what another tab or worker wrote when its broadcast reaches this
+        tab. A render inside an action of the same instance, such as one from <code>$ctx-&gt;sync()</code>, shows
+        the action's own changes instead, which are written back when the method returns.
+    </p>
+    <p>
         A scoped action runs on the instance of the tab that posts it, so one tab's click never changes another
         tab's properties. A SESSION or custom scope is joined by the context that declares it. In a component,
         its URL starts with the namespace, as a per-tab action's does (<code>/_action/cats-vote</code>), so two
