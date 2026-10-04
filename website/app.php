@@ -110,7 +110,8 @@ $app->middleware(new CorsMiddleware([
     'origin' => [$corsOrigin],
     'methods' => ['GET', 'POST'],
     'headers.allow' => ['Content-Type', 'Authorization'],
-    'credentials' => true,
+    // Credentials only for a concrete origin: with '*' Tuupola reflects any Origin.
+    'credentials' => $corsOrigin !== '*',
     'cache' => 3600,
     'origin.server' => !str_contains($corsOrigin, '*') ? $corsOrigin : null,
     'logger' => $corsLogger,
@@ -172,18 +173,18 @@ const COUNTER_SCOPE = 'home:counter';
  * Shared multiplayer counter: all visitors share one counter.
  * The "aha" moment: click and everyone sees it.
  */
-$sharedCounterDemo = function (Context $c): void {
+$sharedCounterDemo = function (Context $c) use ($app): void {
     $c->scope(COUNTER_SCOPE);
 
-    $counter = $c->signal(0, 'counter', COUNTER_SCOPE);
+    // GlobalState keeps the count once the homepage is empty, when the scope's signals go.
+    $counter = $c->signal($app->globalState('home_counter') ?? 0, 'counter', COUNTER_SCOPE);
     $lastClick = $c->signal('', 'lastClick', COUNTER_SCOPE);
     $lastClickHue = $c->signal(0, 'lastClickHue', COUNTER_SCOPE);
 
     // Each write broadcasts COUNTER_SCOPE, and the three land in one render.
-    $c->action(function (Context $c) use ($counter, $lastClick, $lastClickHue): void {
-        // Atomic: with more than one worker, setValue($counter->int() + 1) would let two workers
-        // read the same value and each write back the same result, dropping a click.
-        $counter->increment();
+    $c->action(function (Context $c) use ($app, $counter, $lastClick, $lastClickHue): void {
+        // Atomic, so two workers that take a click at the same moment do not drop one.
+        $counter->setValue($app->incrementGlobalState('home_counter'));
 
         // $c is this component; the visitor is the page it sits on.
         $visitorNum = substr($c->getPageContext()->getId(), -4);

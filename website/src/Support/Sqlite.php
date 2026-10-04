@@ -23,14 +23,19 @@ final class Sqlite {
 
     /**
      * Open $path in WAL mode and run $schema, waiting for the locks of other workers meanwhile.
+     *
+     * @throws \RuntimeException when other workers hold the lock past the setup budget
      */
     public static function open(string $path, string $schema): \SQLite3 {
         $db = new \SQLite3($path);
         $db->enableExceptions(true);
         $db->busyTimeout(self::SETUP_BUSY_TIMEOUT_MS);
-        $db->exec('PRAGMA journal_mode=WAL');
-        $db->exec('PRAGMA synchronous=NORMAL');
-        $db->exec($schema);
+        // Two workers switching a fresh file to WAL get SQLITE_BUSY at once, without the busy timeout.
+        foreach (['PRAGMA journal_mode=WAL', 'PRAGMA synchronous=NORMAL', $schema] as $sql) {
+            if (self::retry(static fn (): bool => $db->exec($sql), self::SETUP_BUSY_TIMEOUT_MS * 5) === null) {
+                throw new \RuntimeException("SQLite stayed locked while setting up {$path}.");
+            }
+        }
         $db->busyTimeout(0);
 
         return $db;

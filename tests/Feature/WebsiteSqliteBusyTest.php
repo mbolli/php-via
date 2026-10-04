@@ -167,3 +167,13 @@ test('spreadsheet writes the lock keeps out leave the cells as they were, withou
     $db->close();
     $locker->close();
 });
+
+test('two workers that open a fresh database at the same instant both get it, though the switch to WAL meets no busy timeout', function (): void {
+    $out = trim((string) shell_exec(
+        'timeout 60 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/website_sqlite_fresh_race.php') . ' 40 2>&1'
+    ));
+    $lines = explode("\n", $out);
+    $data = json_decode((string) end($lines), true);
+
+    expect($data)->toBe(['rounds' => 40, 'failed' => 0], 'fixture output: ' . $out);
+})->skip(!function_exists('pcntl_fork'), 'needs ext-pcntl');
