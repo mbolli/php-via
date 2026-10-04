@@ -1133,13 +1133,26 @@ main { position: relative; }
     transform: rotate(90deg);
   }
   .mobile-subnav summary::-webkit-details-marker { display: none; }
+  .mobile-subnav .sidebar-nav {
+    padding: var(--size-1) var(--size-3) var(--size-3);
+  }
+  .mobile-subnav .sidebar-section {
+    margin: var(--size-3) 0 0;
+  }
+  .mobile-subnav .sidebar-heading {
+    font-size: var(--font-size-0);
+    margin: 0 0 var(--size-1);
+  }
   .mobile-subnav .sidebar-nav ul {
-    padding: var(--size-2) var(--size-3);
+    display: block;
+    padding: 0;
     columns: 2;
     column-gap: var(--size-3);
   }
   .mobile-subnav .sidebar-nav li {
     break-inside: avoid;
+    margin: 0;
+    padding: 0;
   }
 }
 
