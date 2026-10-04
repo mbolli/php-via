@@ -137,7 +137,7 @@ class HtmlBuilder {
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
-            '{{ via_html_attrs }}' => Bootstrap::htmlAttributes($context->cspNonce()),
+            '{{ via_html_attrs }}' => str_contains($shell, '{{ via_html_attrs }}') ? Bootstrap::htmlAttributes($context->cspNonce()) : '',
             '{{ via_head }}' => str_contains($shell, '{{ via_head }}') ? $context->viaHead() : '',
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
