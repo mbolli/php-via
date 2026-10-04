@@ -1,20 +1,21 @@
 {% extends 'shells/base.html.twig' %}
 
+{% macro navlink(href, label, currentRoute, basePath, badge) %}
+    <li>
+        <a href="{{ basePath }}{{ href }}"
+            {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}>
+            {{ label }}
+            {% if badge %}<span class="badge badge-{{ badge | lower }}">{{ badge }}</span>{% endif %}
+        </a>
+    </li>
+{% endmacro %}
+
 {% block body_class %}docs-body{% endblock %}
 
 {% block layout %}
 <div class="docs-layout">
     <aside class="docs-sidebar" role="complementary" aria-label="Examples navigation">
         <nav class="sidebar-nav">
-            {% macro navlink(href, label, currentRoute, basePath, badge) %}
-                <li>
-                    <a href="{{ basePath }}{{ href }}"
-                        {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}>
-                        {{ label }}
-                        {% if badge %}<span class="badge badge-{{ badge | lower }}">{{ badge }}</span>{% endif %}
-                    </a>
-                </li>
-            {% endmacro %}
             {% import _self as m %}
             <section class="sidebar-section">
                 <ul role="list">
