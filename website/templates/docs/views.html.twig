@@ -251,9 +251,9 @@ final class CspNonce implements MiddlewareInterface {
 $app->middleware(new CspNonce());
 {% endverbatim %}{% endcode %}
     <p>
-        A header the middleware adds to the response from <code>$handler-&gt;handle()</code> does not reach a
-        page, so send the policy as a <code>&lt;meta http-equiv&gt;</code> tag:
-        <a href="/docs/deployment#csp">Content Security Policy</a> shows the layout.
+        The middleware sends the policy as a header on the response it gets back from
+        <code>$handler-&gt;handle()</code>, or the layout carries it in a <code>&lt;meta http-equiv&gt;</code>
+        tag: <a href="/docs/deployment#csp">Content Security Policy</a> shows both.
     </p>
 
     <h2 id="patch-elements">Patching HTML outside the view</h2>

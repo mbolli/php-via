@@ -77,7 +77,7 @@ final class TestResponse extends Response {
     }
 
     public function rawcookie(string $key, ?string $value = null, int $expire = 0, string $path = '', string $domain = '', bool $secure = false, bool $httpOnly = false, string $sameSite = '', string $priority = ''): bool {
-        return $this->cookie($key, $value, $expire, $path, $domain, $secure, $httpOnly, $sameSite, $priority);
+        return $this->cookie($key, $value === null ? null : urldecode($value), $expire, $path, $domain, $secure, $httpOnly, $sameSite, $priority);
     }
 
     public function status(int $statusCode, string $reason = ''): bool {

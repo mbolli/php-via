@@ -776,9 +776,13 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `via_head`, `via_foot` and the Dev Bar carries it. Datastar reads the nonce from
   `<html data-nonce="...">`; without it, it compiles expressions with `Function()`
   (`'unsafe-eval'`) and a nonce policy blocks the scripts of `execScript()` and `dispatch()`.
-  A header middleware adds to the response from `$handler->handle()` does not reach a page:
-  send the policy as `<meta http-equiv="Content-Security-Policy">` in the head, and read the
-  nonce in the page handler, since an action's request carries a nonce of its own.
+  The middleware sends the policy as a header on the response from `$handler->handle()`, or
+  the layout as `<meta http-equiv="Content-Security-Policy">` in the head. Read the nonce in
+  the page handler, since an action's request carries a nonce of its own.
+- Headers middleware adds to the response from `$handler->handle()` go out with pages and
+  actions. php-via keeps `Content-Type`, `Content-Length`, `Content-Encoding`,
+  `Transfer-Encoding`, `Connection`, its session cookie and any header or cookie it set;
+  `Vary` and `Content-Security-Policy` get both values.
 - `withDevBar(true)` in production is read-only but shows every visitor's traces, scopes and
   context ids, and the server's stats (`/_via/stats`), to anyone who opens a page.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.

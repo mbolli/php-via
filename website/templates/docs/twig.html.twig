@@ -243,10 +243,10 @@ $c->view(fn (): string => '<!DOCTYPE html><html><head><meta charset="UTF-8">' . 
             which lets scripts that the nonced Datastar script creates run.</li>
     </ul>
     <p>
-        php-via writes the page response itself, so a header a middleware adds to the response it gets back
-        from <code>$handler-&gt;handle()</code> does not reach the page. Send the policy as a
-        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head. These two setups run in
-        Chromium with counters, <code>dispatch()</code> and scripts working:
+        The middleware can send the policy as a header on the response it gets back from
+        <code>$handler-&gt;handle()</code>, or a page can carry it in a
+        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head. These two setups use the
+        meta tag and run in Chromium with counters, <code>dispatch()</code> and scripts working:
     </p>
     {% code 'php' %}{% verbatim %}
 final class CspNonce implements MiddlewareInterface {

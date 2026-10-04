@@ -105,6 +105,9 @@ class RequestHandler {
     /** @var null|array{0: string, 1: string} The configured static dir and its realpath, resolved once */
     private ?array $staticBase = null;
 
+    /** @var array<string, true> Header names of middleware that dev mode warned about, see release() */
+    private array $refusedHeadersWarned = [];
+
     public function __construct(Via $via, SseHandler $sseHandler, ActionHandler $actionHandler, ?StaticBrotli $staticBrotli = null) {
         $this->via = $via;
         $this->sseHandler = $sseHandler;
@@ -751,10 +754,8 @@ class RequestHandler {
         // Build PSR-7 request and wrap the page handler as the core handler
         $psrRequest = $this->psrRequest($request, 'page');
 
-        // Capture variables needed by the core handler closure
-        $via = $this->via;
-        $self = $this;
-        $coreHandler = new class($self, $request, $response, $route, $handler, $params, $method, $path, $requestStart) implements RequestHandlerInterface {
+        $held = new HeldResponse($response);
+        $coreHandler = new class($this, $request, $held, $route, $handler, $params, $method, $path, $requestStart) implements RequestHandlerInterface {
             private bool $handled = false;
 
             /**
@@ -788,7 +789,7 @@ class RequestHandler {
                     $request->getAttributes(),
                 );
 
-                // Return a dummy response: the real response was already sent via OpenSwoole
+                // The page waits in the HeldResponse; the middleware adds its headers to this one.
                 return new Psr7Response(200);
             }
 
@@ -806,7 +807,11 @@ class RequestHandler {
             $this->psrResponseEmitter->emit($psrResponse, $response);
             $this->logRequest($method, $path, $psrResponse->getStatusCode(), $requestStart);
             $this->countRequest($requestStart);
+
+            return;
         }
+
+        $this->release($held, $psrResponse, $path);
     }
 
     /**
@@ -824,8 +829,8 @@ class RequestHandler {
 
         $psrRequest = $this->psrRequest($request, 'action');
 
-        $actionHandler = $this->actionHandler;
-        $coreHandler = new class($actionHandler, $request, $response, $actionId) implements RequestHandlerInterface {
+        $held = new HeldResponse($response);
+        $coreHandler = new class($this->actionHandler, $request, $held, $actionId) implements RequestHandlerInterface {
             private bool $handled = false;
 
             public function __construct(
@@ -853,6 +858,28 @@ class RequestHandler {
         if (!$coreHandler->wasHandled()) {
             $this->via->writeSessionCookie($request, $response);
             $this->psrResponseEmitter->emit($psrResponse, $response);
+
+            return;
+        }
+
+        $this->release($held, $psrResponse, '/_action/' . $actionId);
+    }
+
+    /**
+     * End a page or action response with the headers the middleware added, and in dev mode warn once per header
+     * name about those php-via keeps its own of.
+     */
+    private function release(HeldResponse $held, ResponseInterface $fromMiddleware, string $path): void {
+        $refused = $held->release($fromMiddleware);
+        if (!$this->via->getSettings()->devMode) {
+            return;
+        }
+        foreach ($refused as $name) {
+            $key = strtolower($name);
+            if (!isset($this->refusedHeadersWarned[$key])) {
+                $this->refusedHeadersWarned[$key] = true;
+                $this->via->log('warning', "Middleware set {$name} on the response of {$path}, which php-via writes itself, so the middleware's is left out.");
+            }
         }
     }
 

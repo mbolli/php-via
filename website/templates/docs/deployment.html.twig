@@ -514,18 +514,22 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 final class CspNonce implements MiddlewareInterface {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
-        return $handler->handle($request->withAttribute('via.csp_nonce', base64_encode(random_bytes(16))));
+        $nonce = base64_encode(random_bytes(16));
+        $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
+
+        return $response->withHeader('Content-Security-Policy', "script-src 'nonce-{$nonce}'; object-src 'none'; base-uri 'none'");
     }
 }
 
 $app->middleware(new CspNonce());
     {% endverbatim %}{% endcode %}
     <p>
-        php-via writes the page response itself, so a header the middleware adds to the response it gets back
-        from <code>$handler-&gt;handle()</code> does not reach the browser. Send the policy as a
-        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head, before <code>via_head</code>.
-        A meta policy cannot set <code>frame-ancestors</code>; <code>withEmbeddable()</code> sends that one as a
-        header.
+        The header the middleware adds to the response it gets back from <code>$handler-&gt;handle()</code> goes
+        out with the page, and so does any other security header. A
+        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head, before <code>via_head</code>,
+        works too, but a meta policy cannot set <code>frame-ancestors</code> or <code>report-to</code>. With
+        <code>withEmbeddable()</code>, php-via sends its <code>frame-ancestors</code> policy in the same header,
+        and the browser enforces both.
     </p>
     <p>
         Datastar reads the nonce from a <code>data-nonce</code> attribute on the <code>&lt;html&gt;</code> element. With it,

@@ -285,6 +285,11 @@ covers the changes that need more than a rename.
   are now dropped until its backlog is empty, and the default `socket_buffer_size` is 2 MiB.
 - For a client that fell behind, appended and prepended element patches went missing. Only view
   updates are dropped now.
+- Headers a middleware added to the response from `$handler->handle()`, such as
+  `Content-Security-Policy` or `Strict-Transport-Security`, never reached a page or an action. They
+  go out now; php-via keeps the headers and cookies it writes itself. See
+  [Middleware](https://via.zweiundeins.gmbh/docs/middleware#how-it-works).
+- A middleware or `route()` response with several `Set-Cookie` headers sent only the last one.
 - `withStaticDir()` served dotfiles such as `.env`, and the source of PHP files. See
   [Paths never served](https://via.zweiundeins.gmbh/docs/deployment#static-refused).
 - Static `.json`, `.txt`, `.html` and `.xml` files were served as `application/octet-stream`, and a
