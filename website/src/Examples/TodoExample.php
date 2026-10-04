@@ -40,6 +40,7 @@ final class TodoExample {
     public function view(Context $ctx): void {
         $ctx->view('examples/todo.html.twig', fn (): array => [
             'title' => '✓ Todo List',
+            'perWorker' => 'the todo list',
             'description' => 'Composition API: a static shared list + a TAB-scoped <code>#[Signal]</code> draft. <code>#[Broadcast(Scope::ROUTE)]</code> makes every action fan out to all viewers.',
             'summary' => [
                 '<strong>#[Broadcast(Scope::ROUTE)]</strong> on the class sets ROUTE as the primary scope. A bare <code>$ctx->broadcast()</code> then re-renders the list for every browser on this route. No scope argument needed.',

@@ -120,6 +120,7 @@ final class LiveAuctionExample {
 
             $c->view('examples/live_auction.html.twig', fn (): array => [
                 'title' => '🔨 Live Auction',
+                'perWorker' => 'the auction',
                 'description' => 'A timed auction with anti-snipe protection. Place a bid: the server clock, bid history, and winner banner update for every viewer in real time.',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,

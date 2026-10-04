@@ -27,6 +27,7 @@ use Twig\RuntimeLoader\FactoryRuntimeLoader;
 $isDev = getenv('APP_ENV') === 'dev';
 $corsOrigin = getenv('CORS_ORIGIN') ?: '*';
 
+// One worker, the default: several examples and the homepage's PairingStore keep their state per process.
 $config = (new Config())
     ->withHost('0.0.0.0')
     ->withPort((int) (getenv('VIA_PORT') ?: 3000))

@@ -73,6 +73,7 @@ final class GameOfLifeExample {
 
                 return [
                     'title' => '🎮 Game of Life',
+                    'perWorker' => 'the board',
                     'description' => 'Multiplayer Conway\'s Game of Life. Click to draw, watch patterns evolve.',
                     'summary' => [
                         '<strong>Shared board</strong> via ROUTE scope: everyone on this page sees and edits the same 50×50 grid. Click to draw a cross pattern in your color.',

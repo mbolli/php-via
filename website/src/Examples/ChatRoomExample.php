@@ -8,6 +8,7 @@ use Mbolli\PhpVia\Context;
 use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Via;
 use OpenSwoole\Timer;
+use PhpVia\Website\Support\Sqlite;
 
 final class ChatRoomExample {
     public const string SLUG = 'chat-room';
@@ -119,7 +120,12 @@ final class ChatRoomExample {
             }
 
             // Time the INSERT as a `db.*` span in the Dev Bar trace.
-            $ctx->span('db.insert_message', fn () => self::addMessage($room, $username, $message), ['room' => $room]);
+            if (!$ctx->span('db.insert_message', fn (): bool => self::addMessage($room, $username, $message), ['room' => $room])) {
+                // The draft stays in the input, so Enter sends it again.
+                self::$app?->log('warn', "Chat message not stored in room {$room}: chat.db stayed locked");
+
+                return;
+            }
 
             $ctx->getSignal('messageInput')->setValue('');
             self::$lastSent[$contextId] = $message;
@@ -157,6 +163,7 @@ final class ChatRoomExample {
 
         $c->view('examples/chat_room.html.twig', fn (): array => [
             'title' => '💬 Chat Room',
+            'perWorker' => 'who is in each room',
             'description' => 'Chat: ' . self::$rooms[$room]['name'],
             'summary' => self::SUMMARY,
             'anatomy' => self::ANATOMY,
@@ -261,27 +268,22 @@ final class ChatRoomExample {
     }
 
     private static function db(): \SQLite3 {
-        if (self::$db === null) {
-            self::$db = new \SQLite3(__DIR__ . '/../../chat.db');
-            // Every worker opens the file at start: wait for another worker's lock instead of failing.
-            self::$db->busyTimeout(1000);
-            self::$db->exec('PRAGMA journal_mode=WAL');
-            self::$db->exec('PRAGMA synchronous=NORMAL');
-            self::$db->exec(
-                'CREATE TABLE IF NOT EXISTS messages (
-                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                    room      TEXT    NOT NULL,
-                    username  TEXT    NOT NULL,
-                    message   TEXT    NOT NULL,
-                    timestamp TEXT    NOT NULL
-                )'
-            );
-        }
-
-        return self::$db;
+        return self::$db ??= Sqlite::open(
+            __DIR__ . '/../../chat.db',
+            'CREATE TABLE IF NOT EXISTS messages (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                room      TEXT    NOT NULL,
+                username  TEXT    NOT NULL,
+                message   TEXT    NOT NULL,
+                timestamp TEXT    NOT NULL
+            )'
+        );
     }
 
-    private static function addMessage(string $room, string $username, string $message): void {
+    /**
+     * Store a message. Returns false when another worker held the database too long.
+     */
+    private static function addMessage(string $room, string $username, string $message): bool {
         $stmt = self::db()->prepare(
             'INSERT INTO messages (room, username, message, timestamp) VALUES (:room, :username, :message, :timestamp)'
         );
@@ -289,7 +291,8 @@ final class ChatRoomExample {
         $stmt->bindValue(':username', $username, SQLITE3_TEXT);
         $stmt->bindValue(':message', $message, SQLITE3_TEXT);
         $stmt->bindValue(':timestamp', date('H:i:s'), SQLITE3_TEXT);
-        $stmt->execute();
+
+        return Sqlite::retry(static fn () => $stmt->execute()) !== null;
     }
 
     /**

@@ -66,6 +66,7 @@ final class StockTickerExample {
             $c->view('examples/stock_dashboard.html.twig', fn (): array => [
                 'title' => '📈 Stock Ticker',
                 'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
+                'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,
@@ -80,6 +81,7 @@ final class StockTickerExample {
                 $c->view('examples/stock_not_found.html.twig', [
                     'title' => '📈 Stock Ticker',
                     'description' => 'Stock not found.',
+                    'perWorker' => 'the prices',
                     'summary' => self::SUMMARY,
                     'anatomy' => self::ANATOMY,
                     'githubLinks' => self::GITHUB_LINKS,
@@ -99,6 +101,7 @@ final class StockTickerExample {
             $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('examples/stock_detail.html.twig', [
                 'title' => '📈 Stock Ticker',
                 'description' => $symbol . ' · ' . $stock['name'],
+                'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,
                 'anatomy' => self::ANATOMY,
                 'githubLinks' => self::GITHUB_LINKS,

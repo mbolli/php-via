@@ -1,5 +1,11 @@
 {% extends 'shells/base.html.twig' %}
 
+{% macro navlink(href, label, currentRoute, basePath) %}
+    <li><a href="{{ basePath }}{{ href }}"
+        {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}
+        >{{ label }}</a></li>
+{% endmacro %}
+
 {% block og_type %}article{% endblock %}
 
 {% block head %}
@@ -37,11 +43,6 @@
 <div class="docs-layout">
     <aside class="docs-sidebar" role="complementary" aria-label="Documentation navigation">
         <nav class="sidebar-nav">
-            {% macro navlink(href, label, currentRoute, basePath) %}
-                <li><a href="{{ basePath }}{{ href }}"
-                    {% if ('/' ~ href) == currentRoute %}aria-current="page" class="active"{% endif %}
-                    >{{ label }}</a></li>
-            {% endmacro %}
             {% import _self as m %}
             <section class="sidebar-section">
                 <h3 class="sidebar-heading">Get started</h3>

@@ -10,6 +10,7 @@ use Mbolli\PhpVia\Scope;
 use Mbolli\PhpVia\Signal;
 use Mbolli\PhpVia\Tracing\Tracer;
 use Mbolli\PhpVia\Via;
+use PhpVia\Website\Support\Sqlite;
 
 final class SpreadsheetExample {
     public const string SLUG = 'spreadsheet';
@@ -26,6 +27,8 @@ final class SpreadsheetExample {
     private static array $openEdits = [];
 
     private static ?\SQLite3 $db = null;
+
+    private static ?Via $app = null;
 
     /** @var null|array{maxRow: int, maxCol: int} Raw DB max (without padding), updated on writes */
     private static ?array $extentCache = null;
@@ -48,6 +51,7 @@ final class SpreadsheetExample {
     private static array $rangeCache = [];
 
     public static function register(Via $app): void {
+        self::$app = $app;
         self::db(); // initialize on registration
 
         $app->page('/examples/spreadsheet', function (Context $c) use ($app): void {
@@ -580,6 +584,7 @@ final class SpreadsheetExample {
                     'myHue' => self::hueForSession($sessionId),
                     'clientCount' => $app->countClients(self::SCOPE),
                     'title' => '📊 Spreadsheet',
+                    'perWorker' => 'the cursors, the selections and a cache of the cells',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
                     'summary' => [
                         '<strong>SQLite persistence</strong>: cell values survive server restarts. The database stores only non-empty cells, making the grid effectively infinite in both directions.',
@@ -864,23 +869,29 @@ final class SpreadsheetExample {
     }
 
     private static function db(): \SQLite3 {
-        if (self::$db === null) {
-            self::$db = new \SQLite3(__DIR__ . '/../../spreadsheet.db');
-            // Every worker opens the file at start: wait for another worker's lock instead of failing.
-            self::$db->busyTimeout(1000);
-            self::$db->exec('PRAGMA journal_mode=WAL');
-            self::$db->exec('PRAGMA synchronous=NORMAL');
-            self::$db->exec(
-                'CREATE TABLE IF NOT EXISTS cells (
-                    row INTEGER NOT NULL,
-                    col INTEGER NOT NULL,
-                    value TEXT NOT NULL DEFAULT \'\',
-                    PRIMARY KEY (row, col)
-                )'
-            );
-        }
+        return self::$db ??= Sqlite::open(
+            __DIR__ . '/../../spreadsheet.db',
+            'CREATE TABLE IF NOT EXISTS cells (
+                row INTEGER NOT NULL,
+                col INTEGER NOT NULL,
+                value TEXT NOT NULL DEFAULT \'\',
+                PRIMARY KEY (row, col)
+            )'
+        );
+    }
 
-        return self::$db;
+    /**
+     * Run a write while another worker may hold the lock. Returns false, and logs, when it stayed held.
+     *
+     * @param callable(): mixed $write
+     */
+    private static function write(callable $write): bool {
+        if (Sqlite::retry($write) !== null) {
+            return true;
+        }
+        self::$app?->log('warn', 'Spreadsheet write skipped: spreadsheet.db stayed locked');
+
+        return false;
     }
 
     private static function getCell(int $row, int $col): string {
@@ -935,7 +946,9 @@ final class SpreadsheetExample {
                 $stmt = self::db()->prepare('DELETE FROM cells WHERE row = :row AND col = :col');
                 $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
                 $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-                $stmt->execute();
+                if (!self::write(static fn () => $stmt->execute())) {
+                    return;
+                }
                 // Shrink extent cache if the deleted cell was at the boundary.
                 if (self::$extentCache !== null
                     && ($row >= self::$extentCache['maxRow'] || $col >= self::$extentCache['maxCol'])) {
@@ -949,7 +962,9 @@ final class SpreadsheetExample {
                 $stmt->bindValue(':value', $value, SQLITE3_TEXT);
                 $stmt->bindValue(':row', $row, SQLITE3_INTEGER);
                 $stmt->bindValue(':col', $col, SQLITE3_INTEGER);
-                $stmt->execute();
+                if (!self::write(static fn () => $stmt->execute())) {
+                    return;
+                }
                 // Grow extent cache if the new cell exceeds the known boundary.
                 if (self::$extentCache !== null) {
                     if ($row > self::$extentCache['maxRow']) {
@@ -979,7 +994,9 @@ final class SpreadsheetExample {
             // busy handler, so busy_timeout offers no protection and a writer can starve
             // indefinitely. Taking the write lock up front keeps read and write on one
             // snapshot. See tests/Feature/SqliteTransactionSafetyTest.php.
-            self::db()->exec('BEGIN IMMEDIATE');
+            if (!self::write(static fn () => self::db()->exec('BEGIN IMMEDIATE'))) {
+                return;
+            }
 
             try {
                 foreach ($cells as $cell) {
