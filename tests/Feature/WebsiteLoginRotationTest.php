@@ -14,7 +14,7 @@ use PhpVia\Website\Examples\LoginExample;
 
 /*
  * The website's login example rotates the session cookie at login and logout, so a cookie planted
- * before the login reaches the dashboard for the grace period at most.
+ * before the login never reaches the dashboard.
  */
 
 $loginAutoload = dirname(__DIR__, 2) . '/website/vendor/autoload.php';
@@ -63,7 +63,7 @@ function websiteLoginCookie(TestTab $tab): string {
     return (string) $tab->open('/examples/login', connect: false)->context()->cookie(SessionManager::SESSION_COOKIE_NAME);
 }
 
-test('the login example rotates the session cookie at login and logout, so an earlier cookie reaches the dashboard only for the grace period', function (): void {
+test('the login example rotates the session cookie at login and logout, so an earlier cookie never reaches the dashboard', function (): void {
     $now = 1_000_000;
     $app = websiteLoginApp($now);
     $tab = $app->open('/examples/login');
@@ -76,7 +76,7 @@ test('the login example rotates the session cookie at login and logout, so an ea
 
     expect($planted)->not->toBe('')
         ->and($loggedIn)->not->toBe($planted)
-        ->and($inGrace)->toBe(200)
+        ->and($inGrace)->toBe(302)
         ->and(websiteLoginDashboard($app, $planted))->toBe(302)
         ->and(websiteLoginDashboard($app, $loggedIn))->toBe(200)
     ;

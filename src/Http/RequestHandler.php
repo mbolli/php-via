@@ -80,8 +80,11 @@ class RequestHandler {
         'mp3' => ['audio/mpeg', false],
     ];
 
-    /** Extensions never served from the static dir, so a PHP file put there by mistake does not leak its source. */
-    private const string REFUSED_EXTENSIONS = '/^(?:php\d?|phps|phpt|pht|phtml|phar|inc)$/i';
+    /**
+     * Names never served from the static dir, so a PHP file put there by mistake does not leak its source: a PHP
+     * extension anywhere in the chain, as in x.php~, x.php.bak or x.php.br.
+     */
+    private const string REFUSED_EXTENSIONS = '/\.(?:php\d?|phps|phpt|pht|phtml|phar|inc)(?:[.~]|$)/i';
 
     /** @var array<string, callable> */
     private array $routes = [];
@@ -245,7 +248,7 @@ class RequestHandler {
             }
         }
 
-        return preg_match(self::REFUSED_EXTENSIONS, pathinfo($relative, PATHINFO_EXTENSION)) !== 1;
+        return preg_match(self::REFUSED_EXTENSIONS, basename($relative)) !== 1;
     }
 
     /**

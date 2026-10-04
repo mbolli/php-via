@@ -100,7 +100,8 @@ class SessionManager {
      * The session of a request, the same object on every call.
      *
      * Only a cookie in the form this class issues is taken, and not one a rotation retired past its grace
-     * period; anything else starts a new session. With secure cookies only the __Host- cookie counts: a
+     * period; anything else starts a new session. In its grace period the old cookie serves only actions and
+     * streams of contexts that exist, so a cookie planted before a login cannot open pages of the session. With secure cookies only the __Host- cookie counts: a
      * sibling subdomain or a plain-HTTP response can set the plain one. A request without a valid cookie
      * gets the same new session on every call, so the 'via.session' attribute middleware reads is the
      * session the page then sets.
@@ -112,16 +113,21 @@ class SessionManager {
 
         $cookies = $request->cookie ?? [];
         $token = $cookies[$secure ? self::SESSION_COOKIE_NAME_SECURE : self::SESSION_COOKIE_NAME] ?? null;
+        $cookieless = false;
         if (\is_string($token) && self::isValidSessionId($token)) {
             [$key, $state] = $this->tokens->lookup($token);
-            if ($state !== SessionTokens::RETIRED) {
+            if ($state !== SessionTokens::RETIRED && ($state !== SessionTokens::GRACE || self::reachesExistingContext($request))) {
                 return $this->sessions[$request] = new RequestSession($key, $token, $state);
             }
+            // Setting a cookie here would log out the browser that holds the rotated one.
+            $cookieless = $state === SessionTokens::GRACE;
         }
 
         $token = bin2hex(random_bytes(16));
+        $session = new RequestSession(SessionTokens::key($token), $token, RequestSession::NEW);
+        $session->cookieless = $cookieless;
 
-        return $this->sessions[$request] = new RequestSession(SessionTokens::key($token), $token, RequestSession::NEW);
+        return $this->sessions[$request] = $session;
     }
 
     /**
@@ -183,6 +189,9 @@ class SessionManager {
             return null;
         }
 
+        if ($session->cookieless) {
+            return null;
+        }
         if ($session->state === RequestSession::NEW) {
             return $session->token;
         }
@@ -264,5 +273,15 @@ class SessionManager {
         }
 
         return implode('; ', $parts);
+    }
+
+    /**
+     * Whether a request is an action or a stream, the only requests a cookie in its grace period still serves.
+     * Contexts the grace period's cookie could reach already exist; a revival among these is refused separately.
+     */
+    private static function reachesExistingContext(Request $request): bool {
+        $path = (string) ($request->server['request_uri'] ?? '');
+
+        return $path === '/_sse' || str_starts_with($path, '/_action/');
     }
 }

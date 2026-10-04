@@ -40,6 +40,17 @@ describe('Context::patchElements()', function (): void {
         ]);
     });
 
+    test('rejects a selector with a line break, which would end the SSE data line', function (): void {
+        $ctx = new Context(testContextId(), '/test', createVia());
+
+        expect(fn () => $ctx->patchElements('<b>hi</b>', "#row-1\n\nevent: datastar-patch-signals", PatchMode::Append))
+            ->toThrow(InvalidArgumentException::class, 'line break')
+            ->and(fn () => $ctx->patchElements('<b>hi</b>', "#row-1\rdata: mode inner", PatchMode::Append))
+            ->toThrow(InvalidArgumentException::class, 'line break')
+        ;
+        expect(patchElementsQueue($ctx))->toBe([]);
+    });
+
     test('rejects a patch with neither HTML nor a selector', function (): void {
         $ctx = new Context(testContextId(), '/test', createVia());
 

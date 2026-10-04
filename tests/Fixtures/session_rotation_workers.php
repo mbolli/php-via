@@ -6,9 +6,10 @@ declare(strict_types=1);
  * Fixture for SessionRotationTest: a rotation on one worker, seen by the other.
  *
  * Two workers and a grace period of 2 s. A tab loads its page on worker A and streams from worker B.
- * Its login action on A rotates the session cookie. B then takes the new cookie and, until the grace
- * period ends, the old one; after it B and A refuse the old cookie, and the stream B opened with it asks
- * the tab to reconnect and ends instead of sending the next patch.
+ * Its login action on A rotates the session cookie. B then takes the new cookie, and until the grace
+ * period ends keeps the stream opened with the old one while a route() request with it gets a new session;
+ * after it B and A refuse the old cookie, and the stream asks the tab to reconnect and ends instead of
+ * sending the next patch.
  *
  * Prints key=value lines.
  */
@@ -171,7 +172,7 @@ $app->setInterval(static function () use ($app, $port): void {
             [$bOld] = rotationWhoami($onB, $old);
             echo 'b_new_same_session=', (int) ($bNew === $session), "\n";
             echo 'b_new_user=', $bUser, "\n";
-            echo 'b_old_in_grace_same_session=', (int) ($bOld === $session), "\n";
+            echo 'b_old_route_in_grace_same_session=', (int) ($bOld === $session), "\n";
 
             [$bumpStatus] = rotationAction($onB, $port, $bump, $contextId, $new);
             echo 'b_bump_new=', $bumpStatus, "\n";

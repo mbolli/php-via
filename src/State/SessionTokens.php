@@ -25,8 +25,8 @@ use OpenSwoole\Table;
  * @internal
  */
 final class SessionTokens {
-    /** How long a retired cookie keeps working, for requests other tabs sent before the new one arrived. */
-    public const int GRACE_SECONDS = 10;
+    /** How long a retired cookie keeps working, for the actions and streams other tabs sent before the new one arrived. */
+    public const int GRACE_SECONDS = 2;
 
     /** A cookie that never rotated. */
     public const string FRESH = 'fresh';

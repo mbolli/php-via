@@ -171,12 +171,12 @@ function rotationConnect(TestApp $app, TestTab $tab, string $cookie): TestRespon
  *
  * @return array{SessionTokens, Closure(int): void, ArrayObject<string, bool>}
  */
-function rotationTokens(): array {
+function rotationTokens(int $graceSeconds = SessionTokens::GRACE_SECONDS): array {
     $now = 1_000_000;
 
     /** @var ArrayObject<string, bool> $data */
     $data = new ArrayObject();
-    $tokens = new SessionTokens(8, static fn (string $key): bool => isset($data[$key]), clock: static function () use (&$now): int {
+    $tokens = new SessionTokens(8, static fn (string $key): bool => isset($data[$key]), $graceSeconds, static function () use (&$now): int {
         return $now;
     });
 
@@ -257,7 +257,7 @@ describe('Context::regenerateSession()', function (): void {
         ;
     });
 
-    test('sets no cookie on a page loaded with the old cookie in the grace period, which would undo the rotation', function (): void {
+    test('in the grace period, serves a page or a route() request with the old cookie as a new session and sets no cookie, which would undo the rotation', function (): void {
         $now = 1_000_000;
         $app = rotationApp($now);
         $tab = $app->open('/p');
@@ -265,12 +265,39 @@ describe('Context::regenerateSession()', function (): void {
         $tab->action('login');
 
         $page = rotationSend($app, 'GET', '/p', (string) $old);
+        $route = rotationSend($app, 'GET', '/whoami', (string) $old);
+        $planted = json_decode($route->body, true);
         $fresh = rotationSend($app, 'GET', '/p', (string) rotationWhoami($tab)['cookie']);
 
         expect($page->statusCode)->toBe(200)
             ->and($page->cookies)->toBe([])
-            ->and(json_decode(rotationSend($app, 'GET', '/whoami', (string) $old)->body, true)['session'])->toBe($session)
+            ->and($route->cookies)->toBe([])
+            ->and($planted['session'])->not->toBe($session)
+            ->and($app->via()->getSessionData($planted['session'], 'user'))->toBeNull()
             ->and(array_keys($fresh->cookies))->toBe([SessionManager::SESSION_COOKIE_NAME])
+        ;
+    });
+
+    test('in the grace period, does not revive a context for the old cookie, since a revival runs the page handler', function (): void {
+        $now = 1_000_000;
+        $app = rotationApp($now);
+        $tab = $app->open('/p');
+        $planted = $tab->open('/p');
+        $old = (string) rotationWhoami($tab)['cookie'];
+        $tab->action('login');
+        $new = (string) rotationWhoami($tab)['cookie'];
+        $id = $planted->context()->getId();
+        $planted->disconnect(expire: true);
+        $bump = static fn (string $cookie): TestResponse => rotationSend($app, 'POST', '/_action/bump', $cookie, body: (string) json_encode(['via_ctx' => $id]));
+
+        $refused = $bump($old);
+        $revivedForOld = isset($app->via()->contexts[$id]);
+        $revived = $bump($new);
+
+        expect($revivedForOld)->toBeFalse()
+            ->and($refused->statusCode)->not->toBe(200)
+            ->and($revived->statusCode)->toBe(200)
+            ->and(isset($app->via()->contexts[$id]))->toBeTrue()
         ;
     });
 
@@ -679,7 +706,7 @@ describe('SessionTokens', function (): void {
     });
 
     test('when full, a prune drops the least recently seen sessions without data, outside their grace period', function (): void {
-        [$tokens, $advance, $data] = rotationTokens();
+        [$tokens, $advance, $data] = rotationTokens(graceSeconds: 10);
         $cookies = [];
         $next = [];
         for ($i = 0; $i < 4; ++$i) {
@@ -690,7 +717,7 @@ describe('SessionTokens', function (): void {
         $data[SessionTokens::key($cookies[0])] = true;
         expect(fn () => $tokens->rotate(str_repeat('ef', 16)))->toThrow(OverflowException::class);
 
-        $advance(SessionTokens::GRACE_SECONDS);
+        $advance(10);
         $rotated = $tokens->rotate(str_repeat('ef', 16));
 
         expect($rotated)->toBeString()
@@ -715,7 +742,7 @@ describe('SessionTokens', function (): void {
 });
 
 describe('with two workers', function (): void {
-    test('a rotation on one worker reaches the other: the new cookie works there, and the old one and its stream only for the grace period', function (): void {
+    test('a rotation on one worker reaches the other: the new cookie works there, and the stream opened with the old one only for the grace period', function (): void {
         $out = (string) shell_exec('timeout 60 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/Fixtures/session_rotation_workers.php') . ' 2>&1');
         preg_match_all('/^([a-z_]+)=(\S*)$/m', $out, $m);
         $r = array_combine($m[1], $m[2]);
@@ -728,7 +755,7 @@ describe('with two workers', function (): void {
             'rotated' => '1',
             'b_new_same_session' => '1',
             'b_new_user' => 'ada',
-            'b_old_in_grace_same_session' => '1',
+            'b_old_route_in_grace_same_session' => '0',
             'b_bump_new' => '200',
             'stream_got_bump' => '1',
             'b_old_after_grace_same_session' => '0',

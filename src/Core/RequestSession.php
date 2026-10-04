@@ -24,6 +24,9 @@ final class RequestSession {
     /** The cookie a rotation issued for this request's response when it was asked for. */
     public ?string $issued = null;
 
+    /** A new session for a request with a cookie in its grace period, whose response sets no cookie. */
+    public bool $cookieless = false;
+
     /** The response's session cookie is decided. */
     public bool $written = false;
 

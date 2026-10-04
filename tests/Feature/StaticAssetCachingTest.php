@@ -708,7 +708,7 @@ describe('the static dir lookup', function (): void {
     test('dot segments, PHP files and NUL bytes answer 404 without a look at the disk, decoded or not', function () use (&$dir, &$outside, $handlerWithRoutes, $get): void {
         mkdir($dir . '/.git');
         mkdir($dir . '/assets/.cache', 0o777, true);
-        $php = ['index.php', 'shell.PHTML', 'app.phar', 'a.php5', 'a.php8', 'a.phps', 'a.pht', 'a.phpt', 'a.inc'];
+        $php = ['index.php', 'shell.PHTML', 'app.phar', 'a.php5', 'a.php8', 'a.phps', 'a.pht', 'a.phpt', 'a.inc', 'index.php~', 'x.php.bak', 'x.php.orig', 'x.PHP.save', 'x.php.br'];
         foreach (['.env', '.git/config', '.git/HEAD.css', 'assets/.cache/app.js', '.htpasswd', 'a.css', ...$php] as $file) {
             file_put_contents($dir . '/' . $file, 'SECRET ' . $file);
         }
@@ -718,7 +718,7 @@ describe('the static dir lookup', function (): void {
         $paths = [
             ...array_map(static fn (string $file): string => '/' . $file, $php),
             '/.env', '/%2eenv', '/%2Eenv', '/.git/config', '/.git/HEAD.css', '/%2egit/HEAD.css', '/assets/.cache/app.js',
-            '/assets/%2Ecache/app.js', '/.htpasswd', '/INDEX.PHP', '/index%2ephp',
+            '/assets/%2Ecache/app.js', '/.htpasswd', '/INDEX.PHP', '/index%2ephp', '/index.php%7E',
             "/../{$name}/secret.css", "/%2e%2e/{$name}/secret.css", "/..%2f{$name}/secret.css", "/%2E%2E%2F{$name}%2Fsecret.css",
             '/assets/../a.css', '/./a.css', '/.well-known/../.env', '/.well-known/.hidden', '/a.css%00.txt', '/%00',
             '/sub/.well-known/x.txt',

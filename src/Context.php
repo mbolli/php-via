@@ -222,8 +222,9 @@ class Context {
      * so a cookie someone planted or read before it stops reaching the session.
      *
      * The session keeps its id, its data, its SESSION signals and its other tabs. The rotation happens at the call:
-     * from then on the old cookie keeps working for 10 seconds, for the requests other tabs sent before the browser
-     * had the new one, and then starts a new session, and a stream opened with it ends. A tab whose browser has the
+     * from then on a page load, a route() request or a download with the old cookie gets a new session. For 2 more
+     * seconds the old cookie still reaches the actions and streams of the tabs that exist, for the requests other
+     * tabs sent before the browser had the new one; then a stream opened with it ends. A tab whose browser has the
      * new cookie reconnects at once. Call it after slow work such as a password check and before the login writes
      * anything, so a throw leaves the visitor logged out.
      *
@@ -1600,7 +1601,7 @@ class Context {
      * again: a full queue drops them last, and a client that falls behind gets them all. Does nothing once
      * the context is destroyed.
      *
-     * @throws \InvalidArgumentException when there is neither HTML nor a selector, or the mode needs a selector
+     * @throws \InvalidArgumentException when there is neither HTML nor a selector, the mode needs a selector, or the selector has a line break
      */
     public function patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void {
         if ($html === '' && ($selector ?? '') === '') {
@@ -1608,6 +1609,9 @@ class Context {
         }
         if (($selector ?? '') === '' && $mode !== PatchMode::Outer && $mode !== PatchMode::Replace) {
             throw new \InvalidArgumentException("PatchMode::{$mode->name} needs a selector: only Outer and Replace find their target by the element's id.");
+        }
+        if ($selector !== null && strpbrk($selector, "\r\n") !== false) {
+            throw new \InvalidArgumentException('patchElements() refuses a selector with a line break: it would end the SSE data line.');
         }
 
         if ($this->destroyed) {

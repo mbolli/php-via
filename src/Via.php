@@ -1955,7 +1955,7 @@ class Via {
      * action URLs, via_ctx) keeps working), re-runs the page handler behind the route's own middleware,
      * and re-seeds TAB signal values from what the client still holds (sent with the reconnect). Returns
      * null (and the caller falls back to a full reload) when revival is disabled, no record exists, it
-     * expired, the requester's session doesn't own the context, the route is no longer registered, or
+     * expired, the requester's session doesn't own the context or its cookie is in its grace period, the route is no longer registered, or
      * the route's middleware answered instead of running the handler, which $refused then holds.
      *
      * @param bool                 $byConnect  Whether an SSE connect revives it, which seeds the context itself
@@ -1964,6 +1964,11 @@ class Via {
      * @internal used by SseHandler on reconnect to a missing context
      */
     public function reviveContext(string $contextId, Request $request, bool $byConnect = false, array $attributes = [], ?ResponseInterface &$refused = null): ?Context {
+        // A revival runs the page handler, which a cookie in its grace period may no longer do.
+        if ($this->getRequestSession($request)->state === SessionTokens::GRACE) {
+            return null;
+        }
+
         return $this->reviveContextFromClient(
             $contextId,
             $this->getSessionId($request),

@@ -48,3 +48,18 @@ test('keep-alive comments carry no patch, and an event split across writes is re
         ->and($reader->read(substr($frame, 20)))->toBe([['type' => 'signals', 'signals' => ['n' => 1], 'onlyIfMissing' => false]])
     ;
 });
+
+test('a CR in HTML, a script or a selector cannot end the data line and start fields or events of its own', function (): void {
+    $sse = new SwooleSSEGenerator();
+    $frames = $sse->patchElements("<li>hello\rdata: selector body\rdata: mode inner\r\revent: datastar-patch-signals\rdata: signals {x: 1}\r\r</li>")
+        . $sse->patchElements('<b>x</b>', ['selector' => "#a\r\nevent: x", 'mode' => ElementPatchMode::Append])
+        . $sse->executeScript("a()\r\rb()");
+
+    expect($frames)->not->toContain("\r")
+        ->and((new SseReader())->read($frames))->toBe([
+            ['type' => 'elements', 'html' => "<li>hello\ndata: selector body\ndata: mode inner\n\nevent: datastar-patch-signals\ndata: signals {x: 1}\n\n</li>", 'selector' => null, 'mode' => PatchMode::Outer],
+            ['type' => 'elements', 'html' => '<b>x</b>', 'selector' => '#a  event: x', 'mode' => PatchMode::Append],
+            ['type' => 'elements', 'html' => "<script data-effect=\"el.remove()\">a()\n\nb()</script>", 'selector' => 'body', 'mode' => PatchMode::Append],
+        ])
+    ;
+});

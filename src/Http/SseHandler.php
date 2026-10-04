@@ -16,7 +16,6 @@ use Mbolli\PhpVia\Via;
 use OpenSwoole\Coroutine;
 use OpenSwoole\Http\Request;
 use OpenSwoole\Http\Response;
-use OpenSwoole\Timer;
 use starfederation\datastar\enums\ElementPatchMode;
 
 /**
@@ -34,6 +33,15 @@ class SseHandler {
 
     private const string KEEP_ALIVE = ": keep-alive\n\n";
 
+    /** How long a context told to reload is closed silently on its next connects. */
+    private const int RELOAD_MEMORY_SECONDS = 300;
+
+    /** Contexts told to reload that the handler remembers, so ids a client makes up cannot fill the worker. */
+    private const int RELOAD_MEMORY_MAX = 10_000;
+
+    /** Longer than any context id RequestHandler makes: the route pattern, '_/' and 16 hex characters. */
+    private const int CONTEXT_ID_MAX_BYTES = 512;
+
     private Via $via;
     private ?RequestLogger $requestLogger = null;
 
@@ -42,9 +50,9 @@ class SseHandler {
      * Subsequent reconnects from the same dead context (e.g. backgrounded tab
      * that can't execute JS) are closed silently instead of spamming the log
      * and re-sending a reload that will never execute.
-     * Entries are evicted after 5 minutes via a timer set on first insert.
+     * An entry counts for RELOAD_MEMORY_SECONDS, and past RELOAD_MEMORY_MAX entries the oldest goes.
      *
-     * @var array<string, true>
+     * @var array<string, int> the time of the reload, oldest first
      */
     private array $reloadedContextIds = [];
 
@@ -88,7 +96,7 @@ class SseHandler {
         $signals = SignalParser::read($request);
         $contextId = $signals['via_ctx'] ?? null;
 
-        if (!$contextId) {
+        if (!\is_string($contextId) || !self::isContextIdShape($contextId)) {
             $response->status(400);
             $response->end('Invalid context');
 
@@ -115,18 +123,19 @@ class SseHandler {
                 // Rebuilt: clear any stale reload marker and continue with the revived context.
                 unset($this->reloadedContextIds[$contextId]);
             } else {
-                if (isset($this->reloadedContextIds[$contextId])) {
+                $now = time();
+                if ($now - ($this->reloadedContextIds[$contextId] ?? PHP_INT_MIN) < self::RELOAD_MEMORY_SECONDS) {
                     // Already told this context to reload; just close cleanly.
                     $response->end();
 
                     return;
                 }
 
-                $this->reloadedContextIds[$contextId] = true;
-                // Evict after 5 minutes so the set doesn't grow unbounded.
-                Timer::after(300_000, function () use ($contextId): void {
-                    unset($this->reloadedContextIds[$contextId]);
-                });
+                unset($this->reloadedContextIds[$contextId]);
+                $this->reloadedContextIds[$contextId] = $now;
+                if (\count($this->reloadedContextIds) > self::RELOAD_MEMORY_MAX) {
+                    unset($this->reloadedContextIds[array_key_first($this->reloadedContextIds)]);
+                }
 
                 $this->via->log('info', "Context expired, sending reload: {$contextId}");
                 $response->write($sse->executeScript('window.location.reload()'));
@@ -351,6 +360,14 @@ class SseHandler {
             $stream->clientGone = true;
             $stream->context->getPatchManager()->wakeConsumers();
         }
+    }
+
+    /**
+     * Whether $id could be a context id: bounded and without control characters or spaces, so that one a client made up
+     * is refused before it is logged or kept.
+     */
+    public static function isContextIdShape(string $id): bool {
+        return \strlen($id) <= self::CONTEXT_ID_MAX_BYTES && preg_match('#^[^\x00-\x20\x7f]+$#D', $id) === 1;
     }
 
     /**
