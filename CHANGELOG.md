@@ -87,8 +87,9 @@ All notable changes to php-via will be documented in this file.
   attempts, and `data-bind` on checkboxes and radios listens to `input`. PHP code and
   `starfederation/datastar-php` 1.0.1 need no change. See
   [Upgrading](https://via.zweiundeins.gmbh/docs/upgrading#datastar).
-- **Static files get Brotli without `withBrotli()`** whenever ext-brotli is loaded, and the server
-  listens only after compressing the files present at start. `withBrotli(false)` turns it off, and
+- **Static files get Brotli without `withBrotli()`** whenever ext-brotli is loaded. The server
+  compresses the small files present at start before it listens, for 2.3 s at most, and the rest
+  right after. `withBrotli(false)` turns it off, and
   a static level of 0 now means none instead of Brotli level 0. See
   [Static compression](https://via.zweiundeins.gmbh/docs/deployment#static-compression).
 - **`worker_num` in `withSwooleSettings()` throws** when it differs from `withWorkerNum()`.
@@ -103,7 +104,12 @@ All notable changes to php-via will be documented in this file.
 - **Renamed, merged and removed methods** throw, most with a message that names the replacement
   until 0.15, as listed under Upgrading from 0.13. Internal API is tagged `@internal`, and so are the `Config` getters
   other than `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`,
-  `getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`.
+  `getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`. These 0.13 public
+  methods still work but are `@internal` now: `Signal::isScoped()`, `getScope()`,
+  `isClientWritable()`, `writeCount()` and `hasChanged()`; `Scope::parse()`, `matches()`,
+  `isBuiltIn()`, `isRouteBased()` and `isValidWireScope()`; `Context::getNamedSignals()`,
+  `getNamedActions()`, `hasView()` and `getShellTemplate()`; `Via::getScopedSignal()`,
+  `getNotFoundHandler()` and `runGcCycle()`; and the `Stats::track*()` methods and `reset()`.
 
 ### Upgrading from 0.13
 
@@ -126,26 +132,26 @@ covers the changes that need more than a rename.
 - `$app->config()` → `$app->getConfig()`
 - `$app->getRenderStats()` → `$app->getStats()->getStats()`
 - `$app->activeSseCount[$id]` → `$c->isConnected()`
-- `$app->parseSignals()` → removed
+- `Via::parseSignals()` → removed
 - `$app->broadcast(Scope::ROUTE)` → `$app->broadcast(Scope::routeScope('/path'))`
 - `$app->broadcast(Scope::SESSION)` → `$app->broadcast(Scope::sessionScope($id))`
 - the `via_session_id` cookie read in middleware → `$request->getAttribute('via.session')`
 - `$c->onDisconnect($fn)` → `$c->onCleanup($fn)`
 - `#[OnDisconnect]` → `#[OnCleanup]`
 - `$c->interval($ms, $fn)` → `$c->setInterval($fn, $ms)`
-- `$c->view($fn, cacheUpdates: true)` → `$c->view($fn, shareRender: true)`; for
+- `$c->view($fn, cacheUpdates: true)` → `$c->view($fn, shareRender: true)` only for a view that is
+  the same for every tab, after `scope()` set a shared scope; otherwise, and for
   `cacheUpdates: false`, leave it out
-- `$c->view('<div>...</div>')` → `$c->view(fn () => '<div>...</div>')`
 - `$c->action($fn, 'name', $scope)` → `$c->action($fn, 'name')`, or `#[Action(scope: ...)]`
 - `$c->signal($value)` → `$c->signal($value, 'name')`
 - `$c->component($fn)` → `$c->component($fn, 'namespace')`
 - `$signal->text()` → `<span data-text="{$signal->ref()}">{$signal->string()}</span>`
 - `setValue($v, broadcast: false)`, and the same flag on `increment()` and `mutate()` →
   declare the signal with `signal(..., autoBroadcast: false)`
-- `setValue($v, markChanged: false)` → `setValue($v)` and then `markSynced()`
+- `setValue($v, markChanged: false)` → `setValue($v)`, followed by `markSynced()` only for a signal
+  the tab already shows: in a page handler `markSynced()` keeps the value out of the page
 - `Config::withContextCleanupDelay($ms)` → `withContextTimeouts(cleanupDelayMs: $ms)`
 - `Config::withContextConnectTimeout($ms)` → `withContextTimeouts(connectMs: $ms)`
-- `Config::withContextReconnectTimeout($ms)` → `withContextTimeouts(reconnectMs: $ms)`
 - `Config::withContextRevivalWindow($ms)` → `withContextTimeouts(revivalWindowMs: $ms)`
 - `Config::withTracing($on)` → `withDevBar($on)`
 - `Config::withTracingWrites($on)` → `withDevBarOptions(writes: $on)`
@@ -270,9 +276,10 @@ covers the changes that need more than a rename.
   under `withSecureCookie(true)` only the secure cookie, which logs out users who carry only the
   plain one.
 - A login could not replace the session cookie (session fixation). Call `regenerateSession()` at
-  login and logout.
+  login and logout. The old cookie then opens no page, and for 2 s still reaches the actions and
+  streams of tabs that exist.
 - `withDevBar(true)` outside dev mode is read-only, but shows every visitor's traces, scopes,
-  context ids and the server's stats. Outside dev mode, `POST /_via/reset` no longer lets any
+  context ids, the server's logs and its stats. Outside dev mode, `POST /_via/reset` no longer lets any
   visitor clear the worker's trace buffer. See [Dev Bar](https://via.zweiundeins.gmbh/docs/dev-bar#enabling).
 
 ### Fixed
@@ -314,9 +321,7 @@ covers the changes that need more than a rename.
 - Property changes an `#[Action]` method made before it threw were lost.
 - A composition view that read a scoped `#[Signal]` property rendered the tab's stale copy when
   another tab's write reached it. Scoped properties are hydrated before each render now.
-- `addScope(Scope::ROUTE)` and `addScope(Scope::SESSION)` joined literal `route` and `session`
-  scopes, and SESSION-scoped actions were never found.
-- SESSION and custom-scope signals declared in a page closure reached no tab without `addScope()`.
+- SESSION-scoped actions were never found.
 - Components had no session.
 - Views of different routes or components in one scope got each other's shared render.
 - `getScopedSignalByName()` returned null on a worker where no context had declared the signal.
@@ -330,6 +335,21 @@ covers the changes that need more than a rename.
   160 ms. They are destroyed in 10 ms slices now.
 - A stopping worker ended its streams and the tabs waited up to 15 s to reconnect. It now asks them
   to reconnect at once.
+- A tab whose stream was down when an action reached it was freed after the connect timeout (30 s),
+  while Datastar's next reconnect attempt can be 30 s away, and the patches the action queued went
+  with it. It now waits for a reconnect timeout, 60 s after the last action
+  (`withContextTimeouts(reconnectMs:)`). See
+  [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream).
+- The default shell never showed its "Not connected" warning: it listened with
+  `data-on-datastar-fetch`, which Datastar 1.0 ignores.
+- A CR in rendered text, such as a chat message, ended the SSE data line and could inject Datastar
+  events that run script, also under a nonce CSP. CR now goes out as LF, and `patchElements()`
+  refuses a selector with a line break.
+- An unauthenticated client could fill a worker's memory and log with made-up `via_ctx` values on
+  `/_sse`. A value over 512 bytes or with control characters answers 400, and the contexts told
+  to reload stay at 10,000.
+- `withStaticDir()` served backup copies of PHP files, such as `x.php~`, `x.php.bak` or `x.php.br`.
+- Under a nonce CSP without `'unsafe-inline'` for styles, the Dev Bar showed unstyled.
 
 ### Tests
 
@@ -402,13 +422,6 @@ covers the changes that need more than a rename.
   leaving one copy running with its timers. The later one now returns the registered context.
 - A component's actions could not read the request or set cookies. `input()`, `file()`,
   `cookie()` and `setCookie()` on a component now use its page's request.
-- A tab whose stream was down when an action reached it was freed after the connect timeout (30 s),
-  while Datastar's next reconnect attempt can be 30 s away, and the patches the action queued went
-  with it. It now waits for the new reconnect timeout, 60 s after the last action
-  (`withContextReconnectTimeout()`). [Lifecycle](https://via.zweiundeins.gmbh/docs/lifecycle#without-stream)
-  lists which timer frees a context without a stream.
-- The default shell never showed its "Not connected" warning: it listened with
-  `data-on-datastar-fetch`, which Datastar 1.0 ignores. It now uses `data-on:datastar-fetch`.
 
 ### Known limitations
 

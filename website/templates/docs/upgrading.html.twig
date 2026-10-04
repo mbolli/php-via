@@ -67,14 +67,14 @@ a later change would be ignored or only half applied. Make every with* call befo
 
     <h3 id="config-renamed">Renamed and merged Config methods</h3>
     <p>
-        The old names throw a <code>BadMethodCallException</code> that names the new call.
+        The old names throw a <code>BadMethodCallException</code> that names the new call, except
+        <code>getTraceMaxBytes()</code>, which is undefined.
     </p>
     <table>
         <thead><tr><th>0.13</th><th>0.14</th></tr></thead>
         <tbody>
             <tr><td><code>withContextCleanupDelay($ms)</code></td><td><code>withContextTimeouts(cleanupDelayMs: $ms)</code></td></tr>
             <tr><td><code>withContextConnectTimeout($ms)</code></td><td><code>withContextTimeouts(connectMs: $ms)</code></td></tr>
-            <tr><td><code>withContextReconnectTimeout($ms)</code></td><td><code>withContextTimeouts(reconnectMs: $ms)</code></td></tr>
             <tr><td><code>withContextRevivalWindow($ms)</code></td><td><code>withContextTimeouts(revivalWindowMs: $ms)</code></td></tr>
             <tr><td><code>withTracing($on)</code></td><td><code>withDevBar($on)</code>; the argument is required</td></tr>
             <tr><td><code>withTracingWrites($on)</code></td><td><code>withDevBarOptions(writes: $on)</code></td></tr>
@@ -82,19 +82,23 @@ a later change would be ignored or only half applied. Make every with* call befo
             <tr><td><code>withSsePollIntervalMs($ms)</code></td><td><code>withDevBarOptions(pollMs: $ms)</code></td></tr>
             <tr><td><code>getDevMode()</code></td><td><code>isDevMode()</code></td></tr>
             <tr><td><code>withGcInterval($ms)</code></td><td><code>withGcIntervalMs($ms)</code></td></tr>
-            <tr><td><code>getTraceMaxBytes()</code></td><td>removed, its limit was never enforced</td></tr>
+            <tr><td><code>getTraceMaxBytes()</code></td><td>undefined; its limit was never enforced</td></tr>
         </tbody>
     </table>
     <p>
         <code>withContextTimeouts()</code> changes only the timers you name, so one call can replace several
         of the old setters. A second <code>withDevBarOptions()</code> call changes only what it names too.
     </p>
-    <p>Three more changes break code that ran on 0.13:</p>
+    <p>Four more changes break code that ran on 0.13:</p>
     <ul>
         <li>
             <code>withSwooleSettings(['worker_num' => $n])</code> throws at <code>start()</code> when it differs from
             <code>withWorkerNum()</code>, which defaults to 1. php-via set up its shared tables and its broker for one
             worker while N started. Pass the count to <code>withWorkerNum($n)</code>.
+        </li>
+        <li>
+            <code>start()</code> throws for <code>hook_flags</code> with <code>SWOOLE_HOOK_STDIO</code> and without
+            <code>SWOOLE_HOOK_FILE</code>. See <a href="/docs/deployment#hooks">Coroutine hooks</a>.
         </li>
         <li>
             <code>withLogLevel()</code> throws for a name it does not know. It used to read any unknown name as
@@ -106,7 +110,14 @@ a later change would be ignored or only half applied. Make every with* call befo
         The Config getters other than <code>getBasePath()</code>, <code>isDevMode()</code>, <code>isHttps()</code>,
         <code>getDatastarUrl()</code>, <code>getDatastarIntegrity()</code>, <code>getImportMap()</code> and
         <code>getContextRevivalWindowMs()</code> are tagged <code>@internal</code>. They still answer, but they
-        may change without notice. <code>withBroadcastCoalescing()</code> is deprecated: <code>new Via()</code>
+        may change without notice. The same holds for these 0.13 public methods:
+        <code>Signal::isScoped()</code>, <code>getScope()</code>, <code>isClientWritable()</code>,
+        <code>writeCount()</code> and <code>hasChanged()</code>; <code>Scope::parse()</code>, <code>matches()</code>,
+        <code>isBuiltIn()</code>, <code>isRouteBased()</code> and <code>isValidWireScope()</code>;
+        <code>Context::getNamedSignals()</code>, <code>getNamedActions()</code>, <code>hasView()</code> and
+        <code>getShellTemplate()</code>; <code>Via::getScopedSignal()</code>, <code>getNotFoundHandler()</code> and
+        <code>runGcCycle()</code>; and the <code>Stats::track*()</code> methods and <code>reset()</code>.
+        <code>withBroadcastCoalescing()</code> is deprecated: <code>new Via()</code>
         logs a warning when coalescing is off, and 0.15 removes the method. Call
         <code>$app->flushBroadcasts()</code> where a broadcast has to land before the next step.
     </p>
@@ -128,7 +139,7 @@ a later change would be ignored or only half applied. Make every with* call befo
             <tr><td><code>$app->getContextsByScope($scope)</code></td><td><code>$app->getLocalContexts($scope)</code>, this worker's contexts only. <code>$app->countClients($scope)</code> counts the connected tabs on every worker.</td></tr>
             <tr><td><code>$app->getRenderStats()</code></td><td><code>$app->getStats()->getStats()</code></td></tr>
             <tr><td><code>$app->activeSseCount[$id]</code></td><td><code>$c->isConnected()</code>. Via's public properties are <code>@internal</code>.</td></tr>
-            <tr><td><code>$app->parseSignals()</code></td><td>undefined; php-via writes posted signals itself</td></tr>
+            <tr><td><code>Via::parseSignals()</code></td><td>undefined; php-via writes posted signals itself</td></tr>
             <tr><td><code>$c->onDisconnect($fn)</code></td><td><code>$c->onCleanup($fn)</code>, which runs at the same moment</td></tr>
             <tr><td><code>#[OnDisconnect]</code></td><td><code>#[OnCleanup]</code>. A class that uses the old attribute throws at <code>Via::mount()</code> and <code>component()</code>.</td></tr>
             <tr><td><code>$c->interval($ms, $fn)</code></td><td>undefined; <code>$c->setInterval($fn, $ms)</code></td></tr>
@@ -137,7 +148,6 @@ a later change would be ignored or only half applied. Make every with* call befo
             <tr><td><code>$c->action($fn, 'name', $scope)</code></td><td><code>$c->action($fn, 'name')</code>; the third argument throws an <code>ArgumentCountError</code>. See <a href="#scopes">Scopes</a>.</td></tr>
             <tr><td><code>$c->signal($value)</code></td><td><code>$c->signal($value, 'name')</code>, see <a href="#signals">Signals</a></td></tr>
             <tr><td><code>$c->component($fn)</code></td><td><code>$c->component($fn, 'namespace')</code>, see <a href="#composition">Components</a></td></tr>
-            <tr><td><code>$c->view('&lt;div&gt;...&lt;/div&gt;')</code></td><td><code>$c->view(fn () => '&lt;div&gt;...&lt;/div&gt;')</code>, see <a href="#views">Views</a></td></tr>
             <tr><td><code>$c->view($fn, cacheUpdates: ...)</code></td><td><code>shareRender: true</code>, or nothing, see <a href="#views">Views</a></td></tr>
             <tr><td><code>setValue($v, broadcast: false)</code>, <code>markChanged:</code></td><td>see <a href="#signals">Signals</a></td></tr>
         </tbody>
@@ -205,6 +215,24 @@ $c->action(fn () => $moves->increment(), 'move');
         A scoped signal joins its context to its scope, so its writes reach the tab without
         <code>addScope()</code>. <code>scope()</code> replaces only the primary scope and keeps the scopes joined
         this way or with <code>addScope()</code>; in 0.13 it replaced the whole list.
+    </p>
+
+    <h3 id="scopes-lifetime">A scope's signals go with its last context</h3>
+    <p>
+        In 0.13 a ROUTE, GLOBAL or custom-scope signal kept its value for the life of the worker. In 0.14 a
+        worker drops a scope's signals once the last context that uses the scope is destroyed. With one worker,
+        the next visitor then sees the initial value again, so a vote count or a board kept only in a scoped
+        signal resets when every tab has left. Seed such a signal from GlobalState or your database:
+    </p>
+    {% code 'php' %}{% verbatim %}
+$votes = $c->signal($app->globalState('votes', 0), 'votes', Scope::GLOBAL);
+$c->action(function () use ($app, $votes): void {
+    $votes->increment();
+    $app->setGlobalState('votes', $votes->int());
+}, 'vote');
+    {% endverbatim %}{% endcode %}
+    <p>
+        See <a href="/docs/scopes#scope-lifetime">When a scope's signals go</a>.
     </p>
 
     <h3 id="scopes-resolve">ROUTE and SESSION resolve everywhere</h3>
@@ -275,12 +303,11 @@ public function view(callable|string $view, array|callable $data = [], ?string $
     </p>
     {% code 'php' %}{% verbatim %}
 // 0.13
-$c->view('<div id="hello">Hello</div>');
 $c->view(fn () => $c->render('board.html.twig', ['cells' => $board->cells()]), block: 'board');
 
 // 0.14
-$c->view(fn (): string => '<div id="hello">Hello</div>');
 $c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], block: 'board');
+$c->view(fn (): string => '<div id="hello">Hello</div>');   // HTML goes in a closure
     {% endverbatim %}{% endcode %}
 
     <h3 id="views-share-render">Share the update render only where every tab sees the same</h3>
@@ -396,7 +423,15 @@ $c->action(function () use ($count): void {
             signals and actions, so the second throws. In a loop, build it from the key, such as <code>'item-' . $id</code>
             for numeric ids or <code>'item-' . md5($key)</code> for any other key.
         </li>
-        <li><code>#[OnDisconnect]</code> becomes <code>#[OnCleanup]</code>. A class may have several <code>#[OnCleanup]</code> methods; they run in declaration order.</li>
+        <li>
+            <code>#[OnDisconnect]</code> becomes <code>#[OnCleanup]</code>. A class may have several <code>#[OnCleanup]</code>
+            methods; they run in declaration order. A <code>$ctx->broadcast()</code> there reaches only the tab being
+            destroyed when the class has no <code>#[Broadcast]</code>, since its primary scope is then
+            <code>Scope::TAB</code>. To update the other tabs, add <code>#[Broadcast(Scope::ROUTE)]</code> or the scope
+            they share to the class, or call <code>$app->broadcast($scope)</code> with the <code>Via</code> that a
+            factory passed to <code>mount()</code> gives the class. See
+            <a href="/docs/composition#lifecycle">Lifecycle hooks</a>.
+        </li>
         <li>
             Under <code>#[Broadcast]</code> or <code>#[Action(scope: ...)]</code>, an action runs on the instance of the tab
             that posted it. In 0.13 it ran on the first tab's instance, so one tab's click changed another tab's
@@ -454,9 +489,7 @@ $c->action(function () use ($count): void {
 </body>
     {% endverbatim %}{% endcode %}
     <p>
-        The shell placeholders {% verbatim %}<code>{{ datastar_url }}</code>{% endverbatim %} and
-        {% verbatim %}<code>{{ import_map }}</code>{% endverbatim %} and the Twig variables <code>datastarUrl</code> and
-        <code>importMap</code> are gone. {% verbatim %}<code>{{ signals_json }}</code>{% endverbatim %} still renders for
+        {% verbatim %}<code>{{ signals_json }}</code>{% endverbatim %} still renders for
         older shells. A copied bootstrap keeps working, but it loads the unversioned <code>datastar.js</code>, which
         browsers keep for up to an hour after an upgrade, and it lacks the listener that reconnects a tab at once after a
         session rotation or when its worker stops. Such a tab waits for its next 15 s retry.
@@ -614,8 +647,7 @@ $auth = $this->app->getSessionData($sessionId, 'auth');
         <li>
             On libcurl 8.20 or newer, the default <code>hook_flags</code> leave OpenSwoole's native curl hook out, which
             crashed the worker on every curl request to a host name. A curl request then blocks its worker until it
-            returns. <code>start()</code> throws for <code>hook_flags</code> with <code>SWOOLE_HOOK_STDIO</code> and without
-            <code>SWOOLE_HOOK_FILE</code>. See <a href="/docs/deployment#hooks">Coroutine hooks</a>.
+            returns. See <a href="/docs/deployment#hooks">Coroutine hooks</a>.
         </li>
     </ul>
 
@@ -667,10 +699,11 @@ $app->shutdown();
         <li><strong>Composer.</strong> <code>composer require twig/twig</code>, since the app renders Twig templates.</li>
         <li>
             <strong>Config and lifecycle.</strong> <code>app.php</code> stopped before the server listened, on three
-            tombstones:
-            <code>withContextConnectTimeout(90_000)</code> became <code>withContextTimeouts(connectMs: 90_000)</code>, and
+            tombstones and one <code>start()</code> check. <code>withContextConnectTimeout(90_000)</code> went: it had kept
+            tabs alive across Datastar's slow reconnects, which the 60 s reconnect timeout now covers.
             <code>onStart()</code> and <code>onShutdown()</code> became <code>onWorkerStart()</code> and
-            <code>onWorkerStop()</code>.
+            <code>onWorkerStop()</code>, and <code>worker_num</code> moved from <code>withSwooleSettings()</code> to
+            <code>withWorkerNum()</code>.
         </li>
         <li>
             <strong>A page that was only a path for middleware.</strong> The app served MCP over HTTP from middleware attached
@@ -697,8 +730,12 @@ $app->shutdown();
             <strong>Internals.</strong> Four <code>activeSseCount</code> checks became <code>$c->isConnected()</code>, and
             five hand-built element patches became <code>patchElements()</code> with <code>PatchMode</code>.
         </li>
+        <li>
+            <strong>Tests.</strong> The suite set action input with <code>Context::setRequestInput()</code>, 23 times in 12
+            files. That method is gone, so those tests moved to <code>TestApp</code>, as in <a href="#tests">Tests</a>.
+        </li>
     </ol>
-    <p>The app ran on 0.14 after these steps. Four optional changes then removed code the app had written around gaps in 0.13:</p>
+    <p>The app ran on 0.14 after these steps. Three optional changes then removed code the app had written around gaps in 0.13:</p>
     <ul>
         <li>
             Three actions caught every exception only to write an <code>_error</code> signal. One
@@ -714,7 +751,6 @@ $app->shutdown();
             render per 250 ms. <code>Config::withBroadcastThrottle('admin:import', 250)</code> replaced them, and it always
             delivers the last state of a burst.
         </li>
-        <li>Tests that built a <code>Context</code> by hand moved to <code>TestApp</code>, as in <a href="#tests">Tests</a>.</li>
     </ul>
 
     <h2 id="new-apis">New APIs that replace workarounds</h2>

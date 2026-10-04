@@ -643,7 +643,9 @@ $c->appendToHead('<title>My Page</title>', '<meta name="description" content="..
         Without a selector, <code>Outer</code> and <code>Replace</code> match the top-level elements of
         <code>$html</code> by id; every other <a href="#patch-mode">mode</a> needs a selector, and
         <code>Remove</code> needs no HTML. Patches queue until the stream is open, and none is dropped for a
-        client that falls behind, since no render sends it again. A component's patches go to its page.
+        client that falls behind, since no render sends it again. A component's patches go to its page. A
+        selector with a line break throws an <code>InvalidArgumentException</code>, since it would end the SSE
+        line: check a selector built from input.
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\PatchMode;
@@ -873,9 +875,10 @@ $c->clearSessionData();            // everything
         then stays logged out.
     </p>
     <p>
-        The rotation happens at the call. The old cookie keeps working for 10 seconds, for requests other tabs
-        sent before the browser had the new one; after that it starts a new session, and the streams opened
-        with it end. A tab whose browser holds the new cookie reconnects at once; one with only the old cookie
+        The rotation happens at the call. From then on, a page load, a <code>route()</code> request or a
+        download with the old cookie gets a new session. For 2 more seconds the old cookie still reaches the
+        actions and streams of tabs that exist, for requests other tabs sent before the browser had the new
+        one; after that the streams opened with it end. A tab whose browser holds the new cookie reconnects at once; one with only the old cookie
         is refused. In an action the new cookie goes out with that action's response, in a page handler with
         the page, and called outside both, the rotation waits for the tab's next action.
     </p>

@@ -473,7 +473,7 @@ $config->withSecureCookie(true);
         never needs the cookie: <code>$c->getSessionId()</code> and the <code>via.session</code> request attribute hold a
         hash of it, which stays the same when the cookie changes. Give the session a new cookie at login and logout with
         <code>$c->regenerateSession()</code>, or <code>$app->regenerateSession($request)</code> in middleware, so that a
-        cookie someone planted or read before stops reaching the account 10 seconds later.
+        cookie someone planted or read before opens no page of the account, and reaches its open tabs for 2 seconds at most.
         <a href="/docs/middleware#session-rotation">Middleware</a> shows a login.
     </p>
 

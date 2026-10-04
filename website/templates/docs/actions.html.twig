@@ -124,7 +124,8 @@ $vote = $c->action(function (Context $c) use ($app): void {
         An action that logs a visitor in calls <code>$c-&gt;regenerateSession()</code> before it writes the
         login. The session gets a new cookie with the action's response, so a cookie someone planted or read
         before the login no longer reaches it, and it keeps its id, its data, its SESSION signals and its other
-        tabs. The old cookie keeps working for 10 seconds, for requests already on their way:
+        tabs. The old cookie opens no page from then on, and for 2 seconds it still reaches the actions and
+        streams of tabs that exist, for requests already on their way:
     </p>
     {% code 'php' %}{% verbatim %}
 $c->action(function (Context $c) use ($users, $username, $password, $error): void {

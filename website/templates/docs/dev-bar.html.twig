@@ -42,6 +42,12 @@ $config = (new Config())
         <code>via_head</code>'s tags do (see <a href="/docs/twig#csp">Content-Security-Policy</a>).
     </p>
     <p>
+        Each tab with the Dev Bar holds two streams, <code>/_sse</code> and <code>/_via/stream</code>. Over
+        HTTP/1.1 a browser opens six connections per host, so with three tabs of one site open, the third tab's
+        actions wait until another tab closes. Over HTTP/2 all streams share one connection: serve the site with
+        <code>withCertificate()</code>, or behind a proxy such as Caddy.
+    </p>
+    <p>
         The Dev Bar is separate from the Live Signals panel of php-via's default shell, which shows the page's
         signals in a sidebar in dev mode only.
     </p>

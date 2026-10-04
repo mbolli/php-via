@@ -787,7 +787,7 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `Transfer-Encoding`, `Connection`, its session cookie and any header or cookie it set;
   `Vary` and `Content-Security-Policy` get both values.
 - `withDevBar(true)` in production is read-only but shows every visitor's traces, scopes and
-  context ids, and the server's stats (`/_via/stats`), to anyone who opens a page.
+  context ids, and the server's logs and stats (`/_via/stats`), to anyone who opens a page.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
 
 ---
@@ -967,8 +967,8 @@ The full guide is https://via.zweiundeins.gmbh/docs/upgrading. The changes that 
 
 - `composer require twig/twig` for `withTemplateDir()`, template views, `render()` and `getTwig()`.
 - `new Via($config)` freezes the Config. Renamed setters throw and name the new call:
-  `withContextCleanupDelay()`, `withContextConnectTimeout()`, `withContextReconnectTimeout()` and
-  `withContextRevivalWindow()` are `withContextTimeouts(...)`; `withTracing()` is `withDevBar()`;
+  `withContextCleanupDelay()`, `withContextConnectTimeout()` and `withContextRevivalWindow()` are
+  `withContextTimeouts(...)`; `withTracing()` is `withDevBar()`;
   `withTracingWrites()`, `withTraceBufferSize()` and `withSsePollIntervalMs()` are
   `withDevBarOptions(...)`; `getDevMode()` is `isDevMode()`; `withGcInterval()` is
   `withGcIntervalMs()`.
@@ -977,7 +977,7 @@ The full guide is https://via.zweiundeins.gmbh/docs/upgrading. The changes that 
   `activeSseCount[$id]` is `$c->isConnected()`; `onDisconnect()`/`#[OnDisconnect]` are
   `onCleanup()`/`#[OnCleanup]`; `interval($ms, $fn)` is `setInterval($fn, $ms)`; `renderString()`
   (`$app->getTwig()->createTemplate($src)->render($data)`) and `Signal::text()` (`data-text` with
-  `ref()`) are removed; `parseSignals()` is gone.
+  `ref()`) are removed; `Via::parseSignals()` is gone.
 - `signal()` needs a name and takes its scope as an argument; after `scope()` a signal without one
   throws. `action()` takes no scope.
 - `setValue()`/`increment()`/`mutate()` take no `broadcast:`/`markChanged:`.
