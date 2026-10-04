@@ -3,12 +3,13 @@
 {% block demo %}
 <div id="client-monitor">
     <h3>Connected Clients ({{ clients|length }})</h3>
+    <p class="text-sm text-muted">Every visitor sees this list, so IP addresses show only their network.</p>
     <div class="client-grid">
         {% for client in clients %}
         <div class="card" style="min-width: 120px; text-align: center;">
             <img src="{{ client.identicon }}" alt="" style="width: 64px; height: 64px; border-radius: var(--radius-md); margin-block-end: var(--size-1); display: block; margin-inline: auto;">
             <strong style="font-size: var(--font-size-0);">{{ client.id }}</strong><br>
-            <span style="font-size: 0.7rem; color: var(--text-3);">IP: {{ client.ip }}<br>Connected: {{ now - client.connected_at }}s ago</span>
+            <span style="font-size: 0.7rem; color: var(--text-3);">IP: {{ client.network }}<br>Connected: {{ now - client.connected_at }}s ago</span>
         </div>
         {% endfor %}
     </div>
