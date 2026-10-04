@@ -13,6 +13,7 @@ use Mbolli\PhpVia\State\ScopeRegistry;
 use Mbolli\PhpVia\State\SharedClientRegistry;
 use Mbolli\PhpVia\State\SharedContextDirectory;
 use Mbolli\PhpVia\State\SharedSessionStore;
+use Mbolli\PhpVia\State\SharedSignalStore;
 use Mbolli\PhpVia\State\SharedTable;
 use Mbolli\PhpVia\State\SignalManager;
 use Mbolli\PhpVia\Support\Logger;
@@ -141,6 +142,11 @@ class Application {
 
     /** This worker's id, set by claimWorker() */
     private int $workerId = 0;
+
+    private ?SharedSignalStore $sharedSignalStore = null;
+
+    /** @var array<string, true> Scopes this worker holds in the shared signal store */
+    private array $heldSharedScopes = [];
 
     /** @var array<string, true> Routes already warned about for a query too long for the context record */
     private array $queryDroppedRoutes = [];
@@ -409,10 +415,61 @@ class Application {
         if ($removed > 0) {
             $this->logger->log('debug', "Worker {$workerId} dropped {$removed} client(s) registered by its previous process");
         }
+
+        $this->removeDeadScopeHolders();
     }
 
     /**
-     * Drop the clients of worker processes that no longer exist and that claimWorker() missed.
+     * Install the cross-worker store of scoped signal values.
+     *
+     * @internal called by Via::setSharedSignalStore()
+     */
+    public function setSharedSignalStore(?SharedSignalStore $store): void {
+        $this->sharedSignalStore = $store;
+        $this->heldSharedScopes = [];
+    }
+
+    /**
+     * Hold a scope in the shared signal store for as long as a context on this worker uses it.
+     *
+     * @internal called by Via before it attaches a scoped signal to the store
+     */
+    public function holdSharedScope(string $scope): void {
+        if ($this->sharedSignalStore === null || isset($this->heldSharedScopes[$scope])) {
+            return;
+        }
+
+        try {
+            if ($this->sharedSignalStore->holdScope($scope)) {
+                $this->heldSharedScopes[$scope] = true;
+            }
+        } catch (\RuntimeException $e) {
+            $this->logger->log('warn', "Could not hold scope {$scope} in the shared signal store: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete the shared signal rows of scopes whose holders were all worker processes that no longer run.
+     *
+     * @internal run at worker start and periodically on the leader worker
+     */
+    public function removeDeadScopeHolders(): void {
+        try {
+            $removed = $this->sharedSignalStore?->removeDeadHolders() ?? 0;
+        } catch (\RuntimeException $e) {
+            $this->logger->log('warn', 'Could not sweep the shared signal store: ' . $e->getMessage());
+
+            return;
+        }
+
+        if ($removed > 0) {
+            $this->logger->log('info', "Removed the shared signals of {$removed} scope(s) held only by worker processes that no longer run");
+        }
+    }
+
+    /**
+     * Drop the clients of worker processes that no longer exist and that claimWorker() missed, and their holds on
+     * shared scopes.
      *
      * @internal run periodically on the leader worker
      */
@@ -422,6 +479,8 @@ class Application {
         if ($removed > 0) {
             $this->logger->log('info', "Removed {$removed} client(s) of worker processes that no longer run");
         }
+
+        $this->removeDeadScopeHolders();
     }
 
     /**
@@ -873,7 +932,7 @@ class Application {
     /**
      * Remove a context from all its scopes, and clear the signals, actions and shared renders of the scopes no
      * live context on this worker uses any more. With several workers a scoped signal's value stays in the
-     * shared table, so a context that declares it again adopts what the other workers hold.
+     * shared table while another worker uses the scope, so a context that declares it again adopts that value.
      *
      * @internal called when a context is destroyed, and when a revival is dropped
      */
@@ -884,12 +943,26 @@ class Application {
             $hadSignals = $this->signalManager->clearScope($scope);
             $hadActions = $this->actionRegistry->clearScope($scope);
             $this->viewCache?->invalidate($scope);
+            $this->releaseSharedScope($scope);
 
             if ($hadSignals || $hadActions) {
                 $this->logger->log('debug', "Cleaned up empty scope with signals/actions: {$scope}");
             } else {
                 $this->logger->log('debug', "Cleaned up empty scope: {$scope}");
             }
+        }
+    }
+
+    private function releaseSharedScope(string $scope): void {
+        if (!isset($this->heldSharedScopes[$scope])) {
+            return;
+        }
+        unset($this->heldSharedScopes[$scope]);
+
+        try {
+            $this->sharedSignalStore?->releaseScope($scope);
+        } catch (\RuntimeException $e) {
+            $this->logger->log('warn', "Could not release scope {$scope} in the shared signal store: " . $e->getMessage());
         }
     }
 

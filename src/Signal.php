@@ -102,7 +102,7 @@ final class Signal {
      */
     public function attachSharedStore(SharedSignalStore $store): void {
         $this->store = $store;
-        $this->value = $store->initialize($this->sharedKey(), $this->value);
+        $this->value = $store->initialize($this->sharedKey(), $this->value, $this->scope);
         $this->readEpoch = 0;
     }
 

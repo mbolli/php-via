@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Mbolli\PhpVia\State;
 
 use Mbolli\PhpVia\Signal;
+use OpenSwoole\Exception;
+use OpenSwoole\Process;
 use OpenSwoole\Table;
 
 /**
@@ -50,9 +52,33 @@ final class SharedSignalStore {
     /** Row uses the serialized string column. */
     private const int KIND_SERIALIZED = 0;
 
+    /** Lock rows that serialise holding, releasing and purging scopes. Never deleted, so no waiter loses its ticket. */
+    private const int SCOPE_LOCK_STRIPES = 64;
+
+    /** Width of one holder entry in the `pids` column: a process ID and a comma. */
+    private const int HOLDER_WIDTH = 8;
+
+    /** How often a full table is reported, per process. */
+    private const int FULL_REPORT_INTERVAL_S = 10;
+
     private Table $table;
 
     private TicketLock $lock;
+
+    /** Per scope: the process IDs that hold it, one entry per holder, and how many index rows it has. */
+    private Table $scopes;
+
+    /** Per scope and position: the key of one of its value rows. */
+    private Table $index;
+
+    private TicketLock $scopeLock;
+
+    /** @var null|\Closure(string): void */
+    private ?\Closure $reporter = null;
+
+    private int $fullReportedAt = 0;
+
+    private int $fullDropped = 0;
 
     private ReadEpochs $readEpochs;
 
@@ -62,7 +88,11 @@ final class SharedSignalStore {
      * @param int $maxValueSize Serialized byte cap for non-integer values. Lazily mapped, so
      *                          raising it costs nothing until large values are actually stored.
      */
-    public function __construct(int $maxRows = 1024, private int $maxValueSize = 32768) {
+    /**
+     * @param int $holderSlots Holders one scope can list: a process per worker, plus processes still draining
+     *                         after a reload or dead ones not yet swept
+     */
+    public function __construct(int $maxRows = 1024, private int $maxValueSize = 32768, private int $holderSlots = 16) {
         $table = new Table($maxRows);
         $table->column('kind', Table::TYPE_INT, 1);
         $table->column('n', Table::TYPE_INT, 8);
@@ -76,6 +106,29 @@ final class SharedSignalStore {
         $table->create();
         $this->table = $table;
         $this->readEpochs = new ReadEpochs();
+
+        $this->scopes = new Table($maxRows);
+        $this->scopes->column('pids', Table::TYPE_STRING, $holderSlots * self::HOLDER_WIDTH);
+        $this->scopes->column('n', Table::TYPE_INT, 8);
+        $this->scopes->create();
+
+        $this->index = new Table($maxRows);
+        $this->index->column('k', Table::TYPE_STRING, 32);
+        $this->index->create();
+
+        $locks = new Table(self::SCOPE_LOCK_STRIPES);
+        $locks->column('next', Table::TYPE_INT, 8);
+        $locks->column('serving', Table::TYPE_INT, 8);
+        $locks->column('lease', Table::TYPE_INT, 8);
+        $locks->create();
+        for ($i = 0; $i < self::SCOPE_LOCK_STRIPES; ++$i) {
+            $locks->set((string) $i, ['next' => 0, 'serving' => 0, 'lease' => 0]);
+        }
+        $this->scopeLock = new TicketLock(
+            $locks,
+            static fn (string $stripe): string => "Timed out waiting for the scoped signal scope lock (stripe {$stripe}).",
+        );
+
         $this->lock = new TicketLock(
             $table,
             static fn (string $key): string => "Timed out waiting to mutate scoped signal (key {$key}). A mutate() callback "
@@ -90,16 +143,113 @@ final class SharedSignalStore {
      * not reset it to the declared default. That is the whole point of a scoped signal. The
      * seed race between two workers starting together is benign: both write the same default.
      */
-    public function initialize(string $id, mixed $default): mixed {
+    public function initialize(string $id, mixed $default, ?string $scope = null): mixed {
         $key = self::key($id);
 
         if ($this->table->exists($key)) {
             return $this->read($key, $default);
         }
 
-        $this->write($key, $id, $default);
+        if ($this->write($key, $id, $default) && $scope !== null) {
+            $this->addToIndex(self::scopeKey($scope), $key);
+        }
 
         return $default;
+    }
+
+    /**
+     * Report a full table through $reporter, at most every FULL_REPORT_INTERVAL_S seconds.
+     *
+     * @param \Closure(string): void $reporter
+     */
+    public function onTableFull(\Closure $reporter): void {
+        $this->reporter = $reporter;
+    }
+
+    /**
+     * Count the calling process as a holder of $scope. Call it before the scope's signals are attached, so a
+     * concurrent release on another worker cannot delete the rows they adopt.
+     *
+     * @return bool false when the scope cannot be tracked: its rows then stay until the server stops
+     *
+     * @throws \RuntimeException if the scope lock is not taken in time
+     */
+    public function holdScope(string $scope): bool {
+        $key = self::scopeKey($scope);
+
+        return $this->scopeLock->run(self::stripe($key), function () use ($key, $scope): bool {
+            $pids = $this->holders($key);
+            if (\count($pids) >= $this->holderSlots) {
+                $pids = array_values(array_filter($pids, self::isAlive(...)));
+            }
+            $pids[] = getmypid();
+
+            if (\count($pids) > $this->holderSlots || !self::insert($this->scopes, $key, ['pids' => implode(',', $pids)])) {
+                $this->reportFull("scope \"{$scope}\" could not be tracked, so its rows stay until the server stops");
+
+                return false;
+            }
+
+            return true;
+        });
+    }
+
+    /**
+     * Drop one hold of the calling process on $scope, and delete the scope's rows when no holder is left.
+     *
+     * @throws \RuntimeException if the scope lock is not taken in time
+     */
+    public function releaseScope(string $scope): void {
+        $key = self::scopeKey($scope);
+
+        $this->scopeLock->run(self::stripe($key), function () use ($key): void {
+            $pids = $this->holders($key);
+            $at = array_search(getmypid(), $pids, true);
+            if ($at !== false) {
+                unset($pids[$at]);
+            }
+            $this->storeHolders($key, $pids);
+        });
+    }
+
+    /**
+     * Drop the holds of processes that no longer run, deleting the rows of scopes no live process holds. A
+     * worker that crashed or was killed never released its scopes.
+     *
+     * @return int scopes whose rows were deleted
+     */
+    public function removeDeadHolders(): int {
+        /** @var array<int, bool> $alive */
+        $alive = [];
+        $isAlive = static function (int $pid) use (&$alive): bool {
+            return $alive[$pid] ??= self::isAlive($pid);
+        };
+
+        $stale = [];
+        foreach ($this->scopes as $key => $row) {
+            $pids = self::parseHolders((string) $row['pids']);
+            if (\count(array_filter($pids, $isAlive)) < \count($pids) || $pids === []) {
+                $stale[] = (string) $key;
+            }
+        }
+
+        $removed = 0;
+        foreach ($stale as $key) {
+            $removed += $this->scopeLock->run(self::stripe($key), function () use ($key, $isAlive): int {
+                if (!$this->scopes->exists($key)) {
+                    return 0;
+                }
+
+                return $this->storeHolders($key, array_filter($this->holders($key), $isAlive)) ? 1 : 0;
+            });
+        }
+
+        return $removed;
+    }
+
+    /** Number of scopes that hold rows in the store. */
+    public function scopeCount(): int {
+        return \count($this->scopes);
     }
 
     public function get(string $id, mixed $default = null): mixed {
@@ -135,9 +285,11 @@ final class SharedSignalStore {
             );
         }
 
-        if (!\is_array($row)) {
-            // First touch: seed at zero so the increment below is the only mutation.
-            $this->table->set($key, ['kind' => self::KIND_INT, 'n' => 0, 's' => '']);
+        // First touch: seed at zero so the increment below is the only mutation.
+        if (!\is_array($row) && !self::insert($this->table, $key, ['kind' => self::KIND_INT, 'n' => 0, 's' => ''])) {
+            $this->reportFull("increment of \"{$id}\" was dropped");
+
+            return $by;
         }
 
         return (int) $this->table->incr($key, 'n', $by);
@@ -228,6 +380,103 @@ final class SharedSignalStore {
         return substr(sha1($id), 0, 32);
     }
 
+    private static function scopeKey(string $scope): string {
+        return substr(sha1($scope), 0, 32);
+    }
+
+    private static function stripe(string $scopeKey): string {
+        return (string) (hexdec(substr($scopeKey, 0, 6)) % self::SCOPE_LOCK_STRIPES);
+    }
+
+    /**
+     * Table::set() that reports a full table as false. OpenSwoole 26 throws there, older releases return false.
+     *
+     * @param array<string, int|string> $row
+     */
+    private static function insert(Table $table, string $key, array $row): bool {
+        try {
+            return $table->set($key, $row);
+        } catch (Exception) {
+            return false;
+        }
+    }
+
+    private static function isAlive(int $pid): bool {
+        // Signal 0 only checks. It also fails when the ID now belongs to another user's process.
+        return $pid === getmypid() || Process::kill($pid, 0);
+    }
+
+    /** @return list<int> */
+    private static function parseHolders(string $pids): array {
+        return $pids === '' ? [] : array_map(intval(...), explode(',', $pids));
+    }
+
+    /** @return list<int> */
+    private function holders(string $scopeKey): array {
+        $pids = $this->scopes->get($scopeKey, 'pids');
+
+        return \is_string($pids) ? self::parseHolders($pids) : [];
+    }
+
+    /**
+     * Write a scope's holders, or delete the scope's rows when there are none. Runs under the scope lock.
+     *
+     * @param array<int> $pids
+     *
+     * @return bool whether the rows were deleted
+     */
+    private function storeHolders(string $scopeKey, array $pids): bool {
+        if ($pids !== []) {
+            $this->scopes->set($scopeKey, ['pids' => implode(',', $pids)]);
+
+            return false;
+        }
+
+        $count = (int) $this->scopes->get($scopeKey, 'n');
+        for ($i = 0; $i < $count; ++$i) {
+            $row = $this->index->get("{$scopeKey}.{$i}", 'k');
+            if (\is_string($row)) {
+                $this->table->del($row);
+                $this->index->del("{$scopeKey}.{$i}");
+            }
+        }
+        $this->scopes->del($scopeKey);
+
+        return true;
+    }
+
+    /**
+     * List a value row under its scope. Two workers that create the same row at once list it twice, and
+     * deleting it twice does no harm.
+     */
+    private function addToIndex(string $scopeKey, string $key): void {
+        // incr() creates a scope row nobody holds when the signal was attached without holdScope(); a sweep finds
+        // it with no holders and deletes it.
+        // At capacity incr() warns and returns false.
+        $position = (int) @$this->scopes->incr($scopeKey, 'n', 1);
+        if ($position < 1 || !self::insert($this->index, "{$scopeKey}." . ($position - 1), ['k' => $key])) {
+            $this->reportFull('a scoped signal row could not be indexed, so it stays until the server stops');
+        }
+    }
+
+    private function reportFull(string $what): void {
+        ++$this->fullDropped;
+        $now = time();
+        if ($this->reporter === null || $now - $this->fullReportedAt < self::FULL_REPORT_INTERVAL_S) {
+            return;
+        }
+
+        $dropped = $this->fullDropped;
+        $this->fullDropped = 0;
+        $this->fullReportedAt = $now;
+        ($this->reporter)(
+            "Scoped signal table is full: {$what}"
+            . ($dropped > 1 ? \sprintf(' (%d failures since the last report)', $dropped) : '')
+            . '. Values of scoped signals stop reaching the other workers until rows free up. Raise the row count '
+            . 'with Config::withScopedSignalTableSize().'
+        );
+    }
+
     /**
      * Create the row if absent, so incr() never has to allocate under contention.
      * incr() by zero creates a zeroed row atomically; a set() here would reset the ticket, serving
@@ -264,13 +513,23 @@ final class SharedSignalStore {
         return $serialized === '' ? $default : unserialize($serialized);
     }
 
-    private function write(string $key, string $id, mixed $value): void {
+    private function write(string $key, string $id, mixed $value): bool {
         if (\is_int($value)) {
-            $this->table->set($key, ['kind' => self::KIND_INT, 'n' => $value, 's' => '']);
-
-            return;
+            $row = ['kind' => self::KIND_INT, 'n' => $value, 's' => ''];
+        } else {
+            $row = ['kind' => self::KIND_SERIALIZED, 'n' => 0, 's' => $this->serialize($id, $value)];
         }
 
+        if (!self::insert($this->table, $key, $row)) {
+            $this->reportFull("write of \"{$id}\" was dropped");
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private function serialize(string $id, mixed $value): string {
         $serialized = serialize($value);
         if (\strlen($serialized) > $this->maxValueSize) {
             throw new \OverflowException(
@@ -280,6 +539,6 @@ final class SharedSignalStore {
             );
         }
 
-        $this->table->set($key, ['kind' => self::KIND_SERIALIZED, 'n' => 0, 's' => $serialized]);
+        return $serialized;
     }
 }

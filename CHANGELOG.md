@@ -312,6 +312,11 @@ covers the changes that need more than a rename.
   now get no row, a warning is logged at most every 10 s per worker, and actions of those tabs that
   reach another worker answer 400. The sweep of expired rows runs at most once a second. See
   [Same machine](https://via.zweiundeins.gmbh/docs/deployment#same-machine) for sizing.
+- With several workers, the shared table of scoped signal values kept a row for every scoped signal
+  ever declared, so per-entity scopes such as `room:<id>` filled it, and then page views that declared
+  a new one answered 500. A scope's rows now go when the last context that uses it on any worker is
+  destroyed, and a write to a full table is dropped and logged at most every 10 s per worker. See
+  [Same machine](https://via.zweiundeins.gmbh/docs/deployment#shared-tables) for sizing.
 - A revival that arrived while a destroyed context's cleanup callbacks ran could be torn down with
   it. Teardown now removes only entries that still belong to the destroyed context.
 - A revival whose page handler threw left the half-built context in its scopes, with its timers

@@ -747,12 +747,20 @@ myapp.example.com {
             initial value. Keep state that has to survive that in a scoped signal or in <code>tabState()</code>.
         </li>
     </ul>
-    <p>
+    <p id="shared-tables">
         The shared tables are sized at startup. <code>Config::withGlobalStateTableSize()</code> (default
         1&nbsp;024 keys &times; 32&nbsp;KB per value), <code>withScopedSignalTableSize()</code> and
         <code>withContextDirectorySize()</code> tune them. Row counts are a floor: OpenSwoole admits more keys
         than requested, then rejects by hash, and a full GlobalState table throws
         <code>\OverflowException</code>. GlobalState keys are at most 63 characters.
+    </p>
+    <p>
+        The scoped signal table takes one row per scoped signal of every scope that a context on some worker
+        uses, and the row goes when the last such context is destroyed. Size it for the peak: live scopes
+        &times; signals per scope, so 300 open chat rooms with 3 signals each take 900 rows. The default
+        1&nbsp;024 rows covers that. When it is full, a write that needs a new row is dropped and an error that
+        names <code>withScopedSignalTableSize()</code> is logged at most every 10&nbsp;s per worker. The
+        signal's value then no longer reaches the other workers.
     </p>
     <p>
         The context directory keeps a row for every page view until its revival window ends. A page whose
