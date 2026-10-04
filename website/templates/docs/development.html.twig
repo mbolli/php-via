@@ -199,8 +199,9 @@ it('counts clicks', function (): void {
     <p>
         <code>patches()</code> returns what the stream sent since the last call, <code>html()</code> renders the page from
         server state, <code>disconnect(expire: true)</code> and <code>connect()</code> test a revival, and
-        <code>runTasks()</code> runs <code>spawn()</code> tasks and timers. TestApp runs one worker and renders broadcasts at
-        once, without the broadcast tick.
+        <code>runTasks()</code> runs <code>spawn()</code> tasks, and timers such as <code>$c-&gt;setInterval()</code> fire
+        while it does. <code>$app-&gt;setInterval()</code> callbacks never fire in a TestApp: call their work directly.
+        TestApp runs one worker and renders broadcasts at once, without the broadcast tick.
     </p>
 
     <h2 id="your-project">Using this pattern in your project</h2>

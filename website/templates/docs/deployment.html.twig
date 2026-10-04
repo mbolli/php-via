@@ -502,8 +502,8 @@ $config->withEmbeddable('https://parent.example');   // origins allowed to frame
 
     <h3 id="csp">Content Security Policy</h3>
     <p>
-        For a policy with nonces, a global middleware creates the nonce, passes it to php-via in the
-        <code>via.csp_nonce</code> request attribute and sends the header. php-via puts the nonce on every tag of
+        For a policy with nonces, a global middleware creates the nonce and passes it to php-via in the
+        <code>via.csp_nonce</code> request attribute. php-via puts the nonce on every tag of
         <code>via_head</code> and <code>via_foot</code>, the import map included, and on the Dev Bar's tags:
     </p>
     {% code 'php' %}{% verbatim %}
@@ -514,15 +514,19 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 final class CspNonce implements MiddlewareInterface {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
-        $nonce = base64_encode(random_bytes(16));
-        $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
-
-        return $response->withHeader('Content-Security-Policy', "script-src 'nonce-{$nonce}'");
+        return $handler->handle($request->withAttribute('via.csp_nonce', base64_encode(random_bytes(16))));
     }
 }
 
 $app->middleware(new CspNonce());
     {% endverbatim %}{% endcode %}
+    <p>
+        php-via writes the page response itself, so a header the middleware adds to the response it gets back
+        from <code>$handler-&gt;handle()</code> does not reach the browser. Send the policy as a
+        <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> in the head, before <code>via_head</code>.
+        A meta policy cannot set <code>frame-ancestors</code>; <code>withEmbeddable()</code> sends that one as a
+        header.
+    </p>
     <p>
         Datastar reads the nonce from a <code>data-nonce</code> attribute on the <code>&lt;html&gt;</code> element. With it,
         Datastar runs <code>data-*</code> expressions, the scripts of <code>execScript()</code> and <code>dispatch()</code>,
@@ -537,6 +541,7 @@ $app->middleware(new CspNonce());
 <html lang="en" data-nonce="{{ cspNonce }}">
 <head>
     <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{{ cspNonce }}'">
     {{ via_head() }}
 </head>
 <body>
@@ -547,9 +552,13 @@ $app->middleware(new CspNonce());
     {% endverbatim %}{% endcode %}
     {% code 'php' %}{% verbatim %}
 $app->page('/', function (Context $c): void {
-    $c->view('home.html.twig', fn (): array => ['cspNonce' => $c->getRequestAttribute('via.csp_nonce')]);
+    $c->view('home.html.twig', ['cspNonce' => $c->getRequestAttribute('via.csp_nonce')]);
 });
     {% endverbatim %}{% endcode %}
+    <p>
+        Read the nonce once, in the page handler. In an action, <code>getRequestAttribute()</code> returns the
+        action request's own nonce, which the page's policy does not allow.
+    </p>
 
     <h3 id="security-devbar">Dev Bar in production</h3>
     <p>
@@ -709,7 +718,7 @@ myapp.example.com {
         as OpenSwoole restarts it, and every 60&nbsp;s the first worker drops the clients of processes that
         no longer exist.
     </p>
-    <p>
+    <p id="per-worker">
         <strong>What stays per worker.</strong> The server logs these at start-up:
     </p>
     <ul>

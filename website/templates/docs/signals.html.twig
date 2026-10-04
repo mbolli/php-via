@@ -30,7 +30,7 @@ $step  = $c->signal(1, 'step');
 $count->int();      // as int
 $count->string();   // as string; an array comes out as JSON
 $count->float();    // as float
-$count->bool();     // 'true', '1', 'yes' and 'on' are true; other values follow PHP's rules
+$count->bool();     // 'true', '1', 'yes', 'on' are true, other strings false, other types as PHP casts
 $count->array();    // as array
 $count->getValue(); // as stored
 

@@ -770,7 +770,7 @@ class Application {
      *
      * @return bool false when the context has no row there and keeps its tab state itself
      *
-     * @throws \OverflowException if the state would exceed Config::withContextDirectorySize(maxTabStateBytes:)
+     * @throws \OverflowException if the state would exceed the $maxTabStateBytes of Config::withContextDirectorySize()
      * @throws \RuntimeException  if the lock is not taken in time
      */
     public function changeSharedTabState(string $contextId, \Closure $change, string $name): bool {
@@ -840,7 +840,7 @@ class Application {
      *
      * @param array<string, array<string, string>> $state
      *
-     * @throws \OverflowException if it exceeds Config::withContextDirectorySize(maxTabStateBytes:)
+     * @throws \OverflowException if it exceeds the $maxTabStateBytes of Config::withContextDirectorySize()
      */
     public function assertTabStateFits(array $state, string $name): void {
         if ($this->contextDirectory !== null && $this->settings->contextRevivalWindowMs > 0) {

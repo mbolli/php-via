@@ -244,15 +244,17 @@ $c->view(fn (): string => <<<HTML
     {% code 'php' %}{% verbatim %}
 final class CspNonce implements MiddlewareInterface {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
-        $nonce = base64_encode(random_bytes(16));
-        $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
-
-        return $response; // with your Content-Security-Policy header, built from $nonce
+        return $handler->handle($request->withAttribute('via.csp_nonce', base64_encode(random_bytes(16))));
     }
 }
 
 $app->middleware(new CspNonce());
 {% endverbatim %}{% endcode %}
+    <p>
+        A header the middleware adds to the response from <code>$handler-&gt;handle()</code> does not reach a
+        page, so send the policy as a <code>&lt;meta http-equiv&gt;</code> tag:
+        <a href="/docs/deployment#csp">Content Security Policy</a> shows the layout.
+    </p>
 
     <h2 id="patch-elements">Patching HTML outside the view</h2>
     <p>

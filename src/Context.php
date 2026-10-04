@@ -330,7 +330,7 @@ class Context {
      * With one worker, the values live in its memory, and the revival records of destroyed tabs keep
      * up to 64 MiB of them: past that, the oldest records that hold tab state are evicted. With more than
      * one worker, every worker reads the same values from the shared context directory, which caps a tab's
-     * serialized values at Config::withContextDirectorySize(maxTabStateBytes:), 1024 bytes by default.
+     * serialized values at the $maxTabStateBytes of Config::withContextDirectorySize(), 1024 bytes by default.
      * Once the context is destroyed, a write from a spawn() task or an onCleanup() callback goes to its
      * revival record, or to the context that revived it, so the tab reads it on its return.
      *

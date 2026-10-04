@@ -213,7 +213,7 @@ $app->page('/search', function (Context $c) use ($search): void {
         With one worker it stays in memory, and the revival records of destroyed tabs hold up to 64&nbsp;MiB of
         it. With more than one worker every worker reads it from the shared context directory, which holds up
         to 1&nbsp;024 serialized bytes per tab; raise that with
-        <code>withContextDirectorySize(maxTabStateBytes: ...)</code>. A write from a <code>spawn()</code> task
+        <code>withContextDirectorySize(4096, maxTabStateBytes: ...)</code>, where 4096 is the default row count. A write from a <code>spawn()</code> task
         after the tab's context was destroyed still reaches the revived tab.
     </p>
 

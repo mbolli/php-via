@@ -113,9 +113,11 @@ a later change would be ignored or only half applied. Make every with* call befo
 
     <h2 id="removed">Removed and renamed methods</h2>
     <p>
-        Each row's old call throws in 0.14. Calls marked <em>undefined</em> fail with PHP's
-        "Call to undefined method"; the others throw a <code>BadMethodCallException</code> such as
-        "Via::onStart() was removed in php-via 0.14. Use $app->onWorkerStart($fn)...".
+        Each row's old call fails in 0.14, except <code>$app->activeSseCount</code>, which still answers but is
+        internal. Most throw an exception that names the new call, such as "Via::onStart() was removed in php-via
+        0.14. Use $app->onWorkerStart($fn)...". Calls marked <em>undefined</em> fail with PHP's "Call to undefined
+        method", <code>$c->signal($value)</code> and <code>$c->component($fn)</code> with PHP's "Too few
+        arguments", and <code>cacheUpdates:</code> with PHP's "Unknown named parameter".
     </p>
     <table>
         <thead><tr><th>0.13</th><th>0.14</th></tr></thead>
@@ -602,7 +604,8 @@ $auth = $this->app->getSessionData($sessionId, 'auth');
         </li>
         <li>
             <code>tabState()</code> values survive a tab moving to another worker; with several workers each tab has
-            1,024 serialized bytes for them by default (<code>withContextDirectorySize(maxTabStateBytes:)</code>).
+            1,024 serialized bytes for them by default. <code>withContextDirectorySize(4096, maxTabStateBytes: ...)</code>
+            raises that, where 4096 is the default row count.
         </li>
         <li>
             Deploy 0.14 with a full restart, not a worker reload: php-via's own classes load in the master process, and the

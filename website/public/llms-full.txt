@@ -142,9 +142,10 @@ call `markSynced()` after a write the tab already shows. Render a value with
 
 **Ids**: a signal's id is unique per tab and includes the tab for TAB signals, so always
 write it from the signal object: `id()`, `ref()`, `bind()` in PHP, or `{{ count.id }}`,
-`{{ count.ref }}` in Twig. A scoped signal outside a component whose name and scope are
-plain letters and digits keeps a readable id such as `global_count`; every other id ends in
-`____` plus codes. SESSION signal ids carry a hash of the session id. To find a scoped
+`{{ count.ref }}` in Twig. A scoped signal outside a component keeps a readable id when its
+name is letters and digits and its scope is letters and digits joined by `:` or a route of
+such segments: `global_count`, `room_lobby_online` for `room:lobby`, `route___likes` for
+`route:/`. Every other id ends in `____` plus codes. SESSION signal ids carry a hash of the session id. To find a scoped
 signal from code outside a context (a timer), use `$app->getScopedSignalByName($scope, $name)`
 with a resolved scope such as `Scope::routeScope('/board')`.
 
@@ -550,7 +551,8 @@ worker that held the tab stopped. Read-modify-write on shared values loses updat
 workers: use `increment()`/`mutate()` on signals, `incrementGlobalState()`/`mutateGlobalState()`
 on GlobalState, and `#[Signal(..., atomic: true)]` in the composition API. Session data and tab
 state values must be serializable; tab state gets 1,024 serialized bytes per tab by default
-(`withContextDirectorySize(maxTabStateBytes:)`). `withScopedSignalTableSize()`,
+(raise it with `withContextDirectorySize(4096, maxTabStateBytes: ...)`, 4096 being the default
+row count). `withScopedSignalTableSize()`,
 `withContextDirectorySize()`, `withSessionTableSize()` and `withGlobalStateTableSize()` size
 the shared tables. `worker_num` in `withSwooleSettings()` that differs from `withWorkerNum()`
 throws at `start()`.
@@ -774,6 +776,9 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `via_head`, `via_foot` and the Dev Bar carries it. Datastar reads the nonce from
   `<html data-nonce="...">`; without it, it compiles expressions with `Function()`
   (`'unsafe-eval'`) and a nonce policy blocks the scripts of `execScript()` and `dispatch()`.
+  A header middleware adds to the response from `$handler->handle()` does not reach a page:
+  send the policy as `<meta http-equiv="Content-Security-Policy">` in the head, and read the
+  nonce in the page handler, since an action's request carries a nonce of its own.
 - `withDevBar(true)` in production is read-only but shows every visitor's traces, scopes and
   context ids, and the server's stats (`/_via/stats`), to anyone who opens a page.
 - `withActionRateLimit($max, $windowSeconds)` limits actions per IP.
@@ -937,12 +942,13 @@ $tab->signal('count');             // 1, the value the browser holds
 $tab->html();                      // the page from server state
 $tab->disconnect(expire: true);    // destroy the context; connect() or action() revives it
 $app->request('GET', '/api/health'); // a plain request, to a route() or a download() URL
-$app->runTasks();                  // run spawn() tasks and timers
+$app->runTasks();                  // run spawn() tasks; $c->setInterval() timers fire meanwhile
 $app->shutdown();
 ```
 
 TestApp runs php-via's own request, action and SSE handlers in the test's process, with no
 server, no port and no `VIA_TEST_MODE`, as one worker, with broadcasts rendered at once.
+`$app->setInterval()` callbacks never fire in a TestApp: call their work directly.
 
 ---
 
@@ -1033,8 +1039,10 @@ php-via.
     `if ($app->countClients($scope) === 0) return;`.
 14. **Shell templates ignore Twig**: shell HTML files use string placeholders, not Twig; put
     layout logic in `{% extends %}` / `{% block %}` templates.
-15. **Action returns 403**: a POST without an `Origin` header when `withTrustedOrigins()` is
-    set; browsers always send one, scripts need `withAllowMissingOrigin()`.
+15. **Action returns 403**: outside dev mode, a POST without an `Origin` header, with or
+    without `withTrustedOrigins()`; browsers always send one, scripts need
+    `withAllowMissingOrigin()`. An `Origin` that is not in `withTrustedOrigins()`, or without
+    an allowlist does not match the `Host`, gets 403 too.
 16. **Rocket component fails or the page runs two Datastar engines**: enable
     `withDatastarRocket()` and write `via_head`/`via_foot` (`{{ via_head }}` in a shell,
     `{{ via_head() }}` in Twig) instead of an own map or script. Add other modules with

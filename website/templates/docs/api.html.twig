@@ -912,7 +912,8 @@ $c->action(function (Context $c) use ($email, $password, $users): void {
         One worker keeps them in memory, and the revival records of destroyed tabs hold up to 64&nbsp;MiB of
         them. With several workers every worker reads them from the shared context directory, up to 1024
         serialized bytes per tab, past which <code>setTabState()</code> throws an <code>OverflowException</code>:
-        raise it with <code>withContextDirectorySize(maxTabStateBytes:)</code>. A write from a
+        raise it with <code>withContextDirectorySize(4096, maxTabStateBytes: ...)</code>, where 4096 is the default
+        row count. A write from a
         <code>spawn()</code> task or an <code>onCleanup()</code> callback after the context was destroyed still
         reaches the revived tab.
     </p>
@@ -1002,8 +1003,8 @@ $c->traceAttribute('cache.hit', false);
     <h4 id="signal-typed"><code>string(): string</code>, <code>int(): int</code>, <code>float(): float</code>, <code>bool(): bool</code>, <code>array(): array</code></h4>
     <p>
         The value, raw or cast. <code>bool()</code> reads the strings <code>'true'</code>, <code>'1'</code>,
-        <code>'yes'</code> and <code>'on'</code> as true in any case; other values follow PHP's truthiness, so
-        <code>2</code> is true.
+        <code>'yes'</code> and <code>'on'</code> as true in any case, and any other string as false. A value that
+        is not a string follows PHP's truthiness, so <code>2</code> is true.
     </p>
 
     <h3 id="signal-write">Writing</h3>
@@ -1559,11 +1560,16 @@ it('counts clicks', function (): void {
     <h4 id="test-app-open"><code>open(string $path, array $query = [], bool $connect = true): TestTab</code></h4>
     <p>Loads a page in a new browser with a session of its own and, by default, opens its SSE stream. It throws a <code>RuntimeException</code> for a status other than 200.</p>
     <h4 id="test-app-request"><code>request(string $method, string $path, string $body = '', array $headers = []): ResponseInterface</code></h4>
-    <p>A plain HTTP request from a client without cookies, such as an API client calling a <code>route()</code>.</p>
+    <p>
+        A plain HTTP request from a client without cookies, such as an API client calling a <code>route()</code>.
+        A body sent as <code>application/x-www-form-urlencoded</code> reaches <code>getParsedBody()</code>, as on a
+        server; a multipart body does not.
+    </p>
     <h4 id="test-app-run-tasks"><code>runTasks(float $timeoutSeconds = 5.0): void</code></h4>
     <p>
         Runs the event loop until the <code>spawn()</code> tasks have ended and their broadcasts have rendered.
-        Timers fire meanwhile. A task otherwise runs only up to its first wait.
+        Timers fire meanwhile, <code>$c-&gt;setInterval()</code> callbacks included; <code>$app-&gt;setInterval()</code>
+        callbacks never fire in a TestApp. A task otherwise runs only up to its first wait.
     </p>
     <h4 id="test-app-via"><code>via(): Via</code></h4>
     <p>The app's <code>Via</code>, for <code>broadcast()</code>, <code>globalState()</code> and the like.</p>

@@ -380,8 +380,8 @@ final class Signal {
     /**
      * Get value as boolean.
      *
-     * A string is true when it reads 'true', '1', 'yes' or 'on' (any case); any other value
-     * follows PHP's truthiness, so int 2 and float 0.5 are true.
+     * A string is true when it reads 'true', '1', 'yes' or 'on' (any case), and any other string is
+     * false. A value that is not a string follows PHP's truthiness, so int 2 and float 0.5 are true.
      */
     public function bool(): bool {
         $value = $this->store === null ? $this->value : $this->getValue();

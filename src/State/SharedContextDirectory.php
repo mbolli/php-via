@@ -226,8 +226,8 @@ final class SharedContextDirectory {
         if (\strlen($serialized) > $this->maxStateBytes) {
             throw new \OverflowException(
                 'The tab state would take ' . \strlen($serialized) . " bytes after writing {$name}, over the "
-                . "{$this->maxStateBytes} bytes per tab that more than one worker share. Raise it with "
-                . 'Config::withContextDirectorySize(maxTabStateBytes: ...), or keep large values out of tab state.'
+                . "{$this->maxStateBytes} bytes per tab that more than one worker share. Raise it with the "
+                . '$maxTabStateBytes argument of Config::withContextDirectorySize(), or keep large values out of tab state.'
             );
         }
 

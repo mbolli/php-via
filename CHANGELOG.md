@@ -97,8 +97,8 @@ All notable changes to php-via will be documented in this file.
 - **`Config::withLogLevel()` throws for an unknown level,** where it used `info`.
 - **`Config`, `Signal`, `Action` and `Scope` are final.**
 - **The default shell shows its Live Signals panel in dev mode only.**
-- **Renamed, merged and removed methods** throw and name their replacement until 0.15, as listed
-  under Upgrading from 0.13. Internal API is tagged `@internal`, and so are the `Config` getters
+- **Renamed, merged and removed methods** throw, most with a message that names the replacement
+  until 0.15, as listed under Upgrading from 0.13. Internal API is tagged `@internal`, and so are the `Config` getters
   other than `getBasePath()`, `isDevMode()`, `isHttps()`, `getDatastarUrl()`,
   `getDatastarIntegrity()`, `getImportMap()` and `getContextRevivalWindowMs()`.
 
@@ -275,6 +275,8 @@ covers the changes that need more than a rename.
 - On libcurl 8.20 or newer, a curl request crashed the worker under the default hook flags
   (curl#21558). The default leaves `SWOOLE_HOOK_NATIVE_CURL` out there.
 - With `hook_flags` that lack `SWOOLE_HOOK_SLEEP`, an open Dev Bar froze its worker.
+- A page in the browser's back/forward cache kept its Dev Bar stream open. Over HTTP/1.1, a few tabs
+  then held all six connections the browser opens to a host, and navigation and actions stalled.
 - `getStats()->getAll()` read 0 for requests, actions, SSE connections and the active counts.
 - A client that read too slowly could park its SSE stream until it disconnected. Its element frames
   are now dropped until its backlog is empty, and the default `socket_buffer_size` is 2 MiB.

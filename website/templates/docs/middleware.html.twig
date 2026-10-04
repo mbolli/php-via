@@ -61,15 +61,15 @@ $app->middleware(new CorsMiddleware([
     </p>
     {% code 'php' %}{% verbatim %}
 $app->page('/admin', fn (Context $c) => $c->view('admin.html.twig'))
-    ->middleware(new AuthMiddleware());
+    ->middleware(new AuthMiddleware($app));
 
 $app->page('/reports', fn (Context $c) => $c->view('reports.html.twig'))
-    ->middleware(new AuthMiddleware(), new AuditMiddleware());
+    ->middleware(new AuthMiddleware($app), new AuditMiddleware());
 
 $app->group('/account', function (Via $app): void {
     $app->page('/', fn (Context $c) => $c->view('account.html.twig'));
     $app->page('/billing', fn (Context $c) => $c->view('billing.html.twig'));
-})->middleware(new AuthMiddleware());
+})->middleware(new AuthMiddleware($app));
     {% endverbatim %}{% endcode %}
     <p>
         Route middleware runs after the global middleware: global, then route, then the page handler.
@@ -127,7 +127,13 @@ final class AuthMiddleware implements SseAwareMiddleware {
         return $handler->handle($request);
     }
 }
+
+$app->middleware(new AuthMiddleware());
     {% endverbatim %}{% endcode %}
+    <p>
+        The marker counts only for global middleware. Route middleware never runs on an SSE connect, so a
+        tab that was open before a logout keeps its stream until it reloads or its context expires.
+    </p>
 
     <h2 id="request-attributes">Request attributes in handlers and actions</h2>
     <p>
