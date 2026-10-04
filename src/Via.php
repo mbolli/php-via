@@ -1164,6 +1164,13 @@ class Via {
 
             $settings = self::serverSettings($this->settings);
             self::assertHookFlags($settings, $this->broker);
+            $maxQueued = $this->settings->sseMaxQueuedBytes;
+            $socketBuffer = (int) ($settings['socket_buffer_size'] ?? 0);
+            $threshold = SseHandler::dropThreshold($maxQueued, $socketBuffer);
+            if ($threshold < $maxQueued) {
+                $this->log('warning', "withSseMaxQueuedBytes({$maxQueued}) is above half of socket_buffer_size ({$socketBuffer}), so a slow client's element frames are dropped from a backlog of {$threshold} bytes. "
+                    . 'Raise socket_buffer_size with withSwooleSettings() to ' . (2 * $maxQueued) . ' for the threshold you set.');
+            }
             if (((int) ($settings['hook_flags'] ?? 0) & SWOOLE_HOOK_NATIVE_CURL) !== 0 && self::nativeCurlHookCrashes()) {
                 $this->log('warning', 'hook_flags include SWOOLE_HOOK_NATIVE_CURL, and with libcurl 8.20 or newer a curl '
                     . 'request to any hostname crashes the worker. Remove the flag, see https://via.zweiundeins.gmbh/docs/deployment#hooks');

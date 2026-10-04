@@ -289,6 +289,7 @@ covers the changes that need more than a rename.
 - `getStats()->getAll()` read 0 for requests, actions, SSE connections and the active counts.
 - A client that read too slowly could park its SSE stream until it disconnected. Its element frames
   are now dropped until its backlog is empty, and the default `socket_buffer_size` is 2 MiB.
+  `start()` warns when `withSseMaxQueuedBytes()` is above half of it, which caps the threshold.
 - For a client that fell behind, appended and prepended element patches went missing. Only view
   updates are dropped now.
 - Headers a middleware added to the response from `$handler->handle()`, such as

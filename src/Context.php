@@ -1567,8 +1567,9 @@ class Context {
      * A callable that throws is logged and reaches Via::onError() as ErrorPhase::Render, and the browser sees the
      * download fail.
      *
-     * With more than one worker, a request for the URL that reaches another worker is passed to the worker that
-     * holds the context, as an action is (see Config::withContextTimeouts(forwardMs:)).
+     * With more than one worker, the URL carries the id of the worker that made it, and a request for it that reaches
+     * another worker is passed there (see Config::withContextTimeouts(forwardMs:)). Once the tab's stream has moved to
+     * another worker, that worker has destroyed its copy of the context, so the URLs it made answer 404.
      *
      * ```php
      * $url = $c->download(function () use ($rows): \Generator {

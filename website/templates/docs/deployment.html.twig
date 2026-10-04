@@ -648,7 +648,8 @@ $config = (new Config())
         worker only. Passing a request on adds about 0.04&nbsp;ms to it, and a passed action costs the server
         about twice the CPU of one that reaches the tab's worker (0.18 against 0.09&nbsp;ms in a benchmark of
         TAB actions). An upload goes over as it arrived, so <code>file()</code> and <code>move_uploaded_file()</code>
-        work there.
+        work there. A <code>download()</code> URL names the worker that made it, so once the tab's stream has moved
+        to another worker, the URLs made before answer 404.
     </p>
     <p>
         OpenSwoole hands each connection to one worker, and every request on that connection goes there. So which

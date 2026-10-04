@@ -1342,7 +1342,8 @@ $config->withImportMap([], [$config->getDatastarUrl() => $config->getDatastarInt
         instead of waiting for it; the next render sends them again. Once past it, the stream drops them
         until its backlog is empty. Signals, scripts and <code>patchElements()</code> patches are never
         dropped. 0 turns dropping off. A threshold above half of <code>socket_buffer_size</code> (2&nbsp;MiB
-        by default) acts as half of it.
+        by default) acts as half of it, and <code>start()</code> logs a warning that names the buffer size to
+        set with <code>withSwooleSettings()</code>.
     </p>
 
     <h4 id="config-with-broadcast-tick-ms"><code>withBroadcastTickMs(int $ms): Config</code></h4>
