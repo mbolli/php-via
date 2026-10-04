@@ -32,6 +32,10 @@ final class TestRequest extends Request {
         $this->header = ['host' => self::HOST] + $headers;
         $this->cookie = $cookies;
         $this->get = $query === [] ? null : $query;
+        if ($body !== '' && str_starts_with(strtolower($headers['content-type'] ?? ''), 'application/x-www-form-urlencoded')) {
+            parse_str($body, $post);
+            $this->post = $post;
+        }
     }
 
     public function rawContent(): string {

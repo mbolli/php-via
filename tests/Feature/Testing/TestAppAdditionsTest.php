@@ -298,6 +298,19 @@ describe('route()', function (): void {
         ;
     });
 
+    test('a form-urlencoded body reaches getParsedBody(), as on a server, and a JSON body does not', function (): void {
+        $app = additionsApp(static function (Via $via): void {
+            $via->route('POST', '/login', additionsHandler(static fn (ServerRequestInterface $r): ResponseInterface => new Psr7Response(200, [], (string) json_encode($r->getParsedBody()))));
+        });
+
+        $form = $app->request('POST', '/login', 'user=ada&password=love+lace&roles%5B%5D=a', ['Content-Type' => 'application/x-www-form-urlencoded; charset=UTF-8']);
+        $json = $app->request('POST', '/login', '{"user":"ada"}', ['Content-Type' => 'application/json']);
+
+        expect(json_decode((string) $form->getBody(), true))->toBe(['user' => 'ada', 'password' => 'love lace', 'roles' => ['a']])
+            ->and((string) $json->getBody())->toBe('null')
+        ;
+    });
+
     test('a tab request carries its session in via.session', function (): void {
         $app = additionsApp(static function (Via $via): void {
             $via->page('/', static fn (Context $c) => $c->view(static fn (): string => '<p id="h">h</p>'));

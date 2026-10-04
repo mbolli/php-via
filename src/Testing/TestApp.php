@@ -36,8 +36,10 @@ use Psr\Http\Message\ResponseInterface;
  *   one action send two frames where a server may send one; disconnect(expire: true) stands for the
  *   cleanup delay passing
  * - an event loop, except in runTasks(): a coroutine the app starts, such as a Context::spawn() task,
- *   runs only up to its first wait, and setInterval() callbacks and timeouts fire only in runTasks(),
+ *   runs only up to its first wait, and timers, Context::setInterval() included, fire only in runTasks(),
  *   which waits for spawn() tasks and not for coroutines started with Coroutine::create()
+ * - Via::setInterval(): a server arms these timers when a worker starts, and a TestApp never does, so a
+ *   test calls their work directly
  * - the network: no slow clients or dropped frames, and no HTTP/2 stream resets
  * - the browser past its signals: html() renders the page from server state, no DOM applies patches,
  *   and actions post JSON, never a form or a file upload
@@ -90,7 +92,8 @@ final class TestApp {
 
     /**
      * Send a plain HTTP request from a client without cookies, such as an API client calling a Via::route().
-     * TestTab::request() sends one with its browser's cookies, as a download link needs.
+     * TestTab::request() sends one with its browser's cookies, as a download link needs. An
+     * application/x-www-form-urlencoded body reaches PSR-7's getParsedBody() as on a server; a multipart one does not.
      *
      * @param string                $path    the path, with its query string
      * @param array<string, string> $headers by name
@@ -106,8 +109,8 @@ final class TestApp {
      *
      * A task runs inside the action that starts it up to its first wait (a sleep, a Channel, socket I/O); this
      * runs the rest, and the patches its sync() calls queue reach the tabs. Meanwhile time passes as on a
-     * server: timers fire, setInterval() callbacks included, and a task's broadcasts wait for the broadcast
-     * tick and any Config::withBroadcastThrottle().
+     * server: timers fire, Context::setInterval() callbacks included, and a task's broadcasts wait for the
+     * broadcast tick and any Config::withBroadcastThrottle(). Via::setInterval() callbacks never fire here.
      *
      * It waits for spawn() tasks and broadcasts only. A coroutine started with Coroutine::create(), such as an
      * app-wide import or daemon that belongs to no tab, runs only while something else keeps the loop busy: a test
