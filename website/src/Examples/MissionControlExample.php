@@ -259,7 +259,7 @@ final class MissionControlExample {
                 $anyEmitting = \count(array_filter($serviceData, fn (array $s) => $s['isEmitting'])) > 0;
 
                 return [
-                    'title' => '🛰 NATS Visualizer',
+                    'title' => 'NATS Visualizer',
                     'perWorker' => 'the state of the services, the event log and the NATS connection',
                     'description' => 'Four simulated microservices publish events over NATS. Watch Core pub/sub, JetStream persistence, and KV health heartbeats update in real time.',
                     'summary' => self::SUMMARY,

@@ -162,7 +162,7 @@ final class ChatRoomExample {
         });
 
         $c->view('examples/chat_room.html.twig', fn (): array => [
-            'title' => '💬 Chat Room',
+            'title' => 'Chat Room',
             'perWorker' => 'who is in each room',
             'description' => 'Chat: ' . self::$rooms[$room]['name'],
             'summary' => self::SUMMARY,

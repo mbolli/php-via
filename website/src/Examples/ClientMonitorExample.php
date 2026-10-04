@@ -19,7 +19,7 @@ final class ClientMonitorExample {
         $app->page('/examples/client-monitor', function (Context $c) use ($app): void {
             $c->scope(Scope::ROUTE);
             $c->view('examples/client_monitor.html.twig', fn (): array => [
-                'title' => '👁️ Client Monitor',
+                'title' => 'Client Monitor',
                 'description' => 'Live dashboard of connected clients, with identicons and masked IP addresses.',
                 'summary' => [
                     '<strong>Hook-driven updates</strong>: the client list re-renders only when someone connects or disconnects. No polling, no timer, no wasted cycles.',

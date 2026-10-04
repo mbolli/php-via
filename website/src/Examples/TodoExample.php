@@ -39,7 +39,7 @@ final class TodoExample {
 
     public function view(Context $ctx): void {
         $ctx->view('examples/todo.html.twig', fn (): array => [
-            'title' => '✓ Todo List',
+            'title' => 'Todo List',
             'perWorker' => 'the todo list',
             'description' => 'Composition API: a static shared list + a TAB-scoped <code>#[Signal]</code> draft. <code>#[Broadcast(Scope::ROUTE)]</code> makes every action fan out to all viewers.',
             'summary' => [

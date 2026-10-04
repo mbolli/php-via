@@ -139,7 +139,7 @@ final class ContactFormExample {
                 &$submittedFileInfo,
             ): array {
                 return [
-                    'title' => '📬 Contact Form',
+                    'title' => 'Contact Form',
                     'description' => 'Multipart file upload and server-side form validation. The form submits as <code>multipart/form-data</code>; text fields arrive in <code>$c->input()</code>, the file in <code>$c->file()</code>. Per-field errors come back in the form, re-rendered over SSE.',
                     'summary' => [
                         '<strong>No base64 overhead.</strong> Datastar\'s <code>contentType: \'form\'</code> modifier submits the nearest <code>&lt;form enctype="multipart/form-data"&gt;</code> as a real multipart POST: files travel as binary, not JSON blobs.',

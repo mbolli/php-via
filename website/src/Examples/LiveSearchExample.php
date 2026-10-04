@@ -162,7 +162,7 @@ final class LiveSearchExample {
             }, 'search');
 
             $c->view('examples/live_search.html.twig', fn (): array => [
-                'title' => '🔍 Live Search',
+                'title' => 'Live Search',
                 'description' => 'Type to filter PHP stdlib functions server-side. Every keystroke is a round-trip, and nobody shipped a line of search logic to the browser.',
                 'summary' => [
                     '<strong>data-on:input__throttle.100ms.trailing</strong> fires at most once every 100 ms while the user types, and always fires one final time at the end, so the last keystroke is never dropped. No setTimeout written by you.',

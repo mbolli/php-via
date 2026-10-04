@@ -583,7 +583,7 @@ final class SpreadsheetExample {
                     'colNames' => array_map(fn (int $i) => self::colName($vc + $i), range(0, $vpCols - 1)),
                     'myHue' => self::hueForSession($sessionId),
                     'clientCount' => $app->countClients(self::SCOPE),
-                    'title' => '📊 Spreadsheet',
+                    'title' => 'Spreadsheet',
                     'perWorker' => 'the cursors, the selections and a cache of the cells',
                     'description' => 'Collaborative spreadsheet with SQLite persistence, virtual scrolling, and multi-user cursors.',
                     'summary' => [
@@ -711,7 +711,7 @@ final class SpreadsheetExample {
             . ' data-on:blur="$' . $jumpId . ' !== \'\' && @post(\'' . $jumpUrl . '\')"'
             . '>';
         $out .= '<div class="ss-formula-bar">' . $h($focusedCellValue) . '</div>';
-        $out .= '<div class="ss-users">👥 ' . $clientCount . ' connected</div>';
+        $out .= '<div class="ss-users">' . $clientCount . ' connected</div>';
         $out .= '<div class="ss-pos">Row ' . ($fr + 1) . ', Col ' . $h($colDisplay)
             . ' · Viewing from ' . $h(($colNames[0] ?? 'A') . ($vr + 1)) . '</div>';
         $out .= '</div>';

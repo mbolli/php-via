@@ -140,7 +140,7 @@ final class AllScopesExample {
                     }
 
                     return $c->render('examples/all_scopes.html.twig', [
-                        'title' => '📊 All Scopes',
+                        'title' => 'All Scopes',
                         'perWorker' => 'the ROUTE counters',
                         'description' => 'Demonstrates GLOBAL, ROUTE, and TAB scopes side by side.',
                         'summary' => self::SUMMARY,

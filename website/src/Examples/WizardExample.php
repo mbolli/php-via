@@ -109,7 +109,7 @@ final class WizardExample {
             }
 
             return [
-                'title' => '🪄 Multi-step Form',
+                'title' => 'Multi-step Form',
                 'description' => 'Composition API: client inputs are <code>#[Signal]</code>, while the step and validation error are <code>#[Persist]</code>, server-only state that survives between actions and drives the server-side re-render.',
                 'summary' => [
                     '<strong>#[Persist] step &amp; error</strong>: server-controlled state that is never sent to the client and never hydrated from it. Because the class instance lives as long as the tab\'s context, the step survives across Next/Back actions.',

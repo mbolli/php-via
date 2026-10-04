@@ -1819,6 +1819,7 @@ docs-toc {
 .badge-intermediate  { background: var(--yellow-1); color: var(--yellow-8); }
 .badge-advanced      { background: var(--red-1); color: var(--red-7); }
 :is(.badge-beginner, .badge-intermediate, .badge-advanced) { border: 1px solid currentColor; }
+.badge-multiplayer   { color: var(--violet-ink); border: 1px solid currentColor; text-transform: lowercase; letter-spacing: 0.02em; margin-inline-start: 0.4em; }
 
 @media (prefers-color-scheme: dark) {
   .badge-beginner     { background: var(--green-9); color: var(--green-2); }

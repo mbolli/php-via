@@ -23,7 +23,7 @@ final class GreeterExample {
 
     public function view(Context $ctx): void {
         $ctx->view('examples/greeter.html.twig', [
-            'title' => '👋 Greeter',
+            'title' => 'Greeter',
             'description' => 'Composition API: one <code>#[Signal]</code> property and two <code>#[Action]</code> methods make up a small page class. The template gets them by name.',
             'summary' => [
                 '<strong>#[Signal]</strong> turns the <code>$greeting</code> property into a reactive signal. After an action writes <code>$this->greeting</code>, php-via sends the new value to the browser over SSE.',

@@ -21,17 +21,14 @@
 
     <section class="ex-intro-grid">
         <div class="ex-intro-card">
-            <div class="ex-intro-icon">⚡</div>
             <h3>Reactive without JavaScript</h3>
             <p>Signals live on the server. Actions are PHP closures. The browser sends a POST and receives DOM patches over SSE. No client framework required.</p>
         </div>
         <div class="ex-intro-card">
-            <div class="ex-intro-icon">👥</div>
             <h3>Built-in multiplayer</h3>
             <p>Scope signals to a route, a session, or every connected client. Open two tabs and watch them stay in sync automatically.</p>
         </div>
         <div class="ex-intro-card">
-            <div class="ex-intro-icon">🔀</div>
             <h3>MPA navigation</h3>
             <p>Full page loads, real URLs, browser history. No SPA router. SESSION-scoped signals follow the user across every page change.</p>
         </div>
@@ -41,18 +38,27 @@
         <h2>Where to start</h2>
         <dl class="ex-intro-dl">
             <div>
-                <dt><span class="badge badge-beginner">Beginner</span></dt>
-                <dd>Counter, Greeter, Live Search: signals, actions, and two-way binding in under 50 lines of PHP.</dd>
+                <dt>Basics</dt>
+                <dd>Counter, Greeter, Path Parameters, Live Search, Components and Theme Builder: signals, actions, two-way binding and components, each in a few dozen lines of PHP.</dd>
             </div>
             <div>
-                <dt><span class="badge badge-intermediate">Intermediate</span></dt>
-                <dd>Shopping Cart, Login Flow, Multi-step Form, Contact Form: per-session state, PSR-15 middleware, file uploads, and server-side validation.</dd>
+                <dt>Forms and sessions</dt>
+                <dd>Multi-step Form, Contact Form, Login Flow, Shopping Cart and SharedWorker Upload: per-session state, server-side validation, PSR-15 middleware, session rotation and file uploads.</dd>
             </div>
             <div>
-                <dt><span class="badge badge-advanced">Advanced</span></dt>
-                <dd>Chat Room, Game of Life, NATS Visualizer, SharedWorker Upload: custom scope strings, NATS pub/sub, and <code>extendedLifetime</code> SharedWorkers.</dd>
+                <dt>Shared state</dt>
+                <dd>All Scopes, Todo List, Chat Room, Client Monitor and Spreadsheet: state shared by a route, a session or a custom scope. Open them in two tabs.</dd>
+            </div>
+            <div>
+                <dt>Live data and games</dt>
+                <dd>Stock Ticker, Live Auction, Game of Life and Type Race: server timers and broadcasts that every open tab sees at once.</dd>
+            </div>
+            <div>
+                <dt>Several servers</dt>
+                <dd>NATS Visualizer: broadcasts between php-via nodes through NATS.</dd>
             </div>
         </dl>
+        <p>Examples marked <span class="badge badge-multiplayer">multiplayer</span> share their state between visitors: open them in two windows to see it.</p>
     </section>
 
 </article>

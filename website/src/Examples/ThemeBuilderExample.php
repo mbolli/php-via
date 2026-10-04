@@ -63,7 +63,7 @@ final class ThemeBuilderExample {
 
     public function view(Context $ctx): void {
         $ctx->view('examples/theme_builder.html.twig', fn (): array => [
-            'title' => '🎨 Theme Builder',
+            'title' => 'Theme Builder',
             'description' => 'Composition API: undo/redo history lives in a <code>#[Persist]</code> array (per-tab server state, no signals). Click swatches to repaint the preview card server-side.',
             'summary' => [
                 '<strong>#[Persist] history</strong>: the undo/redo stack is a plain instance array. Each tab gets its own instance, so no static maps keyed by context id are needed; the state is freed with the tab\'s context.',

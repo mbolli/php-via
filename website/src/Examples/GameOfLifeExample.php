@@ -72,7 +72,7 @@ final class GameOfLifeExample {
                 $runningEmoji = $running ? '⏸️' : '▶️';
 
                 return [
-                    'title' => '🎮 Game of Life',
+                    'title' => 'Game of Life',
                     'perWorker' => 'the board',
                     'description' => 'Multiplayer Conway\'s Game of Life. Click to draw, watch patterns evolve.',
                     'summary' => [

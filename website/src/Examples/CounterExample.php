@@ -30,7 +30,7 @@ final class CounterExample {
             }, 'reset');
 
             $c->view('examples/counter.html.twig', [
-                'title' => '⚡ Counter',
+                'title' => 'Counter',
                 'description' => 'Counter with configurable step. Uses data-bind for two-way input binding.',
                 'summary' => [
                     '<strong>Signals</strong> hold reactive state. The count and the step are signals, and their new values reach the page over the SSE stream.',

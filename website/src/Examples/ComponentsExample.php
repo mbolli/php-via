@@ -38,7 +38,7 @@ final class ComponentsExample {
 
             // Rendered with the page, so a page re-render carries the counters' current HTML.
             $c->view('examples/components.html.twig', fn (): array => [
-                'title' => '🧩 Components',
+                'title' => 'Components',
                 'description' => 'Three independent counters on one page. Each is an isolated component with its own signals.',
                 'summary' => [
                     '<strong>Components</strong> are sub-contexts with isolated state. Define a component once and instantiate it multiple times: each gets its own signals and actions.',

@@ -56,7 +56,7 @@ final class CompositionDemo {
 
         // The widgets render with the page, so a page re-render carries their current votes.
         $ctx->view('examples/composition.html.twig', fn (): array => [
-            'title' => '🏗️ Composition API',
+            'title' => 'Composition API',
             'description' => 'Class-based page and component API using PHP attributes: <code>#[Signal]</code>, <code>#[Signal(Scope::SESSION)]</code>, <code>#[Signal(Scope::GLOBAL)]</code>, <code>#[Persist]</code>, and <code>#[Action]</code>.',
             'summary' => [
                 '<strong>#[Signal]</strong> creates a TAB-scoped reactive signal backed by a client-visible store entry. Client-writable via <code>data-bind</code>. Each browser tab has its own isolated copy.',

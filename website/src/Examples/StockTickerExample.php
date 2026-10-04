@@ -64,7 +64,7 @@ final class StockTickerExample {
         $app->page('/examples/stock-ticker', function (Context $c): void {
             $c->scope(Scope::ROUTE);
             $c->view('examples/stock_dashboard.html.twig', fn (): array => [
-                'title' => '📈 Stock Ticker',
+                'title' => 'Stock Ticker',
                 'description' => 'Real-time stock price simulation with live chart updates every 2 seconds.',
                 'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,
@@ -79,7 +79,7 @@ final class StockTickerExample {
             $stock = self::$stocks[$symbol] ?? null;
             if ($stock === null) {
                 $c->view('examples/stock_not_found.html.twig', [
-                    'title' => '📈 Stock Ticker',
+                    'title' => 'Stock Ticker',
                     'description' => 'Stock not found.',
                     'perWorker' => 'the prices',
                     'summary' => self::SUMMARY,
@@ -99,7 +99,7 @@ final class StockTickerExample {
 
             // Rendered once: the signals carry every later change.
             $c->view(fn (bool $isUpdate): string => $isUpdate ? '' : $c->render('examples/stock_detail.html.twig', [
-                'title' => '📈 Stock Ticker',
+                'title' => 'Stock Ticker',
                 'description' => $symbol . ' · ' . $stock['name'],
                 'perWorker' => 'the prices',
                 'summary' => self::SUMMARY,

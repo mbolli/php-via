@@ -266,7 +266,7 @@ final class TypeRaceExample {
                 $raceId = self::$contextRace[$contextId] ?? '';
 
                 return [
-                    'title' => '⌨️ Type Race',
+                    'title' => 'Type Race',
                     'perWorker' => 'the races',
                     'description' => 'Race to type a PHP snippet first. Progress, WPM, and countdown all live-update for every racer, no client logic.',
                     'summary' => self::SUMMARY,
