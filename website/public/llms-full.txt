@@ -776,6 +776,10 @@ https://via.zweiundeins.gmbh/docs/deployment#hooks
   `via_head`, `via_foot` and the Dev Bar carries it. Datastar reads the nonce from
   `<html data-nonce="...">`; without it, it compiles expressions with `Function()`
   (`'unsafe-eval'`) and a nonce policy blocks the scripts of `execScript()` and `dispatch()`.
+  The default shell writes `data-nonce` when the page request has a nonce; a custom shell
+  writes `<html{{ via_html_attrs }}>`, a Twig layout `<html{{ via_html_attrs() }}>`. Both write
+  nothing without a nonce and in update renders. Dev mode warns about a page with a nonce and
+  no `data-nonce`.
   The middleware sends the policy as a header on the response from `$handler->handle()`, or
   the layout as `<meta http-equiv="Content-Security-Policy">` in the head. Read the nonce in
   the page handler, since an action's request carries a nonce of its own.
@@ -857,7 +861,7 @@ Datastar attributes in templates, with ids written from the signal objects:
 `{{ via_head() }}` right after `<meta charset>` and `{{ via_foot() }}` before `</body>`; a
 closure that returns a document writes `$c->viaHead()` and `$c->viaFoot()`. A shell template
 (`withShellTemplate()`) uses string placeholders, not Twig: `{{ via_head }}`, `{{ via_foot }}`,
-`{{ head_content }}`, `{{ content }}`, `{{ foot_content }}`, `{{ base_path }}`,
+`{{ via_html_attrs }}` (on `<html>`), `{{ head_content }}`, `{{ content }}`, `{{ foot_content }}`, `{{ base_path }}`,
 `{{ context_id }}`, and `{{ name }}` / `{{ name.id }}` per signal. A layout that loads its own
 Datastar bundle keeps its script, leaves out `via_foot`, and leaves `withDatastarRocket()` and
 `withImportMap()` off. php-via warns once per shell or route without `via_head`. In a template

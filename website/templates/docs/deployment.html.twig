@@ -517,7 +517,7 @@ final class CspNonce implements MiddlewareInterface {
         $nonce = base64_encode(random_bytes(16));
         $response = $handler->handle($request->withAttribute('via.csp_nonce', $nonce));
 
-        return $response->withHeader('Content-Security-Policy', "script-src 'nonce-{$nonce}'; object-src 'none'; base-uri 'none'");
+        return $response->withHeader('Content-Security-Policy', "default-src 'self'; script-src 'nonce-{$nonce}'; object-src 'none'; base-uri 'none'");
     }
 }
 
@@ -536,16 +536,17 @@ $app->middleware(new CspNonce());
         Datastar runs <code>data-*</code> expressions, the scripts of <code>execScript()</code> and <code>dispatch()</code>,
         and the reload php-via sends a tab it cannot rebuild, through script elements that carry the nonce. Without it,
         Datastar compiles expressions with <code>Function()</code>, which needs <code>'unsafe-eval'</code> in
-        <code>script-src</code>, and a nonce policy blocks those scripts. The default shell and shell templates have no
-        placeholder for the attribute, so write the document in a Twig layout and pass the nonce in:
+        <code>script-src</code>, and a nonce policy blocks those scripts. The default shell writes the attribute when the
+        page request carries a nonce. A shell of your own writes it with
+        {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %}, a Twig layout with
+        {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
     </p>
     {% code 'twig' %}{% verbatim %}
 {# layout.html.twig #}
 <!DOCTYPE html>
-<html lang="en" data-nonce="{{ cspNonce }}">
+<html lang="en"{{ via_html_attrs() }}>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{{ cspNonce }}'">
     {{ via_head() }}
 </head>
 <body>
@@ -554,14 +555,10 @@ $app->middleware(new CspNonce());
 </body>
 </html>
     {% endverbatim %}{% endcode %}
-    {% code 'php' %}{% verbatim %}
-$app->page('/', function (Context $c): void {
-    $c->view('home.html.twig', ['cspNonce' => $c->getRequestAttribute('via.csp_nonce')]);
-});
-    {% endverbatim %}{% endcode %}
     <p>
-        Read the nonce once, in the page handler. In an action, <code>getRequestAttribute()</code> returns the
-        action request's own nonce, which the page's policy does not allow.
+        With the policy above, the default shell, a shell with the placeholder and this layout run the counter,
+        <code>dispatch()</code> and <code>execScript()</code> in Chromium with no CSP errors. See
+        <a href="/docs/twig#csp">Templates → Content-Security-Policy</a> for a callable that returns a whole document.
     </p>
 
     <h3 id="security-devbar">Dev Bar in production</h3>

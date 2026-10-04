@@ -165,6 +165,10 @@ covers the changes that need more than a rename.
   copied from the default shell, and carry the page request's `via.csp_nonce`. php-via warns about
   a shell without `via_head` or with a second Datastar script. See
   [Templates](https://via.zweiundeins.gmbh/docs/twig#bootstrap).
+- **`data-nonce` on `<html>`.** Datastar runs expressions and server scripts under a nonce policy
+  without `'unsafe-eval'` once `<html>` carries the nonce. The default shell writes it when the page
+  request has `via.csp_nonce`, a custom shell with `{{ via_html_attrs }}` and a Twig layout with
+  `{{ via_html_attrs() }}`. See [Templates](https://via.zweiundeins.gmbh/docs/twig#csp).
 - **`Config::withTemplateEngine()`** registers a `Rendering\TemplateEngine`; `Twig\TwigEngine` is
   php-via's. See [Templates](https://via.zweiundeins.gmbh/docs/twig#own-engine).
 - **`$c->patchElements($html, $selector, $mode)`** sends HTML outside a view render, with a

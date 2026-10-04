@@ -56,6 +56,9 @@ class Context {
     /** Whether update renders are shared by every context of this view in its primary scope */
     private bool $shareRender = false;
 
+    /** Set while an update render runs: Datastar read the page's data-nonce at the page load and dropped it */
+    private bool $renderingUpdate = false;
+
     /** Memo of viewKey() */
     private ?string $viewKey = null;
 
@@ -1077,7 +1080,7 @@ class Context {
 
     /**
      * Render a template with this context's data: its named signals and actions, '_via',
-     * contextId, currentRoute, basePath, and via_head and via_foot. Explicit $data wins.
+     * contextId, currentRoute, basePath, via_html_attrs, via_head and via_foot. Explicit $data wins.
      *
      * @param array<string, mixed> $data  Data to pass to the template
      * @param null|string          $block Optional block name to render only that block
@@ -1153,13 +1156,19 @@ class Context {
             throw new \LogicException("view(shareRender: true) on {$this->route} has no scope to share the render in: its primary scope is TAB. Call \$c->scope(...) with the shared scope, or drop shareRender.");
         }
 
-        return $this->app->getViewRenderer()->renderView(
-            $this->viewFn,
-            $isUpdate,
-            $scope,
-            $this,
-            $this->route
-        );
+        $this->renderingUpdate = $isUpdate;
+
+        try {
+            return $this->app->getViewRenderer()->renderView(
+                $this->viewFn,
+                $isUpdate,
+                $scope,
+                $this,
+                $this->route
+            );
+        } finally {
+            $this->renderingUpdate = false;
+        }
     }
 
     /**
@@ -1769,12 +1778,17 @@ class Context {
     }
 
     /**
-     * via_head and via_foot as template data, built only when a template prints them.
+     * via_html_attrs, via_head and via_foot as template data, built only when a template prints them. An update
+     * render leaves data-nonce out, so a morph of the document does not put back what Datastar removed.
      *
-     * @return array{via_head: Html, via_foot: Html}
+     * @return array{via_html_attrs: Html, via_head: Html, via_foot: Html}
      */
     private function documentData(): array {
-        return ['via_head' => new Html($this->viaHead(...)), 'via_foot' => new Html($this->viaFoot(...))];
+        return [
+            'via_html_attrs' => new Html(fn (): string => $this->renderingUpdate ? '' : Bootstrap::htmlAttributes($this->getPageContext()->cspNonce())),
+            'via_head' => new Html($this->viaHead(...)),
+            'via_foot' => new Html($this->viaFoot(...)),
+        ];
     }
 
     /**

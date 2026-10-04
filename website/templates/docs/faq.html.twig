@@ -188,7 +188,7 @@
             "name": "Datastar stops working under a Content-Security-Policy",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Datastar runs data-* expressions through the Function constructor, which needs 'unsafe-eval', and scripts the server sends need 'strict-dynamic'. Fix: set a nonce in the via.csp_nonce request attribute, which via_head and via_foot write, and allow 'nonce-…' 'strict-dynamic' 'unsafe-eval', or put data-nonce on the <html> element of a whole-document layout and allow the nonce alone."
+                "text": "Without data-nonce on the <html> element, Datastar runs data-* expressions through the Function constructor, which needs 'unsafe-eval', and a nonce policy blocks the scripts the server sends. Fix: set a nonce in the via.csp_nonce request attribute and allow the nonce alone. via_head and via_foot write it on their tags, and the default shell writes data-nonce on <html>; a custom shell needs <html{{ via_html_attrs }}> and a Twig layout <html{{ via_html_attrs() }}>."
             }
         },
         {
@@ -246,13 +246,14 @@
             With a policy in place, the console shows <code>EvalError</code> or <code>GenerateExpression</code>
             errors, or scripts sent with <code>execScript()</code> never run.
         </p>
-        <p><strong>Why:</strong> Datastar runs every <code>data-*</code> expression through the
-        <code>Function</code> constructor, which needs <code>'unsafe-eval'</code>. Scripts the server sends are
-        created by Datastar and need <code>'strict-dynamic'</code> next to the nonce.</p>
-        <p><strong>Fix:</strong> Set a nonce in the <code>via.csp_nonce</code> request attribute, which
-        <code>via_head</code> and <code>via_foot</code> write on their tags, and allow
-        <code>'nonce-…' 'strict-dynamic' 'unsafe-eval'</code>. Without <code>'unsafe-eval'</code>, a layout that
-        renders the whole document puts <code>data-nonce</code> on its <code>&lt;html&gt;</code> element. See
+        <p><strong>Why:</strong> Without <code>data-nonce</code> on the <code>&lt;html&gt;</code> element, Datastar
+        runs every <code>data-*</code> expression through the <code>Function</code> constructor, which needs
+        <code>'unsafe-eval'</code>, and a nonce policy blocks the scripts the server sends.</p>
+        <p><strong>Fix:</strong> Set a nonce in the <code>via.csp_nonce</code> request attribute and allow the
+        nonce alone. <code>via_head</code> and <code>via_foot</code> write it on their tags, and the default shell
+        writes <code>data-nonce</code> on <code>&lt;html&gt;</code>. A custom shell needs
+        {% verbatim %}<code>&lt;html{{ via_html_attrs }}&gt;</code>{% endverbatim %}, a Twig layout
+        {% verbatim %}<code>&lt;html{{ via_html_attrs() }}&gt;</code>{% endverbatim %}. See
         <a href="/docs/twig#csp">Templates → Content-Security-Policy</a>.</p>
     </details>
 

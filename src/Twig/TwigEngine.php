@@ -18,10 +18,10 @@ use Twig\TwigFunction;
  * Twig templates for php-via, registered with Config::withTemplateEngine(new TwigEngine($dir)).
  *
  * Templates are autoescaped as HTML and strict about undefined variables. They get the functions
- * bind(signal, prop), dump(), via_head() and via_foot(), and the basePath global, which Via sets to
- * Config::getBasePath() so that renders outside a context, such as a notFound() page, can read it.
- * There via_head() and via_foot() write what needs no page, the import map and the Datastar script,
- * without a nonce, so such a page can use the site's layout.
+ * bind(signal, prop), dump(), via_html_attrs(), via_head() and via_foot(), and the basePath global, which
+ * Via sets to Config::getBasePath() so that renders outside a context, such as a notFound() page, can read
+ * it. There via_head() and via_foot() write what needs no page, the import map and the Datastar script,
+ * without a nonce, and via_html_attrs() nothing, so such a page can use the site's layout.
  * environment() is the Twig Environment, for extensions, runtime loaders, globals and templates
  * held as strings.
  */
@@ -48,6 +48,7 @@ final class TwigEngine implements TemplateEngine {
 
         $this->twig->addGlobal('basePath', '/');
         // Via sets these to the parts that need no page; declared now, since Twig takes no new global once it renders.
+        $this->twig->addGlobal('via_html_attrs', null);
         $this->twig->addGlobal('via_head', null);
         $this->twig->addGlobal('via_foot', null);
         $this->twig->addFunction(new TwigFunction(
@@ -59,7 +60,7 @@ final class TwigEngine implements TemplateEngine {
             static fn (mixed ...$vars): string => '<pre>' . htmlspecialchars(print_r($vars, true), ENT_QUOTES, 'UTF-8') . '</pre>',
             ['is_safe' => ['html']],
         ));
-        foreach (['via_head', 'via_foot'] as $name) {
+        foreach (['via_html_attrs', 'via_head', 'via_foot'] as $name) {
             $this->twig->addFunction(new TwigFunction(
                 $name,
                 static fn (array $context): string => self::documentPart($context, $name),

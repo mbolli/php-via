@@ -390,8 +390,9 @@ class Via {
         $this->requestHandler->setRequestLogger($this->requestLogger);
 
         if ($templateEngine instanceof TwigEngine) {
-            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_head and via_foot.
+            // For renders outside a context, such as notFound() pages; a context passes its own basePath, via_html_attrs, via_head and via_foot.
             $templateEngine->environment()->addGlobal('basePath', $this->settings->basePath);
+            $templateEngine->environment()->addGlobal('via_html_attrs', new Html(''));
             $templateEngine->environment()->addGlobal('via_head', new Html($this->settings->importMapTag()));
             $templateEngine->environment()->addGlobal('via_foot', new Html(Bootstrap::foot($this->settings->datastarUrl, null)));
         }

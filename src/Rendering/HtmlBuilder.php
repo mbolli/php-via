@@ -99,6 +99,8 @@ class HtmlBuilder {
                 ]);
             }
 
+            $this->checkNonce($this->checkedDocuments, $route . "\0nonce", $content, $context, "The document rendered for {$route} has no data-nonce on <html>, so Datastar runs expressions through Function(), which a CSP with a nonce blocks: write <html{{ via_html_attrs() }}> (Twig).");
+
             return $this->checkImportMaps($this->injectIntoDocument($content, $context, initial: true), $context);
         }
 
@@ -132,6 +134,7 @@ class HtmlBuilder {
             '{{ signals_json }}' => $signalsJson,
             '{{ context_id }}' => $contextId,
             '{{ base_path }}' => $basePath,
+            '{{ via_html_attrs }}' => Bootstrap::htmlAttributes($context->cspNonce()),
             '{{ via_head }}' => str_contains($shell, '{{ via_head }}') ? $context->viaHead() : '',
             '{{ head_content }}' => implode("\n", $headIncludes),
             '{{ content }}' => $content,
@@ -150,6 +153,7 @@ class HtmlBuilder {
                 "Shell {$shellPath} loads a Datastar script of its own next to via_head's import map, which maps 'datastar' to Config::getDatastarUrl(), so modules that import 'datastar' start a second Datastar engine: write {{ via_foot }} in place of the script.",
             ]);
         }
+        $this->checkNonce($this->checkedShells, $shellPath . "\0nonce", $html, $context, "Shell {$shellPath} has no data-nonce on <html>, so Datastar runs expressions through Function(), which a CSP with a nonce blocks: write <html{{ via_html_attrs }}>.");
 
         return $this->checkImportMaps($html, $context);
     }
@@ -244,6 +248,20 @@ class HtmlBuilder {
             $this->warnOnce($checked, $key, $problem, $context);
         } elseif (!$this->devMode) {
             $checked[$key] = true;
+        }
+    }
+
+    /**
+     * In dev mode, warn once per key about a page whose request carries a CSP nonce and whose <html> has no data-nonce.
+     *
+     * @param array<string, true> $checked keys warned about
+     */
+    private function checkNonce(array &$checked, string $key, string $html, Context $context, string $message): void {
+        if (!$this->devMode || isset($checked[$key]) || ($context->cspNonce() ?? '') === '') {
+            return;
+        }
+        if (preg_match('/<html\b[^>]*\sdata-nonce\s*=/i', $html) !== 1) {
+            $this->warnOnce($checked, $key, $message, $context);
         }
     }
 

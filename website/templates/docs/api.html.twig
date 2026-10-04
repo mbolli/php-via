@@ -1507,8 +1507,8 @@ $config->withBroadcastThrottle('import:*', 250);
     <h3 id="html"><code>Rendering\Html</code></h3>
     <h4 id="html-to-string"><code>__toString(): string</code></h4>
     <p>
-        Trusted markup in the template data: <code>via_head</code> and <code>via_foot</code> arrive as
-        <code>Html</code>. An engine prints it unescaped, so an autoescaping engine marks the class safe, as
+        Trusted markup in the template data: <code>via_html_attrs</code>, <code>via_head</code> and
+        <code>via_foot</code> arrive as <code>Html</code>. An engine prints it unescaped, so an autoescaping engine marks the class safe, as
         <code>TwigEngine</code> does. php-via builds these; apps only print them.
     </p>
 
@@ -1520,8 +1520,9 @@ $config->withBroadcastThrottle('import:*', 250);
     <p>
         Twig templates from <code>$templateDir</code>, compiled into <code>$cacheDir</code> or in memory. Templates
         are autoescaped as HTML and strict about undefined variables, and get the functions
-        <code>bind()</code>, <code>dump()</code>, <code>via_head()</code> and <code>via_foot()</code> and the
-        <code>basePath</code> global. <code>environment()</code> is the <code>Twig\Environment</code>, which
+        <code>bind()</code>, <code>dump()</code>, <code>via_html_attrs()</code>, <code>via_head()</code> and
+        <code>via_foot()</code> and the <code>basePath</code> global. <code>via_html_attrs()</code> writes
+        <code>data-nonce</code> for the page's <code>&lt;html&gt;</code> under a CSP nonce. <code>environment()</code> is the <code>Twig\Environment</code>, which
         <code>$app-&gt;getTwig()</code> returns too. The constructor throws a <code>LogicException</code> when
         <code>twig/twig</code> is not installed.
     </p>

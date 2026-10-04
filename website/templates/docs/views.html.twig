@@ -253,7 +253,10 @@ $app->middleware(new CspNonce());
     <p>
         The middleware sends the policy as a header on the response it gets back from
         <code>$handler-&gt;handle()</code>, or the layout carries it in a <code>&lt;meta http-equiv&gt;</code>
-        tag: <a href="/docs/deployment#csp">Content Security Policy</a> shows both.
+        tag. Datastar takes the nonce from <code>data-nonce</code> on <code>&lt;html&gt;</code>, which the default
+        shell writes, a custom shell with {% verbatim %}<code>{{ via_html_attrs }}</code>{% endverbatim %} and a
+        Twig layout with {% verbatim %}<code>{{ via_html_attrs() }}</code>{% endverbatim %}:
+        <a href="/docs/deployment#csp">Content Security Policy</a> shows the layout.
     </p>
 
     <h2 id="patch-elements">Patching HTML outside the view</h2>
