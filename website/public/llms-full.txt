@@ -1,6 +1,6 @@
 # php-via: Full LLM Reference
 
-**Version**: 0.14.0 (MIT) | **Requires**: PHP 8.4+, ext-openswoole 26
+**Version**: 0.14.1 (MIT) | **Requires**: PHP 8.4+, ext-openswoole 26
 **Install**: `composer require mbolli/php-via`, plus `composer require twig/twig` for Twig templates
 **Homepage**: https://via.zweiundeins.gmbh/
 **GitHub**: https://github.com/mbolli/php-via
