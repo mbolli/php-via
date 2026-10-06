@@ -55,6 +55,7 @@ class Context {
 
     /** Whether update renders are shared by every context of this view in its primary scope */
     private bool $shareRender = false;
+    private bool|string $viewTransition = false;
 
     /** Set while an update render runs: Datastar read the page's data-nonce at the page load and dropped it */
     private bool $renderingUpdate = false;
@@ -1028,15 +1029,17 @@ class Context {
      * ($isUpdate, $basePath), or view('template.html.twig', $data, $block), which renders a
      * template through the engine from Config::withTemplateEngine() or withTemplateDir().
      *
-     * @param callable(bool, string): string|string                 $view        Function that returns HTML, or a template name
-     * @param array<string, mixed>|callable(): array<string, mixed> $data        Template data, or a callable that builds it on every render. Template views only.
-     * @param null|string                                           $block       Block rendered on SSE updates instead of the whole template; the initial page load always renders the whole template. Template views only.
-     * @param bool                                                  $shareRender Render each update once for every context of this view (same primary scope, route and component) instead of once per context. Only for views that are identical for every tab: TAB signals, per-user data or components inside the view make the shared HTML wrong for the others. Needs a primary scope set with scope(). A full-document view never shares its render.
+     * @param callable(bool, string): string|string                 $view           Function that returns HTML, or a template name
+     * @param array<string, mixed>|callable(): array<string, mixed> $data           Template data, or a callable that builds it on every render. Template views only.
+     * @param null|string                                           $block          Block rendered on SSE updates instead of the whole template; the initial page load always renders the whole template. Template views only.
+     * @param bool                                                  $shareRender    Render each update once for every context of this view (same primary scope, route and component) instead of once per context. Only for views that are identical for every tab: TAB signals, per-user data or components inside the view make the shared HTML wrong for the others. Needs a primary scope set with scope(). A full-document view never shares its render.
+     * @param bool|string                                           $viewTransition Apply each update inside a view transition: true for the whole document, a CSS selector to scope it to that element. The page load and the render on SSE connect have none.
      *
-     * @throws \InvalidArgumentException when $data or $block is passed with a callable, or the template name is markup
+     * @throws \InvalidArgumentException when $data or $block is passed with a callable, the template name is markup, or $viewTransition is an empty selector or has a line break
      * @throws \LogicException           for a template without a template engine, or $block with an engine that renders no blocks
      */
-    public function view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false): void {
+    public function view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false, bool|string $viewTransition = false): void {
+        self::assertViewTransition($viewTransition, 'view()');
         if (\is_string($view)) {
             if (str_contains($view, '<')) {
                 throw new \InvalidArgumentException('view() takes a template name as a string, not markup. Return the HTML from a callable instead: $c->view(fn () => \'<div>...</div>\').');
@@ -1056,6 +1059,7 @@ class Context {
         }
 
         $this->shareRender = $shareRender;
+        $this->viewTransition = $viewTransition;
     }
 
     /**
@@ -1086,6 +1090,16 @@ class Context {
      */
     public function shouldShareRender(): bool {
         return $this->shareRender;
+    }
+
+    /**
+     * How view() asked for update renders to be applied: false, true for a document view transition, or the
+     * selector of the element a scoped one runs on.
+     *
+     * @internal
+     */
+    public function viewTransition(): bool|string {
+        return $this->viewTransition;
     }
 
     /**
@@ -1492,6 +1506,20 @@ class Context {
     }
 
     /**
+     * sync() without the view transition view() asked for: the render a stream sends when it connects
+     * matches the page already shown, and a transition on it would only block input while it runs.
+     *
+     * @internal Called by SseHandler and PatchManager
+     */
+    public function syncWithoutViewTransition(): void {
+        if ($this->destroyed) {
+            return;
+        }
+
+        $this->patchManager->sync(viewTransition: false);
+    }
+
+    /**
      * Sync for a broadcast fan-out that began reading state at read epoch $epoch.
      *
      * @internal Called by Via
@@ -1600,9 +1628,13 @@ class Context {
      * again: a full queue drops them last, and a client that falls behind gets them all. Does nothing once
      * the context is destroyed.
      *
-     * @throws \InvalidArgumentException when there is neither HTML nor a selector, the mode needs a selector, or the selector has a line break
+     * $viewTransition applies the patch inside a view transition: true for the whole document, a CSS selector
+     * to scope it to that element.
+     *
+     * @throws \InvalidArgumentException when there is neither HTML nor a selector, the mode needs a selector, or a selector is empty or has a line break
      */
-    public function patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void {
+    public function patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer, bool|string $viewTransition = false): void {
+        self::assertViewTransition($viewTransition, 'patchElements()');
         if ($html === '' && ($selector ?? '') === '') {
             throw new \InvalidArgumentException('patchElements() needs HTML, a selector, or both.');
         }
@@ -1620,6 +1652,9 @@ class Context {
         $patch = ['type' => 'elements', 'content' => $html, 'mode' => $mode];
         if ($selector !== null && $selector !== '') {
             $patch['selector'] = $selector;
+        }
+        if ($viewTransition !== false) {
+            $patch['viewTransition'] = $viewTransition;
         }
 
         $this->patchManager->queuePatch($patch);
@@ -1745,7 +1780,7 @@ class Context {
      *
      * @internal Called by Via during SSE event streaming
      *
-     * @return null|array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void}
+     * @return null|array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, viewTransition?: string|true, confirm?: callable(): void}
      */
     public function getPatch(): ?array {
         return $this->patchManager->getPatch();
@@ -1965,5 +2000,11 @@ class Context {
         }
 
         return $signals;
+    }
+
+    private static function assertViewTransition(bool|string $viewTransition, string $method): void {
+        if (\is_string($viewTransition) && (trim($viewTransition) === '' || strpbrk($viewTransition, "\r\n") !== false)) {
+            throw new \InvalidArgumentException("{$method} takes true or a CSS selector as viewTransition, not an empty string or one with a line break.");
+        }
     }
 }

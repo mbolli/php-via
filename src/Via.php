@@ -79,7 +79,7 @@ use Twig\Environment;
  * Not designed for extension.
  */
 class Via {
-    public const string VERSION = '0.14.0';
+    public const string VERSION = '0.14.1';
 
     /** See noFileIoHookFlags(): 1790 on OpenSwoole 26.2. */
     private const int NO_FILE_IO_HOOKS = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG
@@ -2162,7 +2162,7 @@ class Via {
      *
      * @internal called by Forwarder on a handover
      *
-     * @return array{patches: list<array{type: string, content: string, selector?: string, mode?: string}>, signals: array<string, mixed>}
+     * @return array{patches: list<array{type: string, content: string, selector?: string, mode?: string, viewTransition?: string|true}>, signals: array<string, mixed>}
      */
     public function releaseHandedOver(string $contextId): array {
         $context = $this->contexts[$contextId] ?? null;
@@ -2219,6 +2219,10 @@ class Via {
             $mode = \is_string($patch['mode'] ?? null) ? PatchMode::tryFrom($patch['mode']) : null;
             if ($mode !== null) {
                 $queued['mode'] = $mode;
+            }
+            $viewTransition = $patch['viewTransition'] ?? null;
+            if ($viewTransition === true || (\is_string($viewTransition) && $viewTransition !== '')) {
+                $queued['viewTransition'] = $viewTransition;
             }
             $context->getPatchManager()->queuePatch($queued);
         }

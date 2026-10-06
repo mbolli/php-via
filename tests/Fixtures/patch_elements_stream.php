@@ -9,6 +9,7 @@ declare(strict_types=1);
  * argv[1] picks the case:
  *   wire     the SSE frames patchElements() produces, and a datastar-php mode queued by hand
  *   backlog  a client whose send queue is over the threshold: which element patches the loop drops
+ *   transition  view transitions: patchElements() with one, and the update renders of a view that asks for one
  *
  * Prints one "key=value" per line.
  */
@@ -84,9 +85,9 @@ $app = $case === 'backlog'
     ? new BackloggedVia($config, new BackloggedServer('127.0.0.1', FixturePort::pick(4600, 150)))
     : new Via($config);
 
-Coroutine::run(static function () use ($app): void {
+Coroutine::run(static function () use ($app, $case): void {
     $context = new Context('tab', '/p', $app);
-    $context->view(static fn (): string => '<main id="page">page</main>');
+    $context->view(static fn (): string => '<main id="page">page</main>', viewTransition: $case === 'transition' ? '#page' : false);
     $app->contexts['tab'] = $context;
     $app->getApp()->registerContext($context);
 
@@ -99,16 +100,29 @@ Coroutine::run(static function () use ($app): void {
         Coroutine::create(static fn () => (new SseHandler($app))->handleSSE($request, $response));
         Coroutine::usleep(30_000);
 
-        $context->patchElements('<li>chunk 1</li>', '#log', PatchMode::Append);
-        $context->patchElements('<p>modal</p>', '#modal', PatchMode::Inner);
-        $context->patchElements(selector: '#toast', mode: PatchMode::Remove);
-        $context->patchElements('<li>chunk 2</li>', '#log', PatchMode::Prepend);
-        $context->getPatchManager()->queuePatch(['type' => 'elements', 'content' => '<li>chunk 3</li>', 'selector' => '#log', 'mode' => ElementPatchMode::After]);
-        Coroutine::usleep(50_000);
+        if ($case === 'transition') {
+            $context->patchElements('<div id="toast">Saved</div>', viewTransition: true);
+            $context->patchElements('<li>1</li>', '#log', PatchMode::Append, viewTransition: '#log');
+            $context->sync();
+            Coroutine::usleep(50_000);
+
+            foreach (explode("\n\n", $response->body) as $frame) {
+                if (str_contains($frame, 'page</main>') && !str_contains($frame, 'useViewTransition')) {
+                    echo 'initial_frame=', str_replace("\n", '|', preg_replace('/^(event|id|retry): .*\n/m', '', $frame)), "\n";
+                }
+            }
+        } else {
+            $context->patchElements('<li>chunk 1</li>', '#log', PatchMode::Append);
+            $context->patchElements('<p>modal</p>', '#modal', PatchMode::Inner);
+            $context->patchElements(selector: '#toast', mode: PatchMode::Remove);
+            $context->patchElements('<li>chunk 2</li>', '#log', PatchMode::Prepend);
+            $context->getPatchManager()->queuePatch(['type' => 'elements', 'content' => '<li>chunk 3</li>', 'selector' => '#log', 'mode' => ElementPatchMode::After]);
+            Coroutine::usleep(50_000);
+        }
 
         $frames = array_values(array_filter(
             explode("\n\n", $response->body),
-            static fn (string $frame): bool => str_contains($frame, 'datastar-patch-elements') && !str_contains($frame, 'page</main>'),
+            static fn (string $frame): bool => str_contains($frame, 'datastar-patch-elements') && (!str_contains($frame, 'page</main>') || str_contains($frame, 'useViewTransition')),
         ));
         echo 'frames=', count($frames), "\n";
         foreach ($frames as $i => $frame) {

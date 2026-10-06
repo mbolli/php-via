@@ -419,7 +419,7 @@ class SseHandler {
         $synced = true;
 
         try {
-            $context->sync();
+            $context->syncWithoutViewTransition();
             // Confirm the connection even when the sync had nothing to send: it clears the
             // shell's reconnect banner ($_disconnected) and flushes the headers now, not at
             // the first keep-alive.
@@ -731,7 +731,7 @@ class SseHandler {
     /**
      * Send SSE patch to client using Datastar SDK.
      *
-     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, confirm?: callable(): void} $patch
+     * @param array{type: string, content: mixed, selector?: string, mode?: ElementPatchMode|PatchMode, viewTransition?: string|true, confirm?: callable(): void} $patch
      */
     private function sendSSEPatch(SwooleSSEGenerator $sse, array $patch): string {
         $type = $patch['type'];
@@ -741,11 +741,14 @@ class SseHandler {
         if ($mode instanceof PatchMode) {
             $mode = ElementPatchMode::from($mode->value);
         }
+        $viewTransition = $patch['viewTransition'] ?? null;
 
         return match ($type) {
             'elements' => $sse->patchElements($content, array_filter([
                 'selector' => $selector,
                 'mode' => $mode,
+                'useViewTransition' => $viewTransition !== null,
+                'viewTransitionSelector' => \is_string($viewTransition) ? $viewTransition : null,
             ])),
             'signals' => $sse->patchSignals($content),
             'script' => $sse->executeScript($content),

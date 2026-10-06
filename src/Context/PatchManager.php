@@ -24,7 +24,7 @@ use starfederation\datastar\enums\ElementPatchMode;
  * - Script execution
  * - Signal nesting/flattening
  *
- * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, mode?: PatchMode|ElementPatchMode, confirm?: callable(): void}
+ * @phpstan-type QueuedPatch array{type: string, content: mixed, selector?: string, mode?: PatchMode|ElementPatchMode, viewTransition?: string|true, confirm?: callable(): void}
  */
 class PatchManager {
     private const int CHANNEL_CAPACITY = 50;
@@ -260,8 +260,10 @@ class PatchManager {
 
     /**
      * Sync current view and signals to the browser.
+     *
+     * @param bool $viewTransition false leaves out the view transition view() asked for, as on the render a stream sends when it connects
      */
-    public function sync(): void {
+    public function sync(bool $viewTransition = true): void {
         $context = $this->context();
         $page = $this->componentManager->getParentPageContext() ?? $context;
         if ($this->isHeldForSeed($page)) {
@@ -293,20 +295,24 @@ class PatchManager {
         if (!empty(trim($viewHtml))) {
             if (!$isPage) {
                 $cssId = DomId::component($this->contextId);
-                $wrappedHtml = '<div id="' . $cssId . '">' . $viewHtml . '</div>';
-                $this->queuePatch([
+                $patch = [
                     'type' => 'elements',
-                    'content' => $wrappedHtml,
+                    'content' => '<div id="' . $cssId . '">' . $viewHtml . '</div>',
                     'selector' => '#' . $cssId,
-                ]);
+                ];
             } else {
                 // For pages: Datastar matches by the root element's id in the fragment
-                $this->queuePatch([
+                $patch = [
                     'type' => 'elements',
                     'content' => $viewHtml,
-                ]);
+                ];
                 $pageFrame = $viewHtml;
             }
+            $transition = $viewTransition ? $context->viewTransition() : false;
+            if ($transition !== false) {
+                $patch['viewTransition'] = $transition;
+            }
+            $this->queuePatch($patch);
         }
 
         // Sync signals
@@ -338,7 +344,7 @@ class PatchManager {
                 if ($componentSignals->hasSignals() && !$componentSignals->hasChangedSignals()) {
                     continue;
                 }
-                $component->sync();
+                $viewTransition ? $component->sync() : $component->syncWithoutViewTransition();
             }
         }
     }
@@ -477,7 +483,7 @@ class PatchManager {
      * Take the queued patches that no render sends again (isOneShot()), for the worker a tab moved to, with their
      * mode as its value. The other patches are dropped: the new worker's first sync sends view and signals.
      *
-     * @return list<array{type: string, content: string, selector?: string, mode?: string}>
+     * @return list<array{type: string, content: string, selector?: string, mode?: string, viewTransition?: string|true}>
      */
     public function takeOneShotPatches(): array {
         if ($this->useArray) {
@@ -499,6 +505,9 @@ class PatchManager {
             }
             if (isset($patch['mode'])) {
                 $one['mode'] = $patch['mode']->value;
+            }
+            if (isset($patch['viewTransition'])) {
+                $one['viewTransition'] = $patch['viewTransition'];
             }
             $taken[] = $one;
         }

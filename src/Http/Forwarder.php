@@ -227,8 +227,8 @@ final class Forwarder {
     /**
      * Send the new home of a tab what its previous home handed over, see Via::releaseHandedOver().
      *
-     * @param list<array{type: string, content: string, selector?: string, mode?: string}> $patches
-     * @param array<string, mixed>                                                         $signals by signal id
+     * @param list<array{type: string, content: string, selector?: string, mode?: string, viewTransition?: string|true}> $patches
+     * @param array<string, mixed>                                                                                       $signals by signal id
      */
     public function sendHandedOver(int $workerId, string $contextId, array $patches, array $signals): void {
         if ($patches === [] && $signals === []) {

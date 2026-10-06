@@ -2,6 +2,15 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [0.14.1] - 2026-10-06
+
+### Added
+
+- **View transitions.** `view(..., viewTransition: true)` and `patchElements(..., viewTransition: true)`
+  apply an update inside a view transition, and a CSS selector scopes it to that element. The render a
+  stream sends when it connects has none. See
+  [View transitions](https://via.zweiundeins.gmbh/docs/views#view-transitions).
+
 ## [0.14.0] - 2026-10-04
 
 ### Highlights
