@@ -300,10 +300,11 @@ $c->patchElements('<div id="toast">Saved</div>', viewTransition: true);
 {% endverbatim %}{% endcode %}
     <p>
         Give the elements that should move between states a <code>view-transition-name</code> in CSS; the
-        rest cross-fades. While a document transition runs, its
-        overlay covers the page and takes the clicks, and a new transition skips the one still running. Leave it
-        off for views that update several times a second, such as a ticker, or scope it to the element that
-        changes.
+        rest cross-fades. While a document transition runs, its overlay covers the page and takes the clicks,
+        and a new transition skips the one still running, so rows jump to their place instead of gliding. For a
+        scope that many visitors update, <code>Config::withBroadcastThrottle()</code> with an interval longer
+        than the transition lets each one finish: the <a href="/examples/leaderboard">Leaderboard</a> example
+        uses 400&nbsp;ms. Leave transitions off for views that update several times a second, such as a ticker.
     </p>
     <p>
         Navigating between pages needs no server support: php-via loads every page in full, so
