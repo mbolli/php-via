@@ -14,7 +14,7 @@ use Mbolli\PhpVia\PatchMode;
  *
  * @internal
  *
- * @phpstan-type WirePatch array{type: 'elements', html: string, selector: null|string, mode: PatchMode}|array{type: 'signals', signals: array<array-key, mixed>, onlyIfMissing: bool}
+ * @phpstan-type WirePatch array{type: 'elements', html: string, selector: null|string, mode: PatchMode, viewTransition?: string|true}|array{type: 'signals', signals: array<array-key, mixed>, onlyIfMissing: bool}
  */
 final class SseReader {
     private string $buffer = '';
@@ -54,12 +54,18 @@ final class SseReader {
         }
 
         if ($type === 'datastar-patch-elements') {
-            return [
+            $patch = [
                 'type' => 'elements',
                 'html' => implode("\n", $data['elements'] ?? []),
                 'selector' => $data['selector'][0] ?? null,
                 'mode' => PatchMode::tryFrom($data['mode'][0] ?? 'outer') ?? PatchMode::Outer,
             ];
+            // Only a patch that asks for a view transition carries the key.
+            if (($data['useViewTransition'][0] ?? 'false') === 'true') {
+                $patch['viewTransition'] = $data['viewTransitionSelector'][0] ?? true;
+            }
+
+            return $patch;
         }
 
         if ($type === 'datastar-patch-signals') {

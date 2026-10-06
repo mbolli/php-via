@@ -223,7 +223,7 @@ Views render a context's HTML. They run on page load, on `$c->sync()`, on every 
 and on every broadcast flush that reaches the context.
 
 ```php
-// view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false)
+// view(callable|string $view, array|callable $data = [], ?string $block = null, bool $shareRender = false, bool|string $viewTransition = false)
 
 // Closure view returning HTML
 $c->view(fn (): string => '<p id="hello">Hello</p>');
@@ -252,6 +252,11 @@ components.
 Pass changing data as a closure, as above. An array computed in the page handler is frozen
 at page load.
 
+`viewTransition: true` applies each update inside a view transition, and a CSS selector scopes
+it to that element. The page load and the render on SSE connect have none. Leave it off for
+views that update several times a second: a document transition's overlay takes the clicks
+while it runs.
+
 Every update, and every SSE connect and reconnect, morphs the view into the page, which sets
 each element's attributes to the server's markup. An attribute the browser set itself, such
 as the `open` that `showModal()` puts on a `<dialog>`, would go, so list it in
@@ -268,6 +273,7 @@ use Mbolli\PhpVia\PatchMode;
 
 $c->patchElements('<li>new row</li>', '#log', PatchMode::Append); // Outer and Replace need no selector
 $c->patchElements(selector: '#toast', mode: PatchMode::Remove);
+$c->patchElements('<div id="toast">Saved</div>', viewTransition: true); // or a selector to scope it
 $c->dispatch('toast', ['text' => 'Saved']);   // CustomEvent on window: data-on:toast__window="..."
 $c->execScript('console.log("hi")');
 $c->isConnected();                            // the tab's stream is open on this worker

@@ -2162,7 +2162,7 @@ class Via {
      *
      * @internal called by Forwarder on a handover
      *
-     * @return array{patches: list<array{type: string, content: string, selector?: string, mode?: string}>, signals: array<string, mixed>}
+     * @return array{patches: list<array{type: string, content: string, selector?: string, mode?: string, viewTransition?: string|true}>, signals: array<string, mixed>}
      */
     public function releaseHandedOver(string $contextId): array {
         $context = $this->contexts[$contextId] ?? null;
@@ -2219,6 +2219,10 @@ class Via {
             $mode = \is_string($patch['mode'] ?? null) ? PatchMode::tryFrom($patch['mode']) : null;
             if ($mode !== null) {
                 $queued['mode'] = $mode;
+            }
+            $viewTransition = $patch['viewTransition'] ?? null;
+            if ($viewTransition === true || (\is_string($viewTransition) && $viewTransition !== '')) {
+                $queued['viewTransition'] = $viewTransition;
             }
             $context->getPatchManager()->queuePatch($queued);
         }

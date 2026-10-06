@@ -63,3 +63,14 @@ test('a CR in HTML, a script or a selector cannot end the data line and start fi
         ])
     ;
 });
+
+test('an element patch that asks for a view transition carries it, as true or its selector', function (): void {
+    $sse = new SwooleSSEGenerator();
+    $frames = $sse->patchElements('<div id="toast">Saved</div>', ['useViewTransition' => true])
+        . $sse->patchElements('<li>1</li>', ['selector' => '#log', 'mode' => ElementPatchMode::Append, 'useViewTransition' => true, 'viewTransitionSelector' => '#log']);
+
+    expect((new SseReader())->read($frames))->toBe([
+        ['type' => 'elements', 'html' => '<div id="toast">Saved</div>', 'selector' => null, 'mode' => PatchMode::Outer, 'viewTransition' => true],
+        ['type' => 'elements', 'html' => '<li>1</li>', 'selector' => '#log', 'mode' => PatchMode::Append, 'viewTransition' => '#log'],
+    ]);
+});

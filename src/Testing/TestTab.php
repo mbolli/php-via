@@ -15,7 +15,7 @@ use Psr\Http\Message\ResponseInterface;
  * stream sends updates them, and every action and connect sends them back, as Datastar does. Name a
  * signal or an action as the page handler names it, and a component's as 'namespace.name'.
  *
- * @phpstan-type Patch array{type: 'elements', html: string, selector: null|string, mode: PatchMode}|array{type: 'signals', signals: array<string, mixed>}
+ * @phpstan-type Patch array{type: 'elements', html: string, selector: null|string, mode: PatchMode, viewTransition?: string|true}|array{type: 'signals', signals: array<string, mixed>}
  */
 final class TestTab {
     private string $contextId;
@@ -35,7 +35,7 @@ final class TestTab {
     private ?Context $streamContext = null;
     private SseReader $reader;
 
-    /** @var list<array{type: 'elements', html: string, selector: null|string, mode: PatchMode}|array{type: 'signals', signals: array<array-key, mixed>, onlyIfMissing: bool}> */
+    /** @var list<array{type: 'elements', html: string, selector: null|string, mode: PatchMode, viewTransition?: string|true}|array{type: 'signals', signals: array<array-key, mixed>, onlyIfMissing: bool}> */
     private array $received = [];
 
     /**

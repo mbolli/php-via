@@ -35,6 +35,17 @@ test('each patch goes out as a Datastar frame with its selector and mode', funct
     ;
 });
 
+test('a view transition goes out with patchElements() and update renders, but not with the render on connect', function (): void {
+    $r = patchElementsStream('transition');
+
+    expect($r['frames'] ?? null)->toBe('3', $r['out'])
+        ->and($r['initial_frame'] ?? null)->toBe('data: elements <main id="page">page</main>')
+        ->and($r['frame0'])->toBe('data: useViewTransition true|data: elements <div id="toast">Saved</div>')
+        ->and($r['frame1'])->toBe('data: selector #log|data: mode append|data: useViewTransition true|data: viewTransitionSelector #log|data: elements <li>1</li>')
+        ->and($r['frame2'])->toBe('data: useViewTransition true|data: viewTransitionSelector #page|data: elements <main id="page">page</main>')
+    ;
+});
+
 test('a client that has fallen behind loses view frames, never a patchElements() patch', function (): void {
     $r = patchElementsStream('backlog');
 

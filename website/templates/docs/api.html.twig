@@ -554,7 +554,7 @@ $inc = $c->action(function (Context $c) use ($count): void {
 
     <h3 id="context-views">Views and templates</h3>
 
-    <h4 id="context-view"><code>view(callable|string $view, callable|array $data = [], ?string $block = null, bool $shareRender = false): void</code></h4>
+    <h4 id="context-view"><code>view(callable|string $view, callable|array $data = [], ?string $block = null, bool $shareRender = false, bool|string $viewTransition = false): void</code></h4>
     <p>
         Defines what the tab shows: a callable that returns HTML, or a template name rendered by the
         <a href="#templates">template engine</a>. A template gets the context's named signals and actions
@@ -583,6 +583,12 @@ $c->view('page.html.twig', fn (): array => ['items' => $repo->all()], block: 'li
 $c->scope(Scope::routeScope('/board'));
 $c->view('board.html.twig', fn (): array => ['cells' => $board->cells()], shareRender: true);
     {% endverbatim %}{% endcode %}
+    <p>
+        <code>viewTransition</code> applies each update inside a view transition: <code>true</code> for the
+        whole document, or a CSS selector for a transition scoped to that element. The page load and the render
+        a stream sends when it connects have none. An empty selector or one with a line break throws an
+        <code>InvalidArgumentException</code>. See <a href="/docs/views#view-transitions">View transitions</a>.
+    </p>
 
     <h4 id="context-render"><code>render(string $template, array $data = [], ?string $block = null): string</code></h4>
     <p>
@@ -637,7 +643,7 @@ $c->appendToHead('<title>My Page</title>', '<meta name="description" content="..
         Both do nothing once the context is destroyed.
     </p>
 
-    <h4 id="context-patch-elements"><code>patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer): void</code></h4>
+    <h4 id="context-patch-elements"><code>patchElements(string $html = '', ?string $selector = null, PatchMode $mode = PatchMode::Outer, bool|string $viewTransition = false): void</code></h4>
     <p>
         Sends HTML to the page outside a view render, such as a modal, a toast or a chunk of streamed output.
         Without a selector, <code>Outer</code> and <code>Replace</code> match the top-level elements of
@@ -645,7 +651,8 @@ $c->appendToHead('<title>My Page</title>', '<meta name="description" content="..
         <code>Remove</code> needs no HTML. Patches queue until the stream is open, and none is dropped for a
         client that falls behind, since no render sends it again. A component's patches go to its page. A
         selector with a line break throws an <code>InvalidArgumentException</code>, since it would end the SSE
-        line: check a selector built from input.
+        line: check a selector built from input. <code>viewTransition</code> applies the patch inside a
+        <a href="/docs/views#view-transitions">view transition</a>, as on <code>view()</code>.
     </p>
     {% code 'php' %}{% verbatim %}
 use Mbolli\PhpVia\PatchMode;

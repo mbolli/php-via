@@ -28,7 +28,7 @@ $c->view('todo.html.twig', ['todos' => $todos]);
 $c->view('todo.html.twig', fn (): array => ['todos' => $repository->all()]);
 {% endverbatim %}{% endcode %}
     <p>
-        The signature is <code>view($view, $data = [], ?string $block = null, bool $shareRender = false)</code>.
+        The signature is <code>view($view, $data = [], ?string $block = null, bool $shareRender = false, bool|string $viewTransition = false)</code>.
         <code>$data</code> and <code>block:</code> go with a template name: a callable view with either throws,
         and so does a string of HTML in place of a template name.
     </p>
@@ -282,6 +282,33 @@ $c->patchElements(selector: '#toast', mode: PatchMode::Remove);
         behind gets them all. A component's patches go to its page. The next render of the view morphs the
         view's own elements back to its HTML, so patch elements outside the view, or keep what you add in the
         state the view renders.
+    </p>
+
+    <h2 id="view-transitions">View transitions</h2>
+    <p>
+        <code>viewTransition: true</code> on <code>view()</code> or <code>patchElements()</code> asks Datastar to
+        apply the patch inside the browser's
+        <a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API" target="_blank" rel="noopener">View Transition API</a>.
+        A CSS selector instead of <code>true</code> scopes the transition to that element. The page load and the
+        render a stream sends when it connects have no transition, since they show what the page already shows.
+        A browser without view transitions, or without scoped ones for a selector, applies the patch without one.
+    </p>
+    {% code 'php' %}{% verbatim %}
+$c->view('gallery.html.twig', viewTransition: true);         // every update animates
+$c->view('board.html.twig', viewTransition: '#board');       // scoped to #board
+$c->patchElements('<div id="toast">Saved</div>', viewTransition: true);
+{% endverbatim %}{% endcode %}
+    <p>
+        Give the elements that should move between states a <code>view-transition-name</code> in CSS; the
+        rest cross-fades. While a document transition runs, its
+        overlay covers the page and takes the clicks, and a new transition skips the one still running. Leave it
+        off for views that update several times a second, such as a ticker, or scope it to the element that
+        changes.
+    </p>
+    <p>
+        Navigating between pages needs no server support: php-via loads every page in full, so
+        <code>@view-transition { navigation: auto; }</code> in the stylesheet animates it in browsers that
+        support transitions between documents.
     </p>
 
     <h2 id="components">Views in components</h2>
