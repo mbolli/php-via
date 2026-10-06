@@ -762,6 +762,7 @@ class RequestHandler {
             private bool $handled = false;
 
             /**
+             * @param callable              $pageHandler
              * @param array<string, string> $params
              */
             public function __construct(
@@ -769,7 +770,6 @@ class RequestHandler {
                 private Request $swooleRequest,
                 private Response $swooleResponse,
                 private string $route,
-                /** @var callable */
                 private mixed $pageHandler,
                 private array $params,
                 private string $method,
