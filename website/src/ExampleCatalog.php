@@ -33,6 +33,7 @@ final class ExampleCatalog {
         ['name' => 'Shared state', 'multiplayer' => true, 'items' => [
             ['route' => 'examples/all-scopes', 'label' => 'All Scopes', 'blurb' => 'Compare a status for everyone, a counter per page and a message per tab.'],
             ['route' => 'examples/todo', 'label' => 'Todo List', 'blurb' => 'Add, tick off and delete todos on a list every visitor shares.'],
+            ['route' => 'examples/leaderboard', 'label' => 'Leaderboard', 'blurb' => 'Vote toppings up a shared list and watch the rows glide to their new rank.'],
             ['route' => 'examples/chat-room', 'label' => 'Chat Room', 'blurb' => 'Chat with other visitors in one of several rooms.'],
             ['route' => 'examples/client-monitor', 'label' => 'Client Monitor', 'blurb' => 'Watch open connections appear and disappear as tabs come and go.'],
             ['route' => 'examples/spreadsheet', 'label' => 'Spreadsheet', 'blurb' => 'Edit cells together with others and see where their cursors are.'],

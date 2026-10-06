@@ -2521,6 +2521,149 @@ docs-toc {
   max-inline-size: unset;
 }
 
+/* ─── Leaderboard example ──────────────────────────────── */
+.lb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-3);
+}
+.lb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-3);
+}
+.lb-sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2);
+}
+.lb-sort-label {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-0);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.example-demo :is(.lb-sort-btn, .lb-vote, .lb-remove, .lb-reset) {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  box-shadow: 2px 2px 0 0 var(--shadow-hard);
+}
+.example-demo :is(.lb-sort-btn, .lb-vote, .lb-remove, .lb-reset):active { transform: translate(2px, 2px); box-shadow: none; }
+.example-demo .lb-sort-btn:not(.is-active) {
+  --btn-fill: var(--surface-1);
+  --btn-hover: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+.example-demo .lb-remove {
+  --btn-fill: var(--surface-1);
+  --btn-hover: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.example-demo .lb-remove:hover { color: var(--on-brand); }
+
+.lb-row {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "rank name votes vote remove";
+  align-items: center;
+  gap: var(--size-2) var(--size-3);
+  padding: var(--size-2) var(--size-3);
+  max-inline-size: none;
+  margin-block-end: var(--size-2);
+  background: var(--surface-1);
+  border: 2px solid var(--border);
+  box-shadow: 3px 3px 0 0 var(--shadow-hard);
+}
+.lb-rank {
+  grid-area: rank;
+  display: grid;
+  place-items: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  font-family: var(--font-ui);
+  font-weight: var(--font-weight-7);
+  background: var(--surface-3);
+  border: 2px solid var(--border-strong);
+}
+.lb-row.is-first .lb-rank {
+  background: var(--brand-accent);
+  border-color: var(--brand-accent);
+  color: var(--on-brand);
+}
+.lb-name {
+  grid-area: name;
+  font-weight: var(--font-weight-6);
+  overflow-wrap: anywhere;
+}
+.lb-votes {
+  grid-area: votes;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-0);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.lb-votes strong {
+  font-size: var(--font-size-1);
+  color: var(--violet-ink);
+}
+.lb-vote { grid-area: vote; }
+.lb-remove { grid-area: remove; }
+.lb-empty {
+  padding: var(--size-4);
+  border: 2px dashed var(--border-strong);
+  max-inline-size: none;
+  color: var(--text-3);
+  text-align: center;
+}
+.lb-add {
+  display: flex;
+  gap: var(--size-2);
+}
+.lb-add-input { flex: 1; }
+.lb-meta {
+  margin: 0;
+  max-inline-size: none;
+  font-size: var(--font-size-0);
+  color: var(--text-3);
+}
+
+/* On a phone the buttons stack at the right of the name and the votes */
+@media (max-width: 34rem) {
+  .lb-row {
+    grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "rank name vote"
+      "rank votes remove";
+  }
+  .example-demo :is(.lb-vote, .lb-remove) { min-inline-size: 5.5rem; }
+}
+
+/* The transitions of this page: rows glide, a new row slides in, a removed one fades out */
+:root:has(#leaderboard)::view-transition-group(*) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+:root:has(#leaderboard)::view-transition-new(*):only-child { animation: lb-slide-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+:root:has(#leaderboard)::view-transition-old(*):only-child { animation: lb-fade-out 200ms ease-in both; }
+@keyframes lb-slide-in {
+  from { opacity: 0; transform: translateX(-2rem); }
+}
+@keyframes lb-fade-out {
+  to { opacity: 0; transform: scale(0.96); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:has(#leaderboard)::view-transition-group(*),
+  :root:has(#leaderboard)::view-transition-old(*),
+  :root:has(#leaderboard)::view-transition-new(*) { animation: none; }
+}
+
 /* ─── Chat room example ────────────────────────────────── */
 .chat-layout {
   display: flex;

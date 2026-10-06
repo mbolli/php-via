@@ -34,6 +34,7 @@ php-via is a PHP library (MIT) that turns a standard PHP process into a persiste
 - [Counter](https://via.zweiundeins.gmbh/examples/counter): Minimal signal + action in under 20 lines
 - [Greeter](https://via.zweiundeins.gmbh/examples/greeter): Two-way data binding with a text input
 - [Todo](https://via.zweiundeins.gmbh/examples/todo): List management with add/complete/delete
+- [Leaderboard](https://via.zweiundeins.gmbh/examples/leaderboard): Shared voting list whose rows glide to their new rank in a view transition
 - [Components](https://via.zweiundeins.gmbh/examples/components): Sub-context composition with isolated state
 - [Composition](https://via.zweiundeins.gmbh/examples/composition): Class-based page and components with attributes
 - [All scopes](https://via.zweiundeins.gmbh/examples/all-scopes): TAB vs ROUTE vs SESSION vs GLOBAL side by side
