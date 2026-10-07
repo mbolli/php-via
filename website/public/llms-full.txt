@@ -253,9 +253,10 @@ Pass changing data as a closure, as above. An array computed in the page handler
 at page load.
 
 `viewTransition: true` applies each update inside a view transition, and a CSS selector scopes
-it to that element. The page load and the render on SSE connect have none. Leave it off for
-views that update several times a second: a document transition's overlay takes the clicks
-while it runs.
+it to that element. The page load and the render on SSE connect have none. A document
+transition's overlay takes the clicks while it runs, and a new one skips the running one: for a
+busy scope, `Config::withBroadcastThrottle($scope, 400)` (longer than the transition) lets each
+finish. Leave it off for views that update several times a second.
 
 Every update, and every SSE connect and reconnect, morphs the view into the page, which sets
 each element's attributes to the server's markup. An attribute the browser set itself, such

@@ -35,7 +35,7 @@ if (!$cacheDeclReady) {
 /** @return list<string> Mirrors website/routes.php. */
 function cacheDeclExampleClasses(): array {
     return [
-        'CounterExample', 'CompositionDemo', 'GreeterExample', 'TodoExample', 'ComponentsExample',
+        'CounterExample', 'CompositionDemo', 'GreeterExample', 'TodoExample', 'LeaderboardExample', 'ComponentsExample',
         'PathParamsExample', 'StockTickerExample', 'ChatRoomExample', 'ClientMonitorExample', 'AllScopesExample',
         'GameOfLifeExample', 'SpreadsheetExample', 'LiveSearchExample', 'ShoppingCartExample', 'ThemeBuilderExample',
         'WizardExample', 'LoginExample', 'ContactFormExample', 'FileUploadExample', 'LiveAuctionExample',

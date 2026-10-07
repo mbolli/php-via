@@ -1,0 +1,56 @@
+{% extends 'examples/_wrapper.html.twig' %}
+
+{% block demo %}
+<div id="leaderboard" class="lb">
+    <div class="lb-toolbar">
+        <div class="lb-sort" role="group" aria-label="Sort this tab">
+            <span class="lb-sort-label">Sort by</span>
+            {% for key, label in sorts %}
+            <button type="button"
+                    class="lb-sort-btn{% if key == currentSort %} is-active{% endif %}"
+                    aria-pressed="{{ key == currentSort ? 'true' : 'false' }}"
+                    aria-label="Sort by {{ label|lower }}"
+                    data-on:click="@post('{{ sortBy.url }}?by={{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <button type="button" class="lb-reset secondary"
+                aria-label="Reset the list to the starting toppings"
+                data-on:click="@post('{{ reset.url }}')">Reset</button>
+    </div>
+
+    <ol class="lb-list list-reset">
+        {% for item in items %}
+        <li class="lb-row{% if item.rank == 1 %} is-first{% endif %}" id="lb-{{ item.id }}" style="view-transition-name: lb-{{ item.id }}">
+            <span class="lb-rank" aria-label="Rank {{ item.rank }}">{{ item.rank }}</span>
+            <span class="lb-name">{{ item.name }}</span>
+            <span class="lb-votes"><strong>{{ item.votes }}</strong> <span class="lb-votes-unit">{{ item.votes == 1 ? 'vote' : 'votes' }}</span></span>
+            <button type="button" class="lb-vote"
+                    aria-label="Vote for {{ item.name }}"
+                    data-on:click="@post('{{ vote.url }}?id={{ item.id }}')">Vote</button>
+            <button type="button" class="lb-remove danger"
+                    aria-label="Remove {{ item.name }}"
+                    data-on:click="@post('{{ remove.url }}?id={{ item.id }}')">Remove</button>
+        </li>
+        {% else %}
+        <li class="lb-empty" style="view-transition-name: lb-empty">No toppings left. Add one, or press Reset.</li>
+        {% endfor %}
+    </ol>
+
+    <div class="lb-add" style="view-transition-name: lb-add">
+        <input type="text"
+               class="lb-add-input"
+               placeholder="{{ full ? 'The list is full' : 'Add a topping' }}"
+               aria-label="New topping"
+               maxlength="{{ maxNameLength }}"
+               autocomplete="off"
+               {{ bind(draft) }}
+               {% if full %}disabled{% endif %}
+               data-on:keydown="evt.key == 'Enter' && @post('{{ add.url }}')">
+        <button type="button" class="lb-add-btn"
+                aria-label="Add topping"
+                {% if full %}disabled{% endif %}
+                data-on:click="@post('{{ add.url }}')">Add</button>
+    </div>
+    <p class="lb-meta">{{ items|length }} of {{ maxItems }} toppings. Votes and toppings are shared with everyone on this page; the sort is yours.</p>
+</div>
+{% endblock %}

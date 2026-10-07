@@ -58,6 +58,10 @@ $config = (new Config())
     // people behind one NAT multiply that. 1200/60s = 20/s per IP leaves them untouched while
     // still capping a flood.
     ->withActionRateLimit((int) (getenv('VIA_ACTION_RATE_LIMIT') ?: 1200), 60)
+
+    // The leaderboard animates each update in a view transition of about 400 ms, and a new one
+    // skips the one still running. One render per 400 ms lets each transition finish.
+    ->withBroadcastThrottle(Scope::routeScope('/examples/leaderboard'), 400)
 ;
 
 // The Datastar + Rocket build, and the Starbase components the site copies into public/vendor/starbase
