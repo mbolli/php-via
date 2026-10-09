@@ -5,6 +5,7 @@
 !/bench/contention/
 !/bench/capacity/
 !/bench/profile/
+!/bench/datastar-sdk/
 /tmp/
 /website/node_modules/
 /website/vendor/
