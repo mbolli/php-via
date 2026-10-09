@@ -1,4 +1,6 @@
 parameters:
+  # Per checkout: a cache shared through /tmp mixes results between worktrees.
+  tmpDir: .phpstan-cache
   bootstrapFiles:
     - phpstan-bootstrap.php
     - website/vendor/autoload.php

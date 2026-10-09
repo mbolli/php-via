@@ -2,6 +2,14 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### Improvements
+
+- **Cheaper SSE events.** php-via writes the Datastar event text itself, byte for byte as the SDK does,
+  with one `str_replace()` per patch instead of a function call per HTML line. A 400-line patch takes
+  a quarter of the time.
+
 ## [0.14.1] - 2026-10-06
 
 ### Added
