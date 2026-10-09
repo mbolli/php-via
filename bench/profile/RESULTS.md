@@ -1,5 +1,66 @@
 # Profiling results
 
+## Three hot paths fixed, measured 2026-10-09
+
+The branch `perf/hot-paths` fixes the first, third and fourth findings below. Each scenario ran
+twice in a row, on master (673b9ae) and on the branch, with the same setup as the run further down.
+
+### Findings
+
+- **Page views cost a third to a half of what they did.** Code blocks are highlighted when Twig
+  compiles the template, and a render only yields the stored HTML. `/docs/api` went from 5.81 to
+  1.74 ms of worker CPU per view. The rendered HTML of every page in the sitemap is the same as
+  before, apart from the ids that change on every render.
+- **Brotli is now most of a page view:** 41 to 80%. It is the next thing to look at.
+- **A chat message costs 22% less.** The Chat Room reads its messages once per room until one
+  arrives, instead of once per tab render. Together with the cheaper event text, a message to 300
+  tabs went from 137.8 to 107.7 ms. SQLite fell from 6.5% to 1.3%; what is left is the
+  `PRAGMA data_version` check per render, which notices a message another worker wrote.
+- **The Datastar SDK's share fell from 8 to 15% to under 1%.** php-via writes the event text with
+  one `str_replace()` per patch. The Leaderboard saved 9% per vote, the counter 6% per click.
+
+### Worker CPU
+
+| Scenario | Unit | Before | After | Change |
+|---|---|---:|---:|---:|
+| pages-api | per view | 5.81 ms | 1.74 ms | -70% |
+| pages-signals | per view | 1.50 ms | 0.66 ms | -56% |
+| pages-home | per view | 3.14 ms | 1.40 ms | -55% |
+| pages-faq | per view | 2.96 ms | 0.87 ms | -71% |
+| pages-mixed | per view | 2.83 ms | 1.05 ms | -63% |
+| chat | per message (300 tabs) | 137.8 ms | 107.7 ms | -22% |
+| leaderboard | per vote (1,000 tabs) | 27.7 ms | 25.3 ms | -9% |
+| counter | per click (500 tabs) | 18.7 ms | 17.7 ms | -6% |
+
+The before figures agree with the run below within 2%.
+
+### Shares of the worker's samples, in percent
+
+| Scenario | Highlighting | Twig | Brotli | Datastar SDK | SQLite |
+|---|---|---|---|---|---|
+| pages-api | 68.8 → 0 | 3.5 → 9.1 | 23.8 → 79.7 | | |
+| pages-signals | 51.1 → 0 | 10.5 → 21.4 | 23.1 → 50.0 | | |
+| pages-home | 54.9 → 0 | 16.9 → 35.2 | 18.1 → 41.1 | | |
+| pages-faq | 64.3 → 0 | 6.7 → 15.8 | 19.3 → 66.2 | | |
+| pages-mixed | 62.4 → 0 | 8.3 → 21.3 | 20.8 → 59.8 | | |
+| chat | | 44.0 → 51.5 | 17.1 → 22.2 | 15.4 → 0.8 | 6.5 → 1.3 |
+| leaderboard | | 53.0 → 53.4 | 16.0 → 20.0 | 7.8 → 0.7 | |
+| counter | | 0.2 → 0.2 | 53.1 → 49.8 | 8.0 → 0.9 | |
+
+The master process's share of the server's CPU barely moved: 0.4 to 1.1% before and 1.1 to 2.3%
+after for page views (the worker does less, so the same socket work is a larger share), 24% for the
+counter.
+
+### Clocks
+
+The server cores' clocks were logged once a second (`/proc/cpuinfo`, cores 2 and 4). Their median
+was 4.5 GHz in every run except the counter after the fix, at 4.4 GHz; the lowest single reading
+during a window was 4.2 GHz. The package reached 100 °C from the faq runs on, so the counter's
+after figure is about 2% high. Chromium processes from another session ran on cores 3, 4 and 6 to
+11 throughout, in both halves of each pair.
+
+The flame graphs in `svg/` are still the ones from the run below.
+
 ## Website on 0.14.1, measured 2026-10-09
 
 Where the worker's CPU goes in ten scenarios against the website, from Excimer samples (1 ms of
