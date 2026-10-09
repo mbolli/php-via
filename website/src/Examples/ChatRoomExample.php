@@ -19,7 +19,7 @@ final class ChatRoomExample {
         '<strong>Session-scoped usernames</strong> persist across tabs. Your username is stored in SESSION scope, so switching rooms or opening a new tab keeps the same identity.',
         '<strong>Presence + typing</strong> indicators update in real time. When a tab closes, the <code>onCleanup</code> hook removes its user from the room\'s list.',
         '<strong>addScope()</strong> joins the room\'s scope, so the room\'s broadcasts re-render the page. The page itself stays in TAB scope, which keeps the message draft private.',
-        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code>, and the view loads the last 50 on every render.',
+        '<strong>SQLite persistence</strong> keeps message history across server restarts. Each room\'s messages are stored in <code>chat.db</code>. The last 50 are read once per new message, and every tab in the room renders that one read.',
         '<strong>Multi-room architecture</strong>: open two rooms side by side. Each room\'s scope is independent, so typing in Lobby has no effect on General.',
     ];
 
@@ -72,6 +72,12 @@ final class ChatRoomExample {
     private static ?Via $app = null;
 
     private static ?\SQLite3 $db = null;
+
+    /** @var array<string, list<array{username: string, message: string, timestamp: string}>> room => its last 50 messages */
+    private static array $messageCache = [];
+
+    /** chat.db's data_version when $messageCache was last checked */
+    private static int $dataVersion = -1;
 
     public static function register(Via $app): void {
         self::$app = $app;
@@ -292,13 +298,33 @@ final class ChatRoomExample {
         $stmt->bindValue(':message', $message, SQLITE3_TEXT);
         $stmt->bindValue(':timestamp', date('H:i:s'), SQLITE3_TEXT);
 
-        return Sqlite::retry(static fn () => $stmt->execute()) !== null;
+        $stored = Sqlite::retry(static fn () => $stmt->execute()) !== null;
+        // This connection's own commits leave data_version as it is.
+        unset(self::$messageCache[$room]);
+
+        return $stored;
+    }
+
+    /**
+     * The room's last 50 messages, read once for all of its tabs until a message arrives.
+     *
+     * @return list<array{username: string, message: string, timestamp: string}>
+     */
+    private static function getMessages(string $room): array {
+        // data_version moves when another connection, such as another worker's, commits to chat.db.
+        $version = (int) self::db()->querySingle('PRAGMA data_version');
+        if ($version !== self::$dataVersion) {
+            self::$dataVersion = $version;
+            self::$messageCache = [];
+        }
+
+        return self::$messageCache[$room] ??= self::queryMessages($room, 50);
     }
 
     /**
      * @return list<array{username: string, message: string, timestamp: string}>
      */
-    private static function getMessages(string $room, int $limit = 50): array {
+    private static function queryMessages(string $room, int $limit): array {
         $stmt = self::db()->prepare(
             'SELECT username, message, timestamp FROM messages WHERE room = :room ORDER BY id DESC LIMIT :limit'
         );
