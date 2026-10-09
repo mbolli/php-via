@@ -1,0 +1,1 @@
+{"name":"pages-home","secs":30.05,"ops":9567,"opname":"view","errors":0,"cpu_s":30.200000000000003,"cpu_by_proc":{"master":0.17,"manager":0,"proc1148104":30.03,"proc1148105":0},"cpu_ms_per_op":3.157,"core_pct":100.5,"html_kb_per_view":96.7}

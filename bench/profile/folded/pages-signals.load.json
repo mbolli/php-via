@@ -1,0 +1,1 @@
+{"name":"pages-signals","secs":30.02,"ops":19841,"opname":"view","errors":0,"cpu_s":30.349999999999998,"cpu_by_proc":{"master":0.33,"manager":0,"proc1147661":30.02,"proc1147662":0},"cpu_ms_per_op":1.53,"core_pct":101.1,"html_kb_per_view":34.4}

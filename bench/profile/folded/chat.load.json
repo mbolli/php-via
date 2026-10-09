@@ -1,0 +1,1 @@
+{"name":"chat","route":"\/examples\/chat-room","tabs":300,"failed":0,"ramp_s":4.9,"act":"chat","rate":4,"secs":30,"ops":120,"opname":"action","codes":{"200":120},"cpu_s":17.02,"cpu_by_proc":{"master":0.56,"manager":0,"proc1149867":16.46,"proc1149868":0},"core_pct":56.7,"cpu_ms_per_op":141.833,"cpu_ms_per_op_per_tab":0.4728}

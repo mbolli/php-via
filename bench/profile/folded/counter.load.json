@@ -1,0 +1,1 @@
+{"name":"counter","route":"\/","tabs":500,"failed":0,"ramp_s":1.9,"act":"counter","rate":20,"secs":30.01,"ops":600,"opname":"action","codes":{"200":600},"cpu_s":14.600000000000001,"cpu_by_proc":{"master":3.46,"manager":0,"proc1150877":11.14,"proc1150878":0},"core_pct":48.6,"cpu_ms_per_op":24.333,"cpu_ms_per_op_per_tab":0.0487}

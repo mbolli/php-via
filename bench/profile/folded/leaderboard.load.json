@@ -1,0 +1,1 @@
+{"name":"leaderboard","route":"\/examples\/leaderboard","tabs":1000,"failed":0,"ramp_s":1.3,"act":"leaderboard","rate":10,"secs":30.01,"ops":300,"opname":"action","codes":{"200":300},"cpu_s":8.879999999999999,"cpu_by_proc":{"master":0.59,"manager":0,"proc1150394":8.29,"proc1150395":0},"core_pct":29.6,"cpu_ms_per_op":29.6,"cpu_ms_per_op_per_tab":0.0296}

@@ -1,0 +1,1035 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1800" height="142" onload="init(evt)" viewBox="0 0 1800 142" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1800.0" height="142.0" fill="url(#background)"  />
+<text id="title" x="900.00" y="24" >/docs/signals page views, 16 keep-alive clients, Brotli: categories</text>
+<g id="legend" font-family="Verdana" font-size="12"><rect x="10.0" y="38.0" width="12" height="12" fill="#17becf" stroke="#555" stroke-width="0.5"/><text x="26.0" y="48.0">highlighting 51.7%</text><rect x="160.4" y="38.0" width="12" height="12" fill="#d62728" stroke="#555" stroke-width="0.5"/><text x="176.4" y="48.0">Brotli 22.9%</text><rect x="270.0" y="38.0" width="12" height="12" fill="#2ca02c" stroke="#555" stroke-width="0.5"/><text x="286.0" y="48.0">Twig 10.0%</text><rect x="366.0" y="38.0" width="12" height="12" fill="#3182bd" stroke="#555" stroke-width="0.5"/><text x="382.0" y="48.0">via: HTTP + PSR 3.6%</text><rect x="530.0" y="38.0" width="12" height="12" fill="#c6dbef" stroke="#555" stroke-width="0.5"/><text x="546.0" y="48.0">via: other 2.6%</text><rect x="660.0" y="38.0" width="12" height="12" fill="#fdae6b" stroke="#555" stroke-width="0.5"/><text x="676.0" y="48.0">via: Dev Bar tracing 2.3%</text><rect x="858.0" y="38.0" width="12" height="12" fill="#7f7f7f" stroke="#555" stroke-width="0.5"/><text x="874.0" y="48.0">cycle GC 2.0%</text><rect x="974.4" y="38.0" width="12" height="12" fill="#6baed6" stroke="#555" stroke-width="0.5"/><text x="990.4" y="48.0">via: render 1.6%</text><rect x="1111.2" y="38.0" width="12" height="12" fill="#ffffff" stroke="#555" stroke-width="0.5"/><text x="1127.2" y="48.0">rest 3.5%</text></g>
+<text id="details" x="10.00" y="125" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1690.00" y="24" >Search</text>
+<text id="ignorecase" x="1774.00" y="24" >ic</text>
+<text id="matched" x="1690.00" y="125" > </text>
+<g id="frames">
+<g >
+<title>Mbolli\PhpVia\Support\Logger (22 ms CPU, 0.07%)</title><rect x="1726.7" y="61" width="1.3" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1729.72" y="71.5" ></text>
+</g>
+<g >
+<title>Response::header() (25 ms CPU, 0.08%)</title><rect x="1586.5" y="61" width="1.5" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1589.47" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Highlighter (1,140 ms CPU, 3.81%)</title><rect x="776.3" y="61" width="67.9" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="779.35" y="71.5" >Tempest..</text>
+</g>
+<g >
+<title>Mbolli\TempestHighlightDatastar\Expression\Patterns\DatastarSignalPattern (155 ms CPU, 0.52%)</title><rect x="652.8" y="61" width="9.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="655.76" y="71.5" ></text>
+</g>
+<g >
+<title>Response::cookie() (77 ms CPU, 0.26%)</title><rect x="1571.5" y="61" width="4.6" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1574.48" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Injections\PhpDocCommentInjection (29 ms CPU, 0.10%)</title><rect x="1050.7" y="61" width="1.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1053.65" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\TempestHighlightDatastar\Html\Injections\DatastarExpressionInjection::{closure:23} (114 ms CPU, 0.38%)</title><rect x="672.3" y="61" width="6.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="675.33" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Injections\PhpFunctionParametersInjection::{closure:23} (64 ms CPU, 0.21%)</title><rect x="1059.6" y="61" width="3.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1062.57" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Injections\PhpAttributePlainInjection (80 ms CPU, 0.27%)</title><rect x="1045.9" y="61" width="4.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1048.89" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::{closure:179} (74 ms CPU, 0.25%)</title><rect x="1769.4" y="61" width="4.4" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1772.36" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\MultilineSingleDocCommentPattern (214 ms CPU, 0.72%)</title><rect x="1205.3" y="61" width="12.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1208.29" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Tokens\ParseTokens (2,610 ms CPU, 8.72%)</title><rect x="1343.2" y="61" width="155.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1346.16" y="71.5" >Tempest\Highlight\T..</text>
+</g>
+<g >
+<title>highlighting (15,463 ms CPU, 51.67%)</title><rect x="651.8" y="77" width="919.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="654.81" y="87.5" >highlighting</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Sanitizer (95 ms CPU, 0.32%)</title><rect x="1603.4" y="61" width="5.7" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1606.42" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Patterns\DeletionEndTokenPattern (18 ms CPU, 0.06%)</title><rect x="916.8" y="61" width="1.0" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="919.77" y="71.5" ></text>
+</g>
+<g >
+<title>via: Dev Bar tracing (687 ms CPU, 2.30%)</title><rect x="1588.0" y="77" width="40.8" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1590.96" y="87.5" >via..</text>
+</g>
+<g >
+<title>Tempest\Highlight\Tokens\TokenTypeEnum (245 ms CPU, 0.82%)</title><rect x="1556.9" y="61" width="14.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1559.91" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\StaticPropertyPattern (31 ms CPU, 0.10%)</title><rect x="1245.6" y="61" width="1.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1248.56" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\UsePattern (71 ms CPU, 0.24%)</title><rect x="1283.8" y="61" width="4.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1286.80" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher (49 ms CPU, 0.16%)</title><rect x="1642.9" y="61" width="2.9" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1645.86" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\JsSinglelineCommentPattern (123 ms CPU, 0.41%)</title><rect x="1034.9" y="61" width="7.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1037.89" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Tokens\Token (396 ms CPU, 1.32%)</title><rect x="1533.4" y="61" width="23.5" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1536.36" y="71.5" >T..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\Bootstrap (54 ms CPU, 0.18%)</title><rect x="1751.6" y="61" width="3.2" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1754.64" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Themes\CssTheme (37 ms CPU, 0.12%)</title><rect x="1294.3" y="61" width="2.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1297.27" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\ParsedInjection (97 ms CPU, 0.32%)</title><rect x="1288.5" y="61" width="5.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1291.50" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Markup (85 ms CPU, 0.28%)</title><rect x="472.5" y="61" width="5.1" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="475.55" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::{closure:889} (15 ms CPU, 0.05%)</title><rect x="1713.9" y="61" width="0.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1716.87" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\SessionTokens (21 ms CPU, 0.07%)</title><rect x="1779.5" y="61" width="1.2" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1782.47" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Twig\TwigEngine (9 ms CPU, 0.03%)</title><rect x="1773.8" y="61" width="0.5" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1776.76" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Support\IdGenerator (11 ms CPU, 0.04%)</title><rect x="1726.1" y="61" width="0.6" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1729.06" y="71.5" ></text>
+</g>
+<g >
+<title>Response::end() (175 ms CPU, 0.58%)</title><rect x="1576.1" y="61" width="10.4" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1579.06" y="71.5" ></text>
+</g>
+<g >
+<title>Tuupola\Middleware\CorsMiddleware (53 ms CPU, 0.18%)</title><rect x="1688.8" y="61" width="3.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1691.83" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Html\Patterns\HtmlAttributePattern (91 ms CPU, 0.30%)</title><rect x="925.7" y="61" width="5.4" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="928.69" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\ConstantNamePattern (393 ms CPU, 1.31%)</title><rect x="1111.1" y="61" width="23.4" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1114.14" y="71.5" >T..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer (191 ms CPU, 0.64%)</title><rect x="1617.5" y="61" width="11.3" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1620.46" y="71.5" ></text>
+</g>
+<g >
+<title>via: broadcast (44 ms CPU, 0.15%)</title><rect x="1692.5" y="77" width="2.6" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1695.52" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\ScopeRegistry (44 ms CPU, 0.15%)</title><rect x="1692.5" y="61" width="2.6" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1695.52" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Core\Router (44 ms CPU, 0.15%)</title><rect x="1628.9" y="61" width="2.7" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1631.94" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\BaseLanguage (13 ms CPU, 0.04%)</title><rect x="844.2" y="61" width="0.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="847.15" y="71.5" ></text>
+</g>
+<g >
+<title>Coroutine::getCid() (21 ms CPU, 0.07%)</title><rect x="420.4" y="61" width="1.2" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="423.38" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\RequestHandler (258 ms CPU, 0.86%)</title><rect x="1646.2" y="61" width="15.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1649.19" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\CombinedKeywordPattern (444 ms CPU, 1.48%)</title><rect x="1084.7" y="61" width="26.4" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1087.73" y="71.5" >T..</text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\OperatorPattern (10 ms CPU, 0.03%)</title><rect x="1222.7" y="61" width="0.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1225.72" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Source (28 ms CPU, 0.09%)</title><rect x="497.7" y="61" width="1.7" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="500.70" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\PhpAsymmetricPropertyPattern (48 ms CPU, 0.16%)</title><rect x="1223.3" y="61" width="2.9" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1226.31" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Runtime\EscaperRuntime (338 ms CPU, 1.13%)</title><rect x="477.6" y="61" width="20.1" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="480.60" y="71.5" ></text>
+</g>
+<g >
+<title>OpenSwoole calls (45 ms CPU, 0.15%)</title><rect x="420.4" y="77" width="2.7" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="423.38" y="87.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Tokens\RenderTokens (588 ms CPU, 1.96%)</title><rect x="1498.4" y="61" width="35.0" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1501.39" y="71.5" >Te..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\TraceStore (15 ms CPU, 0.05%)</title><rect x="1616.6" y="61" width="0.9" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1619.57" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Html\Injections\PhpInHtmlInjection (39 ms CPU, 0.13%)</title><rect x="923.4" y="61" width="2.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="926.37" y="71.5" ></text>
+</g>
+<g >
+<title>Nyholm\Psr7\ServerRequest (164 ms CPU, 0.55%)</title><rect x="1669.6" y="61" width="9.7" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1672.56" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\DoubleQuoteValuePattern (793 ms CPU, 2.65%)</title><rect x="1135.8" y="61" width="47.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1138.82" y="71.5" >Temp..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer (55 ms CPU, 0.18%)</title><rect x="1766.1" y="61" width="3.3" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1769.09" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\CombinedJsKeywordPattern::{closure:26} (1,150 ms CPU, 3.84%)</title><rect x="946.6" y="61" width="68.4" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="949.63" y="71.5" >Tempest..</text>
+</g>
+<g >
+<title>Neomerx\Cors\Analyzer (34 ms CPU, 0.11%)</title><rect x="1661.8" y="61" width="2.0" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1664.77" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Trace (42 ms CPU, 0.14%)</title><rect x="1614.1" y="61" width="2.5" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1617.07" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\AttributeTypePattern (27 ms CPU, 0.09%)</title><rect x="1070.9" y="61" width="1.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1073.93" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\ConstantPropertyPattern (21 ms CPU, 0.07%)</title><rect x="1134.5" y="61" width="1.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1137.51" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Injections\JsDocInjection (38 ms CPU, 0.13%)</title><rect x="931.8" y="61" width="2.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="934.82" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\JavaScriptLanguage (23 ms CPU, 0.08%)</title><rect x="934.1" y="61" width="1.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="937.08" y="71.5" ></text>
+</g>
+<g >
+<title>JSON (54 ms CPU, 0.18%)</title><rect x="417.2" y="77" width="3.2" height="15.0" fill="rgb(231,186,82)" rx="2" ry="2" />
+<text  x="420.17" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\Html (18 ms CPU, 0.06%)</title><rect x="1754.8" y="61" width="1.1" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1757.85" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\BrotliMiddleware (10 ms CPU, 0.03%)</title><rect x="1642.3" y="61" width="0.6" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1645.26" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Patterns\AdditionStartTokenPattern (89 ms CPU, 0.30%)</title><rect x="911.5" y="61" width="5.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="914.48" y="71.5" ></text>
+</g>
+<g >
+<title>via: signals/state (226 ms CPU, 0.76%)</title><rect x="1774.7" y="77" width="13.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1777.66" y="87.5" ></text>
+</g>
+<g >
+<title>Twig\Template::{closure:378} (283 ms CPU, 0.95%)</title><rect x="537.0" y="61" width="16.8" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="540.02" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Injections\CustomClassInjection (123 ms CPU, 0.41%)</title><rect x="874.4" y="61" width="7.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="877.37" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Core\Application (43 ms CPU, 0.14%)</title><rect x="1721.2" y="61" width="2.5" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1724.19" y="71.5" ></text>
+</g>
+<g >
+<title>gc_collect_cycles() (589 ms CPU, 1.97%)</title><rect x="600.4" y="61" width="35.0" height="15.0" fill="rgb(127,127,127)" rx="2" ry="2" />
+<text  x="603.36" y="71.5" >gc..</text>
+</g>
+<g >
+<title>Nyholm\Psr7\Uri (76 ms CPU, 0.25%)</title><rect x="1679.3" y="61" width="4.5" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1682.32" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Template (625 ms CPU, 2.09%)</title><rect x="499.4" y="61" width="37.1" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="502.37" y="71.5" >Twi..</text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Injections\PhpFunctionParametersInjection (121 ms CPU, 0.40%)</title><rect x="1052.4" y="61" width="7.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1055.38" y="71.5" ></text>
+</g>
+<g >
+<title>twig:docs/signals.html.twig (90 ms CPU, 0.30%)</title><rect x="554.6" y="61" width="5.4" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="557.62" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal (25 ms CPU, 0.08%)</title><rect x="1778.0" y="61" width="1.5" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1780.99" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span (84 ms CPU, 0.28%)</title><rect x="1609.1" y="61" width="5.0" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1612.07" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\NestedFunctionCallPattern (72 ms CPU, 0.24%)</title><rect x="1218.4" y="61" width="4.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1221.38" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Injections\BlurInjection (209 ms CPU, 0.70%)</title><rect x="861.9" y="61" width="12.5" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="864.94" y="71.5" ></text>
+</g>
+<g >
+<title>via: patches (100 ms CPU, 0.33%)</title><rect x="1740.9" y="77" width="5.9" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1743.87" y="87.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\JsClassNamePattern (17 ms CPU, 0.06%)</title><rect x="1026.2" y="61" width="1.0" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1029.21" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\TempestHighlightDatastar\Expression\DatastarExpressionLanguage (13 ms CPU, 0.04%)</title><rect x="651.8" y="61" width="0.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="654.81" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\FunctionCallPattern (340 ms CPU, 1.14%)</title><rect x="1183.2" y="61" width="20.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1186.17" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Injections\StrongInjection (150 ms CPU, 0.50%)</title><rect x="902.0" y="61" width="8.9" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="905.02" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\SinglelineCommentPattern (9 ms CPU, 0.03%)</title><rect x="1245.0" y="61" width="0.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1248.02" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Support\DomId (14 ms CPU, 0.05%)</title><rect x="1725.2" y="61" width="0.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1728.23" y="71.5" ></text>
+</g>
+<g >
+<title>Psr\Http\Server\RequestHandlerInterface@anonymous{src/Http/RequestHandler.php:761} (52 ms CPU, 0.17%)</title><rect x="1683.8" y="61" width="3.1" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1686.84" y="71.5" ></text>
+</g>
+<g >
+<title>twig:shells/docs.html.twig (152 ms CPU, 0.51%)</title><rect x="563.2" y="61" width="9.0" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="566.19" y="71.5" ></text>
+</g>
+<g >
+<title>cycle GC (590 ms CPU, 1.97%)</title><rect x="600.3" y="77" width="35.1" height="15.0" fill="rgb(127,127,127)" rx="2" ry="2" />
+<text  x="603.30" y="87.5" >cy..</text>
+</g>
+<g >
+<title>Mbolli\TempestHighlightDatastar\Html\Injections\DatastarExpressionInjection (174 ms CPU, 0.58%)</title><rect x="662.0" y="61" width="10.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="664.98" y="71.5" ></text>
+</g>
+<g >
+<title>twig:shells/docs.html.twig::{closure:221} (361 ms CPU, 1.21%)</title><rect x="572.2" y="61" width="21.5" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="575.23" y="71.5" >t..</text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Injections\AdditionInjection (286 ms CPU, 0.96%)</title><rect x="844.9" y="61" width="17.0" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="847.93" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Injections\EmphasizeInjection (111 ms CPU, 0.37%)</title><rect x="895.4" y="61" width="6.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="898.42" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\UseFunctionNamePattern (609 ms CPU, 2.03%)</title><rect x="1247.6" y="61" width="36.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1250.58" y="71.5" >Tem..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Support\SignalId::{closure:65} (41 ms CPU, 0.14%)</title><rect x="1785.7" y="61" width="2.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1788.66" y="71.5" ></text>
+</g>
+<g >
+<title>Nyholm\Psr7\Response (19 ms CPU, 0.06%)</title><rect x="1668.4" y="61" width="1.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1671.43" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\SignalFactory (49 ms CPU, 0.16%)</title><rect x="1775.1" y="61" width="2.9" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1778.07" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager (95 ms CPU, 0.32%)</title><rect x="1714.8" y="61" width="5.6" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1717.76" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Support\SignalId (61 ms CPU, 0.20%)</title><rect x="1782.0" y="61" width="3.7" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1785.03" y="71.5" ></text>
+</g>
+<g >
+<title>via: other (769 ms CPU, 2.57%)</title><rect x="1695.1" y="77" width="45.8" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1698.14" y="87.5" >via:..</text>
+</g>
+<g >
+<title>Twig\Environment (266 ms CPU, 0.89%)</title><rect x="423.2" y="61" width="15.9" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="426.24" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\ClassPropertyPattern (123 ms CPU, 0.41%)</title><rect x="1075.8" y="61" width="7.3" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1078.81" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\InstanceOfPattern (27 ms CPU, 0.09%)</title><rect x="1203.7" y="61" width="1.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1206.68" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\HeldResponse (26 ms CPU, 0.09%)</title><rect x="1640.7" y="61" width="1.6" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1643.72" y="71.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Twig\CodeRuntime (1,303 ms CPU, 4.35%)</title><rect x="684.3" y="61" width="77.5" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="687.34" y="71.5" >PhpVia\W..</text>
+</g>
+<g >
+<title>socket writes (277 ms CPU, 0.93%)</title><rect x="1571.5" y="77" width="16.5" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1574.48" y="87.5" ></text>
+</g>
+<g >
+<title>json_encode() (54 ms CPU, 0.18%)</title><rect x="417.2" y="61" width="3.2" height="15.0" fill="rgb(231,186,82)" rx="2" ry="2" />
+<text  x="420.17" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Extension\CoreExtension (496 ms CPU, 1.66%)</title><rect x="440.7" y="61" width="29.5" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="443.67" y="71.5" >Tw..</text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\CombinedJsKeywordPattern (188 ms CPU, 0.63%)</title><rect x="935.4" y="61" width="11.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="938.45" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Adapter\PsrRequestFactory (93 ms CPU, 0.31%)</title><rect x="1635.2" y="61" width="5.5" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1638.18" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\JsMethodPattern (102 ms CPU, 0.34%)</title><rect x="1027.3" y="61" width="6.1" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1030.34" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Injections\PhpHeredocInjection (127 ms CPU, 0.42%)</title><rect x="1063.4" y="61" width="7.5" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1066.38" y="71.5" ></text>
+</g>
+<g >
+<title>twig:shells/docs.html.twig::{closure:253} (111 ms CPU, 0.37%)</title><rect x="593.7" y="61" width="6.6" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="596.70" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Injections\DeletionInjection (231 ms CPU, 0.77%)</title><rect x="881.7" y="61" width="13.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="884.68" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Support\Stats (17 ms CPU, 0.06%)</title><rect x="1728.0" y="61" width="1.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1731.03" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (309 ms CPU, 1.03%)</title><rect x="1695.5" y="61" width="18.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1698.49" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\SingleQuoteValuePattern (29 ms CPU, 0.10%)</title><rect x="1243.3" y="61" width="1.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1246.30" y="71.5" ></text>
+</g>
+<g >
+<title>brotli_compress_init() (13 ms CPU, 0.04%)</title><rect x="416.4" y="61" width="0.8" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="419.40" y="71.5" ></text>
+</g>
+<g >
+<title>all (29,928 ms CPU, 100%)</title><rect x="10.0" y="93" width="1780.0" height="15.0" fill="rgb(255,230,55)" rx="2" ry="2" />
+<text  x="13.00" y="103.5" ></text>
+</g>
+<g >
+<title>Neomerx\Cors\Strategies\Settings (73 ms CPU, 0.24%)</title><rect x="1664.0" y="61" width="4.4" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1667.03" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\CastPattern (53 ms CPU, 0.18%)</title><rect x="1072.5" y="61" width="3.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1075.54" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\TempestHighlightDatastar\Html\Patterns\DatastarAttributePattern (88 ms CPU, 0.29%)</title><rect x="679.1" y="61" width="5.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="682.11" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Injections\PhpAttributeInstanceInjection (62 ms CPU, 0.21%)</title><rect x="1042.2" y="61" width="3.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1045.21" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\JsNewObjectPattern (21 ms CPU, 0.07%)</title><rect x="1033.5" y="61" width="1.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1036.46" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::{closure:1482} (276 ms CPU, 0.92%)</title><rect x="635.4" y="61" width="16.4" height="15.0" fill="rgb(188,189,34)" rx="2" ry="2" />
+<text  x="638.39" y="71.5" ></text>
+</g>
+<g >
+<title>Tuupola\Http\Factory\ResponseFactory (32 ms CPU, 0.11%)</title><rect x="1686.9" y="61" width="1.9" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1689.93" y="71.5" ></text>
+</g>
+<g >
+<title>brotli_compress_add() (6,833 ms CPU, 22.83%)</title><rect x="10.0" y="61" width="406.4" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="13.00" y="71.5" >brotli_compress_add()</text>
+</g>
+<g >
+<title>event loop (no PHP frame) (276 ms CPU, 0.92%)</title><rect x="635.4" y="77" width="16.4" height="15.0" fill="rgb(188,189,34)" rx="2" ry="2" />
+<text  x="638.39" y="87.5" ></text>
+</g>
+<g >
+<title>via: HTTP + PSR (1,066 ms CPU, 3.56%)</title><rect x="1628.8" y="77" width="63.4" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1631.82" y="87.5" >via: H..</text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\ClosureDebugPattern (26 ms CPU, 0.09%)</title><rect x="1083.2" y="61" width="1.5" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1086.19" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Core\SessionManager (61 ms CPU, 0.20%)</title><rect x="1631.6" y="61" width="3.6" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1634.56" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Escape (244 ms CPU, 0.82%)</title><rect x="761.8" y="61" width="14.5" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="764.84" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Tokens\GroupTokens (785 ms CPU, 2.62%)</title><rect x="1296.5" y="61" width="46.7" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1299.47" y="71.5" >Temp..</text>
+</g>
+<g >
+<title>Twig (2,980 ms CPU, 9.96%)</title><rect x="423.1" y="77" width="177.2" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="426.06" y="87.5" >Twig</text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Patterns\InjectionTokenPattern (82 ms CPU, 0.27%)</title><rect x="918.0" y="61" width="4.8" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="920.96" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Php\Patterns\PropertyTypesPattern (271 ms CPU, 0.91%)</title><rect x="1227.0" y="61" width="16.1" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1230.00" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\Base\Patterns\AdditionEndTokenPattern (9 ms CPU, 0.03%)</title><rect x="910.9" y="61" width="0.6" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="913.94" y="71.5" ></text>
+</g>
+<g >
+<title>twig:shells/base.html.twig (51 ms CPU, 0.17%)</title><rect x="560.0" y="61" width="3.0" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="562.98" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\DevBar\Injector (253 ms CPU, 0.85%)</title><rect x="1588.0" y="61" width="15.0" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1590.96" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\HtmlBuilder (171 ms CPU, 0.57%)</title><rect x="1755.9" y="61" width="10.2" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1758.92" y="71.5" ></text>
+</g>
+<g >
+<title>Timer::after() (24 ms CPU, 0.08%)</title><rect x="421.6" y="61" width="1.5" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="424.63" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Scope (17 ms CPU, 0.06%)</title><rect x="1724.2" y="61" width="1.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1727.22" y="71.5" ></text>
+</g>
+<g >
+<title>Brotli (6,846 ms CPU, 22.87%)</title><rect x="10.0" y="77" width="407.2" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="13.00" y="87.5" >Brotli</text>
+</g>
+<g >
+<title>Twig\Loader\FilesystemLoader (40 ms CPU, 0.13%)</title><rect x="470.2" y="61" width="2.3" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="473.17" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager (100 ms CPU, 0.33%)</title><rect x="1740.9" y="61" width="5.9" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1743.87" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\TemplateWrapper (13 ms CPU, 0.04%)</title><rect x="553.8" y="61" width="0.8" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="556.85" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (81 ms CPU, 0.27%)</title><rect x="1746.8" y="61" width="4.8" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1749.82" y="71.5" ></text>
+</g>
+<g >
+<title>Tempest\Highlight\Languages\JavaScript\Patterns\CombinedJsKeywordPattern::{closure:31} (188 ms CPU, 0.63%)</title><rect x="1015.0" y="61" width="11.2" height="15.0" fill="rgb(23,190,207)" rx="2" ry="2" />
+<text  x="1018.03" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (199 ms CPU, 0.66%)</title><rect x="1729.0" y="61" width="11.9" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1732.04" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\ExtensionSet (27 ms CPU, 0.09%)</title><rect x="439.1" y="61" width="1.6" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="442.06" y="71.5" ></text>
+</g>
+<g >
+<title>via: render (468 ms CPU, 1.56%)</title><rect x="1746.8" y="77" width="27.9" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1749.82" y="87.5" >v..</text>
+</g>
+<g >
+<title>website code (32 ms CPU, 0.11%)</title><rect x="1788.1" y="77" width="1.9" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1791.10" y="87.5" ></text>
+</g>
+</g>
+</svg>

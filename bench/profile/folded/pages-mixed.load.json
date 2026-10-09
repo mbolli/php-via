@@ -1,0 +1,1 @@
+{"name":"pages-mixed","secs":30.05,"ops":10620,"opname":"view","errors":1,"cpu_s":30.23,"cpu_by_proc":{"master":0.2,"manager":0,"proc1148953":30.03,"proc1148954":0},"cpu_ms_per_op":2.847,"core_pct":100.6,"html_kb_per_view":79.7}

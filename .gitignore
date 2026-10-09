@@ -4,6 +4,8 @@
 /bench/*
 !/bench/contention/
 !/bench/capacity/
+!/bench/profile/
+/tmp/
 /website/node_modules/
 /website/vendor/
 website/*.db

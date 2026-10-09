@@ -1,0 +1,1 @@
+{"name":"pages-faq","secs":30.04,"ops":10075,"opname":"view","errors":0,"cpu_s":30.220000000000002,"cpu_by_proc":{"master":0.19,"manager":0,"proc1148475":30.03,"proc1148476":0},"cpu_ms_per_op":3,"core_pct":100.6,"html_kb_per_view":70}

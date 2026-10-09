@@ -1,0 +1,1 @@
+{"name":"pages-api","secs":30.09,"ops":5199,"opname":"view","errors":0,"cpu_s":30.19,"cpu_by_proc":{"master":0.12,"manager":0,"proc1147232":30.07,"proc1147233":0},"cpu_ms_per_op":5.807,"core_pct":100.3,"html_kb_per_view":170.5}
