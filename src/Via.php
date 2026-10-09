@@ -79,7 +79,7 @@ use Twig\Environment;
  * Not designed for extension.
  */
 class Via {
-    public const string VERSION = '0.14.1';
+    public const string VERSION = '0.14.2';
 
     /** See noFileIoHookFlags(): 1790 on OpenSwoole 26.2. */
     private const int NO_FILE_IO_HOOKS = SWOOLE_HOOK_TCP | SWOOLE_HOOK_UDP | SWOOLE_HOOK_UNIX | SWOOLE_HOOK_UDG

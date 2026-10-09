@@ -243,7 +243,7 @@ Both brokers reconnect automatically with exponential backoff (1 s → 30 s cap)
 A `GET /_health` endpoint is available on every php-via server (no configuration needed):
 
 ```json
-{"status":"ok","version":"0.14.1","broker":{"driver":"RedisBroker","connected":true},"connections":{"contexts":42,"sse":38}}
+{"status":"ok","version":"0.14.2","broker":{"driver":"RedisBroker","connected":true},"connections":{"contexts":42,"sse":38}}
 ```
 
 Returns HTTP 503 when the broker is in the reconnect backoff window.
