@@ -1,0 +1,1 @@
+{"name":"idle","route":"\/","tabs":1000,"failed":0,"ramp_s":3.9,"act":"none","rate":5,"secs":120,"ops":0,"opname":"action","codes":[],"cpu_s":0.3,"cpu_by_proc":{"master":0.06,"manager":0,"proc1151319":0.24,"proc1151320":0},"core_pct":0.2,"cpu_ms_per_op":null,"cpu_ms_per_op_per_tab":null}

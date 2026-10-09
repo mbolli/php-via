@@ -1,0 +1,1155 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1800" height="462" onload="init(evt)" viewBox="0 0 1800 462" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1800.0" height="462.0" fill="url(#background)"  />
+<text id="title" x="900.00" y="24" >Spreadsheet: 300 tabs, 4 editors, 5 edits/s (3 actions each)</text>
+<g id="legend" font-family="Verdana" font-size="12"><rect x="10.0" y="38.0" width="12" height="12" fill="#9467bd" stroke="#555" stroke-width="0.5"/><text x="26.0" y="48.0">website code 55.0%</text><rect x="160.4" y="38.0" width="12" height="12" fill="#d62728" stroke="#555" stroke-width="0.5"/><text x="176.4" y="48.0">Brotli 22.8%</text><rect x="270.0" y="38.0" width="12" height="12" fill="#6baed6" stroke="#555" stroke-width="0.5"/><text x="286.0" y="48.0">via: render 7.1%</text><rect x="406.8" y="38.0" width="12" height="12" fill="#9ecae1" stroke="#555" stroke-width="0.5"/><text x="422.8" y="48.0">via: signals/state 2.6%</text><rect x="591.2" y="38.0" width="12" height="12" fill="#fdae6b" stroke="#555" stroke-width="0.5"/><text x="607.2" y="48.0">via: Dev Bar tracing 2.4%</text><rect x="789.2" y="38.0" width="12" height="12" fill="#2171b5" stroke="#555" stroke-width="0.5"/><text x="805.2" y="48.0">via: SSE loop 2.2%</text><rect x="939.6" y="38.0" width="12" height="12" fill="#c6dbef" stroke="#555" stroke-width="0.5"/><text x="955.6" y="48.0">via: other 2.1%</text><rect x="1069.6" y="38.0" width="12" height="12" fill="#c49c94" stroke="#555" stroke-width="0.5"/><text x="1085.6" y="48.0">Datastar SDK (event text) 1.9%</text><rect x="1301.6" y="38.0" width="12" height="12" fill="#4292c6" stroke="#555" stroke-width="0.5"/><text x="1317.6" y="48.0">via: patches 1.4%</text><rect x="1445.2" y="38.0" width="12" height="12" fill="#ff7f0e" stroke="#555" stroke-width="0.5"/><text x="1461.2" y="48.0">socket writes 1.0%</text><rect x="1595.6" y="38.0" width="12" height="12" fill="#ffffff" stroke="#555" stroke-width="0.5"/><text x="1611.6" y="48.0">rest 1.6%</text></g>
+<text id="details" x="10.00" y="445" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1690.00" y="24" >Search</text>
+<text id="ignorecase" x="1774.00" y="24" >ic</text>
+<text id="matched" x="1690.00" y="445" > </text>
+<g id="frames">
+<g >
+<title>Mbolli\PhpVia\Via::decorateUpdate (843 ms CPU, 5.73%)</title><rect x="1687.4" y="237" width="102.1" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1690.44" y="247.5" >Mbolli\PhpVi..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span::__construct (9 ms CPU, 0.06%)</title><rect x="1629.8" y="157" width="1.1" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1632.80" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getComponentManager (10 ms CPU, 0.07%)</title><rect x="1688.9" y="221" width="1.2" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1691.89" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::span (6 ms CPU, 0.04%)</title><rect x="15.7" y="157" width="0.7" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="18.69" y="167.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::getCellRange (12 ms CPU, 0.08%)</title><rect x="916.5" y="141" width="1.4" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="919.47" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal::int (15 ms CPU, 0.10%)</title><rect x="908.2" y="141" width="1.9" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="911.23" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::viewTransition (19 ms CPU, 0.13%)</title><rect x="1651.7" y="237" width="2.3" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1654.72" y="247.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::syncLocally (10,363 ms CPU, 70.50%)</title><rect x="534.9" y="333" width="1254.9" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="537.92" y="343.5" >Mbolli\PhpVia\Via::syncLocally</text>
+</g>
+<g >
+<title>round() (5 ms CPU, 0.03%)</title><rect x="541.8" y="253" width="0.6" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="544.82" y="263.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::endTrace (45 ms CPU, 0.31%)</title><rect x="537.0" y="317" width="5.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="539.98" y="327.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle (63 ms CPU, 0.43%)</title><rect x="12.7" y="269" width="7.6" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="279.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getRoute (5 ms CPU, 0.03%)</title><rect x="1693.1" y="205" width="0.6" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1696.13" y="215.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::renderView (9,087 ms CPU, 61.82%)</title><rect x="551.4" y="237" width="1100.3" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="554.39" y="247.5" >Mbolli\PhpVia\Context::renderView</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\HtmlBuilder::checkRootIds (24 ms CPU, 0.16%)</title><rect x="1690.8" y="221" width="2.9" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1693.83" y="231.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:452} (16 ms CPU, 0.11%)</title><rect x="13.1" y="77" width="2.0" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="16.15" y="87.5" ></text>
+</g>
+<g >
+<title>Coroutine::getCid() (6 ms CPU, 0.04%)</title><rect x="1634.0" y="141" width="0.8" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="1637.04" y="151.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::traced (11 ms CPU, 0.07%)</title><rect x="16.5" y="157" width="1.4" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.54" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::{closure:1421} (7 ms CPU, 0.05%)</title><rect x="11.0" y="397" width="0.8" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="13.97" y="407.5" ></text>
+</g>
+<g >
+<title>SQLite3::execute() (7 ms CPU, 0.05%)</title><rect x="16.7" y="61" width="0.8" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="19.66" y="71.5" ></text>
+</g>
+<g >
+<title>max() (7 ms CPU, 0.05%)</title><rect x="920.3" y="125" width="0.9" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="923.34" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::span (8,900 ms CPU, 60.54%)</title><rect x="573.3" y="189" width="1077.7" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="576.30" y="199.5" >Mbolli\PhpVia\Tracing\Tracer::span</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::doSyncLocally (10,299 ms CPU, 70.06%)</title><rect x="542.7" y="317" width="1247.1" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="545.67" y="327.5" >Mbolli\PhpVia\Via::doSyncLocally</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span::offsetMsFrom (5 ms CPU, 0.03%)</title><rect x="541.2" y="253" width="0.6" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="544.21" y="263.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\SignalFactory::getSignal (115 ms CPU, 0.78%)</title><rect x="883.2" y="125" width="13.9" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="886.17" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getAction (70 ms CPU, 0.48%)</title><rect x="868.4" y="141" width="8.5" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="871.40" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::prepareSignalsForPatch (89 ms CPU, 0.61%)</title><rect x="1673.5" y="221" width="10.8" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1676.51" y="231.5" ></text>
+</g>
+<g >
+<title>count() (5 ms CPU, 0.03%)</title><rect x="1647.5" y="157" width="0.6" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1650.48" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\SessionTokens::stillNames (33 ms CPU, 0.22%)</title><rect x="43.5" y="205" width="4.0" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="46.54" y="215.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Scope::resolve (16 ms CPU, 0.11%)</title><rect x="913.3" y="125" width="2.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="916.32" y="135.5" ></text>
+</g>
+<g >
+<title>SQLite3::prepare() (6 ms CPU, 0.04%)</title><rect x="917.2" y="77" width="0.7" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="920.19" y="87.5" ></text>
+</g>
+<g >
+<title>array_map() (35 ms CPU, 0.24%)</title><rect x="1608.5" y="141" width="4.2" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1611.49" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::sync (21 ms CPU, 0.14%)</title><rect x="13.1" y="173" width="2.6" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="16.15" y="183.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements::getOptions (10 ms CPU, 0.07%)</title><rect x="94.3" y="141" width="1.2" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="97.28" y="151.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements::getMultiDataLines (124 ms CPU, 0.84%)</title><rect x="78.9" y="125" width="15.0" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="81.90" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getScopes (5 ms CPU, 0.03%)</title><rect x="1686.1" y="205" width="0.6" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1689.11" y="215.5" ></text>
+</g>
+<g >
+<title>hrtime() (24 ms CPU, 0.16%)</title><rect x="1648.1" y="157" width="2.9" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1651.08" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::countClients (53 ms CPU, 0.36%)</title><rect x="910.1" y="141" width="6.4" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="913.05" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::endResetStreams (7 ms CPU, 0.05%)</title><rect x="11.0" y="381" width="0.8" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="13.97" y="391.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::{closure:3255} (10,366 ms CPU, 70.52%)</title><rect x="534.7" y="397" width="1255.2" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="537.68" y="407.5" >Mbolli\PhpVia\Via::{closure:3255}</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::renderTraced (8,988 ms CPU, 61.14%)</title><rect x="562.6" y="205" width="1088.4" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="565.65" y="215.5" >Mbolli\PhpVia\Rendering\ViewRenderer::renderTraced</text>
+</g>
+<g >
+<title>all (14,700 ms CPU, 100%)</title><rect x="10.0" y="413" width="1780.0" height="15.0" fill="rgb(255,230,55)" rx="2" ry="2" />
+<text  x="13.00" y="423.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::cid (12 ms CPU, 0.08%)</title><rect x="1633.3" y="157" width="1.5" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1636.31" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::runStream (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="237" width="511.2" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="25.96" y="247.5" >Mbolli\PhpVia\Http\SseHandler::runStream</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::getPatch (82 ms CPU, 0.56%)</title><rect x="28.6" y="205" width="10.0" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="31.65" y="215.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::doSyncContexts (10,298 ms CPU, 70.05%)</title><rect x="542.8" y="285" width="1247.0" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="545.79" y="295.5" >Mbolli\PhpVia\Via::doSyncContexts</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::syncContexts (10,298 ms CPU, 70.05%)</title><rect x="542.8" y="301" width="1247.0" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="545.79" y="311.5" >Mbolli\PhpVia\Via::syncContexts</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:700} (961 ms CPU, 6.54%)</title><rect x="1462.6" y="125" width="116.3" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1465.58" y="135.5" >PhpVia\Website..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::cookieRetired (40 ms CPU, 0.27%)</title><rect x="42.9" y="221" width="4.9" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="45.94" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal::hasChanged (37 ms CPU, 0.25%)</title><rect x="1679.8" y="205" width="4.5" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1682.81" y="215.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:452} (8,525 ms CPU, 57.99%)</title><rect x="580.4" y="157" width="1032.3" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="583.45" y="167.5" >PhpVia\Website\Examples\SpreadsheetExample::{closure:452}</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::colName (44 ms CPU, 0.30%)</title><rect x="1598.9" y="125" width="5.4" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1601.92" y="135.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:266} (12 ms CPU, 0.08%)</title><rect x="16.4" y="205" width="1.5" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.42" y="215.5" ></text>
+</g>
+<g >
+<title>explode() (25 ms CPU, 0.17%)</title><rect x="90.0" y="109" width="3.1" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="93.04" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::renderView (16 ms CPU, 0.11%)</title><rect x="13.1" y="157" width="2.0" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="16.15" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\ActionHandler::handleAction (62 ms CPU, 0.42%)</title><rect x="12.8" y="237" width="7.5" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.79" y="247.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::getViewRenderer (6 ms CPU, 0.04%)</title><rect x="1651.0" y="221" width="0.7" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1653.99" y="231.5" ></text>
+</g>
+<g >
+<title>Psr\Http\Server\RequestHandlerInterface@anonymous{src/Http/RequestHandler.php:836}::handle (63 ms CPU, 0.43%)</title><rect x="12.7" y="253" width="7.6" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="263.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Adapter\PsrRequestFactory::create (11 ms CPU, 0.07%)</title><rect x="21.0" y="317" width="1.4" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="24.02" y="327.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\RequestHandler::dispatch (4,313 ms CPU, 29.34%)</title><rect x="12.4" y="365" width="522.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.42" y="375.5" >Mbolli\PhpVia\Http\RequestHandler::dispatch</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::{closure:1362} (8 ms CPU, 0.05%)</title><rect x="10.0" y="397" width="1.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="13.00" y="407.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getPrimaryScope (31 ms CPU, 0.21%)</title><rect x="553.6" y="221" width="3.7" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="556.57" y="231.5" ></text>
+</g>
+<g >
+<title>brotli_compress_init() (6 ms CPU, 0.04%)</title><rect x="518.8" y="189" width="0.7" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="521.81" y="199.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::isBackedUp (102 ms CPU, 0.69%)</title><rect x="47.8" y="221" width="12.3" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="50.78" y="231.5" ></text>
+</g>
+<g >
+<title>bin2hex() (93 ms CPU, 0.63%)</title><rect x="1636.2" y="141" width="11.3" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1639.22" y="151.5" ></text>
+</g>
+<g >
+<title>Response::isWritable() (6 ms CPU, 0.04%)</title><rect x="11.1" y="365" width="0.7" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="14.09" y="375.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle (69 ms CPU, 0.47%)</title><rect x="12.7" y="301" width="8.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="311.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Sanitizer::sanitizeAttributes (28 ms CPU, 0.19%)</title><rect x="537.5" y="269" width="3.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="540.46" y="279.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\RequestHandler::handleActionWithMiddleware (85 ms CPU, 0.58%)</title><rect x="12.7" y="349" width="10.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="359.5" ></text>
+</g>
+<g >
+<title>stripos() (791 ms CPU, 5.38%)</title><rect x="1693.7" y="221" width="95.8" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1696.73" y="231.5" >stripos()</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::isHeldForSeed (28 ms CPU, 0.19%)</title><rect x="1657.7" y="237" width="3.3" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1660.65" y="247.5" ></text>
+</g>
+<g >
+<title>array_map() (35 ms CPU, 0.24%)</title><rect x="1604.3" y="125" width="4.2" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1607.25" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\SignalFactory::getTabSignals (28 ms CPU, 0.19%)</title><rect x="1676.4" y="205" width="3.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1679.42" y="215.5" ></text>
+</g>
+<g >
+<title>Channel::pop() (76 ms CPU, 0.52%)</title><rect x="29.4" y="189" width="9.2" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="32.37" y="199.5" ></text>
+</g>
+<g >
+<title>Coroutine::getCid() (10 ms CPU, 0.07%)</title><rect x="915.3" y="109" width="1.2" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="918.26" y="119.5" ></text>
+</g>
+<g >
+<title>Channel::push() (24 ms CPU, 0.16%)</title><rect x="1664.9" y="221" width="2.9" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="1667.92" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager::isComponent (6 ms CPU, 0.04%)</title><rect x="1690.1" y="221" width="0.7" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1693.10" y="231.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Support\Sqlite::retry (8 ms CPU, 0.05%)</title><rect x="16.5" y="93" width="1.0" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="19.54" y="103.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getComponentManager (10 ms CPU, 0.07%)</title><rect x="566.3" y="189" width="1.2" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="569.28" y="199.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::endSpan (31 ms CPU, 0.21%)</title><rect x="1622.9" y="173" width="3.8" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1625.90" y="183.5" ></text>
+</g>
+<g >
+<title>count() (8 ms CPU, 0.05%)</title><rect x="912.4" y="109" width="0.9" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="915.35" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Action::url (47 ms CPU, 0.32%)</title><rect x="862.7" y="141" width="5.7" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="865.70" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::writeOutput (3,594 ms CPU, 24.45%)</title><rect x="99.0" y="221" width="435.2" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="102.00" y="231.5" >Mbolli\PhpVia\Http\SseHandler::writeOutput</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::span (9 ms CPU, 0.06%)</title><rect x="916.8" y="109" width="1.1" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="919.83" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal::bool (5 ms CPU, 0.03%)</title><rect x="897.1" y="141" width="0.6" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="900.09" y="151.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:583} (79 ms CPU, 0.54%)</title><rect x="1598.9" y="141" width="9.6" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1601.92" y="151.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::hueForSession (56 ms CPU, 0.38%)</title><rect x="921.2" y="141" width="6.8" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="924.19" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::renderView (16 ms CPU, 0.11%)</title><rect x="13.1" y="141" width="2.0" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="16.15" y="151.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:898} (5 ms CPU, 0.03%)</title><rect x="15.8" y="141" width="0.6" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="18.81" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::{closure:1482} (4,318 ms CPU, 29.37%)</title><rect x="11.8" y="397" width="522.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="14.82" y="407.5" >Mbolli\PhpVia\Via::{closure:1482}</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:965} (7 ms CPU, 0.05%)</title><rect x="16.7" y="77" width="0.8" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.66" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::startSpan (201 ms CPU, 1.37%)</title><rect x="1626.7" y="173" width="24.3" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1629.65" y="183.5" >M..</text>
+</g>
+<g >
+<title>starfederation\datastar\ServerSentEventGenerator::patchElements (282 ms CPU, 1.92%)</title><rect x="63.0" y="189" width="34.2" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="66.04" y="199.5" >st..</text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements::getDataLines (141 ms CPU, 0.96%)</title><rect x="76.8" y="141" width="17.1" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="79.84" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::stream (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="253" width="511.2" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="25.96" y="263.5" >Mbolli\PhpVia\Http\SseHandler::stream</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager::getComponents (11 ms CPU, 0.07%)</title><rect x="1654.0" y="237" width="1.3" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1657.02" y="247.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\ReadEpochs::current (10 ms CPU, 0.07%)</title><rect x="915.3" y="125" width="1.2" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="918.26" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getPatch (82 ms CPU, 0.56%)</title><rect x="28.6" y="221" width="10.0" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="31.65" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span::toArray (13 ms CPU, 0.09%)</title><rect x="540.9" y="269" width="1.5" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="543.85" y="279.5" ></text>
+</g>
+<g >
+<title>hexdec() (42 ms CPU, 0.29%)</title><rect x="922.9" y="125" width="5.1" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="925.89" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\BrotliMiddleware::process (69 ms CPU, 0.47%)</title><rect x="12.7" y="317" width="8.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="327.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::context (10 ms CPU, 0.07%)</title><rect x="1656.4" y="237" width="1.3" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1659.44" y="247.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::getSettings (7 ms CPU, 0.05%)</title><rect x="59.3" y="205" width="0.8" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="62.28" y="215.5" ></text>
+</g>
+<g >
+<title>htmlspecialchars() (961 ms CPU, 6.54%)</title><rect x="1462.6" y="109" width="116.3" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1465.58" y="119.5" >htmlspecialcha..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::{closure:179} (8,637 ms CPU, 58.76%)</title><rect x="577.1" y="173" width="1045.8" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="580.06" y="183.5" >Mbolli\PhpVia\Rendering\ViewRenderer::{closure:179}</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::renderDynamic (5,541 ms CPU, 37.69%)</title><rect x="928.0" y="141" width="670.9" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="930.97" y="151.5" >PhpVia\Website\Examples\SpreadsheetExample::renderDynamic</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::endEdit (12 ms CPU, 0.08%)</title><rect x="16.4" y="189" width="1.5" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.42" y="199.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::connectionGone (29 ms CPU, 0.20%)</title><rect x="39.4" y="221" width="3.5" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="42.42" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::sync (10,275 ms CPU, 69.90%)</title><rect x="545.3" y="253" width="1244.2" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="548.33" y="263.5" >Mbolli\PhpVia\Context\PatchManager::sync</text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements::getOutput (183 ms CPU, 1.24%)</title><rect x="73.3" y="157" width="22.2" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="76.33" y="167.5" >s..</text>
+</g>
+<g >
+<title>hrtime() (7 ms CPU, 0.05%)</title><rect x="1623.7" y="141" width="0.9" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1626.75" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::renderTraced (16 ms CPU, 0.11%)</title><rect x="13.1" y="125" width="2.0" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="16.15" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal::id (87 ms CPU, 0.59%)</title><rect x="897.7" y="141" width="10.5" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="900.70" y="151.5" ></text>
+</g>
+<g >
+<title>number_format() (165 ms CPU, 1.12%)</title><rect x="1578.9" y="125" width="20.0" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1581.94" y="135.5" ></text>
+</g>
+<g >
+<title>array_filter() (15 ms CPU, 0.10%)</title><rect x="97.2" y="205" width="1.8" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="100.18" y="215.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Core\Application::countClients (17 ms CPU, 0.12%)</title><rect x="911.3" y="125" width="2.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="914.26" y="135.5" ></text>
+</g>
+<g >
+<title>Response::write() (121 ms CPU, 0.82%)</title><rect x="519.5" y="205" width="14.7" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="522.54" y="215.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::drainChannel (5 ms CPU, 0.03%)</title><rect x="1668.1" y="221" width="0.6" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1671.06" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::isOneShot (7 ms CPU, 0.05%)</title><rect x="38.6" y="221" width="0.8" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="41.58" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::queuePatch (73 ms CPU, 0.50%)</title><rect x="1661.0" y="237" width="8.9" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1664.04" y="247.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle (69 ms CPU, 0.47%)</title><rect x="12.7" y="333" width="8.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="343.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::current (40 ms CPU, 0.27%)</title><rect x="568.5" y="189" width="4.8" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="571.46" y="199.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::syncFanOut (10,282 ms CPU, 69.95%)</title><rect x="544.5" y="269" width="1245.0" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="547.48" y="279.5" >Mbolli\PhpVia\Context::syncFanOut</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\RequestHandler::handleSseWithMiddleware (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="349" width="511.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="25.96" y="359.5" >Mbolli\PhpVia\Http\RequestHandler::handleSseWithMiddleware</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::span (11 ms CPU, 0.07%)</title><rect x="16.5" y="141" width="1.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="19.54" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::getPatchChannel (9 ms CPU, 0.06%)</title><rect x="1668.7" y="221" width="1.1" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1671.67" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::runScheduledFlush (10,366 ms CPU, 70.52%)</title><rect x="534.7" y="381" width="1255.2" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="537.68" y="391.5" >Mbolli\PhpVia\Via::runScheduledFlush</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\BrotliStream::write (3,352 ms CPU, 22.80%)</title><rect x="113.7" y="205" width="405.8" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="116.65" y="215.5" >Mbolli\PhpVia\Http\Middleware\BrotliStream::write</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\RequestHandler::psrRequest (12 ms CPU, 0.08%)</title><rect x="21.0" y="333" width="1.5" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="24.02" y="343.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements::getDataLine (7 ms CPU, 0.05%)</title><rect x="93.1" y="109" width="0.8" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="96.07" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::renderView (9,032 ms CPU, 61.44%)</title><rect x="557.3" y="221" width="1093.7" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="560.32" y="231.5" >Mbolli\PhpVia\Rendering\ViewRenderer::renderView</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::syncSignalsOf (145 ms CPU, 0.99%)</title><rect x="1669.9" y="237" width="17.5" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1672.88" y="247.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:918} (8 ms CPU, 0.05%)</title><rect x="917.0" y="93" width="0.9" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="919.95" y="103.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::span (16 ms CPU, 0.11%)</title><rect x="13.1" y="109" width="2.0" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="16.15" y="119.5" ></text>
+</g>
+<g >
+<title>Psr\Http\Server\RequestHandlerInterface@anonymous{src/Http/RequestHandler.php:909}::handle (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="285" width="511.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="25.96" y="295.5" >Psr\Http\Server\RequestHandlerInterface@anonymous{src/Http/RequestHand..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\TraceStore::push (45 ms CPU, 0.31%)</title><rect x="537.0" y="301" width="5.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="539.98" y="311.5" ></text>
+</g>
+<g >
+<title>array_pop() (17 ms CPU, 0.12%)</title><rect x="1624.6" y="157" width="2.1" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1627.59" y="167.5" ></text>
+</g>
+<g >
+<title>intdiv() (14 ms CPU, 0.10%)</title><rect x="1602.6" y="109" width="1.7" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1605.56" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::isAwaitingSeed (8 ms CPU, 0.05%)</title><rect x="1660.1" y="221" width="0.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1663.07" y="231.5" ></text>
+</g>
+<g >
+<title>substr() (8 ms CPU, 0.05%)</title><rect x="1635.2" y="141" width="1.0" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1638.25" y="151.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::traced (6 ms CPU, 0.04%)</title><rect x="15.7" y="173" width="0.7" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="18.69" y="183.5" ></text>
+</g>
+<g >
+<title>Response::isWritable() (20 ms CPU, 0.14%)</title><rect x="40.5" y="205" width="2.4" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="43.51" y="215.5" ></text>
+</g>
+<g >
+<title>chr() (17 ms CPU, 0.12%)</title><rect x="1600.5" y="109" width="2.1" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1603.50" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::runTickFlush (10,365 ms CPU, 70.51%)</title><rect x="534.8" y="365" width="1255.1" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="537.80" y="375.5" >Mbolli\PhpVia\Via::runTickFlush</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::getGridExtent (27 ms CPU, 0.18%)</title><rect x="917.9" y="141" width="3.3" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="920.92" y="151.5" ></text>
+</g>
+<g >
+<title>Tuupola\Middleware\CorsMiddleware::process (69 ms CPU, 0.47%)</title><rect x="12.7" y="285" width="8.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.66" y="295.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::getSignal (167 ms CPU, 1.14%)</title><rect x="876.9" y="141" width="20.2" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="879.87" y="151.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="301" width="511.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="25.96" y="311.5" >Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::traced (9 ms CPU, 0.06%)</title><rect x="916.8" y="125" width="1.1" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="919.83" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::sendSSEPatch (321 ms CPU, 2.18%)</title><rect x="60.1" y="221" width="38.9" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="63.13" y="231.5" >Mbo..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Trace::addSpan (20 ms CPU, 0.14%)</title><rect x="1630.9" y="157" width="2.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1633.89" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::{closure:179} (16 ms CPU, 0.11%)</title><rect x="13.1" y="93" width="2.0" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="16.15" y="103.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager::getParentPageContext (8 ms CPU, 0.05%)</title><rect x="1655.3" y="237" width="1.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1658.35" y="247.5" ></text>
+</g>
+<g >
+<title>array_merge() (12 ms CPU, 0.08%)</title><rect x="77.4" y="125" width="1.5" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="80.45" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::getScopedSignals (6 ms CPU, 0.04%)</title><rect x="1686.7" y="205" width="0.7" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1689.71" y="215.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Trace::toArray (45 ms CPU, 0.31%)</title><rect x="537.0" y="285" width="5.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="539.98" y="295.5" ></text>
+</g>
+<g >
+<title>microtime() (84 ms CPU, 0.57%)</title><rect x="1612.7" y="157" width="10.2" height="15.0" fill="rgb(217,217,217)" rx="2" ry="2" />
+<text  x="1615.73" y="167.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::startTrace (5 ms CPU, 0.03%)</title><rect x="19.1" y="221" width="0.6" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="22.08" y="231.5" ></text>
+</g>
+<g >
+<title>brotli_compress_add() (3,343 ms CPU, 22.74%)</title><rect x="114.0" y="189" width="404.8" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="117.01" y="199.5" >brotli_compress_add()</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\RequestHandler::handleRequest (4,313 ms CPU, 29.34%)</title><rect x="12.4" y="381" width="522.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="15.42" y="391.5" >Mbolli\PhpVia\Http\RequestHandler::handleRequest</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::runFlush (10,364 ms CPU, 70.50%)</title><rect x="534.8" y="349" width="1255.0" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="537.80" y="359.5" >Mbolli\PhpVia\Via::runFlush</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::setCell (11 ms CPU, 0.07%)</title><rect x="16.5" y="173" width="1.4" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.54" y="183.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::shouldDropFrame (7 ms CPU, 0.05%)</title><rect x="58.2" y="205" width="0.8" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="61.19" y="215.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::renderDynamic (10 ms CPU, 0.07%)</title><rect x="13.9" y="61" width="1.2" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="16.87" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager::isComponent (8 ms CPU, 0.05%)</title><rect x="567.5" y="189" width="1.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="570.49" y="199.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager::syncScopedSignals (25 ms CPU, 0.17%)</title><rect x="1684.4" y="221" width="3.0" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1687.41" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SwooleSSEGenerator::patchElements (293 ms CPU, 1.99%)</title><rect x="61.7" y="205" width="35.5" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="64.70" y="215.5" >Mbo..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler::handleSSE (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="269" width="511.2" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="25.96" y="279.5" >Mbolli\PhpVia\Http\SseHandler::handleSSE</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::sync (21 ms CPU, 0.14%)</title><rect x="13.1" y="189" width="2.6" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="16.15" y="199.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SwooleSSEGenerator::sendEvent (189 ms CPU, 1.29%)</title><rect x="72.6" y="173" width="22.9" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="75.60" y="183.5" >M..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::executeAction (41 ms CPU, 0.28%)</title><rect x="12.9" y="221" width="5.0" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="15.91" y="231.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span::end (8 ms CPU, 0.05%)</title><rect x="1623.6" y="157" width="1.0" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1626.62" y="167.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements::__construct (14 ms CPU, 0.10%)</title><rect x="95.5" y="173" width="1.7" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="98.49" y="183.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\BrotliMiddleware::process (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="317" width="511.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="25.96" y="327.5" >Mbolli\PhpVia\Http\Middleware\BrotliMiddleware::process</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::deriveCategory (12 ms CPU, 0.08%)</title><rect x="1634.8" y="157" width="1.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1637.76" y="167.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::getCell (6 ms CPU, 0.04%)</title><rect x="15.7" y="189" width="0.7" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="18.69" y="199.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::write (8 ms CPU, 0.05%)</title><rect x="16.5" y="109" width="1.0" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.54" y="119.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle (4,222 ms CPU, 28.72%)</title><rect x="23.0" y="333" width="511.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="25.96" y="343.5" >Mbolli\PhpVia\Http\Middleware\MiddlewareDispatcher::handle</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:944} (11 ms CPU, 0.07%)</title><rect x="16.5" y="125" width="1.4" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="19.54" y="135.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer::generateId (93 ms CPU, 0.63%)</title><rect x="1636.2" y="157" width="11.3" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1639.22" y="167.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\SpreadsheetExample::{closure:247} (27 ms CPU, 0.18%)</title><rect x="13.1" y="205" width="3.3" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="16.15" y="215.5" ></text>
+</g>
+</g>
+</svg>

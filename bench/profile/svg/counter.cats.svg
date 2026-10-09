@@ -1,0 +1,671 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1800" height="142" onload="init(evt)" viewBox="0 0 1800 142" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1800.0" height="142.0" fill="url(#background)"  />
+<text id="title" x="900.00" y="24" >Home shared counter: 500 tabs, 20 clicks/s: categories</text>
+<g id="legend" font-family="Verdana" font-size="12"><rect x="10.0" y="38.0" width="12" height="12" fill="#d62728" stroke="#555" stroke-width="0.5"/><text x="26.0" y="48.0">Brotli 52.4%</text><rect x="119.6" y="38.0" width="12" height="12" fill="#ff7f0e" stroke="#555" stroke-width="0.5"/><text x="135.6" y="48.0">socket writes 8.6%</text><rect x="270.0" y="38.0" width="12" height="12" fill="#c49c94" stroke="#555" stroke-width="0.5"/><text x="286.0" y="48.0">Datastar SDK (event text) 8.4%</text><rect x="502.0" y="38.0" width="12" height="12" fill="#2171b5" stroke="#555" stroke-width="0.5"/><text x="518.0" y="48.0">via: SSE loop 8.1%</text><rect x="652.4" y="38.0" width="12" height="12" fill="#c6dbef" stroke="#555" stroke-width="0.5"/><text x="668.4" y="48.0">via: other 4.4%</text><rect x="782.4" y="38.0" width="12" height="12" fill="#9edae5" stroke="#555" stroke-width="0.5"/><text x="798.4" y="48.0">OpenSwoole calls 4.4%</text><rect x="953.2" y="38.0" width="12" height="12" fill="#4292c6" stroke="#555" stroke-width="0.5"/><text x="969.2" y="48.0">via: patches 3.9%</text><rect x="1096.8" y="38.0" width="12" height="12" fill="#fdae6b" stroke="#555" stroke-width="0.5"/><text x="1112.8" y="48.0">via: Dev Bar tracing 3.6%</text><rect x="1294.8" y="38.0" width="12" height="12" fill="#9ecae1" stroke="#555" stroke-width="0.5"/><text x="1310.8" y="48.0">via: signals/state 2.0%</text><rect x="1479.2" y="38.0" width="12" height="12" fill="#6baed6" stroke="#555" stroke-width="0.5"/><text x="1495.2" y="48.0">via: render 1.9%</text><rect x="1616.0" y="38.0" width="12" height="12" fill="#ffffff" stroke="#555" stroke-width="0.5"/><text x="1632.0" y="48.0">rest 2.3%</text></g>
+<text id="details" x="10.00" y="125" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1690.00" y="24" >Search</text>
+<text id="ignorecase" x="1774.00" y="24" >ic</text>
+<text id="matched" x="1690.00" y="125" > </text>
+<g id="frames">
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer (23 ms CPU, 0.21%)</title><rect x="1744.7" y="61" width="3.6" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1747.66" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (120 ms CPU, 1.08%)</title><rect x="1720.6" y="61" width="19.3" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1723.63" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::{closure:222} (21 ms CPU, 0.19%)</title><rect x="1748.8" y="61" width="3.4" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1751.83" y="71.5" ></text>
+</g>
+<g >
+<title>via: broadcast (72 ms CPU, 0.65%)</title><rect x="1561.9" y="77" width="11.5" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1564.87" y="87.5" ></text>
+</g>
+<g >
+<title>via: render (206 ms CPU, 1.85%)</title><rect x="1720.6" y="77" width="33.0" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1723.63" y="87.5" >vi..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\SignalFactory (15 ms CPU, 0.14%)</title><rect x="1753.8" y="61" width="2.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1756.79" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler (803 ms CPU, 7.23%)</title><rect x="1421.7" y="61" width="128.6" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1424.70" y="71.5" >Mbolli\PhpVia\Ht..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Core\SessionManager (8 ms CPU, 0.07%)</title><rect x="1411.3" y="61" width="1.3" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1414.28" y="71.5" ></text>
+</g>
+<g >
+<title>JSON (102 ms CPU, 0.92%)</title><rect x="1092.6" y="77" width="16.4" height="15.0" fill="rgb(231,186,82)" rx="2" ry="2" />
+<text  x="1095.64" y="87.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchSignals (176 ms CPU, 1.58%)</title><rect x="1064.4" y="61" width="28.2" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="1067.45" y="71.5" >s..</text>
+</g>
+<g >
+<title>Coroutine::getCid() (19 ms CPU, 0.17%)</title><rect x="1183.3" y="61" width="3.1" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="1186.32" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Sanitizer (69 ms CPU, 0.62%)</title><rect x="1346.6" y="61" width="11.0" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1349.56" y="71.5" ></text>
+</g>
+<g >
+<title>via: patches (433 ms CPU, 3.90%)</title><rect x="1651.3" y="77" width="69.3" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1654.27" y="87.5" >via: pa..</text>
+</g>
+<g >
+<title>OpenSwoole calls (486 ms CPU, 4.37%)</title><rect x="1109.0" y="77" width="77.8" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="1111.98" y="87.5" >OpenSwoo..</text>
+</g>
+<g >
+<title>gc_collect_cycles() (9 ms CPU, 0.08%)</title><rect x="1190.5" y="61" width="1.5" height="15.0" fill="rgb(127,127,127)" rx="2" ry="2" />
+<text  x="1193.53" y="71.5" ></text>
+</g>
+<g >
+<title>Twig (19 ms CPU, 0.17%)</title><rect x="1187.3" y="77" width="3.1" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1190.32" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (19 ms CPU, 0.17%)</title><rect x="1561.9" y="61" width="3.0" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1564.87" y="71.5" ></text>
+</g>
+<g >
+<title>Datastar SDK (event text) (933 ms CPU, 8.40%)</title><rect x="943.2" y="77" width="149.4" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="946.17" y="87.5" >Datastar SDK (event..</text>
+</g>
+<g >
+<title>cycle GC (10 ms CPU, 0.09%)</title><rect x="1190.4" y="77" width="1.6" height="15.0" fill="rgb(127,127,127)" rx="2" ry="2" />
+<text  x="1193.37" y="87.5" ></text>
+</g>
+<g >
+<title>Response::write() (886 ms CPU, 7.97%)</title><rect x="1204.6" y="61" width="142.0" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1207.62" y="71.5" >Response::write()</text>
+</g>
+<g >
+<title>event loop (no PHP frame) (7 ms CPU, 0.06%)</title><rect x="1192.0" y="77" width="1.1" height="15.0" fill="rgb(188,189,34)" rx="2" ry="2" />
+<text  x="1194.97" y="87.5" ></text>
+</g>
+<g >
+<title>twig:components/shared-counter.html.twig (6 ms CPU, 0.05%)</title><rect x="1189.4" y="61" width="1.0" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1192.40" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span (75 ms CPU, 0.68%)</title><rect x="1357.6" y="61" width="12.0" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1360.62" y="71.5" ></text>
+</g>
+<g >
+<title>Response::isWritable() (71 ms CPU, 0.64%)</title><rect x="1193.2" y="61" width="11.4" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1196.25" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (172 ms CPU, 1.55%)</title><rect x="1573.4" y="61" width="27.6" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1576.41" y="71.5" >M..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (48 ms CPU, 0.43%)</title><rect x="1565.7" y="61" width="7.7" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1568.72" y="71.5" ></text>
+</g>
+<g >
+<title>brotli_compress_add() (5,767 ms CPU, 51.90%)</title><rect x="10.0" y="61" width="923.9" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="13.00" y="71.5" >brotli_compress_add()</text>
+</g>
+<g >
+<title>via: Dev Bar tracing (404 ms CPU, 3.64%)</title><rect x="1346.6" y="77" width="64.7" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1349.56" y="87.5" >via: De..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager (430 ms CPU, 3.87%)</title><rect x="1651.7" y="61" width="68.9" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1654.75" y="71.5" >Mbolli\..</text>
+</g>
+<g >
+<title>Channel::pop() (418 ms CPU, 3.76%)</title><rect x="1109.1" y="61" width="67.0" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="1112.14" y="71.5" >Channel..</text>
+</g>
+<g >
+<title>json_encode() (101 ms CPU, 0.91%)</title><rect x="1092.8" y="61" width="16.2" height="15.0" fill="rgb(231,186,82)" rx="2" ry="2" />
+<text  x="1095.80" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer (221 ms CPU, 1.99%)</title><rect x="1375.9" y="61" width="35.4" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1378.88" y="71.5" >Mbo..</text>
+</g>
+<g >
+<title>via: HTTP + PSR (40 ms CPU, 0.36%)</title><rect x="1411.3" y="77" width="6.4" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1414.28" y="87.5" ></text>
+</g>
+<g >
+<title>Brotli (5,825 ms CPU, 52.43%)</title><rect x="10.0" y="77" width="933.2" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="13.00" y="87.5" >Brotli</text>
+</g>
+<g >
+<title>starfederation\datastar\ServerSentEventGenerator (39 ms CPU, 0.35%)</title><rect x="949.9" y="61" width="6.3" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="952.90" y="71.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements (676 ms CPU, 6.08%)</title><rect x="956.2" y="61" width="108.2" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="959.15" y="71.5" >starfederatio..</text>
+</g>
+<g >
+<title>socket writes (958 ms CPU, 8.62%)</title><rect x="1193.1" y="77" width="153.5" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1196.09" y="87.5" >socket writes</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager (166 ms CPU, 1.49%)</title><rect x="1601.0" y="61" width="26.6" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1603.96" y="71.5" >M..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SwooleSSEGenerator (72 ms CPU, 0.65%)</title><rect x="1550.3" y="61" width="11.6" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1553.34" y="71.5" ></text>
+</g>
+<g >
+<title>all (11,111 ms CPU, 100%)</title><rect x="10.0" y="93" width="1780.0" height="15.0" fill="rgb(255,230,55)" rx="2" ry="2" />
+<text  x="13.00" y="103.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via::{closure:1482} (5 ms CPU, 0.05%)</title><rect x="1192.0" y="61" width="0.8" height="15.0" fill="rgb(188,189,34)" rx="2" ry="2" />
+<text  x="1194.97" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\SessionTokens (146 ms CPU, 1.31%)</title><rect x="1763.2" y="61" width="23.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1766.25" y="71.5" >M..</text>
+</g>
+<g >
+<title>starfederation\datastar\ServerSentEventData (42 ms CPU, 0.38%)</title><rect x="943.2" y="61" width="6.7" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="946.17" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\ScopeRegistry (5 ms CPU, 0.05%)</title><rect x="1564.9" y="61" width="0.8" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1567.92" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal (42 ms CPU, 0.38%)</title><rect x="1756.2" y="61" width="6.7" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1759.20" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (51 ms CPU, 0.46%)</title><rect x="1643.1" y="61" width="8.2" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1646.10" y="71.5" ></text>
+</g>
+<g >
+<title>via: signals/state (225 ms CPU, 2.03%)</title><rect x="1753.6" y="77" width="36.1" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1756.63" y="87.5" >via..</text>
+</g>
+<g >
+<title>brotli_compress_init() (58 ms CPU, 0.52%)</title><rect x="933.9" y="61" width="9.3" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="936.88" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Support\DomId (93 ms CPU, 0.84%)</title><rect x="1628.0" y="61" width="14.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1631.04" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewCache (30 ms CPU, 0.27%)</title><rect x="1739.9" y="61" width="4.8" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1742.86" y="71.5" ></text>
+</g>
+<g >
+<title>via: SSE loop (900 ms CPU, 8.10%)</title><rect x="1417.7" y="77" width="144.2" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1420.69" y="87.5" >via: SSE loop</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (8 ms CPU, 0.07%)</title><rect x="1752.4" y="61" width="1.2" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1755.35" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Extension\CoreExtension (5 ms CPU, 0.05%)</title><rect x="1187.5" y="61" width="0.8" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1190.48" y="71.5" ></text>
+</g>
+<g >
+<title>Nyholm\Psr7\Stream (4 ms CPU, 0.04%)</title><rect x="1416.1" y="61" width="0.6" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1419.09" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\BrotliStream (25 ms CPU, 0.23%)</title><rect x="1417.7" y="61" width="4.0" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1420.69" y="71.5" ></text>
+</g>
+<g >
+<title>via: other (486 ms CPU, 4.37%)</title><rect x="1573.4" y="77" width="77.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1576.41" y="87.5" >via: other</text>
+</g>
+<g >
+<title>Channel::push() (45 ms CPU, 0.41%)</title><rect x="1176.1" y="61" width="7.2" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="1179.11" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Trace (39 ms CPU, 0.35%)</title><rect x="1369.6" y="61" width="6.3" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1372.63" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\SignalManager (16 ms CPU, 0.14%)</title><rect x="1787.1" y="61" width="2.6" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1790.12" y="71.5" ></text>
+</g>
+</g>
+</svg>

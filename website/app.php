@@ -482,6 +482,11 @@ $app->onWorkerStart(function () use ($app): void {
     require __DIR__ . '/routes.php';
 });
 
+// Opt-in sampling profiler for bench/profile; with VIA_PROFILE unset nothing is loaded.
+if (getenv('VIA_PROFILE') === '1') {
+    require __DIR__ . '/../bench/profile/excimer.php';
+}
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 $startScheme = $config->isHttps() ? 'https' : 'http';

@@ -1,0 +1,735 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1800" height="142" onload="init(evt)" viewBox="0 0 1800 142" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1800.0" height="142.0" fill="url(#background)"  />
+<text id="title" x="900.00" y="24" >Chat Room: 300 tabs in the lobby, 4 messages/s: categories</text>
+<g id="legend" font-family="Verdana" font-size="12"><rect x="10.0" y="38.0" width="12" height="12" fill="#2ca02c" stroke="#555" stroke-width="0.5"/><text x="26.0" y="48.0">Twig 44.1%</text><rect x="106.0" y="38.0" width="12" height="12" fill="#d62728" stroke="#555" stroke-width="0.5"/><text x="122.0" y="48.0">Brotli 16.9%</text><rect x="215.6" y="38.0" width="12" height="12" fill="#c49c94" stroke="#555" stroke-width="0.5"/><text x="231.6" y="48.0">Datastar SDK (event text) 15.2%</text><rect x="454.4" y="38.0" width="12" height="12" fill="#8c564b" stroke="#555" stroke-width="0.5"/><text x="470.4" y="48.0">SQLite 6.6%</text><rect x="557.2" y="38.0" width="12" height="12" fill="#6baed6" stroke="#555" stroke-width="0.5"/><text x="573.2" y="48.0">via: render 4.3%</text><rect x="694.0" y="38.0" width="12" height="12" fill="#9467bd" stroke="#555" stroke-width="0.5"/><text x="710.0" y="48.0">website code 3.6%</text><rect x="837.6" y="38.0" width="12" height="12" fill="#2171b5" stroke="#555" stroke-width="0.5"/><text x="853.6" y="48.0">via: SSE loop 3.1%</text><rect x="988.0" y="38.0" width="12" height="12" fill="#fdae6b" stroke="#555" stroke-width="0.5"/><text x="1004.0" y="48.0">via: Dev Bar tracing 2.1%</text><rect x="1186.0" y="38.0" width="12" height="12" fill="#ffffff" stroke="#555" stroke-width="0.5"/><text x="1202.0" y="48.0">rest 4.1%</text></g>
+<text id="details" x="10.00" y="125" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1690.00" y="24" >Search</text>
+<text id="ignorecase" x="1774.00" y="24" >ic</text>
+<text id="matched" x="1690.00" y="125" > </text>
+<g id="frames">
+<g >
+<title>Mbolli\PhpVia\Http\Middleware\BrotliStream (5 ms CPU, 0.03%)</title><rect x="1555.2" y="61" width="0.5" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1558.20" y="71.5" ></text>
+</g>
+<g >
+<title>Response::write() (92 ms CPU, 0.56%)</title><rect x="1506.4" y="61" width="10.0" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1509.41" y="71.5" ></text>
+</g>
+<g >
+<title>socket writes (134 ms CPU, 0.82%)</title><rect x="1501.9" y="77" width="14.5" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1504.86" y="87.5" ></text>
+</g>
+<g >
+<title>Channel::pop() (77 ms CPU, 0.47%)</title><rect x="586.1" y="61" width="8.3" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="589.06" y="71.5" ></text>
+</g>
+<g >
+<title>Datastar SDK (event text) (2,504 ms CPU, 15.25%)</title><rect x="310.6" y="77" width="271.4" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="313.61" y="87.5" >Datastar SDK (event text)</text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\ChatRoomExample::{closure:173} (347 ms CPU, 2.11%)</title><rect x="1751.8" y="61" width="37.7" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1754.84" y="71.5" >Php..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\PatchManager (140 ms CPU, 0.85%)</title><rect x="1624.6" y="61" width="15.2" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1627.57" y="71.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\ChatRoomExample::{closure:183} (5 ms CPU, 0.03%)</title><rect x="1789.5" y="61" width="0.5" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1792.46" y="71.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\ServerSentEventData (7 ms CPU, 0.04%)</title><rect x="310.6" y="61" width="0.8" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="313.61" y="71.5" ></text>
+</g>
+<g >
+<title>all (16,420 ms CPU, 100%)</title><rect x="10.0" y="93" width="1780.0" height="15.0" fill="rgb(255,230,55)" rx="2" ry="2" />
+<text  x="13.00" y="103.5" ></text>
+</g>
+<g >
+<title>via: other (108 ms CPU, 0.66%)</title><rect x="1612.8" y="77" width="11.7" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1615.76" y="87.5" ></text>
+</g>
+<g >
+<title>via: Dev Bar tracing (338 ms CPU, 2.06%)</title><rect x="1516.4" y="77" width="36.6" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1519.39" y="87.5" >via..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Tracer (224 ms CPU, 1.36%)</title><rect x="1528.7" y="61" width="24.3" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1531.75" y="71.5" >M..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context\ComponentManager (27 ms CPU, 0.16%)</title><rect x="1616.6" y="61" width="2.9" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1619.55" y="71.5" ></text>
+</g>
+<g >
+<title>via: render (711 ms CPU, 4.33%)</title><rect x="1639.8" y="77" width="77.0" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1642.75" y="87.5" >via: ren..</text>
+</g>
+<g >
+<title>cycle GC (5 ms CPU, 0.03%)</title><rect x="1500.9" y="77" width="0.5" height="15.0" fill="rgb(127,127,127)" rx="2" ry="2" />
+<text  x="1503.89" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SseHandler (492 ms CPU, 3.00%)</title><rect x="1555.7" y="61" width="53.4" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1558.74" y="71.5" >Mboll..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer::{closure:179} (108 ms CPU, 0.66%)</title><rect x="1654.6" y="61" width="11.7" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1657.60" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context::{closure:1049} (10 ms CPU, 0.06%)</title><rect x="1615.5" y="61" width="1.1" height="15.0" fill="rgb(198,219,239)" rx="2" ry="2" />
+<text  x="1618.47" y="71.5" ></text>
+</g>
+<g >
+<title>website code (594 ms CPU, 3.62%)</title><rect x="1725.6" y="77" width="64.4" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1728.61" y="87.5" >website..</text>
+</g>
+<g >
+<title>json_encode() (37 ms CPU, 0.23%)</title><rect x="582.0" y="61" width="4.1" height="15.0" fill="rgb(231,186,82)" rx="2" ry="2" />
+<text  x="585.05" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\TemplateWrapper (8 ms CPU, 0.05%)</title><rect x="1353.2" y="61" width="0.9" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1356.24" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Extension\CoreExtension (892 ms CPU, 5.43%)</title><rect x="746.6" y="61" width="96.7" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="749.61" y="71.5" >Twig\Extens..</text>
+</g>
+<g >
+<title>brotli_compress_init() (11 ms CPU, 0.07%)</title><rect x="309.4" y="61" width="1.2" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="312.41" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Core\SessionManager (8 ms CPU, 0.05%)</title><rect x="1553.0" y="61" width="0.9" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1556.03" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Http\SwooleSSEGenerator (14 ms CPU, 0.09%)</title><rect x="1609.1" y="61" width="1.5" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1612.07" y="71.5" ></text>
+</g>
+<g >
+<title>JSON (37 ms CPU, 0.23%)</title><rect x="582.0" y="77" width="4.1" height="15.0" fill="rgb(231,186,82)" rx="2" ry="2" />
+<text  x="585.05" y="87.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchElements (2,356 ms CPU, 14.35%)</title><rect x="320.6" y="61" width="255.4" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="323.58" y="71.5" >starfederation\datastar\events\Pat..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (69 ms CPU, 0.42%)</title><rect x="1639.8" y="61" width="7.4" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1642.75" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\Html (14 ms CPU, 0.09%)</title><rect x="1647.2" y="61" width="1.5" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1650.23" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Signal (28 ms CPU, 0.17%)</title><rect x="1717.2" y="61" width="3.0" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1720.15" y="71.5" ></text>
+</g>
+<g >
+<title>via: signals/state (81 ms CPU, 0.49%)</title><rect x="1716.8" y="77" width="8.8" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1719.83" y="87.5" ></text>
+</g>
+<g >
+<title>via: HTTP + PSR (20 ms CPU, 0.12%)</title><rect x="1553.0" y="77" width="2.2" height="15.0" fill="rgb(49,130,189)" rx="2" ry="2" />
+<text  x="1556.03" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\SessionTokens (41 ms CPU, 0.25%)</title><rect x="1720.2" y="61" width="4.4" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1723.19" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Template::{closure:204} (124 ms CPU, 0.76%)</title><rect x="1339.8" y="61" width="13.4" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1342.80" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Template (2,333 ms CPU, 14.21%)</title><rect x="1086.9" y="61" width="252.9" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1089.89" y="71.5" >Twig\Template</text>
+</g>
+<g >
+<title>Twig\Environment (259 ms CPU, 1.58%)</title><rect x="717.6" y="61" width="28.0" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="720.56" y="71.5" >T..</text>
+</g>
+<g >
+<title>OpenSwoole calls (119 ms CPU, 0.72%)</title><rect x="586.1" y="77" width="12.9" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="589.06" y="87.5" ></text>
+</g>
+<g >
+<title>gc_collect_cycles() (5 ms CPU, 0.03%)</title><rect x="1500.9" y="61" width="0.5" height="15.0" fill="rgb(127,127,127)" rx="2" ry="2" />
+<text  x="1503.89" y="71.5" ></text>
+</g>
+<g >
+<title>Twig (7,234 ms CPU, 44.06%)</title><rect x="716.7" y="77" width="784.2" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="719.69" y="87.5" >Twig</text>
+</g>
+<g >
+<title>Twig\ExtensionSet (9 ms CPU, 0.05%)</title><rect x="745.6" y="61" width="1.0" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="748.63" y="71.5" ></text>
+</g>
+<g >
+<title>Brotli (2,773 ms CPU, 16.89%)</title><rect x="10.0" y="77" width="300.6" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="13.00" y="87.5" >Brotli</text>
+</g>
+<g >
+<title>SQLite (1,086 ms CPU, 6.61%)</title><rect x="599.0" y="77" width="117.7" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="601.96" y="87.5" >SQLite</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Trace (26 ms CPU, 0.16%)</title><rect x="1525.8" y="61" width="2.8" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1528.82" y="71.5" ></text>
+</g>
+<g >
+<title>via: patches (141 ms CPU, 0.86%)</title><rect x="1624.5" y="77" width="15.3" height="15.0" fill="rgb(66,146,198)" rx="2" ry="2" />
+<text  x="1627.47" y="87.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\ChatRoomExample::{closure:164} (190 ms CPU, 1.16%)</title><rect x="1731.2" y="61" width="20.6" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1734.24" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (5 ms CPU, 0.03%)</title><rect x="1610.6" y="61" width="0.5" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1613.59" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (45 ms CPU, 0.27%)</title><rect x="1619.6" y="61" width="4.9" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1622.59" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Loader\FilesystemLoader (31 ms CPU, 0.19%)</title><rect x="843.3" y="61" width="3.4" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="846.30" y="71.5" ></text>
+</g>
+<g >
+<title>brotli_compress_add() (2,762 ms CPU, 16.82%)</title><rect x="10.0" y="61" width="299.4" height="15.0" fill="rgb(214,39,40)" rx="2" ry="2" />
+<text  x="13.00" y="71.5" >brotli_compress_add()</text>
+</g>
+<g >
+<title>SQLite3::fetchArray() (605 ms CPU, 3.68%)</title><rect x="625.1" y="61" width="65.6" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="628.09" y="71.5" >SQLite3..</text>
+</g>
+<g >
+<title>Response::isWritable() (39 ms CPU, 0.24%)</title><rect x="1502.2" y="61" width="4.2" height="15.0" fill="rgb(255,127,14)" rx="2" ry="2" />
+<text  x="1505.19" y="71.5" ></text>
+</g>
+<g >
+<title>Coroutine::getCid() (10 ms CPU, 0.06%)</title><rect x="597.8" y="61" width="1.1" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="600.77" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (23 ms CPU, 0.14%)</title><rect x="1516.4" y="61" width="2.5" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1519.39" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\HtmlBuilder (7 ms CPU, 0.04%)</title><rect x="1648.7" y="61" width="0.8" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1651.75" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Markup (8 ms CPU, 0.05%)</title><rect x="846.7" y="61" width="0.8" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="849.67" y="71.5" ></text>
+</g>
+<g >
+<title>twig:examples/chat_room.html.twig (1,354 ms CPU, 8.25%)</title><rect x="1354.1" y="61" width="146.8" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="1357.11" y="71.5" >twig:examples/chat..</text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (14 ms CPU, 0.09%)</title><rect x="1611.2" y="61" width="1.6" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1614.24" y="71.5" ></text>
+</g>
+<g >
+<title>via: SSE loop (511 ms CPU, 3.11%)</title><rect x="1555.2" y="77" width="55.4" height="15.0" fill="rgb(33,113,181)" rx="2" ry="2" />
+<text  x="1558.20" y="87.5" >via: ..</text>
+</g>
+<g >
+<title>via: broadcast (20 ms CPU, 0.12%)</title><rect x="1610.6" y="77" width="2.2" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1613.59" y="87.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Span (35 ms CPU, 0.21%)</title><rect x="1522.0" y="61" width="3.8" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1525.02" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Tracing\Sanitizer (29 ms CPU, 0.18%)</title><rect x="1518.9" y="61" width="3.1" height="15.0" fill="rgb(253,174,107)" rx="2" ry="2" />
+<text  x="1521.88" y="71.5" ></text>
+</g>
+<g >
+<title>starfederation\datastar\ServerSentEventGenerator (85 ms CPU, 0.52%)</title><rect x="311.4" y="61" width="9.2" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="314.36" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Rendering\ViewRenderer (47 ms CPU, 0.29%)</title><rect x="1649.5" y="61" width="5.1" height="15.0" fill="rgb(107,174,214)" rx="2" ry="2" />
+<text  x="1652.51" y="71.5" ></text>
+</g>
+<g >
+<title>SQLite3::bindValue() (13 ms CPU, 0.08%)</title><rect x="599.0" y="61" width="1.4" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="601.96" y="71.5" ></text>
+</g>
+<g >
+<title>PhpVia\Website\Examples\ChatRoomExample (52 ms CPU, 0.32%)</title><rect x="1725.6" y="61" width="5.6" height="15.0" fill="rgb(148,103,189)" rx="2" ry="2" />
+<text  x="1728.61" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\Runtime\EscaperRuntime (2,208 ms CPU, 13.45%)</title><rect x="847.5" y="61" width="239.4" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="850.53" y="71.5" >Twig\Runtime\EscaperRuntime</text>
+</g>
+<g >
+<title>starfederation\datastar\events\PatchSignals (56 ms CPU, 0.34%)</title><rect x="576.0" y="61" width="6.0" height="15.0" fill="rgb(196,156,148)" rx="2" ry="2" />
+<text  x="578.98" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\State\SignalManager (7 ms CPU, 0.04%)</title><rect x="1724.6" y="61" width="0.8" height="15.0" fill="rgb(158,202,225)" rx="2" ry="2" />
+<text  x="1727.63" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Via (462 ms CPU, 2.81%)</title><rect x="1666.7" y="61" width="50.1" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1669.74" y="71.5" >Mboll..</text>
+</g>
+<g >
+<title>Channel::push() (31 ms CPU, 0.19%)</title><rect x="594.4" y="61" width="3.4" height="15.0" fill="rgb(158,218,229)" rx="2" ry="2" />
+<text  x="597.41" y="71.5" ></text>
+</g>
+<g >
+<title>Twig\AbstractTwigCallable (8 ms CPU, 0.05%)</title><rect x="716.7" y="61" width="0.9" height="15.0" fill="rgb(44,160,44)" rx="2" ry="2" />
+<text  x="719.69" y="71.5" ></text>
+</g>
+<g >
+<title>Mbolli\PhpVia\Context (22 ms CPU, 0.13%)</title><rect x="1613.1" y="61" width="2.4" height="15.0" fill="rgb(8,48,107)" rx="2" ry="2" />
+<text  x="1616.08" y="71.5" ></text>
+</g>
+<g >
+<title>SQLite3::execute() (228 ms CPU, 1.39%)</title><rect x="600.4" y="61" width="24.7" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="603.37" y="71.5" >S..</text>
+</g>
+<g >
+<title>SQLite3::prepare() (240 ms CPU, 1.46%)</title><rect x="690.7" y="61" width="26.0" height="15.0" fill="rgb(140,86,75)" rx="2" ry="2" />
+<text  x="693.67" y="71.5" >S..</text>
+</g>
+</g>
+</svg>
