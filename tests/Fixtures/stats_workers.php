@@ -57,6 +57,8 @@ $app->route('GET', '/stats', new class($app) implements RequestHandlerInterface 
     }
 });
 
+$app->route('GET', '/metrics', $app->metricsHandler());
+
 $app->route('GET', '/garbage', new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface {
         for ($i = 0; $i < 50; ++$i) {
@@ -171,6 +173,13 @@ function statsDrive(int $port, int $workers): void {
     echo 'shared_requests=', (int) ($b['requests'] === $a['requests'] + 1), "\n";
     echo 'shared_actions=', (int) ($b['actions'] === $a['actions']), "\n";
     echo 'shared_sse_connections=', (int) ($b['sse_connections'] === $a['sse_connections']), "\n";
+
+    [, $head, $metrics] = statsRequest($onB, "GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+    preg_match('/^via_requests_total (\d+)$/m', $metrics, $r);
+    echo 'metrics_type=', (int) (stripos($head, 'content-type: text/plain; version=0.0.4') !== false), "\n";
+    echo 'metrics_requests=', (int) (((int) ($r[1] ?? 0)) >= $b['requests']), "\n";
+    echo 'metrics_worker=', (int) (preg_match('/^via_active_sse\{worker="\d+"\} \d+$/m', $metrics) === 1), "\n";
+    echo 'metrics_memory=', (int) (preg_match('/^via_memory_bytes\{worker="\d+"\} [1-9]\d*$/m', $metrics) === 1), "\n";
     fclose($stream);
 }
 

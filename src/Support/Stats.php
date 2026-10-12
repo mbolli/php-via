@@ -243,6 +243,50 @@ class Stats {
     }
 
     /**
+     * Every figure of getAll() in the Prometheus text format, for a scrape endpoint.
+     *
+     * The server-wide counters carry no label. The figures of this worker carry $workerLabels (such as
+     * ['worker' => '0']), so the series of several workers stay apart; sum them in the query.
+     *
+     * @param array<string, string> $workerLabels
+     */
+    public function toPrometheus(array $workerLabels = []): string {
+        $all = $this->getAll();
+        $render = $this->getStats();
+        $requestTimeUs = $this->shared === null ? $this->requestTimeUs : $this->shared['requestTimeUs']->get();
+
+        $out = '';
+        $metric = static function (string $name, string $type, string $help, float|int $value, array $labels = []) use (&$out): void {
+            $pairs = [];
+            foreach ($labels as $k => $v) {
+                $pairs[] = $k . '="' . addcslashes($v, "\\\"\n") . '"';
+            }
+            $out .= "# HELP {$name} {$help}\n# TYPE {$name} {$type}\n"
+                . $name . ($pairs === [] ? '' : '{' . implode(',', $pairs) . '}') . ' ' . $value . "\n";
+        };
+        $w = $workerLabels;
+
+        $metric('via_requests_total', 'counter', 'Page, static file and route() requests, whole server.', $all['requests']);
+        $metric('via_request_duration_seconds_total', 'counter', 'Time spent on those requests, whole server.', $requestTimeUs / 1_000_000);
+        $metric('via_actions_total', 'counter', 'Actions run, whole server.', $all['actions']);
+        $metric('via_sse_connections_total', 'counter', 'SSE streams opened, whole server.', $all['sse_connections']);
+        $metric('via_active_sse', 'gauge', 'Open SSE streams on this worker.', $all['active_sse'], $w);
+        $metric('via_active_contexts', 'gauge', 'Live contexts on this worker.', $all['active_contexts'], $w);
+        $metric('via_renders_total', 'counter', 'View renders on this worker.', $render['render_count'], $w);
+        $metric('via_render_duration_seconds_total', 'counter', 'Time spent rendering views on this worker.', $render['total_time'], $w);
+        $metric('via_render_duration_max_seconds', 'gauge', 'Slowest render on this worker since start or reset.', $render['max_time'], $w);
+        $metric('via_gc_runs_total', 'counter', 'Cycle collector runs on this worker.', $all['gc_runs'], $w);
+        $metric('via_gc_cycles_freed_total', 'counter', 'Cycles freed by those runs.', $all['gc_cycles_freed'], $w);
+        $metric('via_broadcasts_scheduled_total', 'counter', 'Broadcasts marked for a flush on this worker.', $all['broadcasts_scheduled'], $w);
+        $metric('via_broadcasts_coalesced_total', 'counter', 'Of those, broadcasts that joined a flush already waiting.', $all['broadcasts_coalesced'], $w);
+        $metric('via_broadcast_flushes_total', 'counter', 'Broadcast flushes on this worker.', $all['broadcast_flushes'], $w);
+        $metric('via_broadcast_flush_overruns_total', 'counter', 'Flushes that took longer than the broadcast tick.', $all['broadcast_flush_overruns'], $w);
+        $metric('via_broadcast_flush_duration_seconds_total', 'counter', 'Time spent flushing broadcasts on this worker.', $all['broadcast_flush_total_ms'] / 1000, $w);
+
+        return $out;
+    }
+
+    /**
      * Reset all statistics but the live ones. Shared counters reset for every worker.
      *
      * @internal

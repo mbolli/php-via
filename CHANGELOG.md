@@ -2,6 +2,14 @@
 
 All notable changes to php-via will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Prometheus metrics.** `$app->route('GET', '/metrics', $app->metricsHandler())` serves the server's
+  statistics and the worker's memory in the Prometheus text format, and `Stats::toPrometheus()` returns
+  the same text. See [metricsHandler()](https://via.zweiundeins.gmbh/docs/api#via-metrics-handler).
+
 ## [0.14.2] - 2026-10-09
 
 ### Improvements

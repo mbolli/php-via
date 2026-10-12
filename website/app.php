@@ -29,7 +29,8 @@ $corsOrigin = getenv('CORS_ORIGIN') ?: '*';
 
 // One worker, the default: several examples and the homepage's PairingStore keep their state per process.
 $config = (new Config())
-    ->withHost('0.0.0.0')
+    // VIA_HOST=127.0.0.1 behind a reverse proxy, so the port (and /metrics) is not public.
+    ->withHost(getenv('VIA_HOST') ?: '0.0.0.0')
     ->withPort((int) (getenv('VIA_PORT') ?: 3000))
     ->withDevMode($isDev)
     ->withTemplateDir(__DIR__ . '/templates')
@@ -482,6 +483,9 @@ $app->onWorkerStart(function () use ($app): void {
     require __DIR__ . '/routes.php';
 });
 
+// Prometheus scrape target. The production Caddy block answers /metrics with 404, so only the box reads it.
+$app->route('GET', '/metrics', $app->metricsHandler());
+
 // Opt-in sampling profiler for bench/profile; with VIA_PROFILE unset nothing is loaded.
 if (getenv('VIA_PROFILE') === '1') {
     require __DIR__ . '/../bench/profile/excimer.php';
@@ -490,5 +494,5 @@ if (getenv('VIA_PROFILE') === '1') {
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 $startScheme = $config->isHttps() ? 'https' : 'http';
-echo "⚡ php-via website running on {$startScheme}://0.0.0.0:" . (getenv('VIA_PORT') ?: 3000) . "\n";
+echo "⚡ php-via website running on {$startScheme}://" . (getenv('VIA_HOST') ?: '0.0.0.0') . ':' . (getenv('VIA_PORT') ?: 3000) . "\n";
 $app->start();

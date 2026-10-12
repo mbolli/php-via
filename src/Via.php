@@ -1755,6 +1755,30 @@ class Via {
     }
 
     /**
+     * A handler that serves getStats() and this worker's memory in the Prometheus text format, for
+     * route('GET', '/metrics', $app->metricsHandler()). Each scrape lands on one worker, so with worker_num > 1
+     * the per-worker figures describe whichever worker answered. Anyone who can reach the route can read it,
+     * so keep it off the public internet.
+     */
+    public function metricsHandler(): RequestHandlerInterface {
+        return new class($this->stats, fn (): int => $this->workerId) implements RequestHandlerInterface {
+            /** @param \Closure(): int $workerId */
+            public function __construct(private Stats $stats, private \Closure $workerId) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface {
+                $worker = (string) ($this->workerId)();
+                $body = $this->stats->toPrometheus(['worker' => $worker])
+                    . "# HELP via_memory_bytes Memory PHP holds from the system on this worker.\n# TYPE via_memory_bytes gauge\n"
+                    . "via_memory_bytes{worker=\"{$worker}\"} " . memory_get_usage(true) . "\n"
+                    . "# HELP via_memory_peak_bytes Peak of via_memory_bytes on this worker.\n# TYPE via_memory_peak_bytes gauge\n"
+                    . "via_memory_peak_bytes{worker=\"{$worker}\"} " . memory_get_peak_usage(true) . "\n";
+
+                return new Psr7Response(200, ['Content-Type' => 'text/plain; version=0.0.4; charset=utf-8', 'Cache-Control' => 'no-store'], $body);
+            }
+        };
+    }
+
+    /**
      * Get the trace ring buffer, or null when tracing is disabled.
      *
      * @internal Used by the Dev Bar endpoints

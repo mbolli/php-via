@@ -466,7 +466,20 @@ $app->log('debug', 'Action fired', $c);
         <code>active_contexts</code> are this worker's open streams and contexts, and the render, GC and
         broadcast figures are this worker's. The Dev Bar's <a href="/docs/dev-bar#panels">Stats panel</a>
         shows them, and in dev mode <code>GET /_stats</code> serves the render and broadcast figures as JSON.
+        <code>getStats()-&gt;toPrometheus(['worker' =&gt; '0'])</code> returns them in the Prometheus text format,
+        the labels added to this worker's figures only.
     </p>
+
+    <h4 id="via-metrics-handler"><code>metricsHandler(): RequestHandlerInterface</code></h4>
+    <p>
+        A handler for <code>route()</code> that serves <code>toPrometheus()</code> plus this worker's memory
+        (<code>via_memory_bytes</code>, <code>via_memory_peak_bytes</code>) as a Prometheus scrape target.
+        Counters are named <code>via_*_total</code>; durations are in seconds. Each scrape lands on one worker,
+        so with <code>worker_num</code> above 1 the per-worker figures describe whichever worker answered.
+        The route has no authentication: bind the server to <code>127.0.0.1</code> or block the path in the
+        reverse proxy.
+    </p>
+    {% code 'php' %}{% verbatim %}$app->route('GET', '/metrics', $app->metricsHandler());{% endverbatim %}{% endcode %}
 
     <h2 id="context">Context</h2>
     <p>

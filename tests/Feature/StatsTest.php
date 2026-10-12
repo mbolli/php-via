@@ -35,6 +35,10 @@ test('every getAll() field moves with its traffic, and the server-wide counters 
         'shared_requests' => '1',
         'shared_actions' => '1',
         'shared_sse_connections' => '1',
+        'metrics_type' => '1',
+        'metrics_requests' => '1',
+        'metrics_worker' => '1',
+        'metrics_memory' => '1',
     ], $r['out']);
 })->with([1, 2]);
 
@@ -66,5 +70,34 @@ test('shared counters keep what was counted before and reset with the rest', fun
 
     expect($counted)->toMatchArray(['requests' => 2, 'avg_request_time' => 2.0, 'actions' => 1])
         ->and($stats->getAll())->toMatchArray(['requests' => 0, 'avg_request_time' => 0.0, 'actions' => 0])
+    ;
+});
+
+test('toPrometheus() writes every figure once, worker figures with their labels', function (): void {
+    $stats = new Stats(static fn (): array => ['active_sse' => 3, 'active_contexts' => 5]);
+    $stats->trackRequest(1500.0);
+    $stats->trackAction();
+    $stats->trackRender(0.25);
+    $stats->trackBroadcastFlush(20.0, 10);
+
+    $text = $stats->toPrometheus(['worker' => '0']);
+    preg_match_all('/^(via_[a-z_]+)(\{[^}]*\})? (\S+)$/m', $text, $m);
+    $values = array_combine($m[1], $m[3]);
+    $labels = array_combine($m[1], $m[2]);
+
+    expect($m[1])->toHaveCount(16)->toBe(array_unique($m[1]))
+        ->and($values)->toMatchArray([
+            'via_requests_total' => '1',
+            'via_request_duration_seconds_total' => '1.5',
+            'via_actions_total' => '1',
+            'via_active_sse' => '3',
+            'via_renders_total' => '1',
+            'via_render_duration_seconds_total' => '0.25',
+            'via_broadcast_flush_overruns_total' => '1',
+            'via_broadcast_flush_duration_seconds_total' => '0.02',
+        ])
+        ->and($labels['via_requests_total'])->toBe('')
+        ->and($labels['via_active_sse'])->toBe('{worker="0"}')
+        ->and(substr_count($text, '# TYPE '))->toBe(16)
     ;
 });
