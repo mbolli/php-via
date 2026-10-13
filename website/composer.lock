@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "..",
-                "reference": "1def23262edf01d5627ecb50a5a4ac5e3f96906e"
+                "reference": "b8a09d8a08e5daf1d57a39312f3e1eb7d60bb958"
             },
             "require": {
                 "ext-openswoole": "^26.0",
@@ -20,7 +20,7 @@
                 "openswoole/core": "^26.2",
                 "php": "^8.4",
                 "psr/http-server-middleware": "^1.0",
-                "starfederation/datastar-php": "^1.0"
+                "starfederation/datastar-php": "^1.0.3"
             },
             "conflict": {
                 "twig/twig": "<3.10"
@@ -617,16 +617,16 @@
         },
         {
             "name": "starfederation/datastar-php",
-            "version": "1.0.1",
+            "version": "1.0.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/starfederation/datastar-php.git",
-                "reference": "a02c72956c9ee80fe7ae2ce28d1112cf92c6ffbf"
+                "reference": "20836fa220729c4f032e179e9d6cec418718dec3"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/starfederation/datastar-php/zipball/a02c72956c9ee80fe7ae2ce28d1112cf92c6ffbf",
-                "reference": "a02c72956c9ee80fe7ae2ce28d1112cf92c6ffbf",
+                "url": "https://api.github.com/repos/starfederation/datastar-php/zipball/20836fa220729c4f032e179e9d6cec418718dec3",
+                "reference": "20836fa220729c4f032e179e9d6cec418718dec3",
                 "shasum": ""
             },
             "require": {
@@ -660,7 +660,7 @@
                 "issues": "https://github.com/starfederation/datastar-php/issues",
                 "source": "https://github.com/starfederation/datastar-php"
             },
-            "time": "2026-06-02T18:56:00+00:00"
+            "time": "2026-10-10T12:10:41+00:00"
         },
         {
             "name": "symfony/deprecation-contracts",

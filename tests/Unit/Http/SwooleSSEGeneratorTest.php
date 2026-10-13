@@ -129,3 +129,11 @@ describe('SwooleSSEGenerator', function () use ($payloads, $elementOptions): voi
         ;
     });
 });
+
+test('it rejects an event id that would end the id line, as the SDK does', function (string $character): void {
+    $options = ['eventId' => '7' . $character . 'event: datastar-patch-signals'];
+
+    expect(fn () => (new ServerSentEventGenerator())->patchElements('<p>x</p>', $options))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => (new SwooleSSEGenerator())->patchElements('<p>x</p>', $options))->toThrow(InvalidArgumentException::class)
+    ;
+})->with(['LF' => "\n", 'CR' => "\r", 'NUL' => "\0"]);
