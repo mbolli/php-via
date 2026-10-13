@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6afdcc61eea4e13ddf7d7cbc06a737b5",
+    "content-hash": "85f95eb7c252dd1493e7c0a571ae2054",
     "packages": [
         {
             "name": "nyholm/psr7",
@@ -378,16 +378,16 @@
         },
         {
             "name": "starfederation/datastar-php",
-            "version": "1.0.1",
+            "version": "1.0.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/starfederation/datastar-php.git",
-                "reference": "a02c72956c9ee80fe7ae2ce28d1112cf92c6ffbf"
+                "reference": "20836fa220729c4f032e179e9d6cec418718dec3"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/starfederation/datastar-php/zipball/a02c72956c9ee80fe7ae2ce28d1112cf92c6ffbf",
-                "reference": "a02c72956c9ee80fe7ae2ce28d1112cf92c6ffbf",
+                "url": "https://api.github.com/repos/starfederation/datastar-php/zipball/20836fa220729c4f032e179e9d6cec418718dec3",
+                "reference": "20836fa220729c4f032e179e9d6cec418718dec3",
                 "shasum": ""
             },
             "require": {
@@ -421,7 +421,7 @@
                 "issues": "https://github.com/starfederation/datastar-php/issues",
                 "source": "https://github.com/starfederation/datastar-php"
             },
-            "time": "2026-06-02T18:56:00+00:00"
+            "time": "2026-10-10T12:10:41+00:00"
         }
     ],
     "packages-dev": [

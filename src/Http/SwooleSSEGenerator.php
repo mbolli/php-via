@@ -116,6 +116,9 @@ class SwooleSSEGenerator extends ServerSentEventGenerator {
         $options = $event->getOptions();
         $out = 'event: ' . $event->getEventType()->value . "\n";
         if (isset($options['eventId'])) {
+            if (strpbrk((string) $options['eventId'], "\r\n\0") !== false) {
+                throw new \InvalidArgumentException('SSE event IDs must not contain carriage returns, line feeds, or null bytes.');
+            }
             $out .= 'id: ' . $options['eventId'] . "\n";
         }
         if (isset($options['retryDuration'])) {

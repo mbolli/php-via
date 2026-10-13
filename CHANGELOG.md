@@ -10,6 +10,12 @@ All notable changes to php-via will be documented in this file.
   statistics and the worker's memory in the Prometheus text format, and `Stats::toPrometheus()` returns
   the same text. See [metricsHandler()](https://via.zweiundeins.gmbh/docs/api#via-metrics-handler).
 
+### Dependencies
+
+- **starfederation/datastar-php 1.0.3 or newer.** It fixes an SSE line injection through a carriage
+  return in apps that use the SDK directly. php-via's own event text already turned CR into LF; it now
+  also rejects an event id with a CR, LF or NUL byte, as the SDK does.
+
 ## [0.14.2] - 2026-10-09
 
 ### Improvements
