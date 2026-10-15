@@ -26,34 +26,6 @@
     <meta name="twitter:title" content="{{ _title }}">
     <meta name="twitter:description" content="{{ _description }}">
     <meta name="twitter:image" content="{{ siteUrl }}logo-icon-512.png">
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@graph": [
-            {
-                "@type": "Organization",
-                "@id": "https://zweiundeins.gmbh/#organization",
-                "name": "zwei und eins gmbh",
-                "url": "https://zweiundeins.gmbh",
-                "logo": "https://zweiundeins.gmbh/assets/img/logo.svg",
-                "email": "info@zweiundeins.gmbh",
-                "sameAs": [
-                    "https://www.linkedin.com/company/zwei-und-eins-gmbh/",
-                    "https://github.com/zweiundeins"
-                ],
-                "employee": {
-                    "@type": "Person",
-                    "@id": "https://zweiundeins.gmbh/#mbolli",
-                    "name": "Michael Bolli",
-                    "url": "https://linkedin.com/in/mbolli",
-                    "jobTitle": "Owner & Software developer",
-                    "email": "michael@zweiundeins.gmbh",
-                    "sameAs": ["https://github.com/mbolli"]
-                }
-            }
-        ]
-    }
-    </script>
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
