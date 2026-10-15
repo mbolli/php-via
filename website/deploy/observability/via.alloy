@@ -1,0 +1,16 @@
+// via: its Caddy access log, through the host's caddy_logs pipeline (config.alloy).
+// Installed as /etc/alloy/via.alloy by website/deploy/setup-host.sh.
+
+local.file_match "via_access" {
+	path_targets = [
+		{"__path__" = "/var/log/caddy/via-access.log", "job" = "caddy", "site" = "via"},
+	]
+}
+
+loki.source.file "via_access" {
+	targets    = local.file_match.via_access.targets
+	forward_to = [loki.process.caddy_logs.receiver]
+	// A newly added log starts at its end: Loki rejects lines older than a week,
+	// and referrer-rollup.py --files covers the history instead.
+	tail_from_end = true
+}

@@ -1,0 +1,46 @@
+# Moved from Servitro (5.231.56.71) on 2026-10-12. Proxies to the app on loopback :7100.
+via.zweiundeins.gmbh {
+	# Prometheus scrapes 127.0.0.1:7100/metrics directly; never serve it publicly.
+	respond /metrics 404
+
+	# Compression - SSE streams benefit greatly from Brotli
+	encode {
+		#br 6 # Brotli compression level 6
+		gzip 6 # Gzip fallback
+		#minimum_length 0 # Compress small SSE payloads too
+	}
+
+        # Static assets from the website
+        #@static path /css/* /js/* /images/* /fonts/* *.png
+
+
+	# Root - Examples index page
+		reverse_proxy 127.0.0.1:7100 {
+			transport http {
+                                versions h2c
+				read_timeout 0s
+				write_timeout 0s
+				dial_timeout 3s
+			}
+		}
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-XSS-Protection "1; mode=block"
+	}
+
+	# Access logs
+	log {
+		output file /var/log/caddy/via-access.log {
+			mode 0640
+			roll_size 100mb
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format json
+	}
+}
