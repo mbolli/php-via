@@ -311,3 +311,7 @@ composer cs-fix
 ## License
 
 MIT
+
+## Maintainer
+
+Maintained by [Michael Bolli](https://github.com/mbolli) at [zwei und eins gmbh](https://zweiundeins.gmbh), Aarberg, Switzerland.
