@@ -259,7 +259,7 @@ final class StaticBrotli {
         // drops below this floor, or one very compressible file would let the next file run past the deadline.
         $floorNsPerByte = $level >= 10 ? 1_700.0 : 50.0;
         $nsPerByte = $floorNsPerByte;
-        $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'ms' => 0, 'stopped' => false, 'deferred' => 0, 'left' => 0, 'rest' => false];
+        $result = ['files' => 0, 'bytes' => 0, 'compressed' => 0, 'stopped' => false, 'deferred' => 0, 'rest' => false];
         $spentNs = 0;
         $this->left = [];
         $leftBytes = 0;
