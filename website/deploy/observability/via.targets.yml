@@ -1,0 +1,4 @@
+# Blackbox probes for via, installed as /etc/prometheus/targets/via.yml.
+# `module` picks the blackbox module; see the host's /etc/prometheus/blackbox.yml.
+- targets: ['https://via.zweiundeins.gmbh/']
+  labels: { service: via, module: http_2xx_via }
