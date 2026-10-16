@@ -29,5 +29,5 @@ return (new Config())
         'string_implicit_backslashes' => ['double_quoted' => 'escape', 'single_quoted' => 'ignore', 'heredoc' => 'escape'],
         'yoda_style' => ['equal' => false, 'identical' => false, 'less_and_greater' => false],
     ])
-    ->setFinder(Finder::create()->exclude('vendor')->in(__DIR__))
+    ->setFinder(Finder::create()->exclude(['vendor', 'bench/datastar-sdk'])->in(__DIR__))
 ;
