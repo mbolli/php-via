@@ -5,48 +5,34 @@ below; `tests/Unit/Support/DatastarBundleTest.php` checks the hashes.
 
 ## datastar.js
 
-- Datastar v1.0.4, the official plain bundle. Served by default.
-- Source: https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.4/bundles/datastar.js
-  (`bundles/datastar.js` at tag v1.0.4, commit 1efcdc3cb336ec3e9139491604e770e0329657bc).
-- sha256: `727844adfc825ee651fb93c544a2a739986f9a21820a94524b35f0cac470cf91`
-- 33,553 bytes, 12,183 bytes with brotli -q 11.
+- Datastar v1.0.5, the official plain bundle. Served by default.
+- Source: https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.5/bundles/datastar.js
+  (`bundles/datastar.js` at tag v1.0.5, commit fb03989a5fbb5584d15198e1a4bac151a848ef08).
+- sha256: `7380e0344b7f937d80ad70ededa1c28578173157ee4748be1850991491d911fd`
+- 35,673 bytes, 12,821 bytes with brotli -q 11.
 
 ## datastar-rocket.js
 
-- Datastar v1.0.4 with Rocket beta.2 and Starbase's Rocket patches. Served instead of the plain
-  bundle with `Config::withDatastarRocket()`.
+- Datastar v1.0.5 with Rocket beta.3 and one Starbase patch. Served instead of the plain bundle
+  with `Config::withDatastarRocket()`.
 - Source: Starbase (https://github.com/zweiundeins/starbase), `static/vendor/datastar-rocket.js`
-  at commit be49eed631c25538f7c8b9e30c2d5cc7c90fb404.
-- sha256: `f602fbe19d74e4c16c2f28b3a92c4934072400337372787561089c26a8b3e1db`
-- 68,224 bytes, 21,958 bytes with brotli -q 11.
-- Built from the v1.0.4 tag's `library/src/bundles/datastar-rocket.ts` with these patches from
-  Starbase's `patches/rocket/` (upstream issue in brackets):
-  - 0001 Rocket: finish the teardown when deleting the signals throws (#1217)
-  - 0002 Rocket: keep the element as it is on an atomic move (#1218)
-  - 0003 Rocket: form-associated components and focus delegation (#1220)
-  - 0004 Rocket: bool props follow HTML boolean attributes (#1219)
-  - 0005 Rocket: clean up the shadow tree's attributes on disconnect (#1221)
-  - 0006 Rocket: instances share one constructed stylesheet per CSS text (#1222)
-  - 0007 Rocket: observers hear an attribute write whose value decodes the same (#1223)
-  - 0008 Morph: a morph that starts inside another keeps the outer one's pantry and id maps (#1209)
-  - 0009 Rocket: a light component renders inside a data-ignore-morph ancestor (#1224)
-  - 0010 Engine: a removed Rocket element's mount root leaves the observed roots (#1225)
-  - 0011 Rocket: a queued definition applies the shadow host's children that Datastar's first
-    pass skipped (#1226)
-  - 0012 Rocket: the pending-host observer scans a parent once per batch, not once per moved
-    child (#1227)
-
-  The official `datastar-rocket.js` of v1.0.4 crashes the morph when it reorders keyed elements
-  that contain a Rocket element; 0002 and 0008 fix that.
+  at commit 7dc235215b85a6487d9ea9ea40c6c963921bf8db, the same bytes Starbase serves to its own
+  components as `/c/datastar@dad2261a81d8/datastar-rocket.js`.
+- sha256: `dad2261a81d8e38db5d77bf274d9d2905c2ea5b0a30bd2673dc7810254e2b61e`
+- 72,805 bytes, 23,439 bytes with brotli -q 11.
+- Built from the v1.0.5 tag's `library/src/bundles/datastar-rocket.ts` with the one patch in
+  Starbase's `patches/rocket/`: 0002, an observer hears an attribute write whose value decodes the
+  same (#1223). Upstream keeps its behaviour there, and Starbase's components work the same on the
+  official bundle. php-via serves Starbase's build so that pages run the engine Starbase tests its
+  components against.
 
 ## Updating
 
 1. Plain bundle: download `bundles/datastar.js` of the new tag to `public/datastar.js`.
-2. Rocket bundle: in Starbase, run `DATASTAR_VERSION=<tag> sh scripts/vendor-rocket.sh` (it
-   downloads the official Rocket bundle for the banner, clones the tag, applies
-   `patches/rocket/*.patch` and builds with esbuild), then copy `static/vendor/datastar-rocket.js`
-   to `public/datastar-rocket.js`. Rebuilding v1.0.4 with esbuild v0.28.2 and the patches at
-   Starbase commit 29e58a96558735001903614d06f22929d18e63b8 gives the same bytes as the file here.
+2. Rocket bundle: copy `static/vendor/datastar-rocket.js` from Starbase's main branch to
+   `public/datastar-rocket.js`, and check that it matches the `/c/datastar@<hash>/` file in the
+   current snapshot's `importmap.json` (see `website/public/vendor/starbase/README.md`). Starbase
+   builds it with `go tool task vendor`, which applies `patches/rocket/` to the Datastar tag.
 3. Update the versions, hashes and sizes in this file and in `DatastarBundleTest`.
 
 The bundles end with a `sourceMappingURL` comment; php-via does not serve the maps.

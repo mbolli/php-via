@@ -22,7 +22,7 @@
             the component's value reaches the server with the next action.</li>
     </ul>
     <p>
-        The Rocket build is 22&nbsp;KB with Brotli instead of 12&nbsp;KB, and only apps that turn it on
+        The Rocket build is 23&nbsp;KB with Brotli instead of 13&nbsp;KB, and only apps that turn it on
         load it.
     </p>
 
@@ -34,13 +34,13 @@ $app = new Via(
 );
     {% endverbatim %}{% endcode %}
     <p>
-        <code>/datastar.js</code> then serves Datastar 1.0.4 with Rocket instead of the plain Datastar
-        1.0.4 bundle. The build comes from Starbase: Datastar 1.0.4 and Rocket built with Starbase's
-        fixes, which php-via ships because of the <a href="#keyed-lists">keyed-list crash</a> in the
-        official Rocket bundle.
+        <code>/datastar.js</code> then serves Datastar 1.0.5 with Rocket instead of the plain Datastar
+        1.0.5 bundle. The build comes from Starbase: Datastar 1.0.5 and Rocket with one Starbase patch, the
+        same bytes Starbase serves to its own components, so the page runs the engine Starbase tests them
+        against.
     </p>
     <p>
-        The Rocket build is 21,958 bytes with Brotli, against 12,183 bytes for the plain bundle, and every
+        The Rocket build is 23,439 bytes with Brotli, against 12,821 bytes for the plain bundle, and every
         page of the app loads it, whether the page uses a component or not. Leave the option off unless
         your pages use Rocket components.
     </p>
@@ -286,10 +286,10 @@ $app->appendToHead('<script type="module" src="/js/slider/slider.min.js"></scrip
     </p>
     {% code 'php' %}{% verbatim %}
 $config->withDatastarRocket()->withImportMap(
-    ['sb-qr-code' => '/vendor/starbase/qr-code@ecc5a99c314a/qr-code.min.js'],
+    ['sb-qr-code' => '/vendor/starbase/qr-code@0d8b2096aa94/qr-code.min.js'],
     [
-        '/vendor/starbase/qr-code@ecc5a99c314a/qr-code.min.js' => 'sha384-<hash>',
-        '/vendor/starbase/qr-code@ecc5a99c314a/vendor/uqr.min.mjs' => 'sha384-<hash>',
+        '/vendor/starbase/qr-code@0d8b2096aa94/qr-code.min.js' => 'sha384-<hash>',
+        '/vendor/starbase/qr-code@0d8b2096aa94/vendor/uqr.min.mjs' => 'sha384-<hash>',
     ],
 );
     {% endverbatim %}{% endcode %}
@@ -386,16 +386,14 @@ $app->page('/thrust', function (Context $c): void {
     <h2 id="keyed-lists">Rocket components inside keyed lists</h2>
     <p>
         Datastar's morph matches elements by <code>id</code>, so a list whose items carry ids keeps its
-        elements when a sync or broadcast reorders it. With the official Datastar 1.0.4 Rocket bundle, a
-        morph that reorders keyed elements containing a Rocket component overflows the stack
-        (<code>Maximum call stack size exceeded</code>). When the same patch also inserts or removes
-        elements, a <code>HierarchyRequestError</code> stops the morph halfway and leaves the page out of
-        step with the server. Two of Starbase's patches, 0002 and 0008, fix it (upstream issues
-        <a href="https://github.com/starfederation/datastar/issues/1218" target="_blank" rel="noopener">#1218</a> and
+        elements, and the Rocket components inside them, when a sync or broadcast reorders it. Give each item
+        a stable id, such as the record's key, rather than its position. Before Datastar 1.0.5, a morph that
+        reordered keyed elements containing a Rocket component overflowed the stack; 1.0.5 fixed that
+        upstream (<a href="https://github.com/starfederation/datastar/issues/1218" target="_blank" rel="noopener">#1218</a>,
         <a href="https://github.com/starfederation/datastar/issues/1209" target="_blank" rel="noopener">#1209</a>),
-        which is why <code>withDatastarRocket()</code> serves Starbase's build.
+        so both the official Rocket bundle and Starbase's build handle it.
         <a href="https://github.com/mbolli/php-via/blob/master/public/DATASTAR.md" target="_blank" rel="noopener">public/DATASTAR.md</a>
-        lists all twelve patches, the source commits and the hashes the test suite checks.
+        lists the source commits and the hashes the test suite checks.
     </p>
 
     <h2 id="next-steps">Next steps</h2>

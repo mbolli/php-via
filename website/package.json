@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "open-props": "^1.7.23",
-    "postcss": "^8.5.30",
+    "postcss": "^8.5.33",
     "postcss-cli": "^12.0.0",
     "postcss-import": "^17.0.1",
     "postcss-jit-props": "^1.0.16"

@@ -15,7 +15,7 @@
 php-via is a real-time reactive web framework for PHP. It runs as a persistent
 OpenSwoole server that keeps a long-lived SSE (Server-Sent Events) connection to every
 browser tab. When state changes on the server, it pushes HTML and signal patches to the
-connected tabs, and Datastar (1.0.4, served by php-via) morphs them into the page. No
+connected tabs, and Datastar (1.0.5, served by php-via) morphs them into the page. No
 JavaScript to write, no build step, multiplayer by default.
 
 The name "via" means "the way". From one PHP process you get server-pushed real-time
@@ -880,7 +880,7 @@ import map and the Datastar script.
 
 Rocket is Datastar's web component layer; Starbase (https://starbase.zweiundeins.gmbh) is a
 catalog of Rocket components. `Config::withDatastarRocket()` makes `/datastar.js` serve
-Starbase's build of Datastar 1.0.4 with Rocket (22 KB with Brotli, against 12 KB for the
+Starbase's build of Datastar 1.0.5 with Rocket (23 KB with Brotli, against 13 KB for the
 plain bundle). Configure it before `new Via()`.
 
 **One engine per page.** Components `import { rocket } from 'datastar'`, so the page needs an
@@ -931,9 +931,9 @@ post the component's `change` event to an action, which decides the value and sy
     data-on:change="@post('{{ setThrust.url }}')"></sb-slider>
 ```
 
-**Keyed lists.** The official Datastar 1.0.4 Rocket bundle crashes when a morph reorders
-keyed elements that contain a Rocket component; Starbase's build fixes it, which is why
-php-via serves that build.
+**Keyed lists.** Give list items stable ids: the morph matches by id, so reordering keeps
+the elements and the Rocket components inside them. Datastar 1.0.5 fixed the crash such a
+reorder caused before (upstream #1209, #1218).
 
 ---
 
@@ -995,7 +995,7 @@ The full guide is https://via.zweiundeins.gmbh/docs/upgrading. The changes that 
 - `getSessionId()` and `via.session` are a hash of the cookie; SESSION scopes are per session.
 - `$app->broadcast(Scope::ROUTE)` throws: `Scope::routeScope('/path')`.
 - `worker_num` in `withSwooleSettings()` throws: `withWorkerNum()`.
-- Datastar 1.0.4 cancels requests per method and URL, from any element.
+- Datastar 1.0.5 cancels requests per method and URL, from any element.
 
 ---
 

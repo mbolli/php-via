@@ -94,7 +94,7 @@ $config->withContextTimeouts(reconnectMs: 60_000); // default; 0 uses the connec
     <h3 id="reconnect">How a page reconnects</h3>
     <p>
         <code>via_head</code> opens the stream with <code>@get('/_sse')</code> as soon as Datastar starts, and
-        again every 15 seconds while no stream is open. When a connection fails, Datastar 1.0.4 retries after
+        again every 15 seconds while no stream is open. When a connection fails, Datastar 1.0.5 retries after
         1, 2, 4, 8 and 16 seconds and then every 30 seconds (<code>retryMaxWait</code>), ten times in all
         (<code>retryMaxCount</code>). Each retry sends the tab's signals as they are at that moment, so a context
         revived by the retry starts from the current values. A request of your own with

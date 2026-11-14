@@ -84,7 +84,7 @@
             "name": "A checkbox set by a script does not update its signal",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Datastar 1.0.4 updates a signal bound to a checkbox or radio on the input event, not on change. Fix: dispatch an input event after setting checked, or bind with the __event.change modifier."
+                "text": "Datastar 1.0.5 updates a signal bound to a checkbox or radio on the input event, not on change. Fix: dispatch an input event after setting checked, or bind with the __event.change modifier."
             }
         },
         {
@@ -459,7 +459,7 @@ $app->setInterval(function () use ($app): void {
         <p>
             A script ticks a checkbox and dispatches <code>change</code>, but the bound signal keeps its value.
         </p>
-        <p><strong>Why:</strong> Datastar 1.0.4 updates a signal bound to a checkbox or a radio button on the
+        <p><strong>Why:</strong> Datastar 1.0.5 updates a signal bound to a checkbox or a radio button on the
         <code>input</code> event.</p>
         <p><strong>Fix:</strong> Dispatch <code>input</code>, or bind with the <code>__event.change</code>
         modifier:</p>

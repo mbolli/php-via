@@ -558,7 +558,7 @@ $inc = $c->action(function (Context $c) use ($count): void {
     <p>
         Each action reads its own request through <code>input()</code>, <code>file()</code>,
         <code>cookie()</code> and <code>getRequestAttribute()</code>, also while another action of the tab
-        runs. Datastar 1.0.4 cancels a request still in flight when any element sends another one to the
+        runs. Datastar 1.0.5 cancels a request still in flight when any element sends another one to the
         same URL: see <a href="/docs/actions#cancellation">Actions → Cancellation</a>.
     </p>
 
@@ -1314,9 +1314,9 @@ $config->withStaticCacheControl(function (string $filePath, string $mimeType): ?
 
     <h4 id="config-with-datastar-rocket"><code>withDatastarRocket(bool $enabled = true): Config</code></h4>
     <p>
-        Serves Starbase's build of Datastar 1.0.4 with Rocket at <code>/datastar.js</code> instead of the plain
-        Datastar 1.0.4 bundle, so Rocket web components work on the page: 22&nbsp;KB with Brotli against
-        12&nbsp;KB. See <a href="/docs/web-components">Web components</a>.
+        Serves Starbase's build of Datastar 1.0.5 with Rocket at <code>/datastar.js</code> instead of the plain
+        Datastar 1.0.5 bundle, so Rocket web components work on the page: 23&nbsp;KB with Brotli against
+        13&nbsp;KB. See <a href="/docs/web-components">Web components</a>.
     </p>
 
     <h4 id="config-get-datastar-url"><code>getDatastarUrl(): string</code></h4>

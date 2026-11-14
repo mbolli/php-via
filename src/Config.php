@@ -392,8 +392,8 @@ final class Config {
      * Serve Datastar with Rocket, its web component layer, at /datastar.js instead of the plain
      * Datastar bundle, so Rocket components such as Starbase's work on the page.
      *
-     * The bundle is Starbase's patched build of Datastar 1.0.4 + Rocket (public/DATASTAR.md): about
-     * 22 KB brotli against 12 KB for the plain bundle, so leave it off unless pages use Rocket.
+     * The bundle is Starbase's patched build of Datastar 1.0.5 + Rocket (public/DATASTAR.md): about
+     * 23 KB brotli against 13 KB for the plain bundle, so leave it off unless pages use Rocket.
      *
      * A page must run exactly one Datastar module. Rocket components import it by the bare specifier
      * 'datastar', so an import map has to map 'datastar' to the URL Datastar is loaded from, byte for
