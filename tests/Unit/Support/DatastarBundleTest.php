@@ -30,8 +30,8 @@ describe('bundled Datastar files', function (): void {
 
         expect(realpath($plain))->toBe(realpath(dirname(__DIR__, 3) . '/public/datastar.js'))
             ->and(realpath($rocket))->toBe(realpath(dirname(__DIR__, 3) . '/public/datastar-rocket.js'))
-            ->and(strtok((string) file_get_contents($plain), "\n"))->toBe('// Datastar v1.0.4')
-            ->and(strtok((string) file_get_contents($rocket), "\n"))->toBe('// Datastar v1.0.4 + Rocket beta.2 (patched: patches/rocket)')
+            ->and(strtok((string) file_get_contents($plain), "\n"))->toBe('// Datastar v1.0.5')
+            ->and(strtok((string) file_get_contents($rocket), "\n"))->toBe('// Datastar v1.0.5 + Rocket beta.3 (patched: patches/rocket)')
         ;
     });
 });

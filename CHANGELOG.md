@@ -15,6 +15,11 @@ All notable changes to php-via will be documented in this file.
 - **starfederation/datastar-php 1.0.3 or newer.** It fixes an SSE line injection through a carriage
   return in apps that use the SDK directly. php-via's own event text already turned CR into LF; it now
   also rejects an event id with a CR, LF or NUL byte, as the SDK does.
+- **Datastar 1.0.5 in the browser.** `/datastar.js` serves Datastar 1.0.5, which stops duplicate SSE
+  connections after a tab is shown again and keeps retries within `retryMaxCount`.
+  `withDatastarRocket()` serves Starbase's 1.0.5 build with Rocket beta.3, where a boolean prop follows
+  HTML presence: `open="false"` is true, so remove the attribute to turn it off. See
+  [Web components](https://via.zweiundeins.gmbh/docs/web-components).
 
 ## [0.14.2] - 2026-10-09
 

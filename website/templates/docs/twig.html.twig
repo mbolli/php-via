@@ -343,7 +343,7 @@ $c->view(fn (): string => <<<HTML
 {# or by hand: <input data-bind="{{ name.id }}" type="text"> #}
     {% endverbatim %}{% endcode %}
     <p>
-        Datastar 1.0.4 updates a bound checkbox or radio on <code>input</code>, not <code>change</code>, so a
+        Datastar 1.0.5 updates a bound checkbox or radio on <code>input</code>, not <code>change</code>, so a
         script that sets one has to dispatch <code>input</code>. On a web component, bind a property:
         <code>{% verbatim %}{{ bind(volume, 'value') }}{% endverbatim %}</code> renders
         <code>data-bind__prop.value</code>. See <a href="/docs/web-components#binding">Web components</a>.
@@ -358,7 +358,7 @@ $c->view(fn (): string => <<<HTML
 <button data-on:click="@post('{{ vote.url }}?option=tab')">Vote TAB</button>
     {% endverbatim %}{% endcode %}
     <p>
-        Datastar 1.0.4 cancels a request still in flight when any element sends another one with the same
+        Datastar 1.0.5 cancels a request still in flight when any element sends another one with the same
         method and URL. Two elements that post the same action at the same time need a query each, such as
         <code>?from=button</code>. See <a href="/docs/actions#cancellation">Actions → Cancellation</a>.
     </p>

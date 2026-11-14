@@ -99,7 +99,7 @@ describe('The vendored Starbase components', function (): void {
             StarbaseComponents::MODULES,
         ))
             ->and($map['integrity'] ?? [])->toHaveCount(count(StarbaseComponents::INTEGRITY))
-            ->and($map['integrity'] ?? [])->toHaveKey('/vendor/starbase/qr-code@ecc5a99c314a/vendor/uqr.min.mjs')
+            ->and($map['integrity'] ?? [])->toHaveKey('/vendor/starbase/qr-code@0d8b2096aa94/vendor/uqr.min.mjs')
         ;
     });
 });
